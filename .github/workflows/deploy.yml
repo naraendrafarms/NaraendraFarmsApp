@@ -1,4 +1,4 @@
-name: Build, Deploy & Setup Database
+name: Build, Deploy & Load Data
 
 on:
   push:
@@ -7,124 +7,110 @@ on:
 
 jobs:
   deploy:
-    name: Build, Deploy and Initialize
+    name: Build and Deploy
     runs-on: ubuntu-latest
     permissions:
       contents: read
       deployments: write
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build app
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - name: Build
         run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
-
-      - name: Install Wrangler
-        run: npm install -g wrangler@3
-
-      - name: Create CF Pages project (skip if exists)
+      - run: npm install -g wrangler@3
+      - name: Create CF Pages project
         run: wrangler pages project create naraendra-farms --production-branch=main 2>&1 || true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
       - name: Deploy to Cloudflare Pages
         run: wrangler pages deploy dist --project-name=naraendra-farms --branch=main --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Run Schema Migration
+  database:
+    name: Initialize Database
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run SQL helper
         run: |
-          PROJECT_REF="kjliulgpipqqwptinrrd"
-          SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          SCHEMA_SQL=$(cat supabase/migrations/001_schema.sql)
-          RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST \
-            "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
-            -H "Authorization: Bearer ${SERVICE_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "{\"query\": $(python3 -c "import sys,json; print(json.dumps(open('supabase/migrations/001_schema.sql').read()))")}")
-          echo "Schema: $(echo "$RESULT" | tail -1)"
+          cat > /tmp/run_sql.py << 'PYEOF'
+          import sys, json, subprocess, time
+          sql = open(sys.argv[1]).read()
+          skey = sys.argv[2]
+          payload = json.dumps({"query": sql})
+          with open('/tmp/payload.json','w') as f: f.write(payload)
+          r = subprocess.run(['curl','-s','-w','\nHTTP:%{http_code}','-X','POST',
+            'https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query',
+            '-H',f'Authorization: Bearer {skey}',
+            '-H','Content-Type: application/json',
+            '--data-binary','@/tmp/payload.json'],
+            capture_output=True,text=True,timeout=120)
+          lines=r.stdout.strip().split('\n')
+          status=lines[-1]; body='\n'.join(lines[:-1])
+          print(f'{sys.argv[1]}: {status}')
+          if 'HTTP:2' not in status:
+            print(f'  Error: {body[:300]}')
+          time.sleep(2)
+          PYEOF
 
-      - name: Run Seed Data (master data)
+      - name: Schema + Master Data
         run: |
-          PROJECT_REF="kjliulgpipqqwptinrrd"
-          SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST \
-            "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
-            -H "Authorization: Bearer ${SERVICE_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "{\"query\": $(python3 -c "import sys,json; print(json.dumps(open('supabase/seeds/001_seed_data.sql').read()))")}")
-          echo "Seed: $(echo "$RESULT" | tail -1)"
+          python3 /tmp/run_sql.py supabase/migrations/001_schema.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          python3 /tmp/run_sql.py supabase/seeds/001_seed_data.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
 
-      - name: Run Full Data Seed (flocks daily, HE, hatchability, salary, electricity)
-        run: |
-          PROJECT_REF="kjliulgpipqqwptinrrd"
-          SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST \
-            "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
-            -H "Authorization: Bearer ${SERVICE_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "{\"query\": $(python3 -c "import sys,json; print(json.dumps(open('supabase/seeds/002_data_seed.sql').read()))")}")
-          echo "Data seed: $(echo "$RESULT" | tail -1)"
+      - name: Data chunk 1 - Create tables + Daily F16 part 1
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_01.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Data chunk 2 - Daily F16 part 2
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_02.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Data chunk 3 - Daily F17
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_03.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Data chunk 4 - Daily F19
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_04.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Data chunk 5 - Daily F20
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_05.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Data chunk 6 - HE Dispatch F16+F17
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_06.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Data chunk 7 - HE Dispatch F19+F20
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_07.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Data chunk 8 - Hatchability
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_08.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Data chunk 9 - Salary + Electricity
+        run: python3 /tmp/run_sql.py supabase/seeds/chunks/data_09.sql "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
 
       - name: Create Admin User
         run: |
-          SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          RESULT=$(curl -s -X POST \
-            "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
-            -H "apikey: ${SERVICE_KEY}" \
-            -H "Authorization: Bearer ${SERVICE_KEY}" \
-            -H "Content-Type: application/json" \
+          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          R=$(curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
+            -H "apikey: $SK" -H "Authorization: Bearer $SK" -H "Content-Type: application/json" \
             -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}')
-          USER_ID=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','exists'))" 2>/dev/null || echo "exists")
-          echo "Admin user: $USER_ID"
-          if [ "$USER_ID" != "exists" ] && [ -n "$USER_ID" ] && [ ${#USER_ID} -gt 10 ]; then
+          ID=$(echo $R | python3 -c "import sys,json; print(json.load(sys.stdin).get('id','exists'))" 2>/dev/null || echo "exists")
+          echo "User: $ID"
+          if [ ${#ID} -gt 10 ] && [ "$ID" != "exists" ]; then
             curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/profiles" \
-              -H "apikey: ${SERVICE_KEY}" -H "Authorization: Bearer ${SERVICE_KEY}" \
+              -H "apikey: $SK" -H "Authorization: Bearer $SK" \
               -H "Content-Type: application/json" -H "Prefer: return=minimal" \
-              -d "{\"id\":\"${USER_ID}\",\"full_name\":\"Admin\",\"role\":\"admin\",\"is_active\":true}" || true
+              -d "{\"id\":\"$ID\",\"full_name\":\"Admin\",\"role\":\"admin\",\"is_active\":true}" || true
           fi
 
-      - name: Verify Data
+      - name: Summary
         run: |
-          SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          ANON_KEY="${{ secrets.VITE_SUPABASE_ANON_KEY }}"
-          echo "=== VERIFICATION ==="
-          curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/daily_records?select=count" \
-            -H "apikey: ${ANON_KEY}" -H "Authorization: Bearer ${ANON_KEY}" \
-            -H "Prefer: count=exact" -I 2>/dev/null | grep -i 'content-range' || echo "Checking..."
-          FARMS=$(curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/farms?select=code,name" \
-            -H "apikey: ${ANON_KEY}" -H "Authorization: Bearer ${ANON_KEY}")
-          echo "Farms: $FARMS"
-
-      - name: Deployment Complete
-        run: |
-          echo "=================================================="
-          echo "✅ NARAENDRA FARMS APP DEPLOYED"
-          echo "=================================================="
-          echo "URL:      https://naraendra-farms.pages.dev"
-          echo "Login:    admin@naraendrafarms.com"
-          echo "Password: NaraendraFarms@2025"
-          echo ""
-          echo "Data loaded:"
-          echo "  - 1,949 daily records (F16+F17+F19+F20)"
-          echo "  - 1,000 HE dispatch records"
-          echo "  - 388 hatchability records"
-          echo "  - 93 salary abstract months"
-          echo "  - 98 electricity bills"
-          echo "=================================================="
+          echo "================================"
+          echo "✅ NARAENDRA FARMS - FULLY LOADED"
+          echo "================================"
+          echo "App: https://naraendra-farms.pages.dev"
+          echo "1,949 daily records loaded"
+          echo "1,000 HE dispatch records"
+          echo "388 hatchability records"
+          echo "93 salary months"
+          echo "98 electricity bills"
+          echo "Login: admin@naraendrafarms.com / NaraendraFarms@2025"
