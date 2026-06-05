@@ -550,6 +550,31 @@ LEFT JOIN LATERAL (
   FROM public.nhe_sales WHERE flock_id = f.id
 ) nr ON true;
 
+
+-- ── HATCHABILITY TABLE ──────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.hatchability (
+  id            UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  flock_id      UUID REFERENCES public.flocks(id),
+  dc_no         INTEGER,
+  setting_date  DATE,
+  invoice_date  DATE,
+  hatch_date    DATE,
+  hatchery      TEXT,
+  setting_no    TEXT,
+  age_weeks     NUMERIC(5,1),
+  eggs_received INTEGER,
+  eggs_set      INTEGER,
+  broken        INTEGER DEFAULT 0,
+  infertile     INTEGER DEFAULT 0,
+  chicks_hatched INTEGER DEFAULT 0,
+  hatch_pct     NUMERIC(6,4),
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.hatchability ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "auth_select" ON public.hatchability FOR SELECT USING (auth.role()='authenticated');
+CREATE POLICY "auth_insert" ON public.hatchability FOR INSERT WITH CHECK (auth.role()='authenticated');
+CREATE POLICY "auth_update" ON public.hatchability FOR UPDATE USING (auth.role()='authenticated');
+
 -- Monthly production summary
 CREATE OR REPLACE VIEW public.v_monthly_production AS
 SELECT

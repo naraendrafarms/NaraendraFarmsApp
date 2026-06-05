@@ -165,22 +165,31 @@ INSERT INTO public.medicines_master (name,unit,rate,is_active) VALUES
   ('Rat Poison Bait','gm',0.12,true)
 ON CONFLICT DO NOTHING;
 
+-- FLOCKS (4 flocks)
 INSERT INTO public.flocks
   (flock_no,status,placement_date,laying_start_date,depletion_date,
    rearing_farm_id,laying_farm_id,total_placed_f,total_placed_m,
    paid_female,paid_male,free_female,free_male,transit_mortality,
    breed,chick_rate,chick_cost)
-SELECT v.fno,v.st,v.pd::date,v.ls::date,v.dd::date,rf.id,lf.id,
-  v.tpf,v.tpm,v.pf,v.pm,v.ff,v.fm,v.tm,v.br,v.cr,v.cc
-FROM (VALUES
-  ('16','closed','2023-11-24','2024-04-01','2025-04-23','KPALLY','PPALLY',45760,5491,44860,5391,900,100,200,'VENCO-430',12.50,617835.00),
-  ('17','closed','2024-03-30','2024-09-01','2025-08-01','KPALLY','BPET1', 36920,4430,36120,4330,800,100,200,'VENCO-430',12.50,516970.00),
-  ('19','laying', '2025-02-16','2025-09-01',NULL,        'KPALLY','PPALLY',45700,5490,44800,5390,900,100,200,'VENCO-430',13.00,669770.00),
-  ('20','laying', '2025-05-30','2025-12-01',NULL,        'KPALLY','BPET1', 36920,4430,36020,4330,900,100,200,'VENCO-430',13.00,536380.00)
-) v(fno,st,pd,ls,dd,rc,lc,tpf,tpm,pf,pm,ff,fm,tm,br,cr,cc)
-JOIN public.farms rf ON rf.code=v.rc
-JOIN public.farms lf ON lf.code=v.lc
+VALUES
+  ('16','closed','2023-11-24'::date,'2024-04-01'::date,'2025-04-23'::date,
+   (SELECT id FROM public.farms WHERE code='KPALLY'),
+   (SELECT id FROM public.farms WHERE code='PPALLY'),
+   45760,5491,44860,5391,900,100,200,'VENCO-430',12.50,617835.00),
+  ('17','closed','2024-03-30'::date,'2024-09-01'::date,'2025-08-01'::date,
+   (SELECT id FROM public.farms WHERE code='KPALLY'),
+   (SELECT id FROM public.farms WHERE code='BPET1'),
+   36920,4430,36120,4330,800,100,200,'VENCO-430',12.50,516970.00),
+  ('19','laying','2025-02-16'::date,'2025-09-01'::date,NULL,
+   (SELECT id FROM public.farms WHERE code='KPALLY'),
+   (SELECT id FROM public.farms WHERE code='PPALLY'),
+   45700,5490,44800,5390,900,100,200,'VENCO-430',13.00,669770.00),
+  ('20','laying','2025-05-30'::date,'2025-12-01'::date,NULL,
+   (SELECT id FROM public.farms WHERE code='KPALLY'),
+   (SELECT id FROM public.farms WHERE code='BPET1'),
+   36920,4430,36020,4330,900,100,200,'VENCO-430',13.00,536380.00)
 ON CONFLICT (flock_no) DO UPDATE SET
   status=EXCLUDED.status,
+  depletion_date=EXCLUDED.depletion_date,
   rearing_farm_id=EXCLUDED.rearing_farm_id,
   laying_farm_id=EXCLUDED.laying_farm_id;
