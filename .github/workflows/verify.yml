@@ -1,28 +1,13 @@
-name: DB Check
+name: DB Verify
 on:
   workflow_dispatch:
 jobs:
-  check:
+  verify:
     runs-on: ubuntu-latest
     env:
-      ANON: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      SK: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
+      ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      SERVICE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
     steps:
-      - name: farms
-        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/farms?select=code,name" -H "apikey: $ANON" -H "Authorization: Bearer $ANON"
-      - name: flocks  
-        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/flocks?select=flock_no,status" -H "apikey: $ANON" -H "Authorization: Bearer $ANON"
-      - name: daily_records count
-        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/daily_records?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
-      - name: hatchability
-        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/hatchability?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
-      - name: salary_abstract count
-        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/salary_abstract?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
-      - name: electricity_bills count
-        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/electricity_bills?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
-      - name: he_dispatch count
-        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/he_dispatch?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
-      - name: mgmt api direct count
-        run: |
-          echo '{"query":"SELECT COUNT(*) FROM public.daily_records"}' > /tmp/q.json
-          curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" -H "Authorization: Bearer $SK" -H "Content-Type: application/json" -d @/tmp/q.json
+      - uses: actions/checkout@v4
+      - name: Run verification
+        run: python3 scripts/db_check.py
