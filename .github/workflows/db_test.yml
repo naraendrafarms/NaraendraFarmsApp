@@ -1,57 +1,83 @@
-name: DB Test
+name: DB Schema Test
 on:
   workflow_dispatch:
 jobs:
-  test:
+  schema_test:
     runs-on: ubuntu-latest
     env:
       MGMT: ${{ secrets.SUPABASE_MGMT_TOKEN }}
       GH_PAT: ${{ secrets.GH_PAT }}
     steps:
-      - name: Test and report
+      - uses: actions/checkout@v4
+      - name: Run schema statement by statement
         run: |
           python3 - << 'PYEOF'
-          import subprocess, json, os
+          import subprocess, json, os, re
 
           MGMT = os.environ["MGMT"]
           GH   = os.environ["GH_PAT"]
           REF  = "kjliulgpipqqwptinrrd"
-          results = []
-
-          def sql(query, label):
-              with open("/tmp/q.json","w") as f: json.dump({"query":query},f)
-              r = subprocess.run(["curl","-s","-w","\nHTTP:%{http_code}","-X","POST",
+          
+          with open("supabase/migrations/001_schema.sql") as f:
+              schema = f.read()
+          
+          def run_sql(sql, label):
+              with open("/tmp/q.json","w") as f: json.dump({"query":sql},f)
+              r = subprocess.run(["curl","-s","-X","POST",
                   f"https://api.supabase.com/v1/projects/{REF}/database/query",
                   "-H",f"Authorization: Bearer {MGMT}",
                   "-H","Content-Type: application/json",
                   "--data-binary","@/tmp/q.json"],capture_output=True,text=True,timeout=60)
-              lines=r.stdout.strip().split("\n")
-              status=lines[-1]; body="\n".join(lines[:-1])
-              results.append(f"**{label}**: {status} | {body[:300]}")
-              print(f"[{label}] {status} | {body[:300]}")
-              return status, body
-
-          sql("SELECT 1 as ping", "ping")
-          sql("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"", "uuid_ext")
-          sql("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\"", "pgcrypto")
-          sql("CREATE TABLE IF NOT EXISTS public.farms (id uuid DEFAULT uuid_generate_v4() PRIMARY KEY, code text UNIQUE, name text)", "create_farms")
-          s,b = sql("SELECT COUNT(*) as n FROM public.farms", "count_farms")
-          sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename", "list_tables")
+              try: d=json.loads(r.stdout); return d
+              except: return r.stdout[:200]
           
-          # Check the actual schema SQL file size and first 500 chars
-          try:
-              with open("supabase/migrations/001_schema.sql") as f: schema = f.read()
-              results.append(f"**schema size**: {len(schema)} chars")
-              results.append(f"**schema start**: {schema[:200]}")
-          except Exception as e:
-              results.append(f"**schema file**: ERROR {e}")
-
-          body_text = "\n".join(results)
+          # Smart split: respect $$ blocks
+          stmts = []
+          in_dollar = False
+          current_lines = []
+          for line in schema.split("\n"):
+              if "$$" in line:
+                  count = line.count("$$")
+                  if count % 2 != 0:
+                      in_dollar = not in_dollar
+              current_lines.append(line)
+              if line.rstrip().endswith(";") and not in_dollar:
+                  s = "\n".join(current_lines).strip()
+                  if s and not all(l.strip().startswith("--") or not l.strip() for l in s.split("\n")):
+                      stmts.append(s)
+                  current_lines = []
+          
+          print(f"Total statements: {len(stmts)}")
+          results = [f"Total statements: {len(stmts)}"]
+          
+          ok_phrases = ["already exists", "already defined", "does not exist"]
+          
+          for i, stmt in enumerate(stmts):
+              label = stmt[:60].replace("\n"," ").strip()
+              resp = run_sql(stmt, label)
+              if isinstance(resp, dict) and resp.get("message"):
+                  msg = resp["message"]
+                  status = "OK (already exists)" if any(p in msg.lower() for p in ok_phrases) else f"ERROR: {msg[:200]}"
+              elif isinstance(resp, list):
+                  status = f"OK ({len(resp)} rows)"
+              else:
+                  status = f"OK: {str(resp)[:100]}"
+              print(f"  [{i+1}] {label[:50]}: {status}")
+              results.append(f"- [{i+1}] {label[:50]}: {status}")
+          
+          # Final table list
+          table_resp = run_sql("SELECT tablename FROM pg_tables WHERE schemaname=\'public\' ORDER BY tablename", "list_tables")
+          if isinstance(table_resp, list):
+              tables = [r.get("tablename") for r in table_resp]
+              results.append(f"\n**Tables now existing ({len(tables)}):** {tables}")
+          
+          body = "\n".join(results)
           with open("/tmp/issue.json","w") as f:
-              json.dump({"title":"DB SQL Test Results","body":body_text},f)
+              json.dump({"title":"Schema Statement Test","body":body},f)
           subprocess.run(["curl","-s","-X","POST",
               "https://api.github.com/repos/naraendrafarms/NaraendraFarmsApp/issues",
               "-H",f"Authorization: token {GH}","-H","Accept: application/vnd.github+json",
               "-H","Content-Type: application/json","--data-binary","@/tmp/issue.json"],
               capture_output=True,text=True)
+          print("Done - check GitHub issue for results")
           PYEOF
