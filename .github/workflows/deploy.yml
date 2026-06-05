@@ -33,17 +33,39 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
 
-      - name: Install Wrangler
-        run: npm install -g wrangler@latest
-
-      - name: Create CF Pages project (skip if exists)
-        run: wrangler pages project create naraendra-farms --production-branch=main 2>&1 || true
+      - name: Verify CF Token & Create Project
+        run: |
+          echo "=== Verifying Cloudflare token ==="
+          VERIFY=$(curl -s "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+            -H "Authorization: Bearer $CF_TOKEN")
+          echo "Token verify: $VERIFY"
+          
+          echo "=== Creating/checking Pages project ==="
+          CREATE=$(curl -s -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects" \
+            -H "Authorization: Bearer $CF_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"naraendra-farms","production_branch":"main"}')
+          echo "Create result: $CREATE"
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Deploy dist to Cloudflare Pages
-        run: wrangler pages deploy dist --project-name=naraendra-farms --branch=main --commit-dirty=true
+      - name: Upload to Cloudflare Pages via API
+        run: |
+          echo "=== Uploading dist to CF Pages ==="
+          # Create deployment via API  
+          cd dist
+          # List files
+          echo "Files to deploy:"
+          find . -type f | head -20
+          
+          # Use wrangler with verbose output
+          npm install -g wrangler@3
+          wrangler --version
+          
+          echo "=== Deploying ==="
+          wrangler pages deploy . --project-name=naraendra-farms --branch=main --commit-dirty=true 2>&1
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
