@@ -1,0 +1,438 @@
+import React, { useState } from 'react'
+import { useParams, Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase'
+import { inr, pct, fmtDate, flockAgeWeeks } from '@/lib/utils'
+import {
+  Card, CardHeader, Button, Badge, Table, Th, Td,
+  SectionHeader, Spinner, StatCard, Divider
+} from '@/components/ui'
+import {
+  Bird, Egg, TrendingUp, ArrowLeft, Calendar,
+  BarChart2, DollarSign, Package
+} from 'lucide-react'
+import {
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
+  CartesianGrid, BarChart, Bar, Legend
+} from 'recharts'
+
+export const FlockDetail: React.FC = () => {
+  const { id } = useParams<{ id: string }>()
+  const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'>('overview')
+
+  const { data: flock, isLoading } = useQuery({
+    queryKey: ['flock', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('flocks')
+        .select('*, rearing_farm:farms!rearing_farm_id(name,code), laying_farm:farms!laying_farm_id(name,code)')
+        .eq('id', id!).single()
+      return data
+    }
+  })
+
+  const { data: daily } = useQuery({
+    queryKey: ['flock_daily', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('daily_records')
+        .select('*').eq('flock_id', id!).order('record_date')
+      return data ?? []
+    }
+  })
+
+  const { data: heDispatch } = useQuery({
+    queryKey: ['flock_he', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('he_dispatch')
+        .select('*').eq('flock_id', id!).order('dispatch_date')
+      return data ?? []
+    }
+  })
+
+  const { data: nheSales } = useQuery({
+    queryKey: ['flock_nhe', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('nhe_sales')
+        .select('*').eq('flock_id', id!).order('sale_date')
+      return data ?? []
+    }
+  })
+
+  const { data: medMonthly } = useQuery({
+    queryKey: ['flock_med', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('medicine_monthly')
+        .select('*').eq('flock_id', id!).order('month')
+      return data ?? []
+    }
+  })
+
+  if (isLoading) return <Spinner />
+  if (!flock) return <div className="p-8 text-center text-gray-500">Flock not found</div>
+
+  // Computed totals
+  const totalEggs = daily?.reduce((s, d) => s + (d.total_eggs ?? 0), 0) ?? 0
+  const totalHE   = daily?.reduce((s, d) => s + (d.he_eggs ?? 0), 0) ?? 0
+  const totalMortF = daily?.reduce((s, d) => s + (d.mortality_female ?? 0), 0) ?? 0
+  const totalMortM = daily?.reduce((s, d) => s + (d.mortality_male ?? 0), 0) ?? 0
+  const totalTrF   = daily?.reduce((s, d) => s + (d.trcull_female ?? 0), 0) ?? 0
+  const totalTrM   = daily?.reduce((s, d) => s + (d.trcull_male ?? 0), 0) ?? 0
+  const totalFeedF = daily?.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0) ?? 0
+  const totalFeedM = daily?.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0) ?? 0
+  const hePct = totalEggs > 0 ? totalHE / totalEggs : 0
+
+  const heRevenue  = heDispatch?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
+  const nheRevenue = nheSales?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
+  const medCost    = medMonthly?.reduce((s, m) => s + (m.total_amount ?? 0), 0) ?? 0
+  const chickCost  = flock.chick_cost ?? 0
+  const totalRevenue = heRevenue + nheRevenue
+  const totalCost    = chickCost + medCost  // feed cost requires rate lookup
+
+  // Monthly chart data
+  const monthlyData = daily?.reduce((acc: any[], d) => {
+    const m = d.record_date.slice(0, 7)
+    const existing = acc.find(x => x.month === m)
+    if (existing) {
+      existing.eggs += d.total_eggs ?? 0
+      existing.he   += d.he_eggs ?? 0
+      existing.mort += (d.mortality_female ?? 0) + (d.mortality_male ?? 0)
+    } else {
+      acc.push({ month: m, eggs: d.total_eggs ?? 0, he: d.he_eggs ?? 0,
+        mort: (d.mortality_female ?? 0) + (d.mortality_male ?? 0) })
+    }
+    return acc
+  }, []) ?? []
+
+  const lastRecord = daily?.[daily.length - 1]
+  const ageWeeks = flockAgeWeeks(flock.placement_date)
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-4">
+        <Link to="/flocks" className="p-2 rounded-lg hover:bg-gray-100">
+          <ArrowLeft size={18} className="text-gray-500"/>
+        </Link>
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900">Flock {flock.flock_no}</h1>
+            <Badge color={flock.status === 'laying' ? 'green' : flock.status === 'rearing' ? 'yellow' : 'gray'}>
+              {flock.status}
+            </Badge>
+          </div>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {flock.breed} • {flock.rearing_farm?.name} → {flock.laying_farm?.name} • Age: {ageWeeks} weeks
+          </p>
+        </div>
+        <div className="ml-auto flex gap-2">
+          <Link to="/flocks/daily">
+            <Button variant="outline" size="sm" icon={<Calendar size={14}/>}>Daily Entry</Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* Key metrics */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <StatCard title="Total Eggs" value={(totalEggs/100000).toFixed(2)+'L'}
+          subtitle="Lifetime production" icon={<Egg size={18}/>} color="text-yellow-600" />
+        <StatCard title="HE Eggs" value={(totalHE/100000).toFixed(2)+'L'}
+          subtitle={pct(hePct)+' of eggs'} icon={<Egg size={18}/>} color="text-brand-600" />
+        <StatCard title="Alive ♀" value={(lastRecord?.closing_female ?? flock.total_placed_f)?.toLocaleString('en-IN')}
+          subtitle={'Mortality: '+totalMortF.toLocaleString('en-IN')} icon={<Bird size={18}/>} color="text-green-600" />
+        <StatCard title="HE Revenue" value={inr(heRevenue)}
+          subtitle="Tally confirmed" icon={<DollarSign size={18}/>} color="text-green-700" />
+        <StatCard title="Total Revenue" value={inr(totalRevenue)}
+          subtitle="HE + NHE all sources" icon={<TrendingUp size={18}/>} color="text-green-700" />
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-gray-200">
+        {(['overview','daily','monthly','financial'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors -mb-px
+              ${tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* OVERVIEW TAB */}
+      {tab === 'overview' && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* Bird reconciliation */}
+            <Card>
+              <CardHeader title="Bird Reconciliation" />
+              <table className="w-full text-sm">
+                <tbody>
+                  {[
+                    ['Placed (Paid)', flock.paid_female?.toLocaleString('en-IN')+' F + '+flock.paid_male?.toLocaleString('en-IN')+' M'],
+                    ['Placed (Free)', flock.free_female?.toLocaleString('en-IN')+' F + '+flock.free_male?.toLocaleString('en-IN')+' M'],
+                    ['Total Placed', flock.total_placed_f?.toLocaleString('en-IN')+' F + '+flock.total_placed_m?.toLocaleString('en-IN')+' M'],
+                    ['Tr+Cull (C13/C14)', totalTrF.toLocaleString('en-IN')+' F + '+totalTrM.toLocaleString('en-IN')+' M'],
+                    ['Mortality (C15/C16)', totalMortF.toLocaleString('en-IN')+' F + '+totalMortM.toLocaleString('en-IN')+' M'],
+                    ['Closing Alive', (lastRecord?.closing_female??0).toLocaleString('en-IN')+' F + '+(lastRecord?.closing_male??0).toLocaleString('en-IN')+' M'],
+                  ].map(([label, val]) => (
+                    <tr key={label as string} className="border-b border-gray-50 last:border-0">
+                      <td className="py-2 text-gray-500 font-medium">{label}</td>
+                      <td className="py-2 text-right font-semibold text-gray-900">{val}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+
+            {/* Production summary */}
+            <Card>
+              <CardHeader title="Production Summary" />
+              <table className="w-full text-sm">
+                <tbody>
+                  {[
+                    ['Total Eggs', totalEggs.toLocaleString('en-IN')],
+                    ['Hatching Eggs (HE)', totalHE.toLocaleString('en-IN')],
+                    ['HE %', pct(hePct)],
+                    ['HE Dispatched', (heDispatch?.reduce((s,d)=>s+(d.total_dispatched??0),0)??0).toLocaleString('en-IN')],
+                    ['Free Eggs (2%)', (heDispatch?.reduce((s,d)=>s+(d.free_eggs??0),0)??0).toLocaleString('en-IN')],
+                    ['Feed ♀ (kg)', totalFeedF.toLocaleString('en-IN')],
+                    ['Feed ♂ (kg)', totalFeedM.toLocaleString('en-IN')],
+                    ['Placement', fmtDate(flock.placement_date)],
+                    ['Laying Start', fmtDate(flock.laying_start_date)],
+                  ].map(([label, val]) => (
+                    <tr key={label as string} className="border-b border-gray-50 last:border-0">
+                      <td className="py-2 text-gray-500 font-medium">{label}</td>
+                      <td className="py-2 text-right font-semibold text-gray-900">{val}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </div>
+
+          {/* Chart */}
+          {monthlyData.length > 0 && (
+            <Card>
+              <CardHeader title="Monthly Production" />
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={monthlyData} margin={{ top:4, right:8, bottom:4, left:0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                  <Tooltip formatter={(v: number) => v.toLocaleString('en-IN')} />
+                  <Legend />
+                  <Bar dataKey="eggs" fill="#22c55e" name="Total Eggs" />
+                  <Bar dataKey="he"   fill="#3b82f6" name="HE Eggs" />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* DAILY TAB */}
+      {tab === 'daily' && (
+        <Card padding={false}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-2 py-2 text-left font-semibold text-gray-600 sticky left-0 bg-gray-50">Date</th>
+                  <th className="px-2 py-2 text-left font-semibold text-gray-600">Wk</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♂</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♂</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Eggs</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HD%</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HE</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HE%</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Tr+Cull ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Mort ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Mort ♂</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♂</th>
+                </tr>
+              </thead>
+              <tbody>
+                {daily?.map((d, i) => {
+                  const isLayingPeriod = flock.laying_start_date && d.record_date >= flock.laying_start_date
+                  return (
+                    <tr key={d.id} className={`border-b border-gray-50 hover:bg-gray-50
+                      ${isLayingPeriod ? 'bg-green-50/30' : 'bg-yellow-50/30'}`}>
+                      <td className="px-2 py-1.5 sticky left-0 font-medium"
+                        style={{ backgroundColor: isLayingPeriod ? '#f0fdf4' : '#fefce8' }}>
+                        {fmtDate(d.record_date)}
+                      </td>
+                      <td className="px-2 py-1.5 text-gray-400">{Math.floor(i/7)+1}</td>
+                      <td className="px-2 py-1.5 text-right">{d.opening_female?.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-1.5 text-right">{d.opening_male?.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-1.5 text-right">{d.feed_female_kg?.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-1.5 text-right">{d.feed_male_kg?.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-1.5 text-right font-medium">{d.total_eggs?.toLocaleString('en-IN')}</td>
+                      <td className={`px-2 py-1.5 text-right ${(d.hd_pct??0)>0.85?'text-green-600':'text-orange-500'}`}>
+                        {pct(d.hd_pct, 1)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-medium text-blue-600">{d.he_eggs?.toLocaleString('en-IN')}</td>
+                      <td className={`px-2 py-1.5 text-right ${(d.he_pct??0)>0.88?'text-green-600':'text-orange-500'}`}>
+                        {pct(d.he_pct, 1)}
+                      </td>
+                      <td className="px-2 py-1.5 text-right text-orange-500">{d.trcull_female > 0 ? d.trcull_female : '—'}</td>
+                      <td className="px-2 py-1.5 text-right text-red-500">{d.mortality_female > 0 ? d.mortality_female : '—'}</td>
+                      <td className="px-2 py-1.5 text-right text-red-500">{d.mortality_male > 0 ? d.mortality_male : '—'}</td>
+                      <td className="px-2 py-1.5 text-right">{d.closing_female?.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-1.5 text-right">{d.closing_male?.toLocaleString('en-IN')}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+              {/* Totals row */}
+              {daily && daily.length > 0 && (
+                <tfoot>
+                  <tr className="bg-yellow-50 font-bold text-xs">
+                    <td className="px-2 py-2 sticky left-0 bg-yellow-50" colSpan={2}>TOTAL ({daily.length} days)</td>
+                    <td className="px-2 py-2 text-right">—</td>
+                    <td className="px-2 py-2 text-right">—</td>
+                    <td className="px-2 py-2 text-right">{totalFeedF.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-2 text-right">{totalFeedM.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-2 text-right">{totalEggs.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-2 text-right">{pct(hePct,1)}</td>
+                    <td className="px-2 py-2 text-right">{totalHE.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-2 text-right">{pct(hePct,1)}</td>
+                    <td className="px-2 py-2 text-right">{totalTrF.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-2 text-right">{totalMortF.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-2 text-right">{totalMortM.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-2 text-right">{lastRecord?.closing_female?.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-2 text-right">{lastRecord?.closing_male?.toLocaleString('en-IN')}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* MONTHLY TAB */}
+      {tab === 'monthly' && (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Month</Th><Th right>Days</Th><Th right>Eggs</Th><Th right>HE</Th>
+              <Th right>HE%</Th><Th right>Avg Open ♀</Th><Th right>Mort ♀</Th>
+              <Th right>Feed ♀ kg</Th><Th right>Feed ♂ kg</Th>
+            </tr></thead>
+            <tbody>
+              {monthlyData.map((m: any) => {
+                const monthDaily = daily?.filter(d => d.record_date.startsWith(m.month)) ?? []
+                const avgF = monthDaily.reduce((s, d) => s + (d.opening_female ?? 0), 0) / Math.max(monthDaily.length, 1)
+                const feedF = monthDaily.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0)
+                const feedM = monthDaily.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0)
+                const mortF = monthDaily.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
+                return (
+                  <tr key={m.month} className="hover:bg-gray-50">
+                    <Td className="font-medium">{m.month}</Td>
+                    <Td right>{monthDaily.length}</Td>
+                    <Td right className="font-medium">{m.eggs.toLocaleString('en-IN')}</Td>
+                    <Td right className="text-blue-600 font-medium">{m.he.toLocaleString('en-IN')}</Td>
+                    <Td right>
+                      <span className={m.eggs > 0 && (m.he/m.eggs) > 0.88 ? 'text-green-600' : 'text-orange-500'}>
+                        {m.eggs > 0 ? pct(m.he/m.eggs) : '—'}
+                      </span>
+                    </Td>
+                    <Td right>{Math.round(avgF).toLocaleString('en-IN')}</Td>
+                    <Td right className="text-red-500">{mortF > 0 ? mortF : '—'}</Td>
+                    <Td right>{feedF.toLocaleString('en-IN')}</Td>
+                    <Td right>{feedM.toLocaleString('en-IN')}</Td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </Table>
+        </Card>
+      )}
+
+      {/* FINANCIAL TAB */}
+      {tab === 'financial' && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <Card>
+              <CardHeader title="Revenue" />
+              <table className="w-full text-sm">
+                <tbody>
+                  <tr className="border-b border-gray-50">
+                    <td className="py-2 text-gray-500">HE Revenue (Tally)</td>
+                    <td className="py-2 text-right font-semibold text-green-700">{inr(heRevenue)}</td>
+                  </tr>
+                  {/* NHE by type */}
+                  {Object.entries(nheSales?.reduce((acc: any, s: any) => {
+                    acc[s.sale_type] = (acc[s.sale_type] ?? 0) + s.amount; return acc
+                  }, {}) ?? {}).map(([type, amt]: any) => (
+                    <tr key={type} className="border-b border-gray-50">
+                      <td className="py-2 text-gray-500 pl-4">• {type}</td>
+                      <td className="py-2 text-right font-medium">{inr(amt)}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-green-50">
+                    <td className="py-2 font-bold">TOTAL REVENUE</td>
+                    <td className="py-2 text-right font-bold text-green-700 text-base">{inr(totalRevenue)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </Card>
+            <Card>
+              <CardHeader title="Cost" />
+              <table className="w-full text-sm">
+                <tbody>
+                  <tr className="border-b border-gray-50">
+                    <td className="py-2 text-gray-500">Chick Cost ({flock.paid_female+flock.paid_male} paid × Rs{flock.chick_rate})</td>
+                    <td className="py-2 text-right font-semibold">{inr(chickCost)}</td>
+                  </tr>
+                  <tr className="border-b border-gray-50">
+                    <td className="py-2 text-gray-500">Medicine & Vaccine</td>
+                    <td className="py-2 text-right font-semibold">{inr(medCost)}</td>
+                  </tr>
+                  <tr className="border-b border-gray-50">
+                    <td className="py-2 text-gray-500 text-xs">Feed Cost (See Feed Report for calculation)</td>
+                    <td className="py-2 text-right text-xs text-gray-400">See Reports</td>
+                  </tr>
+                  <tr className="border-b border-gray-50">
+                    <td className="py-2 text-gray-500 text-xs">Salary / Electricity / Bonus</td>
+                    <td className="py-2 text-right text-xs text-gray-400">Allocated separately</td>
+                  </tr>
+                  <tr className="bg-orange-50">
+                    <td className="py-2 font-bold">Partial Cost (no feed/salary/elec)</td>
+                    <td className="py-2 text-right font-bold text-orange-700">{inr(totalCost)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </Card>
+          </div>
+          {/* HE Dispatch table */}
+          <Card>
+            <CardHeader title={`HE Dispatch (${heDispatch?.length ?? 0} records)`} />
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr>
+                  <Th>Dispatch Date</Th><Th>Prod Date</Th><Th right>DC No</Th>
+                  <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice</Th>
+                  <Th right>Rate</Th><Th right>Amount</Th>
+                </tr></thead>
+                <tbody>
+                  {heDispatch?.map((d: any) => (
+                    <tr key={d.id} className="hover:bg-gray-50">
+                      <Td className="text-xs">{fmtDate(d.dispatch_date)}</Td>
+                      <Td className="text-xs text-gray-400">{fmtDate(d.prod_date)}</Td>
+                      <Td right className="text-xs">{d.dc_no}</Td>
+                      <Td right>{d.total_dispatched?.toLocaleString('en-IN')}</Td>
+                      <Td right className="text-xs text-orange-500">{d.free_eggs > 0 ? d.free_eggs : '—'}</Td>
+                      <Td right>{d.invoice_eggs?.toLocaleString('en-IN')}</Td>
+                      <Td right className="text-xs">{d.rate ? `Rs ${d.rate}` : '—'}</Td>
+                      <Td right className="font-semibold text-green-700">{d.amount ? inr(d.amount) : '—'}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  )
+}
