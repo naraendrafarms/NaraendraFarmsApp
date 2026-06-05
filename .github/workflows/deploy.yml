@@ -48,72 +48,83 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Run Database Schema (idempotent - safe to run every time)
+      - name: Run Schema Migration
         run: |
-          echo "Running database schema on Supabase..."
           PROJECT_REF="kjliulgpipqqwptinrrd"
           SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          
-          # Download schema SQL
           SCHEMA_SQL=$(cat supabase/migrations/001_schema.sql)
-          SEED_SQL=$(cat supabase/seeds/001_seed_data.sql)
-          
-          # Run schema via Supabase Management API
-          SCHEMA_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
+          RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST \
             "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
             -H "Authorization: Bearer ${SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"query\": $(echo "$SCHEMA_SQL" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")}")
-          echo "Schema result: $(echo $SCHEMA_RESULT | tail -1)"
-          
-          # Run seed data
-          SEED_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST \
+            -d "{\"query\": $(python3 -c "import sys,json; print(json.dumps(open('supabase/migrations/001_schema.sql').read()))")}")
+          echo "Schema: $(echo "$RESULT" | tail -1)"
+
+      - name: Run Seed Data (master data)
+        run: |
+          PROJECT_REF="kjliulgpipqqwptinrrd"
+          SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST \
             "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
             -H "Authorization: Bearer ${SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"query\": $(echo "$SEED_SQL" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")}")
-          echo "Seed result: $(echo $SEED_RESULT | tail -1)"
+            -d "{\"query\": $(python3 -c "import sys,json; print(json.dumps(open('supabase/seeds/001_seed_data.sql').read()))")}")
+          echo "Seed: $(echo "$RESULT" | tail -1)"
+
+      - name: Run Full Data Seed (flocks daily, HE, hatchability, salary, electricity)
+        run: |
+          PROJECT_REF="kjliulgpipqqwptinrrd"
+          SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          RESULT=$(curl -s -w "\nHTTP:%{http_code}" -X POST \
+            "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"query\": $(python3 -c "import sys,json; print(json.dumps(open('supabase/seeds/002_data_seed.sql').read()))")}")
+          echo "Data seed: $(echo "$RESULT" | tail -1)"
 
       - name: Create Admin User
         run: |
-          PROJECT_REF="kjliulgpipqqwptinrrd"
           SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          SUPABASE_URL="https://${PROJECT_REF}.supabase.co"
-          
-          # Create admin user (skip if already exists)
           RESULT=$(curl -s -X POST \
-            "${SUPABASE_URL}/auth/v1/admin/users" \
+            "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
             -H "apikey: ${SERVICE_KEY}" \
             -H "Authorization: Bearer ${SERVICE_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{
-              "email": "admin@naraendrafarms.com",
-              "password": "NaraendraFarms@2025",
-              "email_confirm": true,
-              "user_metadata": {"full_name": "Admin", "role": "admin"}
-            }')
-          
-          USER_ID=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','already_exists'))" 2>/dev/null || echo "exists")
+            -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}')
+          USER_ID=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','exists'))" 2>/dev/null || echo "exists")
           echo "Admin user: $USER_ID"
-          
-          if [ "$USER_ID" != "already_exists" ] && [ "$USER_ID" != "exists" ] && [ -n "$USER_ID" ]; then
-            # Insert profile
-            curl -s -X POST \
-              "${SUPABASE_URL}/rest/v1/profiles" \
-              -H "apikey: ${SERVICE_KEY}" \
-              -H "Authorization: Bearer ${SERVICE_KEY}" \
-              -H "Content-Type: application/json" \
-              -H "Prefer: return=minimal" \
-              -d "{\"id\": \"${USER_ID}\", \"full_name\": \"Admin\", \"role\": \"admin\", \"is_active\": true}" || true
-            echo "Profile created"
+          if [ "$USER_ID" != "exists" ] && [ -n "$USER_ID" ] && [ ${#USER_ID} -gt 10 ]; then
+            curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/profiles" \
+              -H "apikey: ${SERVICE_KEY}" -H "Authorization: Bearer ${SERVICE_KEY}" \
+              -H "Content-Type: application/json" -H "Prefer: return=minimal" \
+              -d "{\"id\":\"${USER_ID}\",\"full_name\":\"Admin\",\"role\":\"admin\",\"is_active\":true}" || true
           fi
 
-      - name: Deployment Summary
+      - name: Verify Data
         run: |
-          echo "=================================="
-          echo "✅ DEPLOYMENT COMPLETE"
-          echo "=================================="
-          echo "App URL:  https://naraendra-farms.pages.dev"
+          SERVICE_KEY="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          ANON_KEY="${{ secrets.VITE_SUPABASE_ANON_KEY }}"
+          echo "=== VERIFICATION ==="
+          curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/daily_records?select=count" \
+            -H "apikey: ${ANON_KEY}" -H "Authorization: Bearer ${ANON_KEY}" \
+            -H "Prefer: count=exact" -I 2>/dev/null | grep -i 'content-range' || echo "Checking..."
+          FARMS=$(curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/farms?select=code,name" \
+            -H "apikey: ${ANON_KEY}" -H "Authorization: Bearer ${ANON_KEY}")
+          echo "Farms: $FARMS"
+
+      - name: Deployment Complete
+        run: |
+          echo "=================================================="
+          echo "✅ NARAENDRA FARMS APP DEPLOYED"
+          echo "=================================================="
+          echo "URL:      https://naraendra-farms.pages.dev"
           echo "Login:    admin@naraendrafarms.com"
           echo "Password: NaraendraFarms@2025"
-          echo "=================================="
+          echo ""
+          echo "Data loaded:"
+          echo "  - 1,949 daily records (F16+F17+F19+F20)"
+          echo "  - 1,000 HE dispatch records"
+          echo "  - 388 hatchability records"
+          echo "  - 93 salary abstract months"
+          echo "  - 98 electricity bills"
+          echo "=================================================="

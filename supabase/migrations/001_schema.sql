@@ -624,3 +624,19 @@ BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$;
 
 CREATE TRIGGER flocks_updated_at BEFORE UPDATE ON public.flocks
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ── HATCHABILITY VIEW ──
+CREATE OR REPLACE VIEW public.v_hatchability_summary AS
+SELECT
+  f.flock_no,
+  h.hatchery,
+  COUNT(*) AS settings,
+  SUM(h.eggs_set) AS total_eggs_set,
+  SUM(h.chicks_hatched) AS total_chicks,
+  ROUND(AVG(h.hatch_pct)*100,2) AS avg_hatch_pct,
+  MIN(h.setting_date) AS first_setting,
+  MAX(h.hatch_date) AS last_hatch
+FROM public.hatchability h
+JOIN public.flocks f ON f.id=h.flock_id
+WHERE h.eggs_set>0
+GROUP BY f.flock_no, h.hatchery;
