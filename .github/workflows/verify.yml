@@ -9,58 +9,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check tables via REST API
+      - name: Check DB and save results
         run: |
           ANON="${{ secrets.VITE_SUPABASE_ANON_KEY }}"
+          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
           BASE="https://kjliulgpipqqwptinrrd.supabase.co/rest/v1"
-          
-          echo "=== FARMS ==="
-          curl -s "${BASE}/farms?select=code,name" -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"
-          
-          echo ""
-          echo "=== FLOCKS ==="
-          curl -s "${BASE}/flocks?select=flock_no,status" -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"
-          
-          echo ""
-          echo "=== DAILY RECORDS COUNT ==="
-          curl -si "${BASE}/daily_records?select=id&limit=1" -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}" -H "Prefer: count=exact"
-          
-          echo ""
-          echo "=== HATCHABILITY COUNT ==="
-          curl -si "${BASE}/hatchability?select=id&limit=1" -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}" -H "Prefer: count=exact"
-          
-          echo ""
-          echo "=== SALARY COUNT ==="
-          curl -si "${BASE}/salary_abstract?select=id&limit=1" -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}" -H "Prefer: count=exact"
+          mkdir -p /tmp/results
 
-      - name: Test Supabase Management API
-        run: |
-          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          echo "=== MANAGEMENT API TEST ==="
-          curl -s -X POST             "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query"             -H "Authorization: Bearer ${SK}"             -H "Content-Type: application/json"             -d '"query": "SELECT COUNT(*) FROM daily_records"}'             -w "\nHTTP_STATUS:%{http_code}"
+          echo "=== TABLE COUNTS ===" > /tmp/results/db_check.txt
+          
+          for TABLE in farms flocks daily_records he_dispatch hatchability salary_abstract electricity_bills; do
+            RESP=$(curl -s "${BASE}/${TABLE}?select=id&limit=0"               -H "apikey: ${ANON}"               -H "Authorization: Bearer ${ANON}"               -H "Prefer: count=exact"               -D /tmp/headers_${TABLE}.txt 2>/dev/null)
+            COUNT=$(grep -i "content-range" /tmp/headers_${TABLE}.txt | grep -oE "[0-9]+$" | head -1 || echo "?")
+            echo "${TABLE}: ${COUNT}" | tee -a /tmp/results/db_check.txt
+          done
 
-      - name: Test correct JSON format
-        run: |
-          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          echo "=== CORRECT FORMAT ==="
-          echo '{"query":"SELECT COUNT(*) as cnt FROM public.daily_records"}' > /tmp/q.json
-          cat /tmp/q.json
-          curl -s -X POST             "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query"             -H "Authorization: Bearer ${SK}"             -H "Content-Type: application/json"             -d @/tmp/q.json             -w "\nHTTP:%{http_code}"
+          echo "" >> /tmp/results/db_check.txt
+          echo "=== FARMS ===" >> /tmp/results/db_check.txt
+          curl -s "${BASE}/farms?select=code,name"             -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"             >> /tmp/results/db_check.txt
 
-      - name: Run small test INSERT
-        run: |
-          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          echo "=== TEST INSERT ==="
+          echo "" >> /tmp/results/db_check.txt
+          echo "=== FLOCKS ===" >> /tmp/results/db_check.txt
+          curl -s "${BASE}/flocks?select=flock_no,status,placement_date"             -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"             >> /tmp/results/db_check.txt
+
+          echo "" >> /tmp/results/db_check.txt
+          echo "=== MGMT API TEST ===" >> /tmp/results/db_check.txt
           python3 -c "
 import json, subprocess
-sql = \"SELECT COUNT(*) FROM public.daily_records; SELECT COUNT(*) FROM public.hatchability; SELECT COUNT(*) FROM public.electricity_bills;\"
-payload = json.dumps({'query': sql})
-r = subprocess.run(['curl','-s','-w','\\nHTTP:%{http_code}','-X','POST',
-  'https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query',
-  '-H',f'Authorization: Bearer ${SK}',
-  '-H','Content-Type: application/json',
-  '-d',payload],capture_output=True,text=True)
-lines=r.stdout.strip().split('\\n')
-print('HTTP:',lines[-1])
-print('Body:','\\n'.join(lines[:-1])[:1000])
-"
+sql = 'SELECT COUNT(*) as daily FROM public.daily_records'
+payload = json.dumps({"query": sql})
+r = subprocess.run(["curl","-s","-w","\nHTTP:%{http_code}","-X","POST",
+  "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query",
+  "-H","Authorization: Bearer $SK",
+  "-H","Content-Type: application/json",
+  "-d",payload],capture_output=True,text=True)
+print(r.stdout[:500])
+" >> /tmp/results/db_check.txt
+
+          echo "" >> /tmp/results/db_check.txt
+          echo "=== HATCHABILITY TABLE EXISTS? ===" >> /tmp/results/db_check.txt
+          curl -s "${BASE}/hatchability?select=id&limit=1"             -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"             >> /tmp/results/db_check.txt
+
+          cat /tmp/results/db_check.txt
+
+      - name: Upload results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-check-results
+          path: /tmp/results/db_check.txt
+          retention-days: 1
