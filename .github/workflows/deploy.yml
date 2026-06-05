@@ -24,16 +24,11 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
       - run: npm install -g wrangler@3
-      - name: Create CF Pages project
-        run: wrangler pages project create naraendra-farms --production-branch=main 2>&1 || true
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - run: wrangler pages project create naraendra-farms --production-branch=main 2>&1 || true
+        env: { CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}", CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" }
       - name: Deploy to Cloudflare Pages
         run: wrangler pages deploy dist --project-name=naraendra-farms --branch=main --commit-dirty=true
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        env: { CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}", CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" }
 
   database:
     name: Initialize Database
@@ -41,54 +36,54 @@ jobs:
     needs: deploy
     env:
       MGMT: ${{ secrets.SUPABASE_MGMT_TOKEN }}
-      SK:   ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
-      ANON: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      REF:  kjliulgpipqqwptinrrd
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run schema (001_schema.sql)
+      - name: 1. Drop all existing tables (clean reset)
+        run: python3 scripts/run_sql.py supabase/seeds/000_cleanup.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: 2. Create schema (all 28 tables)
         run: python3 scripts/run_sql.py supabase/migrations/001_schema.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
-      - name: Run master seed (001_seed_data.sql)
+      - name: 3. Load master data (farms/sheds/flocks/parties/medicines/etc)
         run: python3 scripts/run_sql.py supabase/seeds/001_seed_data.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
-      - name: Data chunk 1
+      - name: 4. Daily records + HE chunk 1
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_01.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: Data chunk 2
+      - name: 5. Daily chunk 2
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_02.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: Data chunk 3
+      - name: 6. Daily chunk 3
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_03.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: Data chunk 4
+      - name: 7. Daily chunk 4
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_04.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: Data chunk 5
+      - name: 8. Daily chunk 5
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_05.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: Data chunk 6
+      - name: 9. HE dispatch + Hatchability chunk 6
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_06.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: Data chunk 7
+      - name: 10. Hatchability chunk 7
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_07.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: Data chunk 8
+      - name: 11. Salary + Electricity chunk 8
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_08.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: Data chunk 9
+      - name: 12. Final chunk 9
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_09.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
-      - name: Create admin user
+      - name: 13. Create admin user
         run: |
           SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
           R=$(curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
-            -H "apikey: $SK" -H "Authorization: Bearer $SK" \
-            -H "Content-Type: application/json" \
+            -H "apikey: $SK" -H "Authorization: Bearer $SK" -H "Content-Type: application/json" \
             -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}')
           ID=$(echo $R | python3 -c "import sys,json; print(json.load(sys.stdin).get('id','exists'))" 2>/dev/null || echo "exists")
           echo "Admin: $ID"
@@ -99,7 +94,7 @@ jobs:
               -d "{\"id\":\"$ID\",\"full_name\":\"Admin\",\"role\":\"admin\",\"is_active\":true}" || true
           fi
 
-      - name: Verify
+      - name: 14. Verify final counts
         run: python3 scripts/db_check.py
         env:
           ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
@@ -107,10 +102,11 @@ jobs:
           MGMT_TOKEN: ${{ secrets.SUPABASE_MGMT_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
 
-      - name: Summary
+      - name: ✅ Done
         run: |
           echo "=================================="
-          echo "✅ NARAENDRA FARMS DEPLOYED"
+          echo "NARAENDRA FARMS — FULLY LOADED"
           echo "App: https://naraendra-farms.pages.dev"
-          echo "Login: admin@naraendrafarms.com / NaraendraFarms@2025"
+          echo "Login: admin@naraendrafarms.com"
+          echo "Pass:  NaraendraFarms@2025"
           echo "=================================="

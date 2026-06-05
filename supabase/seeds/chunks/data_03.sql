@@ -202,14 +202,7 @@ VALUES
   ((SELECT id FROM flocks WHERE flock_no='17'),'2025-07-28'::date,(SELECT id FROM farms WHERE code='BPET1'),7028,428,1040.0,55.0,4204,3878,20,0,3250,324,5,1,3773,103),
   ((SELECT id FROM flocks WHERE flock_no='17'),'2025-07-29'::date,(SELECT id FROM farms WHERE code='BPET1'),3773,103,559.0,13.0,2385,2110,10,0,392,56,2,0,3379,47),
   ((SELECT id FROM flocks WHERE flock_no='17'),'2025-07-30'::date,(SELECT id FROM farms WHERE code='BPET1'),3379,47,559.0,13.0,2081,1879,10,0,192,100,1,0,3570,147),
-  ((SELECT id FROM flocks WHERE flock_no='17'),'2025-07-31'::date,(SELECT id FROM farms WHERE code='BPET1'),3570,147,559.0,13.0,2085,1854,9,0,3035,147,1,0,534,0)
-ON CONFLICT (flock_id,record_date,farm_id) DO UPDATE SET
-  opening_female=EXCLUDED.opening_female,opening_male=EXCLUDED.opening_male,
-  feed_female_kg=EXCLUDED.feed_female_kg,feed_male_kg=EXCLUDED.feed_male_kg,
-  total_eggs=EXCLUDED.total_eggs,he_eggs=EXCLUDED.he_eggs,
-  trcull_female=EXCLUDED.trcull_female,trcull_male=EXCLUDED.trcull_male,
-  mortality_female=EXCLUDED.mortality_female,mortality_male=EXCLUDED.mortality_male,
-  closing_female=EXCLUDED.closing_female,closing_male=EXCLUDED.closing_male;
+  ((SELECT id FROM flocks WHERE flock_no='17'),'2025-07-31'::date,(SELECT id FROM farms WHERE code='BPET1'),3570,147,559.0,13.0,2085,1854,9,0,3035,147,1,0,534,0);
 
 INSERT INTO public.daily_records
   (flock_id,record_date,farm_id,opening_female,opening_male,
@@ -414,12 +407,5 @@ VALUES
   ((SELECT id FROM flocks WHERE flock_no='19'),'2025-08-29'::date,(SELECT id FROM farms WHERE code='KPALLY'),42145,4412,6114.0,564.0,11408,9331,27,0,0,0,0,0,7,1),
   ((SELECT id FROM flocks WHERE flock_no='19'),'2025-08-30'::date,(SELECT id FROM farms WHERE code='KPALLY'),42138,4411,6114.0,564.0,11949,9949,28,1,0,0,0,0,6,2),
   ((SELECT id FROM flocks WHERE flock_no='19'),'2025-08-31'::date,(SELECT id FROM farms WHERE code='KPALLY'),42132,4409,6114.0,564.0,12556,10676,29,1,0,0,2,0,6,2),
-  ((SELECT id FROM flocks WHERE flock_no='19'),'2025-09-01'::date,(SELECT id FROM farms WHERE code='KPALLY'),42124,4407,6150.0,564.0,12897,11076,30,1,0,0,0,0,9,5),
-  ((SELECT id FROM flocks WHERE flock_no='19'),'2025-09-02'::date,(SELECT id FROM farms WHERE code='KPALLY'),42115,4402,6150.0,564.0,13393,11473,32,1,0,0,0,0,8,0)
-ON CONFLICT (flock_id,record_date,farm_id) DO UPDATE SET
-  opening_female=EXCLUDED.opening_female,opening_male=EXCLUDED.opening_male,
-  feed_female_kg=EXCLUDED.feed_female_kg,feed_male_kg=EXCLUDED.feed_male_kg,
-  total_eggs=EXCLUDED.total_eggs,he_eggs=EXCLUDED.he_eggs,
-  trcull_female=EXCLUDED.trcull_female,trcull_male=EXCLUDED.trcull_male,
-  mortality_female=EXCLUDED.mortality_female,mortality_male=EXCLUDED.mortality_male,
-  closing_female=EXCLUDED.closing_female,closing_male=EXCLUDED.closing_male;
+  ((SELECT id FROM flocks WHERE flock_no='19'),'2025-09-01'::date,(SELECT id FROM farms WHERE code='PPALLY'),42124,4407,6150.0,564.0,12897,11076,30,1,0,0,0,0,9,5),
+  ((SELECT id FROM flocks WHERE flock_no='19'),'2025-09-02'::date,(SELECT id FROM farms WHERE code='PPALLY'),42115,4402,6150.0,564.0,13393,11473,32,1,0,0,0,0,8,0);

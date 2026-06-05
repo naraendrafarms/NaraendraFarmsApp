@@ -1,39 +1,24 @@
 
 -- ============================================================
--- NARAENDRA FARMS — COMPLETE DATA SEED v2.0
--- 1949 daily records | 1000 HE dispatches | 525 hatchability
--- 93 salary months | 98 electricity bills
--- Run AFTER 001_schema.sql and 001_seed_data.sql
+-- NARAENDRA FARMS - FULL DATA LOAD v4.0
+-- TRUNCATES first to ensure clean data
 -- ============================================================
 
--- Disable FK check temporarily for speed
-SET session_replication_role = replica;
+-- Clean all data tables (keep master data)
+TRUNCATE TABLE public.hatchability CASCADE;
+TRUNCATE TABLE public.he_dispatch CASCADE;
+TRUNCATE TABLE public.nhe_sales CASCADE;
+TRUNCATE TABLE public.daily_records CASCADE;
+TRUNCATE TABLE public.medicine_usage CASCADE;
+TRUNCATE TABLE public.medicine_monthly CASCADE;
+TRUNCATE TABLE public.salary_abstract CASCADE;
+TRUNCATE TABLE public.electricity_bills CASCADE;
+TRUNCATE TABLE public.electricity_allocation CASCADE;
+TRUNCATE TABLE public.grn CASCADE;
+TRUNCATE TABLE public.feed_production CASCADE;
+TRUNCATE TABLE public.feed_transfers CASCADE;
 
--- Create hatchability table
-CREATE TABLE IF NOT EXISTS public.hatchability (
-  id           UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  flock_id     UUID REFERENCES public.flocks(id),
-  dc_no        INTEGER,
-  setting_date DATE,
-  invoice_date DATE,
-  hatch_date   DATE,
-  hatchery     TEXT,
-  setting_no   TEXT,
-  age_weeks    NUMERIC(5,1),
-  eggs_received INTEGER,
-  eggs_set     INTEGER,
-  broken       INTEGER DEFAULT 0,
-  infertile    INTEGER DEFAULT 0,
-  chicks_hatched INTEGER DEFAULT 0,
-  hatch_pct    NUMERIC(6,4),
-  created_at   TIMESTAMPTZ DEFAULT NOW()
-);
-ALTER TABLE public.hatchability ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "auth_select" ON public.hatchability FOR SELECT USING (auth.role()='authenticated');
-CREATE POLICY "auth_insert" ON public.hatchability FOR INSERT WITH CHECK (auth.role()='authenticated');
-CREATE POLICY "auth_update" ON public.hatchability FOR UPDATE USING (auth.role()='authenticated');
-
-
+-- DAILY RECORDS (1,949 rows - 4 flocks)
 INSERT INTO public.daily_records
   (flock_id,record_date,farm_id,opening_female,opening_male,
    feed_female_kg,feed_male_kg,total_eggs,he_eggs,je_eggs,te_eggs,
@@ -238,14 +223,7 @@ VALUES
   ((SELECT id FROM flocks WHERE flock_no='16'),'2024-06-14'::date,(SELECT id FROM farms WHERE code='PPALLY'),42875,4843,7031.0,630.0,31491,27850,73,1,0,0,29,1,42846,4842),
   ((SELECT id FROM flocks WHERE flock_no='16'),'2024-06-15'::date,(SELECT id FROM farms WHERE code='PPALLY'),42846,4842,7031.0,630.0,31543,28249,73,0,0,0,27,3,42819,4839),
   ((SELECT id FROM flocks WHERE flock_no='16'),'2024-06-16'::date,(SELECT id FROM farms WHERE code='PPALLY'),42819,4839,7031.0,630.0,31608,28222,73,0,3,0,26,4,42790,4835),
-  ((SELECT id FROM flocks WHERE flock_no='16'),'2024-06-17'::date,(SELECT id FROM farms WHERE code='PPALLY'),42790,4835,7031.0,630.0,31293,27995,73,0,0,0,36,3,42754,4832)
-ON CONFLICT (flock_id,record_date,farm_id) DO UPDATE SET
-  opening_female=EXCLUDED.opening_female,opening_male=EXCLUDED.opening_male,
-  feed_female_kg=EXCLUDED.feed_female_kg,feed_male_kg=EXCLUDED.feed_male_kg,
-  total_eggs=EXCLUDED.total_eggs,he_eggs=EXCLUDED.he_eggs,
-  trcull_female=EXCLUDED.trcull_female,trcull_male=EXCLUDED.trcull_male,
-  mortality_female=EXCLUDED.mortality_female,mortality_male=EXCLUDED.mortality_male,
-  closing_female=EXCLUDED.closing_female,closing_male=EXCLUDED.closing_male;
+  ((SELECT id FROM flocks WHERE flock_no='16'),'2024-06-17'::date,(SELECT id FROM farms WHERE code='PPALLY'),42790,4835,7031.0,630.0,31293,27995,73,0,0,0,36,3,42754,4832);
 
 INSERT INTO public.daily_records
   (flock_id,record_date,farm_id,opening_female,opening_male,
@@ -451,11 +429,4 @@ VALUES
   ((SELECT id FROM flocks WHERE flock_no='16'),'2025-01-04'::date,(SELECT id FROM farms WHERE code='PPALLY'),34303,4175,5250.0,543.0,19252,16911,56,0,0,0,12,4,34291,4171),
   ((SELECT id FROM flocks WHERE flock_no='16'),'2025-01-05'::date,(SELECT id FROM farms WHERE code='PPALLY'),34291,4171,5250.0,543.0,19113,16700,55,0,1,0,12,2,34278,4169),
   ((SELECT id FROM flocks WHERE flock_no='16'),'2025-01-06'::date,(SELECT id FROM farms WHERE code='PPALLY'),34278,4169,5250.0,543.0,19294,16893,56,0,0,0,11,5,34267,4164),
-  ((SELECT id FROM flocks WHERE flock_no='16'),'2025-01-07'::date,(SELECT id FROM farms WHERE code='PPALLY'),34267,4164,5414.0,542.0,18988,16787,55,0,0,0,11,5,34256,4159)
-ON CONFLICT (flock_id,record_date,farm_id) DO UPDATE SET
-  opening_female=EXCLUDED.opening_female,opening_male=EXCLUDED.opening_male,
-  feed_female_kg=EXCLUDED.feed_female_kg,feed_male_kg=EXCLUDED.feed_male_kg,
-  total_eggs=EXCLUDED.total_eggs,he_eggs=EXCLUDED.he_eggs,
-  trcull_female=EXCLUDED.trcull_female,trcull_male=EXCLUDED.trcull_male,
-  mortality_female=EXCLUDED.mortality_female,mortality_male=EXCLUDED.mortality_male,
-  closing_female=EXCLUDED.closing_female,closing_male=EXCLUDED.closing_male;
+  ((SELECT id FROM flocks WHERE flock_no='16'),'2025-01-07'::date,(SELECT id FROM farms WHERE code='PPALLY'),34267,4164,5414.0,542.0,18988,16787,55,0,0,0,11,5,34256,4159);
