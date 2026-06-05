@@ -3,7 +3,7 @@ import subprocess, json, os
 
 ANON = os.environ["ANON_KEY"]
 SK   = os.environ["SERVICE_KEY"]
-GH_TOKEN = os.environ["GITHUB_TOKEN"]
+GH_TOKEN = os.environ.get("GH_PAT", os.environ.get("GITHUB_TOKEN",""))
 BASE = "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1"
 
 def rest_count(table):
