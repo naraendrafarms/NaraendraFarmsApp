@@ -11,10 +11,3 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run verification
         run: python3 scripts/db_check.py
-      - name: Commit results
-        run: |
-          git config user.email "ci@naraendrafarms.com"
-          git config user.name "CI Bot"
-          git add DB_STATUS.md
-          git diff --staged --quiet || git commit -m "ci: db verification results"
-          git push
