@@ -1,0 +1,43 @@
+name: Verify Database
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Count records in each table
+        run: |
+          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          ANON="${{ secrets.VITE_SUPABASE_ANON_KEY }}"
+          BASE="https://kjliulgpipqqwptinrrd.supabase.co"
+          
+          for TABLE in farms flocks daily_records he_dispatch hatchability salary_abstract electricity_bills; do
+            COUNT=$(curl -s "${BASE}/rest/v1/${TABLE}?select=id" \
+              -H "apikey: ${ANON}" \
+              -H "Authorization: Bearer ${ANON}" \
+              -H "Prefer: count=exact" \
+              -H "Range: 0-0" \
+              -I 2>/dev/null | grep -i 'content-range' | grep -oP '\d+$' || echo "?")
+            echo "${TABLE}: ${COUNT} rows"
+          done
+          
+          echo ""
+          echo "=== Sample daily_records ==="
+          curl -s "${BASE}/rest/v1/daily_records?select=record_date,total_eggs,he_eggs&limit=3&order=record_date" \
+            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"
+          
+          echo ""
+          echo "=== Sample hatchability ==="
+          curl -s "${BASE}/rest/v1/hatchability?select=setting_date,eggs_set,chicks_hatched,hatch_pct&limit=3" \
+            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"
+          
+          echo ""
+          echo "=== Test direct SQL via mgmt API ==="
+          curl -s -X POST \
+            "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" \
+            -H "Authorization: Bearer ${SK}" \
+            -H "Content-Type: application/json" \
+            -d '{"query": "SELECT tablename, (SELECT COUNT(*) FROM information_schema.tables WHERE table_name=t.tablename AND table_schema=\'public\') as exists FROM (VALUES (\'daily_records\'),(\'hatchability\'),(\'he_dispatch\'),(\'salary_abstract\'),(\'electricity_bills\')) t(tablename)"}' \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); [print(r) for r in d] if isinstance(d,list) else print(d)"
