@@ -1,3 +1,5 @@
+SET session_replication_role = replica;
+
 -- ============================================================
 -- COMPLETE CLEAN RESET — drops all data and rebuilds
 -- ============================================================
@@ -33,3 +35,7 @@ DROP TABLE IF EXISTS public.farms CASCADE;
 DROP TABLE IF EXISTS public.profiles CASCADE;
 DROP VIEW IF EXISTS public.v_monthly_production CASCADE;
 DROP VIEW IF EXISTS public.v_hatchability_summary CASCADE;
+
+
+-- Re-enable after cleanup
+SET session_replication_role = DEFAULT;

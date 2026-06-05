@@ -1,3 +1,5 @@
+SET session_replication_role = replica;
+
 
 -- ============================================================
 -- NARAENDRA FARMS - FULL DATA LOAD v4.0
