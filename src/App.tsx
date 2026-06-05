@@ -15,6 +15,7 @@ import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
 import { EmployeeList, SalaryAbstractPage } from '@/pages/employees/EmployeePages'
 import { FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster } from '@/pages/masters/MastersPages'
 import { ImportDaily, ImportElectricity, ImportSalary } from '@/pages/import/ImportPages'
+import { SetupPage } from '@/pages/setup/SetupPage'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -55,6 +56,7 @@ export const App: React.FC = () => {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/setup" element={<SetupPage />} />
           <Route element={<PrivateRoute><AppLayout /></PrivateRoute>}>
             {/* Dashboard */}
             <Route index element={<Dashboard />} />
