@@ -3,6 +3,7 @@ import subprocess, json, os
 
 ANON = os.environ["ANON_KEY"]
 SK   = os.environ["SERVICE_KEY"]
+GH_TOKEN = os.environ["GITHUB_TOKEN"]
 BASE = "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1"
 
 def rest_count(table):
@@ -17,7 +18,7 @@ def rest_count(table):
         if "content-range" in line.lower():
             try: return int(line.split("/")[1].strip())
             except: return line.strip()
-    return "not_found"
+    return "table_not_found"
 
 def rest_get(table, fields, limit=3):
     url = f"{BASE}/{table}?select={fields}&limit={limit}"
@@ -37,49 +38,59 @@ def mgmt_sql(sql):
     try: return json.loads(r.stdout)
     except: return r.stdout[:300]
 
-# Counts
-counts = {}
-for t in ["farms","flocks","daily_records","he_dispatch","hatchability","salary_abstract","electricity_bills"]:
-    counts[t] = rest_count(t)
+# Collect all results
+lines = ["## Naraendra Farms - Database Verification\n"]
 
-# Mgmt API counts  
-mgmt = {}
+lines.append("### REST API Table Counts")
+for t in ["farms","flocks","daily_records","he_dispatch","hatchability","salary_abstract","electricity_bills"]:
+    c = rest_count(t)
+    lines.append(f"- **{t}**: `{c}`")
+
+lines.append("\n### Supabase Mgmt API - Direct SQL")
 for t in ["daily_records","he_dispatch","hatchability","salary_abstract","electricity_bills"]:
     res = mgmt_sql(f"SELECT COUNT(*) as n FROM public.{t}")
-    mgmt[t] = res[0].get("n","?") if isinstance(res,list) and res else str(res)[:100]
+    if isinstance(res,list) and res: lines.append(f"- **{t}**: {res[0].get('n','?')}")
+    else: lines.append(f"- **{t}**: ERROR: {str(res)[:150]}")
 
+lines.append("\n### Farms")
 farms = rest_get("farms","code,name",10)
+if isinstance(farms,list):
+    for f in farms: lines.append(f"- {f.get('code')}: {f.get('name')}")
+else: lines.append(f"- {farms}")
+
+lines.append("\n### Flocks")
 flocks = rest_get("flocks","flock_no,status,placement_date",10)
-dr_sample = rest_get("daily_records","record_date,total_eggs,he_eggs&order=record_date",3)
-hatch_sample = rest_get("hatchability","setting_date,hatchery,eggs_set,hatch_pct",3)
+if isinstance(flocks,list):
+    for f in flocks: lines.append(f"- F{f.get('flock_no')}: {f.get('status')} placed={f.get('placement_date')}")
+else: lines.append(f"- {flocks}")
 
-# Print results
-print("TABLE_COUNTS:", json.dumps(counts))
-print("MGMT_COUNTS:", json.dumps(mgmt))
-print("FARMS:", json.dumps(farms))
-print("FLOCKS:", json.dumps(flocks))
-print("DAILY_SAMPLE:", json.dumps(dr_sample))
-print("HATCH_SAMPLE:", json.dumps(hatch_sample))
+lines.append("\n### Daily Records Sample")
+dr = rest_get("daily_records","record_date,total_eggs,he_eggs&order=record_date",5)
+if isinstance(dr,list):
+    for d in dr: lines.append(f"- {d.get('record_date')}: eggs={d.get('total_eggs')} he={d.get('he_eggs')}")
+else: lines.append(f"- {dr}")
 
-# Write to GITHUB_STEP_SUMMARY  
-summary_file = os.environ.get("GITHUB_STEP_SUMMARY","/tmp/summary.md")
-with open(summary_file,"w") as f:
-    f.write("# DB Status\n\n")
-    f.write("## REST Counts\n")
-    for k,v in counts.items(): f.write(f"- **{k}**: {v}\n")
-    f.write("\n## Mgmt API Counts\n")
-    for k,v in mgmt.items(): f.write(f"- **{k}**: {v}\n")
-    f.write("\n## Farms\n")
-    if isinstance(farms,list):
-        for fa in farms: f.write(f"- {fa.get('code')}: {fa.get('name')}\n")
-    f.write("\n## Flocks\n")
-    if isinstance(flocks,list):
-        for fl in flocks: f.write(f"- F{fl.get('flock_no')}: {fl.get('status')} - {fl.get('placement_date')}\n")
-    f.write("\n## Daily Records Sample\n")
-    if isinstance(dr_sample,list):
-        for d in dr_sample: f.write(f"- {d.get('record_date')}: eggs={d.get('total_eggs')} he={d.get('he_eggs')}\n")
-    f.write("\n## Hatchability Sample\n")
-    if isinstance(hatch_sample,list):
-        for h in hatch_sample: f.write(f"- {h.get('setting_date')} {h.get('hatchery')}: {h.get('eggs_set')} eggs {h.get('hatch_pct')}%\n")
-    else: f.write(str(hatch_sample)+"\n")
-print("Done!")
+lines.append("\n### Hatchability Sample")
+h = rest_get("hatchability","setting_date,hatchery,eggs_set,hatch_pct",5)
+if isinstance(h,list):
+    for r in h: lines.append(f"- {r.get('setting_date')} {r.get('hatchery')}: {r.get('eggs_set')} eggs {r.get('hatch_pct')}%")
+else: lines.append(f"- {h}")
+
+body = "\n".join(lines)
+print(body)
+
+# Create GitHub issue with results
+import json as json2
+with open("/tmp/issue.json","w") as f:
+    json2.dump({"title":"DB Verification Results","body":body,"labels":[]},f)
+
+r = subprocess.run(["curl","-s","-X","POST",
+    "https://api.github.com/repos/naraendrafarms/NaraendraFarmsApp/issues",
+    "-H",f"Authorization: token {GH_TOKEN}",
+    "-H","Accept: application/vnd.github+json",
+    "-H","Content-Type: application/json",
+    "-d","@/tmp/issue.json"], capture_output=True,text=True)
+try:
+    d = json2.loads(r.stdout)
+    print(f"\nIssue created: #{d.get('number')} - {d.get('html_url','')}")
+except: print("Issue create response:", r.stdout[:200])
