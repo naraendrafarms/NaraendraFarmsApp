@@ -47,92 +47,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run schema migration
-        run: |
-          python3 - << 'PYEOF'
-          import subprocess, json, os, sys
+      - name: Run schema (001_schema.sql)
+        run: python3 scripts/run_sql.py supabase/migrations/001_schema.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
-          MGMT = os.environ["MGMT"]
-          REF  = os.environ["REF"]
+      - name: Run master seed (001_seed_data.sql)
+        run: python3 scripts/run_sql.py supabase/seeds/001_seed_data.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
-          def run_sql(sql, label):
-              with open("/tmp/q.json","w") as f:
-                  json.dump({"query": sql}, f)
-              r = subprocess.run(["curl","-s","-w","\nHTTP:%{http_code}","-X","POST",
-                  f"https://api.supabase.com/v1/projects/{REF}/database/query",
-                  "-H", f"Authorization: Bearer {MGMT}",
-                  "-H", "Content-Type: application/json",
-                  "--data-binary", "@/tmp/q.json"],
-                  capture_output=True, text=True, timeout=120)
-              lines = r.stdout.strip().split("\n")
-              status = lines[-1]; body = "\n".join(lines[:-1])
-              print(f"{label}: {status} | {body[:300]}")
-              return "HTTP:2" in status
-
-          schema = open("supabase/migrations/001_schema.sql").read()
-          ok = run_sql(schema, "SCHEMA")
-          if not ok:
-              print("Schema failed — trying statement by statement...")
-              import re
-              stmts = re.split(r';\s*\n', schema)
-              errors = 0
-              for i, stmt in enumerate(stmts):
-                  stmt = stmt.strip()
-                  if not stmt or stmt.startswith("--"): continue
-                  if not run_sql(stmt + ";", f"stmt_{i}"): errors += 1
-              print(f"Schema complete. Errors: {errors}")
-          PYEOF
-
-      - name: Run master seed data
-        run: |
-          python3 - << 'PYEOF'
-          import subprocess, json, os
-          MGMT = os.environ["MGMT"]; REF = os.environ["REF"]
-          def run_sql(sql, label):
-              with open("/tmp/q.json","w") as f: json.dump({"query":sql},f)
-              r = subprocess.run(["curl","-s","-w","\nHTTP:%{http_code}","-X","POST",
-                  f"https://api.supabase.com/v1/projects/{REF}/database/query",
-                  "-H",f"Authorization: Bearer {MGMT}","-H","Content-Type: application/json",
-                  "--data-binary","@/tmp/q.json"],capture_output=True,text=True,timeout=120)
-              lines=r.stdout.strip().split("\n"); status=lines[-1]; body="\n".join(lines[:-1])
-              print(f"{label}: {status} | {body[:200]}")
-              return "HTTP:2" in status
-          run_sql(open("supabase/seeds/001_seed_data.sql").read(), "SEED_MASTER")
-          PYEOF
-
-      - name: Load data chunk 1
+      - name: Data chunk 1
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_01.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: Load data chunk 2
+      - name: Data chunk 2
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_02.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: Load data chunk 3
+      - name: Data chunk 3
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_03.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: Load data chunk 4
+      - name: Data chunk 4
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_04.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: Load data chunk 5
+      - name: Data chunk 5
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_05.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: Load data chunk 6
+      - name: Data chunk 6
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_06.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: Load data chunk 7
+      - name: Data chunk 7
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_07.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: Load data chunk 8
+      - name: Data chunk 8
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_08.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: Load data chunk 9
+      - name: Data chunk 9
         run: python3 scripts/run_sql.py supabase/seeds/chunks/data_09.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
@@ -144,7 +91,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}')
           ID=$(echo $R | python3 -c "import sys,json; print(json.load(sys.stdin).get('id','exists'))" 2>/dev/null || echo "exists")
-          echo "Admin user: $ID"
+          echo "Admin: $ID"
           if [ ${#ID} -gt 10 ] && [ "$ID" != "exists" ]; then
             curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/profiles" \
               -H "apikey: $SK" -H "Authorization: Bearer $SK" \
@@ -152,21 +99,18 @@ jobs:
               -d "{\"id\":\"$ID\",\"full_name\":\"Admin\",\"role\":\"admin\",\"is_active\":true}" || true
           fi
 
-      - name: Verify counts
-        run: |
-          ANON="${{ secrets.VITE_SUPABASE_ANON_KEY }}"
-          python3 scripts/db_check.py
+      - name: Verify
+        run: python3 scripts/db_check.py
         env:
           ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           SERVICE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
+          MGMT_TOKEN: ${{ secrets.SUPABASE_MGMT_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
 
-      - name: Done
+      - name: Summary
         run: |
           echo "=================================="
-          echo "✅ NARAENDRA FARMS — FULLY LOADED"
+          echo "✅ NARAENDRA FARMS DEPLOYED"
+          echo "App: https://naraendra-farms.pages.dev"
+          echo "Login: admin@naraendrafarms.com / NaraendraFarms@2025"
           echo "=================================="
-          echo "App:      https://naraendra-farms.pages.dev"
-          echo "Login:    admin@naraendrafarms.com"
-          echo "Password: NaraendraFarms@2025"
-          echo "Data:     1,949 daily | 1,000 HE | 388 hatch | 93 salary | 98 elec"
