@@ -33,6 +33,34 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
 
+      - name: Create Cloudflare Pages project (if not exists)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler pages project create naraendra-farms --production-branch=main || echo "Project may already exist, continuing..."
+
+      - name: Set environment variables on CF Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          curl -s -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/naraendra-farms" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "deployment_configs": {
+                "production": {
+                  "env_vars": {
+                    "VITE_SUPABASE_URL":             {"value": "${{ secrets.VITE_SUPABASE_URL }}"},
+                    "VITE_SUPABASE_ANON_KEY":        {"value": "${{ secrets.VITE_SUPABASE_ANON_KEY }}"},
+                    "VITE_SUPABASE_SERVICE_ROLE_KEY":{"value": "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"}
+                  }
+                }
+              }
+            }' | python3 -c "import json,sys; d=json.load(sys.stdin); print('Env vars set:', d.get('success', d.get('errors','')))"
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
