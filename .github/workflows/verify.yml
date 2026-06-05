@@ -1,70 +1,28 @@
-name: Test DB Insert
+name: DB Check
 on:
   workflow_dispatch:
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
+    env:
+      ANON: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      SK: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
     steps:
-      - name: Test Supabase connection and counts
+      - name: farms
+        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/farms?select=code,name" -H "apikey: $ANON" -H "Authorization: Bearer $ANON"
+      - name: flocks  
+        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/flocks?select=flock_no,status" -H "apikey: $ANON" -H "Authorization: Bearer $ANON"
+      - name: daily_records count
+        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/daily_records?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
+      - name: hatchability
+        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/hatchability?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
+      - name: salary_abstract count
+        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/salary_abstract?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
+      - name: electricity_bills count
+        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/electricity_bills?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
+      - name: he_dispatch count
+        run: curl -s "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/he_dispatch?select=id&limit=0" -H "apikey: $ANON" -H "Authorization: Bearer $ANON" -H "Prefer: count=exact" -I
+      - name: mgmt api direct count
         run: |
-          ANON="${{ secrets.VITE_SUPABASE_ANON_KEY }}"
-          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          BASE="https://kjliulgpipqqwptinrrd.supabase.co"
-          
-          echo "TEST 1: farms table"
-          curl -sf "${BASE}/rest/v1/farms?select=code,name" \
-            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}" || echo "FAILED"
-          
-          echo ""
-          echo "TEST 2: flocks table"
-          curl -sf "${BASE}/rest/v1/flocks?select=flock_no,status,placement_date" \
-            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}" || echo "FAILED"
-          
-          echo ""
-          echo "TEST 3: daily_records count"
-          curl -sf "${BASE}/rest/v1/daily_records?select=id&limit=1" \
-            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}" \
-            -H "Prefer: count=exact" -I 2>&1 | grep -i "content-range" || echo "NO CONTENT-RANGE"
-          
-          echo ""
-          echo "TEST 4: hatchability table exists?"
-          curl -s "${BASE}/rest/v1/hatchability?select=id&limit=1" \
-            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"
-          
-          echo ""
-          echo "TEST 5: Mgmt API - direct SQL count"
-          python3 - <<'PYEOF'
-import json, subprocess
-for sql, label in [
-  ("SELECT COUNT(*) FROM public.daily_records", "daily_records"),
-  ("SELECT COUNT(*) FROM public.he_dispatch", "he_dispatch"),
-  ("SELECT COUNT(*) FROM public.hatchability", "hatchability"),
-  ("SELECT COUNT(*) FROM public.salary_abstract", "salary_abstract"),
-  ("SELECT COUNT(*) FROM public.electricity_bills", "electricity_bills"),
-]:
-    r = subprocess.run(["curl","-s","-X","POST",
-        "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query",
-        "-H","Authorization: Bearer $SK",
-        "-H","Content-Type: application/json",
-        "-d",json.dumps({"query":sql})],
-        capture_output=True,text=True)
-    print(f"{label}: {r.stdout[:200]}")
-PYEOF
-
-          echo ""
-          echo "TEST 6: Insert a test daily record and check"
-          python3 - <<'PYEOF'
-import json, subprocess
-# Try inserting one test record via REST API
-SK_val = subprocess.run(["bash","-c","echo -n $SK"],capture_output=True,text=True).stdout
-# Actually use env var directly
-import os
-sk = os.environ.get("SK","")
-base = "https://kjliulgpipqqwptinrrd.supabase.co"
-
-# Get flock 16 id
-r = subprocess.run(["curl","-s",f"{base}/rest/v1/flocks?select=id,flock_no&flock_no=eq.16",
-    "-H",f"apikey: {sk}","-H",f"Authorization: Bearer {sk}"],
-    capture_output=True,text=True)
-print("Flock 16 lookup:", r.stdout[:200])
-PYEOF
+          echo '{"query":"SELECT COUNT(*) FROM public.daily_records"}' > /tmp/q.json
+          curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" -H "Authorization: Bearer $SK" -H "Content-Type: application/json" -d @/tmp/q.json
