@@ -1,60 +1,45 @@
 name: Debug Database
-
 on:
   workflow_dispatch:
-
 jobs:
   debug:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Check DB and save results
+      - name: Check DB tables
         run: |
           ANON="${{ secrets.VITE_SUPABASE_ANON_KEY }}"
           SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
           BASE="https://kjliulgpipqqwptinrrd.supabase.co/rest/v1"
-          mkdir -p /tmp/results
-
-          echo "=== TABLE COUNTS ===" > /tmp/results/db_check.txt
           
-          for TABLE in farms flocks daily_records he_dispatch hatchability salary_abstract electricity_bills; do
-            RESP=$(curl -s "${BASE}/${TABLE}?select=id&limit=0"               -H "apikey: ${ANON}"               -H "Authorization: Bearer ${ANON}"               -H "Prefer: count=exact"               -D /tmp/headers_${TABLE}.txt 2>/dev/null)
-            COUNT=$(grep -i "content-range" /tmp/headers_${TABLE}.txt | grep -oE "[0-9]+$" | head -1 || echo "?")
-            echo "${TABLE}: ${COUNT}" | tee -a /tmp/results/db_check.txt
+          echo "## DB Results" >> $GITHUB_STEP_SUMMARY
+          
+          for T in farms flocks daily_records he_dispatch hatchability salary_abstract electricity_bills; do
+            R=$(curl -s "${BASE}/${T}?select=id&limit=0" \
+              -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}" \
+              -H "Prefer: count=exact" -w "HTTPSTATUS:%{http_code}" 2>/dev/null)
+            HDR=$(echo "$R" | grep -oE "content-range: [^,]+" | head -1 || echo "no header")
+            echo "${T}: ${HDR}" >> $GITHUB_STEP_SUMMARY
+            echo "${T}: ${HDR}"
           done
-
-          echo "" >> /tmp/results/db_check.txt
-          echo "=== FARMS ===" >> /tmp/results/db_check.txt
-          curl -s "${BASE}/farms?select=code,name"             -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"             >> /tmp/results/db_check.txt
-
-          echo "" >> /tmp/results/db_check.txt
-          echo "=== FLOCKS ===" >> /tmp/results/db_check.txt
-          curl -s "${BASE}/flocks?select=flock_no,status,placement_date"             -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"             >> /tmp/results/db_check.txt
-
-          echo "" >> /tmp/results/db_check.txt
-          echo "=== MGMT API TEST ===" >> /tmp/results/db_check.txt
-          python3 -c "
-import json, subprocess
-sql = 'SELECT COUNT(*) as daily FROM public.daily_records'
-payload = json.dumps({"query": sql})
-r = subprocess.run(["curl","-s","-w","\nHTTP:%{http_code}","-X","POST",
-  "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query",
-  "-H","Authorization: Bearer $SK",
-  "-H","Content-Type: application/json",
-  "-d",payload],capture_output=True,text=True)
-print(r.stdout[:500])
-" >> /tmp/results/db_check.txt
-
-          echo "" >> /tmp/results/db_check.txt
-          echo "=== HATCHABILITY TABLE EXISTS? ===" >> /tmp/results/db_check.txt
-          curl -s "${BASE}/hatchability?select=id&limit=1"             -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}"             >> /tmp/results/db_check.txt
-
-          cat /tmp/results/db_check.txt
-
-      - name: Upload results as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: db-check-results
-          path: /tmp/results/db_check.txt
-          retention-days: 1
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Farms" >> $GITHUB_STEP_SUMMARY
+          FARMS=$(curl -s "${BASE}/farms?select=code,name" \
+            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}")
+          echo "$FARMS" >> $GITHUB_STEP_SUMMARY
+          echo "FARMS: $FARMS"
+          
+          echo "## Flocks" >> $GITHUB_STEP_SUMMARY
+          FLOCKS=$(curl -s "${BASE}/flocks?select=flock_no,status" \
+            -H "apikey: ${ANON}" -H "Authorization: Bearer ${ANON}")
+          echo "$FLOCKS" >> $GITHUB_STEP_SUMMARY
+          echo "FLOCKS: $FLOCKS"
+          
+          echo "## MGMT API test" >> $GITHUB_STEP_SUMMARY
+          MGMT=$(curl -s -X POST \
+            "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" \
+            -H "Authorization: Bearer ${SK}" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"SELECT COUNT(*) FROM daily_records"}')
+          echo "MGMT: $MGMT" >> $GITHUB_STEP_SUMMARY
+          echo "MGMT: $MGMT"
