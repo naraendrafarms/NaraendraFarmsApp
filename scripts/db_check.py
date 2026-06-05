@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""DB verification script - run in GitHub Actions to check table counts"""
 import subprocess, json, os, sys
 
 ANON = os.environ["ANON_KEY"]
@@ -16,24 +15,23 @@ def rest_count(table):
     ], capture_output=True, text=True)
     for line in r.stdout.split("\n"):
         if "content-range" in line.lower():
-            # content-range: 0-0/1949
             try: return int(line.split("/")[1].strip())
             except: return line.strip()
     return "?"
 
-def rest_get(table, select="*", limit=5):
+def rest_get(table, fields, limit=3):
+    url = f"{BASE}/{table}?select={fields}&limit={limit}"
     r = subprocess.run([
-        "curl", "-s",
-        f"{BASE}/{table}?select={select}&limit={limit}",
+        "curl", "-s", url,
         "-H", f"apikey: {ANON}",
         "-H", f"Authorization: Bearer {ANON}"
     ], capture_output=True, text=True)
     try: return json.loads(r.stdout)
     except: return r.stdout[:200]
 
-def mgmt_query(sql):
-    payload = json.dumps({"query": sql})
-    with open("/tmp/q.json","w") as f: f.write(payload)
+def mgmt_sql(sql):
+    with open("/tmp/q.json","w") as f: 
+        json.dump({"query": sql}, f)
     r = subprocess.run([
         "curl", "-s", "-X", "POST",
         "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query",
@@ -44,45 +42,52 @@ def mgmt_query(sql):
     try: return json.loads(r.stdout)
     except: return r.stdout[:300]
 
-print("=" * 50)
-print("NARAENDRA FARMS - DATABASE VERIFICATION")
-print("=" * 50)
+lines = []
+lines.append("# DB Verification Results")
+lines.append("")
 
-tables = ["farms","flocks","daily_records","he_dispatch",
-          "hatchability","salary_abstract","electricity_bills"]
+tables = ["farms","flocks","daily_records","he_dispatch","hatchability","salary_abstract","electricity_bills"]
+lines.append("## Table Counts (REST API)")
 for t in tables:
-    count = rest_count(t)
-    print(f"  {t:30s}: {count}")
+    c = rest_count(t)
+    lines.append(f"- **{t}**: {c}")
 
-print()
-print("FARMS:")
-farms = rest_get("farms","code,name")
-for f in (farms if isinstance(farms,list) else []):
-    print(f"  {f.get('code','?'):10} {f.get('name','?')}")
+lines.append("")
+lines.append("## Farms")
+farms = rest_get("farms","code,name",10)
+if isinstance(farms,list):
+    for f in farms: lines.append(f"- {f.get('code')}: {f.get('name')}")
+else: lines.append(str(farms))
 
-print()
-print("FLOCKS:")
-flocks = rest_get("flocks","flock_no,status,placement_date")
-for f in (flocks if isinstance(flocks,list) else []):
-    print(f"  F{f.get('flock_no','?'):5} {f.get('status','?'):10} {f.get('placement_date','?')}")
+lines.append("")
+lines.append("## Flocks")
+flocks = rest_get("flocks","flock_no,status,placement_date",10)
+if isinstance(flocks,list):
+    for f in flocks: lines.append(f"- F{f.get('flock_no')}: {f.get('status')} placed {f.get('placement_date')}")
+else: lines.append(str(flocks))
 
-print()
-print("SAMPLE DAILY RECORDS:")
+lines.append("")
+lines.append("## Daily Records Sample (first 3)")
 dr = rest_get("daily_records","record_date,total_eggs,he_eggs&order=record_date",3)
-for r in (dr if isinstance(dr,list) else []):
-    print(f"  {r.get('record_date','?')} eggs={r.get('total_eggs','?')} he={r.get('he_eggs','?')}")
+if isinstance(dr,list):
+    for r in dr: lines.append(f"- {r.get('record_date')}: eggs={r.get('total_eggs')} he={r.get('he_eggs')}")
+else: lines.append(str(dr))
 
-print()
-print("MGMT API - COUNTS:")
+lines.append("")
+lines.append("## Hatchability Sample")
+hatch = rest_get("hatchability","setting_date,hatchery,eggs_set,hatch_pct",3)
+if isinstance(hatch,list):
+    for h in hatch: lines.append(f"- {h.get('setting_date')} {h.get('hatchery')}: {h.get('eggs_set')} eggs {h.get('hatch_pct')} hatch%")
+else: lines.append(str(hatch))
+
+lines.append("")
+lines.append("## Mgmt API Direct SQL Counts")
 for table in ["daily_records","he_dispatch","hatchability","salary_abstract","electricity_bills"]:
-    result = mgmt_query(f"SELECT COUNT(*) as n FROM public.{table}")
-    if isinstance(result, list) and result:
-        print(f"  {table}: {result[0].get('n','?')}")
-    else:
-        print(f"  {table}: {str(result)[:100]}")
+    res = mgmt_sql(f"SELECT COUNT(*) as n FROM public.{table}")
+    if isinstance(res,list) and res: lines.append(f"- {table}: {res[0].get('n','?')}")
+    else: lines.append(f"- {table}: {str(res)[:100]}")
 
-print()
-print("HATCHABILITY SAMPLE:")
-hatch = rest_get("hatchability","setting_date,hatchery,eggs_set,chicks_hatched,hatch_pct",3)
-for h in (hatch if isinstance(hatch,list) else []):
-    print(f"  {h.get('setting_date','?')} {h.get('hatchery','?'):15} {h.get('eggs_set','?')} eggs {h.get('hatch_pct','?')} hatch%")
+output = "\n".join(lines)
+print(output)
+with open("DB_STATUS.md","w") as f: f.write(output)
+print("\nWritten to DB_STATUS.md")
