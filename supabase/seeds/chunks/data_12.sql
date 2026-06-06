@@ -306,5 +306,3 @@ VALUES
   ((SELECT id FROM public.flocks WHERE flock_no='20'),'2026-05-28'::date,'2026-05-25'::date,4638,21220,416,20804,19.75,410878.0),
   ((SELECT id FROM public.flocks WHERE flock_no='20'),'2026-05-28'::date,'2026-05-26'::date,4638,22094,433,21661,19.75,427805.0),
   ((SELECT id FROM public.flocks WHERE flock_no='20'),'2026-05-28'::date,'2026-05-27'::date,4638,18907,371,18536,19.75,366086.0);
-
-SET session_replication_role = replica;
