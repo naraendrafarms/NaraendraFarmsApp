@@ -46,6 +46,31 @@ jobs:
         run: python3 scripts/run_sql.py supabase/migrations/001_schema.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
+
+      - name: Reload PostgREST schema cache
+        run: |
+          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          # Send a notification to PostgREST to reload schema
+          curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/rpc/pg_notify" \
+            -H "apikey: $SK" -H "Authorization: Bearer $SK" \
+            -H "Content-Type: application/json" \
+            -d '{"channel":"pgrst","payload":"reload schema"}' || true
+          # Also trigger via the admin API
+          python3 - << 'PYEOF'
+          import subprocess, json, os
+          MGMT = os.environ.get("SUPABASE_MGMT_TOKEN","${{ secrets.SUPABASE_MGMT_TOKEN }}")
+          REF  = "kjliulgpipqqwptinrrd"
+          with open("/tmp/q.json","w") as f:
+              json.dump({"query":"SELECT pg_notify('pgrst','reload schema')"}, f)
+          r = subprocess.run(["curl","-s","-X","POST",
+              f"https://api.supabase.com/v1/projects/{REF}/database/query",
+              "-H",f"Authorization: Bearer {MGMT}",
+              "-H","Content-Type: application/json",
+              "--data-binary","@/tmp/q.json"], capture_output=True, text=True)
+          print("Cache reload:", r.stdout[:200])
+          PYEOF
+        env: { SUPABASE_MGMT_TOKEN: "${{ secrets.SUPABASE_MGMT_TOKEN }}" }
+
       - name: 3. Master data (farms/sheds/flocks/parties/medicines)
         run: python3 scripts/run_sql.py supabase/seeds/001_seed_data.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
