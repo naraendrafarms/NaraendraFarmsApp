@@ -96,9 +96,15 @@ const NAV: NavItem[] = [
     ]
   },
   {
-    label: 'User Management', icon: <Shield size={18}/>,
+    label: 'Admin Centre', icon: <Shield size={18}/>,
     roles: ['admin'],
-    to: '/admin/users',
+    children: [
+      { label: 'Setup Overview',          to: '/admin' },
+      { label: 'Flock–Shed Assignment',   to: '/admin' },
+      { label: 'Electricity Allocation',  to: '/admin' },
+      { label: 'Salary Allocation',       to: '/admin' },
+      { label: 'User Management',         to: '/admin/users' },
+    ]
   },
 ]
 

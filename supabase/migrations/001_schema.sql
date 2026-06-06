@@ -666,5 +666,27 @@ JOIN public.flocks f ON f.id=h.flock_id
 WHERE h.eggs_set>0
 GROUP BY f.flock_no, h.hatchery;
 
+-- ── ADMIN ADDITIONS ──────────────────────────────────────────────
+
+-- Flock current shed placement
+ALTER TABLE public.flocks ADD COLUMN IF NOT EXISTS current_shed_id UUID REFERENCES public.sheds(id) ON DELETE SET NULL;
+
+-- Salary allocation to flocks (for P&L)
+CREATE TABLE IF NOT EXISTS public.salary_allocation (
+  id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  abstract_id    UUID REFERENCES public.salary_abstract(id) ON DELETE CASCADE,
+  flock_id       UUID REFERENCES public.flocks(id) ON DELETE CASCADE,
+  month          DATE NOT NULL,
+  amount         NUMERIC(12,2) NOT NULL,
+  pct            NUMERIC(5,2),
+  remarks        TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(abstract_id, flock_id)
+);
+ALTER TABLE public.salary_allocation ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "auth_select" ON public.salary_allocation FOR SELECT USING (auth.role()='authenticated');
+CREATE POLICY "auth_insert" ON public.salary_allocation FOR INSERT WITH CHECK (auth.role()='authenticated');
+CREATE POLICY "auth_update" ON public.salary_allocation FOR UPDATE USING (auth.role()='authenticated');
+
 -- Reload PostgREST schema cache after schema changes
 SELECT pg_notify('pgrst', 'reload schema');

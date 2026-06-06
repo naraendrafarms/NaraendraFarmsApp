@@ -23,6 +23,7 @@ import { HatchabilityPage } from '@/pages/hatchability/HatchabilityPage'
 import { SetupPage } from '@/pages/setup/SetupPage'
 import { ProductionReport, PLReport, SalaryReport, FeedReport, ExportPage } from '@/pages/reports/ReportsPages'
 import { UserManagement } from '@/pages/admin/UserManagement'
+import { AdminCentre } from '@/pages/admin/AdminCentre'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -113,6 +114,7 @@ export const App: React.FC = () => {
             <Route path="import/electricity" element={<ImportElectricity />} />
             <Route path="import/grn" element={<ImportGRN />} />
             <Route path="admin/users" element={<UserManagement />} />
+            <Route path="admin" element={<AdminCentre />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
