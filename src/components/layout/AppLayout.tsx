@@ -298,26 +298,47 @@ export const AppLayout: React.FC = () => {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <aside className="relative w-64 h-full flex flex-col"
+          <aside className="relative w-72 h-full flex flex-col"
             style={{ background: 'linear-gradient(180deg,#1a5c38,#0f3d22)' }}>
-            <div className="flex items-center justify-between h-14 px-4 border-b border-green-800/40">
-              <span className="font-bold text-sm text-white">Naraendra Farms</span>
-              <button onClick={() => setMobileOpen(false)}><X size={16} className="text-green-300" /></button>
-            </div>
-            {profile && (
-              <div className="px-3 pt-3">
-                <p className="text-xs font-bold text-white">{profile.full_name}</p>
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLORS[role]}`}>
-                  {ROLE_LABELS[role]}
-                </span>
+            {/* Header with bird */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-green-800/40">
+              <div style={{ animation: 'sbBob 2s ease-in-out infinite' }}>
+                <svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg" width="38" height="42">
+                  <path d="M72 55 Q85 35 82 55 Q80 42 74 55Z" fill="#2d8f2d"/>
+                  <ellipse cx="52" cy="68" rx="24" ry="19" fill="#c07c2a"/>
+                  <ellipse cx="50" cy="70" rx="18" ry="12" fill="#a86820"/>
+                  <ellipse cx="36" cy="56" rx="9" ry="13" fill="#c07c2a"/>
+                  <circle cx="30" cy="44" r="15" fill="#d4902e"/>
+                  <path d="M23 30 Q25 23 28 30 Q30 22 33 30 Q36 25 38 31" stroke="#e53e3e" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
+                  <path d="M22 48 Q18 52 20 57 Q24 60 26 55Z" fill="#e53e3e"/>
+                  <circle cx="25" cy="41" r="4.5" fill="white"/>
+                  <circle cx="24" cy="40.5" r="2.5" fill="#1a1a1a"/>
+                  <path d="M16 43 L10 46 L16 49Z" fill="#f0a830"/>
+                </svg>
               </div>
-            )}
-            <nav className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-1">
+              <div className="flex-1">
+                <p className="font-extrabold text-sm text-white">Naraendra Farms</p>
+                {profile && (
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <p className="text-xs text-green-200 truncate">{profile.full_name}</p>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${ROLE_COLORS[role]}`}>
+                      {ROLE_LABELS[role]}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <button onClick={() => setMobileOpen(false)}>
+                <X size={18} className="text-green-300" />
+              </button>
+            </div>
+            <nav className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-0.5">
               {visibleNav.map(item => <NavLink key={item.label} item={item} collapsed={false} />)}
             </nav>
             <div className="px-3 py-3 border-t border-green-800/40 flex items-center justify-between">
-              <span className="text-xs text-green-200">{profile?.full_name}</span>
-              <button onClick={signOut}><LogOut size={14} className="text-green-300" /></button>
+              <span className="text-xs font-medium text-green-200">{profile?.full_name}</span>
+              <button onClick={signOut} className="flex items-center gap-1 text-xs text-green-300 hover:text-white">
+                <LogOut size={14}/> Sign out
+              </button>
             </div>
           </aside>
         </div>

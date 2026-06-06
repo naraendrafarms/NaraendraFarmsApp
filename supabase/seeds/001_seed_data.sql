@@ -209,10 +209,13 @@ SELECT
   (SELECT id FROM public.farms WHERE code=v.lc),
   v.pf, v.pm, v.ff, v.fm, v.cr::numeric
 FROM (VALUES
-  ('16','closed','2023-11-24','2024-04-01','2025-04-23'::date,'KPALLY','PPALLY',44860,5391,900,100,12.50),
-  ('17','closed','2024-03-30','2024-09-01','2025-08-01'::date,'KPALLY','BPET1', 36120,4330,800,100,12.50),
-  ('19','laying', '2025-02-16','2025-09-01',NULL::date,       'KPALLY','PPALLY',44800,5390,900,100,13.00),
-  ('20','laying', '2025-05-30','2025-12-01',NULL::date,       'KPALLY','BPET1', 36020,4330,900,100,13.00)
+  ('16','closed', '2023-11-24','2024-04-01','2025-04-23'::date,'KPALLY','PPALLY',44860,5391,900,100,12.50),
+  ('17','closed', '2024-03-30','2024-09-01','2025-08-01'::date,'KPALLY','BPET1', 36120,4330,800,100,12.50),
+  ('18','closed', '2024-05-15','2024-11-01','2025-09-30'::date,'KPALLY','BPET2', 20400,2448,400, 52,12.50),
+  ('19','laying', '2025-02-16','2025-09-01',NULL::date,        'KPALLY','PPALLY',44800,5390,900,100,13.00),
+  ('20','laying', '2025-05-30','2025-12-01',NULL::date,        'KPALLY','BPET1', 36020,4330,900,100,13.00),
+  ('21','laying', '2025-04-10','2025-10-01',NULL::date,        'KPALLY','BPET2', 20400,2448,400, 52,13.00),
+  ('22','rearing','2025-09-01',NULL,         NULL::date,        'KPALLY','PPALLY',44800,5390,900,100,13.50)
 ) v(fno,st,pd,ls,cd,rc,lc,pf,pm,ff,fm,cr)
 ON CONFLICT (flock_no) DO UPDATE SET
   status=EXCLUDED.status,
