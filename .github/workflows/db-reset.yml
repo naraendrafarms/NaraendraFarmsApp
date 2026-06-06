@@ -57,22 +57,19 @@ jobs:
       - name: 5. Create admin user + profile
         run: |
           SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          # Create auth user
-          R=$(curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
+          # Try to create auth user (may already exist from prior run)
+          curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
             -H "apikey: $SK" -H "Authorization: Bearer $SK" -H "Content-Type: application/json" \
-            -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}')
-          USER_ID=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null)
-          echo "Admin user ID: $USER_ID"
-          # Insert profile row with admin role
-          if [ -n "$USER_ID" ]; then
-            python3 - << PYEOF
+            -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}' || true
+          # Upsert profile by looking up admin user from auth.users by email
+          python3 - << 'PYEOF'
           import subprocess, json, os
           MGMT = os.environ.get("SUPABASE_MGMT_TOKEN","")
           REF = "kjliulgpipqqwptinrrd"
-          USER_ID = "$USER_ID"
-          sql = f"""
+          sql = """
           INSERT INTO public.profiles (id, full_name, role, is_active)
-          VALUES ('{USER_ID}', 'Admin', 'admin', true)
+          SELECT id, 'Admin', 'admin', true FROM auth.users
+          WHERE email = 'admin@naraendrafarms.com'
           ON CONFLICT (id) DO UPDATE SET role='admin', full_name='Admin', is_active=true;
           """
           with open("/tmp/profile.json","w") as f:
@@ -82,9 +79,8 @@ jobs:
               "-H",f"Authorization: Bearer {MGMT}",
               "-H","Content-Type: application/json",
               "--data-binary","@/tmp/profile.json"], capture_output=True, text=True)
-          print("Profile insert:", r.stdout[:300])
+          print("Profile upsert:", r.stdout[:300])
           PYEOF
-          fi
         env:
           SUPABASE_MGMT_TOKEN: "${{ secrets.SUPABASE_MGMT_TOKEN }}"
 
