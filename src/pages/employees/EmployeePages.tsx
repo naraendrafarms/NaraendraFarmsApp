@@ -262,3 +262,207 @@ export const SalaryAbstractPage: React.FC = () => {
     </div>
   )
 }
+
+// ── INDIVIDUAL SALARY ENTRY ──────────────────────────────────────
+export const SalaryEntryPage: React.FC = () => {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [filterMonth, setFilterMonth] = useState('')
+  const [filterFarm, setFilterFarm] = useState('')
+  const [form, setForm] = useState({employee_id:'',month:'',days_worked:'',advance:'0',tds:'0',hold:'0',arrears:'0',ot_bonus:'0',net_salary:''})
+  const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+
+  const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
+  const {data:employees}=useQuery({
+    queryKey:['employees',filterFarm],
+    queryFn:async()=>{
+      let q=supabase.from('employees').select('id,name,emp_id,designation,base_salary,farms(name,code)').eq('is_active',true).order('name')
+      if(filterFarm)q=q.eq('farm_id',filterFarm)
+      const{data}=await q;return data??[]
+    }
+  })
+  const {data:salaries,isLoading}=useQuery({
+    queryKey:['salary_monthly',filterMonth,filterFarm],
+    queryFn:async()=>{
+      let q=supabase.from('salary_monthly').select('*, employees(name,emp_id,base_salary,designation,farms(name,code))').order('month',{ascending:false})
+      if(filterMonth)q=q.eq('month',filterMonth+'-01')
+      const{data}=await q;return data??[]
+    }
+  })
+
+  const calcNet=()=>{
+    const base=parseFloat(employees?.find((e:any)=>e.id===form.employee_id)?.base_salary??'0')||0
+    const net=(base+(parseFloat(form.arrears)||0)+(parseFloat(form.ot_bonus)||0))-(parseFloat(form.advance)||0)-(parseFloat(form.tds)||0)-(parseFloat(form.hold)||0)
+    setForm(f=>({...f,net_salary:net.toFixed(0)}))
+  }
+
+  const mut=useMutation({
+    mutationFn:async()=>{
+      if(!form.employee_id||!form.month)throw new Error('Employee and month required')
+      const{error}=await supabase.from('salary_monthly').upsert({
+        employee_id:form.employee_id,month:form.month+'-01',
+        days_worked:parseInt(form.days_worked)||null,
+        advance:parseFloat(form.advance)||0,
+        tds:parseFloat(form.tds)||0,
+        hold:parseFloat(form.hold)||0,
+        arrears:parseFloat(form.arrears)||0,
+        ot_bonus:parseFloat(form.ot_bonus)||0,
+        net_salary:parseFloat(form.net_salary)||0,
+      },{onConflict:'employee_id,month'})
+      if(error)throw error
+    },
+    onSuccess:()=>{toast.success('Salary saved!');qc.invalidateQueries({queryKey:['salary_monthly']});setShowForm(false)},
+    onError:(e:any)=>toast.error(e.message)
+  })
+
+  const farmOptions=farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
+  const empOptions=employees?.map((e:any)=>({value:e.id,label:`${e.name} (${e.emp_id??e.farms?.code})`}))??[]
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Individual Salary Entry" subtitle="Per-employee monthly salary details"
+        action={<Button icon={<Plus size={16}/>} onClick={()=>{setForm({employee_id:'',month:'',days_worked:'',advance:'0',tds:'0',hold:'0',arrears:'0',ot_bonus:'0',net_salary:''});setShowForm(true)}}>Add Entry</Button>}/>
+      <div className="flex gap-3 flex-wrap">
+        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
+        <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-40"/>
+        {(filterFarm||filterMonth)&&<Button variant="ghost" size="sm" onClick={()=>{setFilterFarm('');setFilterMonth('')}}>Clear</Button>}
+      </div>
+      {isLoading?<Spinner/>:(
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Employee</Th><Th>Site</Th><Th>Month</Th><Th right>Days</Th>
+              <Th right>Advance</Th><Th right>TDS</Th><Th right>OT/Bonus</Th><Th right>Net Salary</Th>
+            </tr></thead>
+            <tbody>
+              {salaries?.map((s:any)=>(
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <Td><span className="font-medium">{s.employees?.name}</span><span className="text-xs text-gray-400 ml-1">{s.employees?.emp_id}</span></Td>
+                  <Td className="text-xs">{s.employees?.farms?.name}</Td>
+                  <Td>{new Date(s.month).toLocaleDateString('en-IN',{month:'short',year:'numeric'})}</Td>
+                  <Td right>{s.days_worked??'—'}</Td>
+                  <Td right className="text-orange-600">{s.advance>0?inr(s.advance):'—'}</Td>
+                  <Td right>{s.tds>0?inr(s.tds):'—'}</Td>
+                  <Td right className="text-blue-600">{s.ot_bonus>0?inr(s.ot_bonus):'—'}</Td>
+                  <Td right className="font-semibold text-green-700">{inr(s.net_salary)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {!salaries?.length&&<EmptyState icon={<IndianRupee size={32}/>} title="No salary entries" action={<Button onClick={()=>setShowForm(true)} icon={<Plus size={16}/>}>Add Entry</Button>}/>}
+        </Card>
+      )}
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title="Add Salary Entry" size="md"
+        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
+        <div className="space-y-4">
+          <FormRow>
+            <Select label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)}/>
+            <Select label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={e=>s('employee_id',e.target.value)}/>
+          </FormRow>
+          <FormRow>
+            <Input label="Month" required type="month" value={form.month} onChange={e=>s('month',e.target.value)}/>
+            <Input label="Days Worked" type="number" value={form.days_worked} onChange={e=>s('days_worked',e.target.value)}/>
+          </FormRow>
+          <Divider label="Deductions"/>
+          <FormRow>
+            <Input label="Advance" type="number" value={form.advance} onChange={e=>s('advance',e.target.value)}/>
+            <Input label="TDS" type="number" value={form.tds} onChange={e=>s('tds',e.target.value)}/>
+            <Input label="Hold" type="number" value={form.hold} onChange={e=>s('hold',e.target.value)}/>
+          </FormRow>
+          <FormRow>
+            <Input label="Arrears" type="number" value={form.arrears} onChange={e=>s('arrears',e.target.value)}/>
+            <Input label="OT / Bonus" type="number" value={form.ot_bonus} onChange={e=>s('ot_bonus',e.target.value)}/>
+          </FormRow>
+          <FormRow>
+            <Input label="Net Salary" required type="number" value={form.net_salary} onChange={e=>s('net_salary',e.target.value)}/>
+            <div className="flex items-end"><Button variant="secondary" onClick={calcNet}>Auto Calc</Button></div>
+          </FormRow>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+// ── BONUS ENTRY ──────────────────────────────────────────────────
+export const BonusPage: React.FC = () => {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [filterFarm, setFilterFarm] = useState('')
+  const [form, setForm] = useState({employee_id:'',bonus_year:'',amount:'',bonus_type:'festival',paid_date:'',remarks:''})
+  const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+
+  const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
+  const {data:employees}=useQuery({queryKey:['employees',filterFarm],queryFn:async()=>{let q=supabase.from('employees').select('id,name,emp_id,farms(name,code)').eq('is_active',true).order('name');if(filterFarm)q=q.eq('farm_id',filterFarm);const{data}=await q;return data??[]}})
+  const {data:bonuses,isLoading}=useQuery({queryKey:['bonuses'],queryFn:async()=>{const{data}=await supabase.from('bonus').select('*, employees(name,emp_id,farms(name,code))').order('paid_date',{ascending:false});return data??[]}})
+
+  const mut=useMutation({
+    mutationFn:async()=>{
+      if(!form.employee_id||!form.bonus_year||!form.amount)throw new Error('Employee, year and amount required')
+      const{error}=await supabase.from('bonus').upsert({
+        employee_id:form.employee_id, bonus_year:parseInt(form.bonus_year),
+        amount:parseFloat(form.amount), bonus_type:form.bonus_type,
+        paid_date:form.paid_date||null, remarks:form.remarks||null,
+      },{onConflict:'employee_id,bonus_year'})
+      if(error)throw error
+    },
+    onSuccess:()=>{toast.success('Bonus saved!');qc.invalidateQueries({queryKey:['bonuses']});setShowForm(false)},
+    onError:(e:any)=>toast.error(e.message)
+  })
+
+  const farmOptions=farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
+  const empOptions=employees?.map((e:any)=>({value:e.id,label:`${e.name} (${e.farms?.code})`}))??[]
+  const totalBonus=bonuses?.reduce((s:number,b:any)=>s+(b.amount??0),0)??0
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Bonus" subtitle={`Total bonus paid: ${inr(totalBonus)}`}
+        action={<Button icon={<Plus size={16}/>} onClick={()=>{setForm({employee_id:'',bonus_year:new Date().getFullYear().toString(),amount:'',bonus_type:'festival',paid_date:'',remarks:''});setShowForm(true)}}>Add Bonus</Button>}/>
+      <div className="flex gap-3">
+        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
+        {filterFarm&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
+      </div>
+      {isLoading?<Spinner/>:(
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Employee</Th><Th>Site</Th><Th right>Year</Th><Th>Type</Th>
+              <Th right>Amount</Th><Th>Paid Date</Th><Th>Remarks</Th>
+            </tr></thead>
+            <tbody>
+              {bonuses?.map((b:any)=>(
+                <tr key={b.id} className="hover:bg-gray-50">
+                  <Td className="font-medium">{b.employees?.name}</Td>
+                  <Td className="text-xs">{b.employees?.farms?.name}</Td>
+                  <Td right>{b.bonus_year}</Td>
+                  <Td><Badge color="yellow">{b.bonus_type}</Badge></Td>
+                  <Td right className="font-semibold text-green-700">{inr(b.amount)}</Td>
+                  <Td>{b.paid_date??'—'}</Td>
+                  <Td className="text-xs text-gray-400">{b.remarks??'—'}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {!bonuses?.length&&<EmptyState icon={<IndianRupee size={32}/>} title="No bonus records" action={<Button onClick={()=>setShowForm(true)} icon={<Plus size={16}/>}>Add Bonus</Button>}/>}
+        </Card>
+      )}
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title="Add Bonus" size="md"
+        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
+        <div className="space-y-4">
+          <FormRow>
+            <Select label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)}/>
+            <Select label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={e=>s('employee_id',e.target.value)}/>
+          </FormRow>
+          <FormRow>
+            <Input label="Bonus Year" required type="number" value={form.bonus_year} onChange={e=>s('bonus_year',e.target.value)} hint="e.g. 2025"/>
+            <Select label="Type" options={['festival','annual','performance','other']} value={form.bonus_type} onChange={e=>s('bonus_type',e.target.value)}/>
+          </FormRow>
+          <FormRow>
+            <Input label="Amount" required type="number" value={form.amount} onChange={e=>s('amount',e.target.value)}/>
+            <Input label="Paid Date" type="date" value={form.paid_date} onChange={e=>s('paid_date',e.target.value)}/>
+          </FormRow>
+          <Input label="Remarks" value={form.remarks} onChange={e=>s('remarks',e.target.value)}/>
+        </div>
+      </Modal>
+    </div>
+  )
+}

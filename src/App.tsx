@@ -11,21 +11,26 @@ import { FlockDetail } from '@/pages/flocks/FlockDetail'
 import { DailyEntry } from '@/pages/flocks/DailyEntry'
 import { HEDispatch, NHESales, MedicineEntry } from '@/pages/flocks/FlockSalesPages'
 import { FeedDashboard, GRNEntry, FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
+import { StockPage } from '@/pages/feed/StockPage'
 import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
-import { EmployeeList, SalaryAbstractPage } from '@/pages/employees/EmployeePages'
-import { FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster } from '@/pages/masters/MastersPages'
-import { ImportDaily, ImportElectricity, ImportSalary } from '@/pages/import/ImportPages'
+import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage } from '@/pages/employees/EmployeePages'
+import {
+  FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster,
+  ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster
+} from '@/pages/masters/MastersPages'
+import { ImportDaily, ImportElectricity, ImportSalary, ImportHE, ImportGRN } from '@/pages/import/ImportPages'
 import { HatchabilityPage } from '@/pages/hatchability/HatchabilityPage'
 import { SetupPage } from '@/pages/setup/SetupPage'
+import { ProductionReport, PLReport, SalaryReport, FeedReport, ExportPage } from '@/pages/reports/ReportsPages'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000,      // 5 min — keeps reads minimal
-      gcTime:    30 * 60 * 1000,     // 30 min cache
+      staleTime: 5 * 60 * 1000,
+      gcTime:    30 * 60 * 1000,
       retry: 1,
-      refetchOnWindowFocus: false,   // don't refetch on tab switch — low usage
+      refetchOnWindowFocus: false,
     }
   }
 })
@@ -39,14 +44,6 @@ const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   )
   return user ? <>{children}</> : <Navigate to="/login" replace />
 }
-
-// Simple placeholder for unbuilt pages
-const Placeholder: React.FC<{ title: string }> = ({ title }) => (
-  <div className="flex flex-col items-center justify-center py-24">
-    <p className="text-lg font-medium text-gray-700">{title}</p>
-    <p className="text-sm text-gray-400 mt-1">Coming soon</p>
-  </div>
-)
 
 export const App: React.FC = () => {
   const { init } = useAuth()
@@ -76,44 +73,44 @@ export const App: React.FC = () => {
             <Route path="feed/grn" element={<GRNEntry />} />
             <Route path="feed/production" element={<FeedProduction />} />
             <Route path="feed/transfer" element={<FeedTransfer />} />
-            <Route path="feed/stock" element={<Placeholder title="Stock Status" />} />
+            <Route path="feed/stock" element={<StockPage />} />
 
             {/* Electricity */}
             <Route path="electricity" element={<ElectricityEntry />} />
-            <Route path="electricity/allocation" element={<Placeholder title="Electricity Allocation" />} />
+            <Route path="electricity/allocation" element={<ElectricityEntry />} />
             <Route path="electricity/history" element={<ElectricityEntry />} />
 
             {/* Employees */}
             <Route path="employees" element={<EmployeeList />} />
-            <Route path="employees/salary" element={<Placeholder title="Individual Salary Entry" />} />
+            <Route path="employees/salary" element={<SalaryEntryPage />} />
             <Route path="employees/abstract" element={<SalaryAbstractPage />} />
-            <Route path="employees/bonus" element={<Placeholder title="Bonus Entry" />} />
+            <Route path="employees/bonus" element={<BonusPage />} />
 
             {/* Masters */}
             <Route path="masters/farms" element={<FarmsMaster />} />
-            <Route path="masters/sheds" element={<Placeholder title="Sheds Master" />} />
+            <Route path="masters/sheds" element={<ShedsMaster />} />
             <Route path="masters/ingredients" element={<IngredientsMaster />} />
-            <Route path="masters/feed-types" element={<Placeholder title="Feed Types" />} />
-            <Route path="masters/formulas" element={<Placeholder title="Feed Formulas" />} />
+            <Route path="masters/feed-types" element={<FeedTypesMaster />} />
+            <Route path="masters/formulas" element={<FeedTypesMaster />} />
             <Route path="masters/parties" element={<PartiesMaster />} />
-            <Route path="masters/hatcheries" element={<Placeholder title="Hatcheries Master" />} />
+            <Route path="masters/hatcheries" element={<HatcheriesMaster />} />
             <Route path="masters/medicines" element={<MedicinesMaster />} />
-            <Route path="masters/meters" element={<Placeholder title="Electricity Meters Master" />} />
+            <Route path="masters/meters" element={<MetersMaster />} />
 
             {/* Reports */}
             <Route path="hatchability" element={<HatchabilityPage />} />
-            <Route path="reports/pl" element={<Placeholder title="Flock P&L Report" />} />
-            <Route path="reports/production" element={<Placeholder title="Production Report" />} />
-            <Route path="reports/feed" element={<Placeholder title="Feed Cost Report" />} />
-            <Route path="reports/salary" element={<Placeholder title="Salary Report" />} />
-            <Route path="reports/export" element={<Placeholder title="Export to Excel" />} />
+            <Route path="reports/pl" element={<PLReport />} />
+            <Route path="reports/production" element={<ProductionReport />} />
+            <Route path="reports/feed" element={<FeedReport />} />
+            <Route path="reports/salary" element={<SalaryReport />} />
+            <Route path="reports/export" element={<ExportPage />} />
 
             {/* Import */}
             <Route path="import/daily" element={<ImportDaily />} />
-            <Route path="import/he" element={<Placeholder title="Import HE Dispatch" />} />
+            <Route path="import/he" element={<ImportHE />} />
             <Route path="import/salary" element={<ImportSalary />} />
             <Route path="import/electricity" element={<ImportElectricity />} />
-            <Route path="import/grn" element={<Placeholder title="Import GRN" />} />
+            <Route path="import/grn" element={<ImportGRN />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -498,3 +498,293 @@ export const ImportSalary: React.FC = () => {
     </div>
   )
 }
+
+// ── IMPORT HE DISPATCH ───────────────────────────────────────────
+export const ImportHE: React.FC = () => {
+  const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [parsedRows, setParsedRows] = useState<any[]>([])
+  const [preview, setPreview] = useState<any[]>([])
+  const [selectedFlock, setSelectedFlock] = useState('')
+  const [result, setResult] = useState<ImportResult | null>(null)
+
+  const { data: flocks } = useQuery({ queryKey:['flocks_all'], queryFn:async()=>{const{data}=await supabase.from('flocks').select('id,flock_no').order('flock_no');return data??[]} })
+  const { data: hatcheries } = useQuery({ queryKey:['hatcheries'], queryFn:async()=>{const{data}=await supabase.from('hatcheries').select('id,name').eq('is_active',true);return data??[]} })
+  const { data: parties } = useQuery({ queryKey:['parties'], queryFn:async()=>{const{data}=await supabase.from('parties').select('id,name').eq('is_active',true);return data??[]} })
+
+  const findHatchery = (name: string) => {
+    if (!name || !hatcheries) return null
+    const nl = name.toLowerCase()
+    return hatcheries.find((h: any) => nl.includes(h.name.toLowerCase().split(' ')[0].toLowerCase()))?.id ?? null
+  }
+  const findParty = (name: string) => {
+    if (!name || !parties) return null
+    const nl = name.toLowerCase()
+    return parties.find((p: any) => nl.includes(p.name.toLowerCase().split(' ')[0].toLowerCase()))?.id ?? null
+  }
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false })
+    const rows: any[] = []
+
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName]
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null }) as any[][]
+      for (const row of data) {
+        if (!row || row.length < 6) continue
+        const d = parseDate(row[0])
+        if (!d) continue
+        const gradeA = num(row[3]); const gradeB = num(row[4]); const total = num(row[5]) || (gradeA + gradeB)
+        if (!total) continue
+        const free = num(row[6])
+        const rate = num(row[7])
+        const amount = num(row[8]) || ((total - free) * rate)
+        rows.push({
+          dispatch_date: d,
+          dc_no: row[1] ? String(row[1]).trim() : null,
+          hatchery_name: row[2] ? String(row[2]).trim() : null,
+          grade_a: gradeA, grade_b: gradeB,
+          total_dispatched: total,
+          free_eggs: free, rate, amount,
+          setting_date: parseDate(row[9]),
+          hatch_date: parseDate(row[10]),
+          chicks_sold: num(row[11]) || null,
+          remarks: row[12] ? String(row[12]).trim() : null,
+        })
+      }
+    }
+    setParsedRows(rows)
+    setPreview(rows.slice(0, 5))
+    toast.success(`Parsed ${rows.length} HE dispatch records`)
+  }
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!selectedFlock) throw new Error('Select a flock')
+      if (!parsedRows.length) throw new Error('No data parsed')
+      let success = 0, errors = 0; const messages: string[] = []
+      for (const r of parsedRows) {
+        const hatchery_id = findHatchery(r.hatchery_name ?? '')
+        const party_id = findParty(r.hatchery_name ?? '')
+        const { error } = await supabase.from('he_dispatch').insert({
+          flock_id: selectedFlock,
+          dispatch_date: r.dispatch_date,
+          dc_no: r.dc_no,
+          hatchery_id, party_id,
+          grade_a: r.grade_a, grade_b: r.grade_b,
+          total_dispatched: r.total_dispatched,
+          free_eggs: r.free_eggs, rate: r.rate, amount: r.amount,
+          setting_date: r.setting_date, hatch_date: r.hatch_date,
+          chicks_sold: r.chicks_sold, remarks: r.remarks,
+        })
+        if (error) { errors++; messages.push(error.message) } else success++
+      }
+      return { success, errors, messages }
+    },
+    onSuccess: (r) => { setResult(r); if(r.success>0){toast.success(`Imported ${r.success} HE records!`);qc.invalidateQueries({queryKey:['he_dispatch']})} },
+    onError: (e:any) => toast.error(e.message)
+  })
+
+  const flockOptions = flocks?.map((f:any)=>({value:f.id,label:`Flock ${f.flock_no}`}))??[]
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Import HE Dispatch" subtitle="Upload HE dispatch Excel files (date, dc_no, hatchery, grade_a, grade_b, total, free, rate, amount)"/>
+      <Card>
+        <div className="space-y-4">
+          <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
+            <p className="font-medium mb-1">Expected columns (row by row):</p>
+            <p>Date | DC No | Hatchery Name | Grade A | Grade B | Total | Free Eggs | Rate | Amount | Setting Date | Hatch Date | Chicks Sold</p>
+          </div>
+          <Select label="Flock" required placeholder="— Select flock —" options={flockOptions} value={selectedFlock} onChange={e=>setSelectedFlock(e.target.value)}/>
+          <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 transition-all" onClick={()=>fileRef.current?.click()}>
+            <FileSpreadsheet size={32} className="mx-auto text-gray-300 mb-2"/>
+            <p className="text-sm text-gray-500">Click to upload HE Dispatch Excel</p>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile}/>
+          </div>
+          {preview.length > 0 && (
+            <div className="overflow-x-auto text-xs bg-gray-50 rounded-lg p-3">
+              <table className="w-full">
+                <thead><tr>{['Date','DC No','Hatchery','Gr A','Gr B','Total','Free','Rate','Amount'].map(h=><th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>)}</tr></thead>
+                <tbody>{preview.map((r:any,i:number)=>(
+                  <tr key={i} className="border-t border-gray-200">
+                    <td className="px-2 py-1 font-medium">{r.dispatch_date}</td>
+                    <td className="px-2 py-1">{r.dc_no??'—'}</td>
+                    <td className="px-2 py-1">{r.hatchery_name??'—'}</td>
+                    <td className="px-2 py-1">{r.grade_a}</td>
+                    <td className="px-2 py-1">{r.grade_b}</td>
+                    <td className="px-2 py-1 font-semibold">{r.total_dispatched}</td>
+                    <td className="px-2 py-1">{r.free_eggs}</td>
+                    <td className="px-2 py-1">{r.rate}</td>
+                    <td className="px-2 py-1">{r.amount?.toLocaleString('en-IN')}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <Button icon={<Upload size={16}/>} loading={mut.isPending} disabled={!selectedFlock||parsedRows.length===0} onClick={()=>mut.mutate()}>
+              Import {parsedRows.length > 0 ? parsedRows.length + ' Records' : ''}
+            </Button>
+          </div>
+        </div>
+      </Card>
+      {result && (
+        <Card>
+          <div className="flex gap-4 text-sm">
+            <span className="text-green-600 font-medium">✓ {result.success} imported</span>
+            {result.errors > 0 && <span className="text-red-600 font-medium">✗ {result.errors} failed</span>}
+          </div>
+          {result.messages.slice(0,5).map((m,i)=><p key={i} className="text-xs text-red-500 mt-1">{m}</p>)}
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ── IMPORT GRN ───────────────────────────────────────────────────
+export const ImportGRN: React.FC = () => {
+  const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [parsedRows, setParsedRows] = useState<any[]>([])
+  const [preview, setPreview] = useState<any[]>([])
+  const [result, setResult] = useState<ImportResult | null>(null)
+
+  const { data: farms } = useQuery({ queryKey:['farms'], queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true);return data??[]} })
+  const { data: parties } = useQuery({ queryKey:['parties'], queryFn:async()=>{const{data}=await supabase.from('parties').select('id,name').eq('is_active',true);return data??[]} })
+  const { data: ingredients } = useQuery({ queryKey:['ingredients'], queryFn:async()=>{const{data}=await supabase.from('feed_ingredients').select('id,name,code,short_name').eq('is_active',true);return data??[]} })
+
+  const findFarm = (name: string) => {
+    if (!name || !farms) return null
+    const nl = name.toLowerCase()
+    return farms.find((f:any) => nl.includes(f.code.toLowerCase()) || nl.includes(f.name.toLowerCase().split(' ')[0]))?.id ?? null
+  }
+  const findParty = (name: string) => {
+    if (!name || !parties) return null
+    const nl = name.toLowerCase()
+    return parties.find((p:any) => nl.includes(p.name.toLowerCase().split(' ')[0]))?.id ?? null
+  }
+  const findIngredient = (name: string) => {
+    if (!name || !ingredients) return null
+    const nl = name.toLowerCase()
+    return ingredients.find((i:any) =>
+      nl.includes(i.code?.toLowerCase() ?? '') ||
+      nl.includes(i.short_name?.toLowerCase() ?? '') ||
+      nl.includes(i.name?.toLowerCase().split('-')[0] ?? '')
+    )?.id ?? null
+  }
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false })
+    const rows: any[] = []
+
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName]
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null }) as any[][]
+      for (const row of data) {
+        if (!row || row.length < 6) continue
+        const d = parseDate(row[0]); if (!d) continue
+        const qty = num(row[6]); if (!qty) continue
+        rows.push({
+          grn_date: d,
+          grn_no: row[1] ? String(row[1]).trim() : `GRN-${d}`,
+          farm_name: row[2] ? String(row[2]).trim() : null,
+          party_name: row[3] ? String(row[3]).trim() : null,
+          item_name: row[4] ? String(row[4]).trim() : null,
+          invoice_no: row[5] ? String(row[5]).trim() : null,
+          qty, unit: row[7] ? String(row[7]).trim() : 'kg',
+          bags: parseInt(String(row[8])) || null,
+          price_per_unit: num(row[9]),
+          basic_amount: num(row[10]),
+          gst_pct: num(row[11]),
+          total_amount: num(row[12]) || num(row[10]),
+          vehicle_no: row[13] ? String(row[13]).trim() : null,
+          remarks: row[14] ? String(row[14]).trim() : null,
+        })
+      }
+    }
+    setParsedRows(rows)
+    setPreview(rows.slice(0, 5))
+    toast.success(`Parsed ${rows.length} GRN records`)
+  }
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!parsedRows.length) throw new Error('No data parsed')
+      let success = 0, errors = 0; const messages: string[] = []
+      for (const r of parsedRows) {
+        const farm_id = findFarm(r.farm_name ?? '')
+        const party_id = findParty(r.party_name ?? '')
+        const ingredient_id = findIngredient(r.item_name ?? '')
+        const { error } = await supabase.from('grn').insert({
+          grn_no: r.grn_no, grn_date: r.grn_date,
+          farm_id, party_id, ingredient_id,
+          item_name: r.item_name,
+          invoice_no: r.invoice_no,
+          qty: r.qty, unit: r.unit, bags: r.bags,
+          price_per_unit: r.price_per_unit || null,
+          basic_amount: r.basic_amount || null,
+          gst_pct: r.gst_pct || null,
+          total_amount: r.total_amount || null,
+          vehicle_no: r.vehicle_no, remarks: r.remarks,
+        })
+        if (error) { errors++; messages.push(`${r.grn_no}: ${error.message}`) } else success++
+      }
+      return { success, errors, messages }
+    },
+    onSuccess: (r) => { setResult(r); if(r.success>0){toast.success(`Imported ${r.success} GRN entries!`);qc.invalidateQueries({queryKey:['grn']})} },
+    onError: (e:any) => toast.error(e.message)
+  })
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Import GRN" subtitle="Upload Goods Received Note Excel files"/>
+      <Card>
+        <div className="space-y-4">
+          <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
+            <p className="font-medium mb-1">Expected columns:</p>
+            <p>Date | GRN No | Farm/Site | Party/Supplier | Item/Ingredient | Invoice No | Qty | Unit | Bags | Price/Unit | Basic Amount | GST% | Total Amount | Vehicle No | Remarks</p>
+          </div>
+          <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 transition-all" onClick={()=>fileRef.current?.click()}>
+            <FileSpreadsheet size={32} className="mx-auto text-gray-300 mb-2"/>
+            <p className="text-sm text-gray-500">Click to upload GRN Excel</p>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile}/>
+          </div>
+          {preview.length > 0 && (
+            <div className="overflow-x-auto text-xs bg-gray-50 rounded-lg p-3">
+              <table className="w-full">
+                <thead><tr>{['Date','GRN No','Farm','Party','Item','Qty','Unit','Amount'].map(h=><th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>)}</tr></thead>
+                <tbody>{preview.map((r:any,i:number)=>(
+                  <tr key={i} className="border-t border-gray-200">
+                    <td className="px-2 py-1 font-medium">{r.grn_date}</td>
+                    <td className="px-2 py-1">{r.grn_no}</td>
+                    <td className="px-2 py-1">{r.farm_name??'—'}</td>
+                    <td className="px-2 py-1">{r.party_name??'—'}</td>
+                    <td className="px-2 py-1">{r.item_name??'—'}</td>
+                    <td className="px-2 py-1 font-semibold">{r.qty?.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-1">{r.unit}</td>
+                    <td className="px-2 py-1">{r.total_amount?.toLocaleString('en-IN')}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          <Button icon={<Upload size={16}/>} loading={mut.isPending} disabled={parsedRows.length===0} onClick={()=>mut.mutate()}>
+            Import {parsedRows.length > 0 ? parsedRows.length + ' Records' : ''}
+          </Button>
+        </div>
+      </Card>
+      {result && (
+        <Card>
+          <div className="flex gap-4 text-sm">
+            <span className="text-green-600 font-medium">✓ {result.success} imported</span>
+            {result.errors > 0 && <span className="text-red-600 font-medium">✗ {result.errors} failed</span>}
+          </div>
+          {result.messages.slice(0,5).map((m,i)=><p key={i} className="text-xs text-red-500 mt-1">{m}</p>)}
+        </Card>
+      )}
+    </div>
+  )
+}
