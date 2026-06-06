@@ -55,43 +55,11 @@ jobs:
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
       - name: 5. Create admin user + profile
-        run: |
-          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          # Try to create auth user; if exists that's fine
-          CREATE_R=$(curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
-            -H "apikey: $SK" -H "Authorization: Bearer $SK" -H "Content-Type: application/json" \
-            -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}')
-          echo "Create response: $CREATE_R"
-          # Get user ID — first try from create response, else list users
-          USER_ID=$(echo "$CREATE_R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null)
-          if [ -z "$USER_ID" ]; then
-            echo "User already exists, fetching from list..."
-            LIST_R=$(curl -s "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users?per_page=100" \
-              -H "apikey: $SK" -H "Authorization: Bearer $SK")
-            USER_ID=$(echo "$LIST_R" | python3 -c "import sys,json; d=json.load(sys.stdin); ul=d.get('users',d) if isinstance(d,dict) else d; m=[u for u in (ul if isinstance(ul,list) else []) if u.get('email')=='admin@naraendrafarms.com']; print(m[0]['id'] if m else '')" 2>/dev/null)
-          fi
-          echo "Admin user ID: $USER_ID"
-          if [ -n "$USER_ID" ]; then
-            python3 - << PYEOF
-import subprocess, json, os
-MGMT = os.environ.get("SUPABASE_MGMT_TOKEN","")
-REF = "kjliulgpipqqwptinrrd"
-USER_ID = "$USER_ID"
-sql = f"INSERT INTO public.profiles (id, full_name, role, is_active) VALUES ('{USER_ID}', 'Admin', 'admin', true) ON CONFLICT (id) DO UPDATE SET role='admin', full_name='Admin', is_active=true;"
-with open("/tmp/profile.json","w") as f:
-    json.dump({"query": sql}, f)
-r = subprocess.run(["curl","-s","-X","POST",
-    f"https://api.supabase.com/v1/projects/{REF}/database/query",
-    "-H",f"Authorization: Bearer {MGMT}",
-    "-H","Content-Type: application/json",
-    "--data-binary","@/tmp/profile.json"], capture_output=True, text=True)
-print("Profile upsert:", r.stdout[:300])
-PYEOF
-          else
-            echo "ERROR: Could not get admin user ID"
-          fi
+        run: python3 scripts/admin_setup.py
         env:
-          SUPABASE_MGMT_TOKEN: "${{ secrets.SUPABASE_MGMT_TOKEN }}"
+          MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}"
+          SK: "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          REF: kjliulgpipqqwptinrrd
 
       - name: Done
         run: |
