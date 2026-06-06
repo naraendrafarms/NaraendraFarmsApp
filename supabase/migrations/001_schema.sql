@@ -665,3 +665,6 @@ FROM public.hatchability h
 JOIN public.flocks f ON f.id=h.flock_id
 WHERE h.eggs_set>0
 GROUP BY f.flock_no, h.hatchery;
+
+-- Reload PostgREST schema cache after schema changes
+SELECT pg_notify('pgrst', 'reload schema');

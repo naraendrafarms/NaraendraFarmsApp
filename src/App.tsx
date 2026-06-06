@@ -15,6 +15,7 @@ import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
 import { EmployeeList, SalaryAbstractPage } from '@/pages/employees/EmployeePages'
 import { FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster } from '@/pages/masters/MastersPages'
 import { ImportDaily, ImportElectricity, ImportSalary } from '@/pages/import/ImportPages'
+import { HatchabilityPage } from '@/pages/hatchability/HatchabilityPage'
 import { SetupPage } from '@/pages/setup/SetupPage'
 import { Spinner } from '@/components/ui'
 

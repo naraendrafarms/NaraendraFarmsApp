@@ -39,3 +39,6 @@ DROP VIEW IF EXISTS public.v_hatchability_summary CASCADE;
 
 -- Re-enable after cleanup
 SET session_replication_role = DEFAULT;
+
+-- Reload PostgREST schema cache
+NOTIFY pgrst, 'reload schema';
