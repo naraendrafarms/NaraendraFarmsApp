@@ -98,7 +98,16 @@ function useHatchability() {
         `)
         .order('setting_date', { ascending: false })
         .limit(2000)
-      if (error) throw error
+      if (error) {
+        // If new columns missing (migration not run yet), retry without them
+        const { data: d2, error: e2 } = await supabase
+          .from('hatchability')
+          .select('id, flock_id, dc_no, setting_date, invoice_date, hatch_date, hatchery, setting_no, age_weeks, eggs_received, eggs_set, broken, infertile, chicks_hatched, hatch_pct, created_at, flocks(flock_no)')
+          .order('setting_date', { ascending: false })
+          .limit(2000)
+        if (e2) throw e2
+        return (d2 ?? []) as unknown as HatchRow[]
+      }
       return (data ?? []) as unknown as HatchRow[]
     },
     staleTime: 5 * 60 * 1000,

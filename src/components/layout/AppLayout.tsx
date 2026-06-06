@@ -195,34 +195,71 @@ export const AppLayout: React.FC = () => {
         hidden lg:flex flex-col bg-white border-r border-gray-100 transition-all duration-200
         ${sidebarOpen ? 'w-60' : 'w-16'}
       `}>
-        {/* Logo */}
-        <div className="flex items-center justify-between h-14 px-4 border-b border-gray-100 shrink-0">
+        {/* Logo + Bird */}
+        <div className={`flex items-center justify-between border-b border-gray-100 shrink-0 ${sidebarOpen ? 'h-20 px-4' : 'h-14 px-2'}`}>
           {sidebarOpen && (
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-brand-600 rounded-lg flex items-center justify-center">
-                <Bird size={14} className="text-white" />
+            <div className="flex items-center gap-3">
+              {/* Animated broiler bird */}
+              <div className="shrink-0" style={{ animation: 'sidebarBob 2.4s ease-in-out infinite' }}>
+                <style>{`
+                  @keyframes sidebarBob { 0%,100%{transform:translateY(0) rotate(-2deg)} 50%{transform:translateY(-4px) rotate(2deg)} }
+                  @keyframes sidebarWing { 0%,100%{transform:scaleY(1)} 50%{transform:scaleY(0.65)} }
+                  .sw { animation: sidebarWing 0.7s ease-in-out infinite; transform-origin: 55px 65px; }
+                `}</style>
+                <svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg" width="42" height="36">
+                  <ellipse cx="60" cy="62" rx="28" ry="20" fill="#c8922a"/>
+                  <ellipse cx="55" cy="65" rx="20" ry="11" fill="#b87d20" className="sw"/>
+                  <path d="M88 62 Q100 52 98 68 Q96 60 88 65Z" fill="#8b5e14"/>
+                  <path d="M88 66 Q102 60 99 74 Q96 66 88 70Z" fill="#a06b18"/>
+                  <ellipse cx="38" cy="54" rx="10" ry="14" fill="#c8922a"/>
+                  <circle cx="30" cy="44" r="13" fill="#d4982e"/>
+                  <path d="M24 32 Q26 26 28 32 Q30 24 32 32 Q34 27 36 32" stroke="#e53e3e" strokeWidth="3" fill="none" strokeLinecap="round"/>
+                  <ellipse cx="24" cy="47" rx="4" ry="6" fill="#e53e3e"/>
+                  <circle cx="26" cy="42" r="3.5" fill="white"/>
+                  <circle cx="25.5" cy="41.5" r="1.8" fill="#1a1a1a"/>
+                  <circle cx="25" cy="41" r="0.7" fill="white"/>
+                  <path d="M18 44 L12 46 L18 48Z" fill="#e8a020"/>
+                </svg>
               </div>
               <div>
-                <p className="font-bold text-xs text-gray-900 leading-tight">Naraendra Farms</p>
+                <p className="font-bold text-sm text-gray-900 leading-tight">Naraendra Farms</p>
                 <p className="text-[10px] text-gray-400">Broiler Breeder</p>
               </div>
             </div>
           )}
+          {!sidebarOpen && (
+            <div className="mx-auto" style={{ animation: 'sidebarBob 2.4s ease-in-out infinite' }}>
+              <svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg" width="32" height="28">
+                <ellipse cx="60" cy="62" rx="28" ry="20" fill="#c8922a"/>
+                <ellipse cx="55" cy="65" rx="20" ry="11" fill="#b87d20"/>
+                <ellipse cx="38" cy="54" rx="10" ry="14" fill="#c8922a"/>
+                <circle cx="30" cy="44" r="13" fill="#d4982e"/>
+                <path d="M24 32 Q26 26 28 32 Q30 24 32 32 Q34 27 36 32" stroke="#e53e3e" strokeWidth="3" fill="none" strokeLinecap="round"/>
+                <ellipse cx="24" cy="47" rx="4" ry="6" fill="#e53e3e"/>
+                <circle cx="26" cy="42" r="3.5" fill="white"/>
+                <circle cx="25.5" cy="41.5" r="1.8" fill="#1a1a1a"/>
+                <path d="M18 44 L12 46 L18 48Z" fill="#e8a020"/>
+              </svg>
+            </div>
+          )}
           <button onClick={() => setSidebarOpen(o => !o)}
-            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors ml-auto">
+            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors ml-auto shrink-0">
             <Menu size={16} className="text-gray-500" />
           </button>
         </div>
 
-        {/* Role badge */}
+        {/* User name + Role badge */}
         {sidebarOpen && profile && (
-          <div className="px-3 pt-3">
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLORS[role]}`}>
-              {ROLE_LABELS[role]}
-            </span>
-            {profile.farm_id && role === 'site_incharge' && (
-              <span className="ml-1 text-[10px] text-gray-400">• Site only</span>
-            )}
+          <div className="px-3 pt-3 pb-1">
+            <p className="text-xs font-semibold text-gray-900 truncate">{profile.full_name ?? 'User'}</p>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLORS[role]}`}>
+                {ROLE_LABELS[role]}
+              </span>
+              {profile.farm_id && role === 'site_incharge' && (
+                <span className="text-[10px] text-gray-400">• Site only</span>
+              )}
+            </div>
           </div>
         )}
 
