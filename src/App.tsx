@@ -101,6 +101,7 @@ export const App: React.FC = () => {
             <Route path="masters/meters" element={<Placeholder title="Electricity Meters Master" />} />
 
             {/* Reports */}
+            <Route path="hatchability" element={<HatchabilityPage />} />
             <Route path="reports/pl" element={<Placeholder title="Flock P&L Report" />} />
             <Route path="reports/production" element={<Placeholder title="Production Report" />} />
             <Route path="reports/feed" element={<Placeholder title="Feed Cost Report" />} />
