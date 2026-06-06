@@ -142,7 +142,7 @@ const NavLink: React.FC<{ item: NavItem; collapsed: boolean }> = ({ item, collap
     return (
       <Link to={item.to!}
         className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors
-          ${active ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+          ${active ? 'bg-white/20 text-white' : 'text-green-100 hover:bg-white/10 hover:text-white'}`}
       >
         {item.icon}
         {!collapsed && item.label}
@@ -156,7 +156,7 @@ const NavLink: React.FC<{ item: NavItem; collapsed: boolean }> = ({ item, collap
     <div>
       <button onClick={() => setOpen(o => !o)}
         className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium
-          transition-colors ${anyActive ? 'text-brand-700 bg-brand-50' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}
+          transition-colors ${anyActive ? 'bg-white/15 text-white' : 'text-green-100 hover:bg-white/10 hover:text-white'}`}
       >
         <span className="flex items-center gap-3">{item.icon}{!collapsed && item.label}</span>
         {!collapsed && (open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>)}
@@ -168,7 +168,7 @@ const NavLink: React.FC<{ item: NavItem; collapsed: boolean }> = ({ item, collap
             return (
               <Link key={c.to} to={c.to}
                 className={`px-3 py-1.5 rounded-lg text-sm transition-colors
-                  ${active ? 'text-brand-700 font-medium bg-brand-50' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
+                  ${active ? 'bg-white/20 text-white font-semibold' : 'text-green-200 hover:text-white hover:bg-white/10'}`}
               >
                 {c.label}
               </Link>
@@ -192,72 +192,76 @@ export const AppLayout: React.FC = () => {
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       {/* Sidebar */}
       <aside className={`
-        hidden lg:flex flex-col bg-white border-r border-gray-100 transition-all duration-200
-        ${sidebarOpen ? 'w-60' : 'w-16'}
-      `}>
+        hidden lg:flex flex-col transition-all duration-200
+        ${sidebarOpen ? 'w-64' : 'w-16'}
+      `} style={{ background: 'linear-gradient(180deg,#1a5c38 0%,#14532d 60%,#0f3d22 100%)' }}>
+
+        <style>{`
+          @keyframes sbBob { 0%,100%{transform:translateY(0) rotate(-3deg)} 50%{transform:translateY(-5px) rotate(3deg)} }
+          .sb-bird { animation: sbBob 2s ease-in-out infinite; }
+        `}</style>
+
         {/* Logo + Bird */}
-        <div className={`flex items-center justify-between border-b border-gray-100 shrink-0 ${sidebarOpen ? 'h-20 px-4' : 'h-14 px-2'}`}>
-          {sidebarOpen && (
-            <div className="flex items-center gap-3">
-              {/* Animated broiler bird */}
-              <div className="shrink-0" style={{ animation: 'sidebarBob 2.4s ease-in-out infinite' }}>
-                <style>{`
-                  @keyframes sidebarBob { 0%,100%{transform:translateY(0) rotate(-2deg)} 50%{transform:translateY(-4px) rotate(2deg)} }
-                  @keyframes sidebarWing { 0%,100%{transform:scaleY(1)} 50%{transform:scaleY(0.65)} }
-                  .sw { animation: sidebarWing 0.7s ease-in-out infinite; transform-origin: 55px 65px; }
-                `}</style>
-                <svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg" width="42" height="36">
-                  <ellipse cx="60" cy="62" rx="28" ry="20" fill="#c8922a"/>
-                  <ellipse cx="55" cy="65" rx="20" ry="11" fill="#b87d20" className="sw"/>
-                  <path d="M88 62 Q100 52 98 68 Q96 60 88 65Z" fill="#8b5e14"/>
-                  <path d="M88 66 Q102 60 99 74 Q96 66 88 70Z" fill="#a06b18"/>
-                  <ellipse cx="38" cy="54" rx="10" ry="14" fill="#c8922a"/>
-                  <circle cx="30" cy="44" r="13" fill="#d4982e"/>
-                  <path d="M24 32 Q26 26 28 32 Q30 24 32 32 Q34 27 36 32" stroke="#e53e3e" strokeWidth="3" fill="none" strokeLinecap="round"/>
-                  <ellipse cx="24" cy="47" rx="4" ry="6" fill="#e53e3e"/>
-                  <circle cx="26" cy="42" r="3.5" fill="white"/>
-                  <circle cx="25.5" cy="41.5" r="1.8" fill="#1a1a1a"/>
-                  <circle cx="25" cy="41" r="0.7" fill="white"/>
-                  <path d="M18 44 L12 46 L18 48Z" fill="#e8a020"/>
+        <div className={`flex items-center border-b border-green-800/40 shrink-0 ${sidebarOpen ? 'h-24 px-4 gap-3' : 'h-16 justify-center'}`}>
+          {sidebarOpen ? (
+            <>
+              <div className="sb-bird shrink-0">
+                <svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg" width="46" height="50">
+                  <path d="M72 55 Q85 35 82 55 Q80 42 74 55Z" fill="#2d8f2d"/>
+                  <path d="M74 60 Q90 42 86 60 Q84 48 76 60Z" fill="#1a6e1a"/>
+                  <ellipse cx="52" cy="68" rx="24" ry="19" fill="#c07c2a"/>
+                  <ellipse cx="50" cy="70" rx="18" ry="12" fill="#a86820"/>
+                  <ellipse cx="36" cy="56" rx="9" ry="13" fill="#c07c2a"/>
+                  <circle cx="30" cy="44" r="15" fill="#d4902e"/>
+                  <path d="M23 30 Q25 23 28 30 Q30 22 33 30 Q36 25 38 31" stroke="#e53e3e" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
+                  <path d="M22 48 Q18 52 20 57 Q24 60 26 55 Q25 52 22 48Z" fill="#e53e3e"/>
+                  <circle cx="25" cy="41" r="4.5" fill="white"/>
+                  <circle cx="24" cy="40.5" r="2.5" fill="#1a1a1a"/>
+                  <circle cx="23" cy="39.5" r="1" fill="white"/>
+                  <path d="M16 43 L10 46 L16 49Z" fill="#f0a830"/>
+                  <line x1="46" y1="86" x2="42" y2="100" stroke="#f0a830" strokeWidth="4" strokeLinecap="round"/>
+                  <line x1="56" y1="86" x2="60" y2="100" stroke="#f0a830" strokeWidth="4" strokeLinecap="round"/>
                 </svg>
               </div>
               <div>
-                <p className="font-bold text-sm text-gray-900 leading-tight">Naraendra Farms</p>
-                <p className="text-[10px] text-gray-400">Broiler Breeder</p>
+                <p className="font-extrabold text-sm text-white leading-tight">Naraendra Farms</p>
+                <p className="text-[10px] text-green-300">Broiler Breeder</p>
               </div>
-            </div>
+              <button onClick={() => setSidebarOpen(o => !o)}
+                className="ml-auto p-1.5 rounded-lg hover:bg-green-700/40 transition-colors shrink-0">
+                <Menu size={16} className="text-green-200" />
+              </button>
+            </>
+          ) : (
+            <button onClick={() => setSidebarOpen(o => !o)}
+              className="flex flex-col items-center gap-1 p-1 rounded-lg hover:bg-green-700/40 transition-colors">
+              <div className="sb-bird">
+                <svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg" width="28" height="30">
+                  <ellipse cx="52" cy="68" rx="24" ry="19" fill="#c07c2a"/>
+                  <ellipse cx="36" cy="56" rx="9" ry="13" fill="#c07c2a"/>
+                  <circle cx="30" cy="44" r="15" fill="#d4902e"/>
+                  <path d="M23 30 Q25 23 28 30 Q30 22 33 30 Q36 25 38 31" stroke="#e53e3e" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
+                  <path d="M22 48 Q18 52 20 57 Q24 60 26 55Z" fill="#e53e3e"/>
+                  <circle cx="25" cy="41" r="4" fill="white"/>
+                  <circle cx="24" cy="40.5" r="2" fill="#1a1a1a"/>
+                  <path d="M16 43 L10 46 L16 49Z" fill="#f0a830"/>
+                </svg>
+              </div>
+              <Menu size={12} className="text-green-300" />
+            </button>
           )}
-          {!sidebarOpen && (
-            <div className="mx-auto" style={{ animation: 'sidebarBob 2.4s ease-in-out infinite' }}>
-              <svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg" width="32" height="28">
-                <ellipse cx="60" cy="62" rx="28" ry="20" fill="#c8922a"/>
-                <ellipse cx="55" cy="65" rx="20" ry="11" fill="#b87d20"/>
-                <ellipse cx="38" cy="54" rx="10" ry="14" fill="#c8922a"/>
-                <circle cx="30" cy="44" r="13" fill="#d4982e"/>
-                <path d="M24 32 Q26 26 28 32 Q30 24 32 32 Q34 27 36 32" stroke="#e53e3e" strokeWidth="3" fill="none" strokeLinecap="round"/>
-                <ellipse cx="24" cy="47" rx="4" ry="6" fill="#e53e3e"/>
-                <circle cx="26" cy="42" r="3.5" fill="white"/>
-                <circle cx="25.5" cy="41.5" r="1.8" fill="#1a1a1a"/>
-                <path d="M18 44 L12 46 L18 48Z" fill="#e8a020"/>
-              </svg>
-            </div>
-          )}
-          <button onClick={() => setSidebarOpen(o => !o)}
-            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors ml-auto shrink-0">
-            <Menu size={16} className="text-gray-500" />
-          </button>
         </div>
 
         {/* User name + Role badge */}
         {sidebarOpen && profile && (
-          <div className="px-3 pt-3 pb-1">
-            <p className="text-xs font-semibold text-gray-900 truncate">{profile.full_name ?? 'User'}</p>
-            <div className="flex items-center gap-1 mt-0.5">
+          <div className="px-4 pt-3 pb-2">
+            <p className="text-sm font-bold text-white truncate">{profile.full_name ?? 'User'}</p>
+            <div className="flex items-center gap-1 mt-1">
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLORS[role]}`}>
                 {ROLE_LABELS[role]}
               </span>
               {profile.farm_id && role === 'site_incharge' && (
-                <span className="text-[10px] text-gray-400">• Site only</span>
+                <span className="text-[10px] text-green-400">• Site only</span>
               )}
             </div>
           </div>
@@ -270,21 +274,20 @@ export const AppLayout: React.FC = () => {
           ))}
         </nav>
 
-        {/* User */}
-        <div className="px-3 py-3 border-t border-gray-100">
+        {/* User sign-out strip */}
+        <div className="px-3 py-3 border-t border-green-800/40">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full bg-brand-100 flex items-center justify-center text-xs font-bold text-brand-700 shrink-0">
+            <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold text-white shrink-0">
               {profile?.full_name?.[0]?.toUpperCase() ?? 'U'}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-gray-900 truncate">{profile?.full_name ?? 'User'}</p>
-                <p className="text-[10px] text-gray-400 truncate">{ROLE_LABELS[role]}</p>
+                <p className="text-xs font-semibold text-white truncate">{profile?.full_name ?? 'User'}</p>
               </div>
             )}
             {sidebarOpen && (
-              <button onClick={signOut} title="Sign out" className="p-1 rounded hover:bg-gray-100 transition-colors">
-                <LogOut size={14} className="text-gray-400" />
+              <button onClick={signOut} title="Sign out" className="p-1 rounded hover:bg-white/10 transition-colors">
+                <LogOut size={14} className="text-green-300" />
               </button>
             )}
           </div>
@@ -295,13 +298,15 @@ export const AppLayout: React.FC = () => {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <aside className="relative w-64 h-full bg-white border-r border-gray-100 flex flex-col">
-            <div className="flex items-center justify-between h-14 px-4 border-b border-gray-100">
-              <span className="font-bold text-sm">Naraendra Farms</span>
-              <button onClick={() => setMobileOpen(false)}><X size={16} /></button>
+          <aside className="relative w-64 h-full flex flex-col"
+            style={{ background: 'linear-gradient(180deg,#1a5c38,#0f3d22)' }}>
+            <div className="flex items-center justify-between h-14 px-4 border-b border-green-800/40">
+              <span className="font-bold text-sm text-white">Naraendra Farms</span>
+              <button onClick={() => setMobileOpen(false)}><X size={16} className="text-green-300" /></button>
             </div>
             {profile && (
               <div className="px-3 pt-3">
+                <p className="text-xs font-bold text-white">{profile.full_name}</p>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLORS[role]}`}>
                   {ROLE_LABELS[role]}
                 </span>
@@ -310,9 +315,9 @@ export const AppLayout: React.FC = () => {
             <nav className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-1">
               {visibleNav.map(item => <NavLink key={item.label} item={item} collapsed={false} />)}
             </nav>
-            <div className="px-3 py-3 border-t border-gray-100 flex items-center justify-between">
-              <span className="text-xs text-gray-700">{profile?.full_name}</span>
-              <button onClick={signOut}><LogOut size={14} className="text-gray-400" /></button>
+            <div className="px-3 py-3 border-t border-green-800/40 flex items-center justify-between">
+              <span className="text-xs text-green-200">{profile?.full_name}</span>
+              <button onClick={signOut}><LogOut size={14} className="text-green-300" /></button>
             </div>
           </aside>
         </div>
