@@ -2,12 +2,45 @@ import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
 import type { User, Session } from '@supabase/supabase-js'
 
-interface Profile {
+export type Role = 'admin' | 'accounts' | 'site_manager' | 'site_incharge' | 'viewer'
+
+export interface Profile {
   id: string
   full_name?: string
-  role: 'admin' | 'manager' | 'supervisor' | 'data_entry' | 'viewer'
-  farm_id?: string
+  role: Role
+  farm_id?: string | null   // set for site_incharge only
   is_active: boolean
+}
+
+// ── Permission helpers ────────────────────────────────────────────
+export const can = {
+  // Can enter data (create/update records)
+  enterData: (r?: Role) =>
+    r === 'admin' || r === 'accounts' || r === 'site_manager' || r === 'site_incharge',
+
+  // Can see salary / employee / financial data
+  viewFinancial: (r?: Role) =>
+    r === 'admin' || r === 'accounts',
+
+  // Can see all sites (not limited to one farm)
+  viewAllSites: (r?: Role) =>
+    r === 'admin' || r === 'accounts' || r === 'site_manager' || r === 'viewer',
+
+  // Can manage master data (farms, ingredients, parties etc.)
+  manageMasters: (r?: Role) =>
+    r === 'admin' || r === 'accounts',
+
+  // Can import from Excel
+  importData: (r?: Role) =>
+    r === 'admin' || r === 'accounts',
+
+  // Can manage users (create/edit user accounts)
+  manageUsers: (r?: Role) =>
+    r === 'admin',
+
+  // Can delete records
+  delete: (r?: Role) =>
+    r === 'admin',
 }
 
 interface AuthState {
@@ -60,6 +93,6 @@ export const useAuth = create<AuthState>((set, get) => ({
       .select('*')
       .eq('id', userId)
       .single()
-    if (data) set({ profile: data })
+    if (data) set({ profile: data as Profile })
   }
 }))
