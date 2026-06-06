@@ -1,3 +1,5 @@
+SET session_replication_role = replica;
+
 -- ============================================================
 -- NARAENDRA FARMS — CLEAN SEED DATA v4.0
 -- No dollar-quoted blocks, simple plain SQL
@@ -188,3 +190,6 @@ ON CONFLICT (flock_no) DO UPDATE SET
   laying_farm_id=EXCLUDED.laying_farm_id;
 
 
+
+
+SET session_replication_role = DEFAULT;

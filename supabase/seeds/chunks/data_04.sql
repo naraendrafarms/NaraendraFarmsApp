@@ -1,3 +1,5 @@
+SET session_replication_role = replica;
+
 INSERT INTO public.daily_records
   (flock_id,record_date,farm_id,opening_female,opening_male,
    feed_female_kg,feed_male_kg,total_eggs,he_eggs,je_eggs,te_eggs,

@@ -1,3 +1,5 @@
+SET session_replication_role = replica;
+
 INSERT INTO public.hatchability
   (flock_id,setting_date,invoice_date,hatch_date,hatchery,setting_no,
    dc_no,age_weeks,eggs_set,broken,infertile,chicks_hatched,hatch_pct)

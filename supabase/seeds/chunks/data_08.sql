@@ -1,3 +1,5 @@
+SET session_replication_role = replica;
+
 INSERT INTO public.he_dispatch
   (flock_id,dispatch_date,prod_date,dc_no,total_dispatched,free_eggs,invoice_eggs,rate,amount)
 VALUES
