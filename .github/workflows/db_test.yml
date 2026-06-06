@@ -1,19 +1,21 @@
-name: DB Audit
+name: Quick Query
 on:
   workflow_dispatch:
 jobs:
-  audit:
+  query:
     runs-on: ubuntu-latest
     env:
       MGMT: ${{ secrets.SUPABASE_MGMT_TOKEN }}
+      SK: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
       GH_PAT: ${{ secrets.GH_PAT }}
     steps:
-      - name: Full audit
+      - name: Query HE per flock and reload PostgREST
         run: |
           python3 - << 'PYEOF'
           import subprocess, json, os
 
           MGMT = os.environ["MGMT"]
+          SK   = os.environ["SK"]
           GH   = os.environ["GH_PAT"]
           REF  = "kjliulgpipqqwptinrrd"
 
@@ -26,86 +28,43 @@ jobs:
               try: return json.loads(r.stdout)
               except: return r.stdout[:300]
 
-          lines = ["# Full DB Audit\n"]
-          
-          # Count every table
-          tables = ["farms","sheds","flocks","daily_records","he_dispatch","hatchability",
-                    "nhe_sales","medicines_master","medicine_usage","medicine_monthly",
-                    "feed_ingredients","feed_types","grn","feed_production","feed_transfers",
-                    "ingredient_stock","electricity_meters","electricity_bills","electricity_allocation",
-                    "parties","hatcheries","employees","salary_monthly","salary_abstract","bonus",
-                    "profiles"]
-          lines.append("## Table Counts")
-          for t in tables:
-              r = sql(f"SELECT COUNT(*) as n FROM public.{t}")
-              n = r[0]["n"] if isinstance(r,list) and r else str(r)[:80]
-              lines.append(f"- {t}: **{n}**")
+          results = []
 
-          # Check for duplicates
-          lines.append("\n## Duplicate Check")
-          dup_checks = [
-              ("daily_records", "SELECT flock_id,record_date,farm_id,COUNT(*) c FROM public.daily_records GROUP BY 1,2,3 HAVING COUNT(*)>1 LIMIT 5"),
-              ("he_dispatch",   "SELECT flock_id,dispatch_date,dc_no,COUNT(*) c FROM public.he_dispatch GROUP BY 1,2,3 HAVING COUNT(*)>1 LIMIT 5"),
-              ("hatchability",  "SELECT flock_id,setting_date,setting_no,COUNT(*) c FROM public.hatchability GROUP BY 1,2,3 HAVING COUNT(*)>1 LIMIT 5"),
-              ("salary_abstract","SELECT farm_id,month,COUNT(*) c FROM public.salary_abstract GROUP BY 1,2 HAVING COUNT(*)>1 LIMIT 5"),
-              ("electricity_bills","SELECT meter_id,bill_month,COUNT(*) c FROM public.electricity_bills GROUP BY 1,2 HAVING COUNT(*)>1 LIMIT 5"),
-          ]
-          for tbl, qry in dup_checks:
-              r = sql(qry)
-              if isinstance(r,list): lines.append(f"- {tbl}: {len(r)} duplicate groups")
-              else: lines.append(f"- {tbl}: {str(r)[:100]}")
+          # HE per flock
+          he = sql("SELECT f.flock_no, COUNT(*) as cnt FROM public.he_dispatch h JOIN public.flocks f ON f.id=h.flock_id GROUP BY f.flock_no ORDER BY f.flock_no")
+          results.append(f"HE per flock: {he}")
 
-          # Check farms
-          lines.append("\n## Farms Detail")
-          r = sql("SELECT code,name,site_type FROM public.farms ORDER BY code")
-          if isinstance(r,list):
-              for f in r: lines.append(f"- {f.get('code')}: {f.get('name')} ({f.get('site_type')})")
-          else: lines.append(str(r)[:200])
+          # Total HE
+          he2 = sql("SELECT COUNT(*) as total FROM public.he_dispatch")
+          results.append(f"HE total: {he2}")
 
-          # Check flocks
-          lines.append("\n## Flocks Detail")
-          r = sql("SELECT flock_no,status,placement_date,total_placed_f,total_placed_m FROM public.flocks ORDER BY flock_no")
-          if isinstance(r,list):
-              for f in r: lines.append(f"- F{f.get('flock_no')}: {f.get('status')} F={f.get('total_placed_f')} M={f.get('total_placed_m')} placed={f.get('placement_date')}")
-          else: lines.append(str(r)[:200])
+          # HE with NULL flock_id
+          he3 = sql("SELECT COUNT(*) as null_flock FROM public.he_dispatch WHERE flock_id IS NULL")
+          results.append(f"HE with NULL flock: {he3}")
 
-          # Check daily records sample
-          lines.append("\n## Daily Records - First 5")
-          r = sql("SELECT dr.record_date,f.flock_no,dr.total_eggs,dr.he_eggs,dr.mortality_female FROM public.daily_records dr JOIN public.flocks f ON f.id=dr.flock_id ORDER BY dr.record_date,f.flock_no LIMIT 5")
-          if isinstance(r,list):
-              for d in r: lines.append(f"- F{d.get('flock_no')} {d.get('record_date')}: eggs={d.get('total_eggs')} he={d.get('he_eggs')} mort={d.get('mortality_female')}")
-          else: lines.append(str(r)[:200])
+          # Reload PostgREST schema cache
+          reload = subprocess.run(["curl","-s","-X","POST",
+              f"https://api.supabase.com/v1/projects/{REF}/database/schema-changes/reload",
+              "-H",f"Authorization: Bearer {MGMT}",
+              "-H","Content-Type: application/json"],
+              capture_output=True,text=True,timeout=30)
+          results.append(f"PostgREST reload: {reload.stdout[:200]}")
 
-          # Check hatchability sample
-          lines.append("\n## Hatchability - First 5")
-          r = sql("SELECT h.setting_date,f.flock_no,h.hatchery,h.eggs_set,h.chicks_hatched,h.hatch_pct FROM public.hatchability h JOIN public.flocks f ON f.id=h.flock_id ORDER BY h.setting_date LIMIT 5")
-          if isinstance(r,list):
-              for h in r: lines.append(f"- F{h.get('flock_no')} {h.get('setting_date')} {h.get('hatchery')}: {h.get('eggs_set')} eggs {h.get('hatch_pct')}% → {h.get('chicks_hatched')} chicks")
-          else: lines.append(str(r)[:200])
+          # Also try via REST API directly
+          reload2 = subprocess.run(["curl","-s","-X","POST",
+              f"https://{REF}.supabase.co/rest/v1/",
+              "-H",f"apikey: {SK}","-H",f"Authorization: Bearer {SK}",
+              "-H","Content-Profile: pg_catalog"],
+              capture_output=True,text=True,timeout=10)
+          results.append(f"Direct reload: {reload2.stdout[:100]}")
 
-          # Salary
-          lines.append("\n## Salary Abstract - Summary")
-          r = sql("SELECT TO_CHAR(month::date,'YYYY-MM') as mo, SUM(total_salary) as total FROM public.salary_abstract GROUP BY mo ORDER BY mo LIMIT 10")
-          if isinstance(r,list):
-              for s in r: lines.append(f"- {s.get('mo')}: Rs {float(s.get('total',0)):,.0f}")
-          else: lines.append(str(r)[:200])
-
-          # Electricity
-          lines.append("\n## Electricity Bills - Summary")
-          r = sql("SELECT TO_CHAR(bill_month::date,'YYYY-MM') as mo, COUNT(*) meters, SUM(amount) total FROM public.electricity_bills GROUP BY mo ORDER BY mo LIMIT 10")
-          if isinstance(r,list):
-              for e in r: lines.append(f"- {e.get('mo')}: {e.get('meters')} meters Rs {float(e.get('total',0)):,.0f}")
-          else: lines.append(str(r)[:200])
-
-          body = "\n".join(lines)
+          body = "\n".join(results)
           print(body)
-          
           with open("/tmp/issue.json","w") as f:
-              json.dump({"title":"FULL DB AUDIT","body":body},f)
+              json.dump({"title":"HE Query + Cache Reload","body":body},f)
           subprocess.run(["curl","-s","-X","POST",
               "https://api.github.com/repos/naraendrafarms/NaraendraFarmsApp/issues",
               "-H",f"Authorization: token {GH}","-H","Accept: application/vnd.github+json",
               "-H","Content-Type: application/json","--data-binary","@/tmp/issue.json"],
               capture_output=True,text=True)
-          print("Audit posted to GitHub issue")
           PYEOF
