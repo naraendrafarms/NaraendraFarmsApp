@@ -2,12 +2,24 @@ import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
 import type { User, Session } from '@supabase/supabase-js'
 
-interface Profile {
+export type Role = 'admin' | 'accounts' | 'site_manager' | 'site_incharge' | 'viewer'
+
+export interface Profile {
   id: string
   full_name?: string
-  role: 'admin' | 'manager' | 'supervisor' | 'data_entry' | 'viewer'
-  farm_id?: string
+  role: Role
+  farm_id?: string | null
   is_active: boolean
+}
+
+export const can = {
+  enterData:      (r?: Role) => r === 'admin' || r === 'accounts' || r === 'site_manager' || r === 'site_incharge',
+  viewFinancial:  (r?: Role) => r === 'admin' || r === 'accounts',
+  viewAllSites:   (r?: Role) => r === 'admin' || r === 'accounts' || r === 'site_manager' || r === 'viewer',
+  manageMasters:  (r?: Role) => r === 'admin' || r === 'accounts',
+  importData:     (r?: Role) => r === 'admin' || r === 'accounts',
+  manageUsers:    (r?: Role) => r === 'admin',
+  delete:         (r?: Role) => r === 'admin',
 }
 
 interface AuthState {
@@ -60,6 +72,6 @@ export const useAuth = create<AuthState>((set, get) => ({
       .select('*')
       .eq('id', userId)
       .single()
-    if (data) set({ profile: data })
+    if (data) set({ profile: data as Profile })
   }
 }))

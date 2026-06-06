@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
+import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Divider,
   SectionHeader, Spinner, Badge
@@ -13,17 +14,20 @@ const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK']
 
 export const DailyEntry: React.FC = () => {
   const qc = useQueryClient()
+  const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [selectedFlock, setSelectedFlock] = useState('')
   const [date, setDate] = useState(today())
 
   const { data: flocks } = useQuery({
-    queryKey: ['active_flocks'],
+    queryKey: ['active_flocks', farmId],
     queryFn: async () => {
-      const { data } = await supabase
+      let q = supabase
         .from('flocks')
         .select('id, flock_no, status, laying_farm_id, rearing_farm_id, farms!laying_farm_id(name)')
         .neq('status', 'closed')
         .order('flock_no')
+      q = applyFlockFarmFilter(q)
+      const { data } = await q
       return data ?? []
     }
   })

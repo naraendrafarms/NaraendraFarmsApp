@@ -168,6 +168,13 @@ export const AppLayout: React.FC = () => {
           </button>
         </div>
 
+        {/* User name */}
+        {sidebarOpen && profile && (
+          <div className="px-3 pt-3">
+            <p className="text-xs font-semibold text-gray-800 truncate">{profile.full_name ?? 'User'}</p>
+          </div>
+        )}
+
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-1">
           {NAV.map(item => (
@@ -184,7 +191,6 @@ export const AppLayout: React.FC = () => {
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-gray-900 truncate">{profile?.full_name ?? 'User'}</p>
-                <p className="text-xs text-gray-500 capitalize">{profile?.role ?? 'viewer'}</p>
               </div>
             )}
             {sidebarOpen && (
