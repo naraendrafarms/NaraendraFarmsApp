@@ -3,7 +3,7 @@ import { Link, useLocation, Outlet } from 'react-router-dom'
 import {
   LayoutDashboard, Bird, Factory, Zap, Users, Package,
   ChevronDown, ChevronRight, LogOut, Menu, X, Settings,
-  BarChart2, Wheat, FileText, Home, Database
+  BarChart2, Wheat, FileText, Home, Database, Egg
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
@@ -71,6 +71,7 @@ const NAV: NavItem[] = [
   {
     label: 'Reports',        icon: <BarChart2 size={18}/>,
     children: [
+      { label: 'Hatchability',      to: '/hatchability' },
       { label: 'Flock P&L',        to: '/reports/pl' },
       { label: 'Production Report', to: '/reports/production' },
       { label: 'Feed Cost Report',  to: '/reports/feed' },
