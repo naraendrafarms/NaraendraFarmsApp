@@ -21,6 +21,10 @@ jobs:
         run: python3 scripts/run_sql.py supabase/migrations/001_schema.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
+      - name: 2b. Add hatchability extended columns
+        run: python3 scripts/run_sql.py supabase/migrations/002_hatchability_columns.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
       - name: 3. Reload PostgREST schema cache
         run: |
           python3 - << 'PYEOF'
@@ -42,6 +46,14 @@ jobs:
         run: python3 scripts/run_sql.py supabase/seeds/001_seed_data.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
+      - name: 4b. Transaction data chunks (electricity, salaries, hatchability, dispatch)
+        run: |
+          for f in supabase/seeds/chunks/data_*.sql; do
+            echo "--- $f ---"
+            python3 scripts/run_sql.py "$f"
+          done
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
       - name: 5. Create admin user
         run: |
           SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
@@ -55,4 +67,4 @@ jobs:
           echo "NARAENDRA FARMS — DATABASE RESET COMPLETE"
           echo "App: https://naraendra-farms.pages.dev"
           echo "Login: admin@naraendrafarms.com / NaraendraFarms@2025"
-          echo "Now import your Excel data through the app Import pages."
+          echo "All seed data loaded including hatchability and HE dispatch for F19 & F20."

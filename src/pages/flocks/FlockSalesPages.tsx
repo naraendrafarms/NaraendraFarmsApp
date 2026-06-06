@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
+import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
@@ -12,14 +13,17 @@ import toast from 'react-hot-toast'
 // ── HE DISPATCH ──────────────────────────────────────────────────
 export const HEDispatch: React.FC = () => {
   const qc = useQueryClient()
+  const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [flockFilter, setFlockFilter] = useState('')
 
   const { data: flocks } = useQuery({
-    queryKey: ['flocks_all'],
+    queryKey: ['flocks_all', farmId],
     queryFn: async () => {
-      const { data } = await supabase.from('flocks').select('id,flock_no,status').order('flock_no')
+      let q = supabase.from('flocks').select('id,flock_no,status,laying_farm_id,rearing_farm_id').order('flock_no')
+      q = applyFlockFarmFilter(q)
+      const { data } = await q
       return data ?? []
     }
   })
@@ -263,12 +267,17 @@ const NHE_TYPES = [
 
 export const NHESales: React.FC = () => {
   const qc = useQueryClient()
+  const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [showForm, setShowForm] = useState(false)
   const [flockFilter, setFlockFilter] = useState('')
 
   const { data: flocks } = useQuery({
-    queryKey: ['flocks_all'],
-    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').order('flock_no'); return data ?? [] }
+    queryKey: ['flocks_all', farmId],
+    queryFn: async () => {
+      let q = supabase.from('flocks').select('id,flock_no,laying_farm_id,rearing_farm_id').order('flock_no')
+      q = applyFlockFarmFilter(q)
+      const { data } = await q; return data ?? []
+    }
   })
   const { data: parties } = useQuery({
     queryKey: ['parties_buyers'],
@@ -408,12 +417,17 @@ export const NHESales: React.FC = () => {
 // ── MEDICINE ENTRY ───────────────────────────────────────────────
 export const MedicineEntry: React.FC = () => {
   const qc = useQueryClient()
+  const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [showForm, setShowForm] = useState(false)
   const [flockFilter, setFlockFilter] = useState('')
 
   const { data: flocks } = useQuery({
-    queryKey: ['flocks_all'],
-    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').order('flock_no'); return data ?? [] }
+    queryKey: ['flocks_all', farmId],
+    queryFn: async () => {
+      let q = supabase.from('flocks').select('id,flock_no,laying_farm_id,rearing_farm_id').order('flock_no')
+      q = applyFlockFarmFilter(q)
+      const { data } = await q; return data ?? []
+    }
   })
   const { data: medicines } = useQuery({
     queryKey: ['medicines'],

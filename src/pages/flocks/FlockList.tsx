@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useFarmScope } from '@/lib/useFarmScope'
 import { inr, pct, fmtDate, statusColor } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Modal, Input, Select, FormRow, Divider,
@@ -147,14 +148,17 @@ export const FlockList: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [filter, setFilter] = useState<'all'|'rearing'|'laying'|'closed'>('all')
   const qc = useQueryClient()
+  const { applyFarmFilter, farmId } = useFarmScope()
 
   const { data: flocks, isLoading } = useQuery({
-    queryKey: ['flocks'],
+    queryKey: ['flocks', farmId],
     queryFn: async () => {
-      const { data } = await supabase
+      let q = supabase
         .from('v_flock_summary')
         .select('*')
         .order('flock_no')
+      q = applyFarmFilter(q, 'laying_farm_id')
+      const { data } = await q
       return data ?? []
     }
   })
