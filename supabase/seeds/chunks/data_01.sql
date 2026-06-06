@@ -6,19 +6,7 @@ SET session_replication_role = replica;
 -- TRUNCATES first to ensure clean data
 -- ============================================================
 
--- Clean all data tables (keep master data)
-TRUNCATE TABLE public.hatchability CASCADE;
-TRUNCATE TABLE public.he_dispatch CASCADE;
-TRUNCATE TABLE public.nhe_sales CASCADE;
-TRUNCATE TABLE public.daily_records CASCADE;
-TRUNCATE TABLE public.medicine_usage CASCADE;
-TRUNCATE TABLE public.medicine_monthly CASCADE;
-TRUNCATE TABLE public.salary_abstract CASCADE;
-TRUNCATE TABLE public.electricity_bills CASCADE;
-TRUNCATE TABLE public.electricity_allocation CASCADE;
-TRUNCATE TABLE public.grn CASCADE;
-TRUNCATE TABLE public.feed_production CASCADE;
-TRUNCATE TABLE public.feed_transfers CASCADE;
+-- Data tables already empty after schema recreate
 
 -- DAILY RECORDS (1,949 rows - 4 flocks)
 INSERT INTO public.daily_records
