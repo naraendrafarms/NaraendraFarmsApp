@@ -1,0 +1,58 @@
+name: Database Full Reset (Manual Only)
+
+# IMPORTANT: This wipes ALL data and re-seeds from scratch.
+# Only run this when you want to start completely fresh.
+# Normal code pushes do NOT trigger this — data is safe.
+on:
+  workflow_dispatch:
+
+jobs:
+  reset:
+    name: Reset & Seed Database
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 1. Drop all tables
+        run: python3 scripts/run_sql.py supabase/seeds/000_cleanup.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: 2. Create schema
+        run: python3 scripts/run_sql.py supabase/migrations/001_schema.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: 3. Reload PostgREST schema cache
+        run: |
+          python3 - << 'PYEOF'
+          import subprocess, json, os
+          MGMT = os.environ.get("SUPABASE_MGMT_TOKEN", "")
+          REF  = "kjliulgpipqqwptinrrd"
+          with open("/tmp/q.json","w") as f:
+              json.dump({"query":"SELECT pg_notify('pgrst','reload schema')"}, f)
+          r = subprocess.run(["curl","-s","-X","POST",
+              f"https://api.supabase.com/v1/projects/{REF}/database/query",
+              "-H",f"Authorization: Bearer {MGMT}",
+              "-H","Content-Type: application/json",
+              "--data-binary","@/tmp/q.json"], capture_output=True, text=True)
+          print("Cache reload:", r.stdout[:200])
+          PYEOF
+        env: { SUPABASE_MGMT_TOKEN: "${{ secrets.SUPABASE_MGMT_TOKEN }}" }
+
+      - name: 4. Master data (farms/sheds/flocks/parties/medicines)
+        run: python3 scripts/run_sql.py supabase/seeds/001_seed_data.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: 5. Create admin user
+        run: |
+          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
+          R=$(curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
+            -H "apikey: $SK" -H "Authorization: Bearer $SK" -H "Content-Type: application/json" \
+            -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}')
+          echo "Done: $R" | head -c 100
+
+      - name: Done
+        run: |
+          echo "NARAENDRA FARMS — DATABASE RESET COMPLETE"
+          echo "App: https://naraendra-farms.pages.dev"
+          echo "Login: admin@naraendrafarms.com / NaraendraFarms@2025"
+          echo "Now import your Excel data through the app Import pages."

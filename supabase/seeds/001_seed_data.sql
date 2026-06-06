@@ -14,28 +14,59 @@ INSERT INTO public.farms (code,name,site_type,address,taluka,district,state,elec
   ('HO',      'Head Office',             'office',   'Head Office - Naraendra Farms','Hyderabad',  'Hyderabad','Telangana',NULL,       true)
 ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name;
 
-INSERT INTO public.sheds (farm_id,shed_name,shed_no,capacity_birds)
-SELECT f.id,v.sn,v.sno,v.cap FROM public.farms f
+-- ── SHEDS — from Naraendra_Farms_Shed_Capacity_Site_Wise.xlsx ──────
+-- KPALLY: Brooding & Growing rearing farm, 12 sheds (combined sex)
+-- PPALLY: Laying farm, 4 sheds each (female+male stored together)
+-- BPET1:  Laying farm, 7 sheds each (female+male stored together)
+-- BPET2:  Laying farm, 4 sheds each (female+male stored together)
+INSERT INTO public.sheds
+  (farm_id, shed_no, shed_name, shed_type, sex,
+   a_side_boxes, b_side_boxes, total_boxes,
+   capacity_female, capacity_male, birds_per_box, water_tank_litres)
+SELECT f.id, v.sno, v.sname, v.stype::text, v.sex::text,
+       v.abox, v.bbox, v.tbox,
+       v.capf, v.capm, v.bpb, v.wtank
+FROM public.farms f
 JOIN (VALUES
-  ('KPALLY','Shed A','A',22000),
-  ('KPALLY','Shed B','B',22000),
-  ('KPALLY','Shed C','C',22000),
-  ('KPALLY','Shed D','D',10000),
-  ('KPALLY','Shed E','E',10000),
-  ('KPALLY','Shed F','F',9000),
-  ('PPALLY','Shed 1','1',16000),
-  ('PPALLY','Shed 2','2',16000),
-  ('PPALLY','Shed 3','3',16000),
-  ('PPALLY','Shed 4','4',9000),
-  ('PPALLY','Shed 5','5',9000),
-  ('BPET1','Shed 1','1',14000),
-  ('BPET1','Shed 2','2',14000),
-  ('BPET1','Shed 3','3',14000),
-  ('BPET2','Shed 1','1',14000),
-  ('BPET2','Shed 2','2',14000),
-  ('FEEDMILL','Store A','A',5000)
-) v(fc,sn,sno,cap) ON f.code=v.fc
-ON CONFLICT DO NOTHING;
+  -- KPALLY: sheds 1-4 grower (2 birds/box), 5-6 brooding (6 birds/box), 7-9 grower, 10-12 brooding
+  ('KPALLY','1', 'Shed 1',  'grower',  'combined', NULL,NULL,2304, 4608,NULL,2.0,500),
+  ('KPALLY','2', 'Shed 2',  'grower',  'combined', NULL,NULL,2288, 4576,NULL,2.0,500),
+  ('KPALLY','3', 'Shed 3',  'grower',  'combined', NULL,NULL,2304, 4608,NULL,2.0,500),
+  ('KPALLY','4', 'Shed 4',  'grower',  'combined', NULL,NULL,2288, 4576,NULL,2.0,500),
+  ('KPALLY','5', 'Shed 5',  'brooding','combined', 528, 564, 1092, 6552,NULL,6.0,500),
+  ('KPALLY','6', 'Shed 6',  'brooding','combined', 770, 518, 1288, 7728,NULL,6.0,500),
+  ('KPALLY','7', 'Shed 7',  'grower',  'combined', 1344,1344,2688, 5376,NULL,2.0,500),
+  ('KPALLY','8', 'Shed 8',  'grower',  'combined', 1344,1344,2688, 5376,NULL,2.0,500),
+  ('KPALLY','9', 'Shed 9',  'grower',  'combined', 1328,1344,2672, 5344,NULL,2.0,500),
+  ('KPALLY','10','Shed 10', 'brooding','combined', 864, 928, 1792,10752,NULL,6.0,1000),
+  ('KPALLY','11','Shed 11', 'brooding','combined', 480, 840, 1320, 7920,NULL,6.0,500),
+  ('KPALLY','12','Shed 12', 'brooding','combined', 480, 840, 1320, 7920,NULL,6.0,500),
+  -- PPALLY (Agraharam Potlapally): 4 laying sheds, female+male in same shed
+  ('PPALLY','1', 'Shed 1',  'laying',  'combined', NULL,NULL,5533,11066,1256,2.0,2000),
+  ('PPALLY','2', 'Shed 2',  'laying',  'combined', NULL,NULL,5470,10940,1340,2.0,2000),
+  ('PPALLY','3', 'Shed 3',  'laying',  'combined', 2852,2696,5548,11096,1344,2.0,2000),
+  ('PPALLY','4', 'Shed 4',  'laying',  'combined', 2848,2696,5544,11088,1344,2.0,2000),
+  -- BPET1 (Bodjanampet-1): 7 laying sheds
+  ('BPET1','1',  'Shed 1',  'laying',  'combined', 1960,940, 2900, 5800, 704, 2.0,2000),
+  ('BPET1','2',  'Shed 2',  'laying',  'combined', 1442,1442,2884, 5768, 704, 2.0,2000),
+  ('BPET1','3',  'Shed 3',  'laying',  'combined', 1442,1442,2884, 5768, 704, 2.0,2000),
+  ('BPET1','4',  'Shed 4',  'laying',  'combined', 1446,1448,2894, 5788, 704, 2.0,2000),
+  ('BPET1','5',  'Shed 5',  'laying',  'combined', NULL,NULL,1914, 3828, 388, 2.0,1000),
+  ('BPET1','6',  'Shed 6',  'laying',  'combined', NULL,NULL,2032, 4064, 408, 2.0,1000),
+  ('BPET1','7',  'Shed 7',  'laying',  'combined', NULL,NULL,2032, 4064, 408, 2.0,1000),
+  -- BPET2 (Bodjanampet-2 VHL): 4 laying sheds
+  ('BPET2','1',  'Shed 1',  'laying',  'combined', 1394,1306,2700, 5400, 560, 2.0,2000),
+  ('BPET2','2',  'Shed 2',  'laying',  'combined', 1398,1324,2722, 5444, 532, 2.0,2000),
+  ('BPET2','3',  'Shed 3',  'laying',  'combined', 1398,1328,2726, 5452, 528, 2.0,2000),
+  ('BPET2','4',  'Shed 4',  'laying',  'combined', 1400,1328,2728, 5456, 528, 2.0,2000)
+) v(fc,sno,sname,stype,sex,abox,bbox,tbox,capf,capm,bpb,wtank)
+  ON f.code=v.fc
+ON CONFLICT (farm_id,shed_no) DO UPDATE
+  SET shed_name=EXCLUDED.shed_name, shed_type=EXCLUDED.shed_type, sex=EXCLUDED.sex,
+      a_side_boxes=EXCLUDED.a_side_boxes, b_side_boxes=EXCLUDED.b_side_boxes,
+      total_boxes=EXCLUDED.total_boxes, capacity_female=EXCLUDED.capacity_female,
+      capacity_male=EXCLUDED.capacity_male, birds_per_box=EXCLUDED.birds_per_box,
+      water_tank_litres=EXCLUDED.water_tank_litres;
 
 INSERT INTO public.hatcheries (name) VALUES
   ('Ruiya GF'),

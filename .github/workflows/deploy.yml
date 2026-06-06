@@ -1,4 +1,4 @@
-name: Build, Deploy & Load Data
+name: Build & Deploy Frontend
 
 on:
   push:
@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build and Deploy
+    name: Build and Deploy to Cloudflare Pages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,121 +30,3 @@ jobs:
       - name: Deploy to Cloudflare Pages
         run: wrangler pages deploy dist --project-name=naraendra-farms --branch=main --commit-dirty=true
         env: { CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}", CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" }
-
-  database:
-    name: Initialize Database
-    runs-on: ubuntu-latest
-    needs: deploy
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 1. Drop all tables (clean reset)
-        run: python3 scripts/run_sql.py supabase/seeds/000_cleanup.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: 2. Create schema (28 tables)
-        run: python3 scripts/run_sql.py supabase/migrations/001_schema.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-
-      - name: Reload PostgREST schema cache
-        run: |
-          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          # Send a notification to PostgREST to reload schema
-          curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/rpc/pg_notify" \
-            -H "apikey: $SK" -H "Authorization: Bearer $SK" \
-            -H "Content-Type: application/json" \
-            -d '{"channel":"pgrst","payload":"reload schema"}' || true
-          # Also trigger via the admin API
-          python3 - << 'PYEOF'
-          import subprocess, json, os
-          MGMT = os.environ.get("SUPABASE_MGMT_TOKEN","${{ secrets.SUPABASE_MGMT_TOKEN }}")
-          REF  = "kjliulgpipqqwptinrrd"
-          with open("/tmp/q.json","w") as f:
-              json.dump({"query":"SELECT pg_notify('pgrst','reload schema')"}, f)
-          r = subprocess.run(["curl","-s","-X","POST",
-              f"https://api.supabase.com/v1/projects/{REF}/database/query",
-              "-H",f"Authorization: Bearer {MGMT}",
-              "-H","Content-Type: application/json",
-              "--data-binary","@/tmp/q.json"], capture_output=True, text=True)
-          print("Cache reload:", r.stdout[:200])
-          PYEOF
-        env: { SUPABASE_MGMT_TOKEN: "${{ secrets.SUPABASE_MGMT_TOKEN }}" }
-
-      - name: 3. Master data (farms/sheds/flocks/parties/medicines)
-        run: python3 scripts/run_sql.py supabase/seeds/001_seed_data.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: 4. Daily records chunk 1
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_01.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 5. Daily records chunk 2
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_02.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 6. Daily records chunk 3
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_03.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 7. Daily records chunk 4
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_04.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 8. Daily records chunk 5
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_05.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 9. Daily records chunk 6
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_06.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 10. Daily records chunk 7
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_07.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 11. Daily records chunk 8
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_08.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 12. Daily records chunk 9
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_09.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 13. Daily + HE dispatch chunk 10
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_10.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 14. HE dispatch chunk 11
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_11.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 15. HE dispatch chunk 12
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_12.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 16. Hatchability + Salary chunk 13
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_13.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-      - name: 17. Electricity bills chunk 14
-        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_14.sql
-        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
-
-      - name: 18. Create admin user
-        run: |
-          SK="${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
-          R=$(curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/auth/v1/admin/users" \
-            -H "apikey: $SK" -H "Authorization: Bearer $SK" -H "Content-Type: application/json" \
-            -d '{"email":"admin@naraendrafarms.com","password":"NaraendraFarms@2025","email_confirm":true,"user_metadata":{"full_name":"Admin","role":"admin"}}')
-          ID=$(echo $R | python3 -c "import sys,json; print(json.load(sys.stdin).get('id','exists'))" 2>/dev/null || echo "exists")
-          echo "Admin: $ID"
-          if [ ${#ID} -gt 10 ] && [ "$ID" != "exists" ]; then
-            curl -s -X POST "https://kjliulgpipqqwptinrrd.supabase.co/rest/v1/profiles" \
-              -H "apikey: $SK" -H "Authorization: Bearer $SK" \
-              -H "Content-Type: application/json" -H "Prefer: return=minimal" \
-              -d "{"id":"$ID","full_name":"Admin","role":"admin","is_active":true}" || true
-          fi
-
-      - name: 19. Verify counts
-        run: python3 scripts/db_check.py
-        env:
-          ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          SERVICE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
-          MGMT_TOKEN: ${{ secrets.SUPABASE_MGMT_TOKEN }}
-          GH_PAT: ${{ secrets.GH_PAT }}
-
-      - name: Done
-        run: |
-          echo "NARAENDRA FARMS — FULLY LOADED"
-          echo "App: https://naraendra-farms.pages.dev"
-          echo "Login: admin@naraendrafarms.com / NaraendraFarms@2025"
-          echo "daily_records: 1949 | he_dispatch: 899 | hatchability: 260"
-          echo "salary: 93 | electricity: 98 | farms: 6 | flocks: 4"
