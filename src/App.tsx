@@ -22,6 +22,8 @@ import { ImportDaily, ImportElectricity, ImportSalary, ImportHE, ImportGRN } fro
 import { HatchabilityPage } from '@/pages/hatchability/HatchabilityPage'
 import { SetupPage } from '@/pages/setup/SetupPage'
 import { ProductionReport, PLReport, SalaryReport, FeedReport, ExportPage } from '@/pages/reports/ReportsPages'
+import { CostOverviewPage, ElectricityCostPage, SalaryCostPage } from '@/pages/reports/CostAnalysis'
+import { PurchaseOrdersPage, PendingPaymentsPage } from '@/pages/reports/POPages'
 import { UserManagement } from '@/pages/admin/UserManagement'
 import { AdminCentre } from '@/pages/admin/AdminCentre'
 import { FlockDashboard, FlockDetail as NewFlockDetail } from '@/pages/flock/FlockPages'
@@ -108,6 +110,11 @@ export const App: React.FC = () => {
             <Route path="reports/feed" element={<FeedReport />} />
             <Route path="reports/salary" element={<SalaryReport />} />
             <Route path="reports/export" element={<ExportPage />} />
+            <Route path="reports/costs" element={<CostOverviewPage />} />
+            <Route path="reports/electricity" element={<ElectricityCostPage />} />
+            <Route path="reports/salary-analysis" element={<SalaryCostPage />} />
+            <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
+            <Route path="pending-payments" element={<PendingPaymentsPage />} />
 
             {/* Import */}
             <Route path="import/daily" element={<ImportDaily />} />

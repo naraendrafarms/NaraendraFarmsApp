@@ -3,7 +3,7 @@ import { Link, useLocation, Outlet, Navigate } from 'react-router-dom'
 import {
   LayoutDashboard, Bird, Factory, Zap, Users, Settings,
   ChevronDown, ChevronRight, LogOut, Menu, X,
-  BarChart2, Database, Shield
+  BarChart2, Database, Shield, ShoppingCart
 } from 'lucide-react'
 import { useAuth, can, type Role } from '@/lib/auth'
 
@@ -88,7 +88,15 @@ const NAV: NavItem[] = [
       { label: 'Production Report',  to: '/reports/production' },
       { label: 'Feed Cost Report',   to: '/reports/feed' },
       { label: 'Salary Report',      to: '/reports/salary' },
+      { label: 'Cost Analysis',      to: '/reports/costs' },
       { label: 'Export to Excel',    to: '/reports/export' },
+    ]
+  },
+  {
+    label: 'Purchase & Payments', icon: <ShoppingCart size={18}/>,
+    children: [
+      { label: 'Purchase Orders',    to: '/purchase-orders' },
+      { label: 'Pending Payments',   to: '/pending-payments' },
     ]
   },
   {

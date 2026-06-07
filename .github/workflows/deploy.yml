@@ -96,3 +96,10 @@ jobs:
             python3 scripts/run_sql.py "$f"
           done
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: Load Purchase Orders and Payments data (idempotent)
+        run: |
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_vendor_bank_details.sql
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_purchase_orders.sql
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_pending_payments.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
