@@ -674,4 +674,4 @@ INSERT INTO public.bird_transfers (
     (SELECT id FROM public.farms WHERE code='KPALLY'),
     (SELECT id FROM public.farms WHERE code='PPALLY')
   )
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT bird_transfers_unique DO NOTHING;

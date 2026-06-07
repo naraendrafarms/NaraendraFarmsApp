@@ -6,13 +6,13 @@ INSERT INTO public.flocks (
   flock_no, breed,
   rearing_farm_id, laying_farm_id,
   placement_date, paid_female, paid_male, free_female, free_male,
-  chick_rate, supplier, status
+  chick_rate, supplier, status, close_date
 ) VALUES (
   '17', 'VENCO-430',
   (SELECT id FROM public.farms WHERE code='KPALLY'),
   (SELECT id FROM public.farms WHERE code='BPET1'),
   '2024-03-30', 35480, 4250, 1419, 176,
-  320, 'Venkateshwara Hatcheries', 'laying'
+  320, 'Venkateshwara Hatcheries', 'closed', '2025-08-01'
 )
 ON CONFLICT (flock_no) DO UPDATE SET
   breed            = EXCLUDED.breed,
@@ -25,4 +25,5 @@ ON CONFLICT (flock_no) DO UPDATE SET
   free_male        = EXCLUDED.free_male,
   chick_rate       = EXCLUDED.chick_rate,
   supplier         = EXCLUDED.supplier,
-  status           = EXCLUDED.status;
+  status           = EXCLUDED.status,
+  close_date       = EXCLUDED.close_date;

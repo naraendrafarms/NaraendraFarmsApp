@@ -2344,4 +2344,4 @@ INSERT INTO public.medicine_usage (
     (SELECT id FROM public.medicines_master WHERE name='Mycoplasma Gallisepticum Vaccine Inactivated BP - 500ML / MG KILLED-1000 DOES' LIMIT 1),
     25000, 'Doses', 4.41, 110250
   )
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT medicine_usage_unique DO NOTHING;

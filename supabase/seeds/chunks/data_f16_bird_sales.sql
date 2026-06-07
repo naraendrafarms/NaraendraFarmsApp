@@ -228,4 +228,6 @@ INSERT INTO public.nhe_sales (
     '2025-04-23', '512', (SELECT id FROM public.parties WHERE LOWER(name)=LOWER('Madheen Marketing') LIMIT 1), 'bird_cull',
     30, 'nos', 50, 3250
   )
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT nhe_sales_unique DO UPDATE SET
+  amount = EXCLUDED.amount,
+  rate = EXCLUDED.rate;

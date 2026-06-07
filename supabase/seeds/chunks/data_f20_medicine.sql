@@ -5984,4 +5984,4 @@ INSERT INTO public.medicine_usage (
     (SELECT id FROM public.medicines_master WHERE name='Vitalosin 62.5% 1 Kg' LIMIT 1),
     '2026-05-13', 5.2, 'Kg'
   )
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT medicine_usage_unique DO NOTHING;

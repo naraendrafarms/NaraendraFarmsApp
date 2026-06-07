@@ -5099,4 +5099,6 @@ INSERT INTO public.nhe_sales (
     1.0, 40.0,
     'Broken Eggs'
   )
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT nhe_sales_unique DO UPDATE SET
+  amount = EXCLUDED.amount,
+  rate = EXCLUDED.rate;

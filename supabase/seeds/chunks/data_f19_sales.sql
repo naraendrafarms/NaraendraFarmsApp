@@ -11624,4 +11624,6 @@ INSERT INTO public.nhe_sales (
     45.0, 31050.0,
     'F=0 M=234 NetWt=690kg'
   )
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT nhe_sales_unique DO UPDATE SET
+  amount = EXCLUDED.amount,
+  rate = EXCLUDED.rate;
