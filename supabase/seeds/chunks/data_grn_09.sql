@@ -256,4 +256,4 @@ FROM (VALUES
   ('2029','2025-07-08','FEEDMILL','Alltech Biotechnology Pvt Ltd','40250392','2025-07-07','Mycosorb A+ 25 Kg',40.0,1000.0,NULL,250.0,NULL,0.0,250000.0),
   ('2030','2025-07-10','FEEDMILL','Das Drug Centre Pvt Ltd','DDCP/03558/25-26','2025-07-01','Ovulanta-P  Pow 5Kg',40.0,200.0,NULL,320.0,NULL,0.0,64000.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

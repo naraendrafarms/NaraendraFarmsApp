@@ -256,4 +256,4 @@ FROM (VALUES
   ('1678','2024-11-02','FEEDMILL','Sai Santhoshini Traders','2119','2024-11-02','Maize  707 Bags',36116.0,36116.0,NULL,26.0,NULL,0.0,939016.0),
   ('1723','2024-11-03','FEEDMILL','P Janya',NULL,'2024-11-03','Fire Wood',5955.0,5955.0,NULL,3.5,NULL,0.0,20841.5)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

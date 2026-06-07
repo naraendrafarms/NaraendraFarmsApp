@@ -187,4 +187,4 @@ FROM (VALUES
   ('2735','2026-05-29','FEEDMILL','Sachin International Protiens Pvt Ltd','SIPPL/26-27/739','2026-05-27','Soya Doc',573.0,34990.0,NULL,62.5,2186875.0,5.0,2296219.0),
   ('2735','2026-05-29','FEEDMILL','SM Transport',NULL,'2026-05-27','Soya Transport Charges',34990.0,34990.0,NULL,1.35,47236.5,0.0,47237.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

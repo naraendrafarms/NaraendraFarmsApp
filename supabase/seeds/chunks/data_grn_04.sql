@@ -256,4 +256,4 @@ FROM (VALUES
   ('564','2022-12-30','FEEDMILL','DAS DRUG CENTRE','DDC/09099/22-23',NULL,'New Improved Stodi-25 Kg',NULL,300.0,NULL,71.0,21300.0,NULL,21300.0),
   ('565','2022-12-30','FEEDMILL','VES SPA','000483',NULL,'VES-CHOL 60%',NULL,1000.0,NULL,90.0,90000.0,NULL,90000.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

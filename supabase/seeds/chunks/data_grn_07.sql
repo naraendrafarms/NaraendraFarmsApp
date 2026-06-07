@@ -256,4 +256,4 @@ FROM (VALUES
   ('904','2023-04-18','PPALLY','Das Drug Center','DDC/00403/23-24','2023-04-08','Famitone 1Lt',NULL,60.0,NULL,580.0,34800.0,NULL,34800.0),
   ('905','2023-04-18','PPALLY','Das Drug Center','DDC/00398/23-24','2023-04-08','Bayrocin 1lt,Ektomin 1ltr',NULL,NULL,NULL,NULL,57650.0,NULL,64568.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

@@ -256,4 +256,4 @@ FROM (VALUES
   ('1264','2023-11-28','FEEDMILL','Healers Assosiates','HAP/2023-24/923','2023-11-24','Tiamu Med 10% KG',NULL,400.0,NULL,675.0,270000.0,NULL,270000.0),
   ('1265','2023-12-01','FEEDMILL','Kemin Industries South Asia Pvt Ltd','IAG230096017','2023-11-24','CLOSTAT 12 DRY 25 KG BAG',NULL,200.0,NULL,500.0,100000.0,NULL,100000.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

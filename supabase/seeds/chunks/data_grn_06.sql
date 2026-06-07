@@ -256,4 +256,4 @@ FROM (VALUES
   ('664','2023-06-02','BPET1','Mohan JCB-TS36A3363',NULL,NULL,'JCB Work At B Pet-1-14:35 Min JCb Work & 14 Trips Triper',NULL,NULL,NULL,14500.0,NULL,NULL,14500.0),
   ('665 & 666','2023-06-02','BPET1','Plasto Marketing agencies','178',NULL,'PVC Pipes, tape, L bow, Etc..,',NULL,NULL,NULL,NULL,34553.0,NULL,40773.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

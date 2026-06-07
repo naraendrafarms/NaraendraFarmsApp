@@ -256,4 +256,4 @@ FROM (VALUES
   ('2635','2026-03-12','PPALLY','Elanco India Pvt Ltd','AP0026000518','2026-03-10','Ektomin 1 Ltr',50.0,50.0,NULL,700.0,NULL,5.0,36750.0),
   ('2413','2026-03-13','FEEDMILL','Bengal Agrovet Private Limited','BAPL/25-26/362','2026-03-06','Safmannan 25 Kg',8.0,200.0,NULL,420.0,NULL,0.0,84000.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

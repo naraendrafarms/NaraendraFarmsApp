@@ -680,4 +680,4 @@ VALUES
   ('Zeus Biotech PVT LTD', 'supplier', 'Purchase', true),
   ('Zeus Biotech Pvt Ltd', 'supplier', 'Purchase', true),
   ('hitech Hatchfresh Pvt Ltd', 'supplier', 'Purchase', true)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

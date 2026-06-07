@@ -17,7 +17,7 @@ export const GRNEntry: React.FC = () => {
 
   // Filters
   const [fFarm,    setFFarm]    = useState('')
-  const [fParty,   setFParty]   = useState('')
+  const [fParties, setFParties] = useState<string[]>([])
   const [fItem,    setFItem]    = useState('')
   const [fFrom,    setFFrom]    = useState('')
   const [fTo,      setFTo]      = useState('')
@@ -48,8 +48,8 @@ export const GRNEntry: React.FC = () => {
 
   // Client-side filtering
   const grns = (allGrns ?? []).filter((g: any) => {
-    if (fFarm  && g.farm_id !== fFarm) return false
-    if (fParty && g.party_id !== fParty) return false
+    if (fFarm && g.farm_id !== fFarm) return false
+    if (fParties.length > 0 && !fParties.includes(g.party_id)) return false
     if (fItem) {
       const name = (g.feed_ingredients?.name ?? g.item_name ?? '').toLowerCase()
       if (!name.includes(fItem.toLowerCase())) return false
@@ -58,6 +58,15 @@ export const GRNEntry: React.FC = () => {
     if (fTo   && g.grn_date > fTo)   return false
     return true
   })
+
+  // Item-level stats (when item filter active)
+  const itemStats = fItem ? (() => {
+    const valid = grns.filter((g: any) => g.qty && g.price_per_unit)
+    const avgRate = valid.length ? valid.reduce((s: number, g: any) => s + g.price_per_unit, 0) / valid.length : 0
+    const minRate = valid.length ? Math.min(...valid.map((g: any) => g.price_per_unit)) : 0
+    const maxRate = valid.length ? Math.max(...valid.map((g: any) => g.price_per_unit)) : 0
+    return { avgRate, minRate, maxRate }
+  })() : null
 
   const [form, setForm] = useState({
     grn_no: '', grn_date: today(), farm_id: '', party_id: '', invoice_no: '',
@@ -142,7 +151,7 @@ export const GRNEntry: React.FC = () => {
 
   const totalQty = grns.reduce((s: number, g: any) => s + (g.qty ?? 0), 0)
   const totalVal = grns.reduce((s: number, g: any) => s + (g.total_amount ?? 0), 0)
-  const hasFilter = fFarm || fParty || fItem || fFrom || fTo
+  const hasFilter = fFarm || fParties.length > 0 || fItem || fFrom || fTo
 
   return (
     <div className="space-y-5">
@@ -156,15 +165,23 @@ export const GRNEntry: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 items-end">
           <Select label="Site" placeholder="All Sites" options={farmOptions}
             value={fFarm} onChange={e => setFFarm(e.target.value)} />
-          <Select label="Supplier" placeholder="All Parties" options={partyOptions}
-            value={fParty} onChange={e => setFParty(e.target.value)} />
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Supplier (multi-select)</label>
+            <select multiple size={4}
+              className="w-full border border-gray-200 rounded-lg text-xs p-1.5 focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+              value={fParties}
+              onChange={e => setFParties(Array.from(e.target.selectedOptions).map(o => o.value))}>
+              {partyOptions.map((p: any) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+            {fParties.length > 0 && <p className="text-xs text-brand-600 mt-0.5">{fParties.length} selected</p>}
+          </div>
           <Input label="Item / Ingredient" placeholder="Search…" value={fItem}
             onChange={e => setFItem(e.target.value)} />
           <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
           <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
         </div>
         {hasFilter && (
-          <button onClick={() => { setFFarm(''); setFParty(''); setFItem(''); setFFrom(''); setFTo('') }}
+          <button onClick={() => { setFFarm(''); setFParties([]); setFItem(''); setFFrom(''); setFTo('') }}
             className="mt-2 text-xs text-brand-600 hover:underline">Clear filters</button>
         )}
       </Card>
@@ -173,7 +190,13 @@ export const GRNEntry: React.FC = () => {
         <StatCard title="Records" value={grns.length.toLocaleString('en-IN')} icon={<Package size={18}/>} color="text-brand-600" />
         <StatCard title="Total Qty" value={`${(totalQty/1000).toFixed(1)} MT`} icon={<Package size={18}/>} color="text-blue-600" />
         <StatCard title="Purchase Value" value={inr(totalVal)} icon={<TrendingUp size={18}/>} color="text-green-600" />
-        <StatCard title="Avg per Record" value={grns.length ? inr(totalVal/grns.length) : '—'} icon={<TrendingUp size={18}/>} color="text-orange-600" />
+        {itemStats ? (
+          <StatCard title={`Avg Rate (${fItem})`} value={`₹${itemStats.avgRate.toFixed(2)}/unit`}
+            subtitle={`Min ₹${itemStats.minRate.toFixed(2)} · Max ₹${itemStats.maxRate.toFixed(2)}`}
+            icon={<TrendingUp size={18}/>} color="text-orange-600" />
+        ) : (
+          <StatCard title="Avg per Record" value={grns.length ? inr(totalVal/grns.length) : '—'} icon={<TrendingUp size={18}/>} color="text-orange-600" />
+        )}
       </div>
 
       {isLoading ? <Spinner /> : (

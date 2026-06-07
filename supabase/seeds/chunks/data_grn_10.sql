@@ -256,4 +256,4 @@ FROM (VALUES
   ('2233','2025-11-01','PPALLY','Venkateshwara B.V.Biocorp Pvt Ltd','26HISLHYD21/1232','2025-11-01','Safeguard 5 Ltrs',20.0,100.0,NULL,234.4,NULL,18.0,27659.0),
   ('2274','2025-11-03','FEEDMILL','Yallalingeshwar Trading Company','57','2025-11-01','Maize',451.0,27134.0,NULL,21.25,NULL,0.0,576598.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

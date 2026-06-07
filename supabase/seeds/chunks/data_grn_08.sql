@@ -256,4 +256,4 @@ FROM (VALUES
   ('1198','2024-03-30','PPALLY','Shiva Packaging','23','2024-03-29','Plastic Sutli Bags + Tapes + CV Tags 100 -1000 pkts',NULL,NULL,NULL,NULL,106000.0,NULL,125080.0),
   ('1199','2024-03-30','PPALLY','Venkteswara Hatcheries PVt LTD','24SLHYD21/2181','2024-03-29','HVT+SB1 1000 Doses',NULL,83.0,NULL,1961.0,162763.0,NULL,170901.0)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;

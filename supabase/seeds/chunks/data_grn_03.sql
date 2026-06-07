@@ -256,4 +256,4 @@ FROM (VALUES
   ('1855','2025-03-04','FEEDMILL','Raghvendra Agencies','GST/2024-25/4567','2025-02-28','Fan belts EA88',10.0,10.0,NULL,226.8,NULL,0.18,2675.65),
   ('1855','2025-03-04','FEEDMILL','Raghvendra Agencies','GST/2024-25/4567','2025-02-28','Fan belts EB84',10.0,10.0,NULL,281.2,NULL,0.18,3317.57)
 ) v(grn_no,grn_date,fc,pn,inv_no,inv_date,item,bags,qty,unit,rate,bamt,gst,tamt)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT grn_unique_record DO NOTHING;
