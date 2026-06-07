@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import {
   Card,
@@ -11,8 +11,14 @@ import {
   Spinner,
   StatCard,
   Select,
+  Button,
+  Input,
+  FormRow,
+  Modal,
 } from '@/components/ui'
-import { pct, fmtDate } from '@/lib/utils'
+import { pct, fmtDate, today } from '@/lib/utils'
+import { Plus, Edit2, Trash2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import {
   ResponsiveContainer,
   LineChart,
@@ -58,7 +64,7 @@ interface FlockRow {
   flock_no: string
 }
 
-type TabId = 'master' | 'hatchery' | 'pipeline' | 'age' | 'compare' | 'issues' | 'graphs'
+type TabId = 'master' | 'hatchery' | 'pipeline' | 'age' | 'compare' | 'issues' | 'graphs' | 'edit'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -139,7 +145,157 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'compare',  label: 'Flock Comparison' },
   { id: 'issues',   label: 'Issues' },
   { id: 'graphs',   label: 'Graphs' },
+  { id: 'edit',     label: '✎ Edit Records' },
 ]
+
+// ─── Edit Records Tab ─────────────────────────────────────────────────────────
+const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows, flocks }) => {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
+  const EMPTY = { flock_id:'', production_date:'', invoice_date:'', setting_date:'', hatch_date:'',
+    hatchery:'', setting_no:'', dc_no:'', age_weeks:'', eggs_set:'', broken:'0', infertile:'0',
+    blasters:'0', chicks_hatched:'', hatch_pct:'', eggs_weight:'', unhatch:'', rejects:'' }
+  const [form, setForm] = useState<any>(EMPTY)
+  const s = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }))
+
+  const openAdd = () => { setEditing(null); setForm(EMPTY); setShowForm(true) }
+  const openEdit = (r: HatchRow) => {
+    setEditing(r)
+    setForm({
+      flock_id: r.flock_id ?? '', production_date: r.production_date ?? '',
+      invoice_date: r.invoice_date ?? '', setting_date: r.setting_date ?? '',
+      hatch_date: r.hatch_date ?? '', hatchery: r.hatchery ?? '',
+      setting_no: r.setting_no?.toString() ?? '', dc_no: r.dc_no?.toString() ?? '',
+      age_weeks: r.age_weeks?.toString() ?? '', eggs_set: r.eggs_set?.toString() ?? '',
+      broken: r.broken?.toString() ?? '0', infertile: r.infertile?.toString() ?? '0',
+      blasters: r.blasters?.toString() ?? '0', chicks_hatched: r.chicks_hatched?.toString() ?? '',
+      hatch_pct: r.hatch_pct != null ? (r.hatch_pct * 100).toFixed(2) : '',
+      eggs_weight: r.eggs_weight?.toString() ?? '',
+      unhatch: r.unhatch?.toString() ?? '', rejects: r.rejects?.toString() ?? ''
+    })
+    setShowForm(true)
+  }
+
+  const payload = () => ({
+    flock_id: form.flock_id || null,
+    production_date: form.production_date || null,
+    invoice_date: form.invoice_date || null,
+    setting_date: form.setting_date || null,
+    hatch_date: form.hatch_date || null,
+    hatchery: form.hatchery || null,
+    setting_no: parseInt(form.setting_no) || null,
+    dc_no: form.dc_no || null,
+    age_weeks: parseInt(form.age_weeks) || null,
+    eggs_set: parseInt(form.eggs_set) || null,
+    broken: parseInt(form.broken) || 0,
+    infertile: parseInt(form.infertile) || 0,
+    blasters: parseInt(form.blasters) || 0,
+    chicks_hatched: parseInt(form.chicks_hatched) || null,
+    hatch_pct: form.hatch_pct ? parseFloat(form.hatch_pct) / 100 : null,
+    eggs_weight: form.eggs_weight ? parseFloat(form.eggs_weight) : null,
+    unhatch: parseInt(form.unhatch) || null,
+    rejects: parseInt(form.rejects) || null,
+  })
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!form.flock_id || !form.setting_date) throw new Error('Flock and setting date required')
+      if (editing) {
+        const { error } = await supabase.from('hatchability').update(payload()).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('hatchability').insert(payload())
+        if (error) throw error
+      }
+    },
+    onSuccess: () => { toast.success(editing ? 'Record updated!' : 'Record added!'); qc.invalidateQueries({ queryKey: ['hatchability'] }); setShowForm(false) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('hatchability').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Record deleted'); qc.invalidateQueries({ queryKey: ['hatchability'] }) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const flockOptions = flocks.map(f => ({ value: f.id, label: `Flock ${f.flock_no}` }))
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button icon={<Plus size={16}/>} onClick={openAdd}>Add Record</Button>
+      </div>
+      <Card padding={false}>
+        <Table>
+          <thead><tr>
+            <Th>Flock</Th><Th>Setting Date</Th><Th>Hatch Date</Th><Th>Hatchery</Th>
+            <Th>DC No</Th><Th right>Eggs Set</Th><Th right>Chicks</Th><Th right>Hatch%</Th><Th></Th>
+          </tr></thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id} className="hover:bg-gray-50">
+                <Td><Badge color="blue">F{r.flocks?.flock_no}</Badge></Td>
+                <Td className="text-xs">{fmtDate(r.setting_date)}</Td>
+                <Td className="text-xs">{fmtDate(r.hatch_date)}</Td>
+                <Td className="text-xs">{r.hatchery ?? '—'}</Td>
+                <Td className="text-xs font-mono">{r.dc_no ?? '—'}</Td>
+                <Td right className="text-xs">{r.eggs_set?.toLocaleString('en-IN') ?? '—'}</Td>
+                <Td right className="text-xs">{r.chicks_hatched?.toLocaleString('en-IN') ?? '—'}</Td>
+                <Td right className="text-xs font-semibold">{r.hatch_pct != null ? pct(r.hatch_pct) : '—'}</Td>
+                <Td>
+                  <div className="flex gap-1">
+                    <button onClick={() => openEdit(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors" title="Edit"><Edit2 size={13}/></button>
+                    <button onClick={() => { if(confirm('Delete this hatchability record?')) deleteMut.mutate(r.id) }} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={13}/></button>
+                  </div>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </Card>
+
+      <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Hatchability Record' : 'Add Hatchability Record'} size="lg"
+        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+          <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Add'}</Button></>}>
+        <div className="space-y-4">
+          <FormRow>
+            <Select label="Flock" required options={flockOptions} value={form.flock_id} onChange={e => s('flock_id', e.target.value)} placeholder="— Select Flock —" />
+            <Input label="Hatchery" value={form.hatchery} onChange={e => s('hatchery', e.target.value)} />
+          </FormRow>
+          <FormRow cols={3}>
+            <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />
+            <Input label="Setting Date" required type="date" value={form.setting_date} onChange={e => s('setting_date', e.target.value)} />
+            <Input label="Hatch Date" type="date" value={form.hatch_date} onChange={e => s('hatch_date', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="DC No" value={form.dc_no} onChange={e => s('dc_no', e.target.value)} />
+            <Input label="Age (Weeks)" type="number" value={form.age_weeks} onChange={e => s('age_weeks', e.target.value)} />
+          </FormRow>
+          <FormRow cols={4}>
+            <Input label="Eggs Set" type="number" value={form.eggs_set} onChange={e => s('eggs_set', e.target.value)} />
+            <Input label="Broken" type="number" value={form.broken} onChange={e => s('broken', e.target.value)} />
+            <Input label="Infertile" type="number" value={form.infertile} onChange={e => s('infertile', e.target.value)} />
+            <Input label="Blasters" type="number" value={form.blasters} onChange={e => s('blasters', e.target.value)} />
+          </FormRow>
+          <FormRow cols={4}>
+            <Input label="Chicks Hatched" type="number" value={form.chicks_hatched} onChange={e => s('chicks_hatched', e.target.value)} />
+            <Input label="Hatch %" type="number" step="0.01" value={form.hatch_pct} onChange={e => s('hatch_pct', e.target.value)} hint="Enter as % e.g. 78.5" />
+            <Input label="Unhatch" type="number" value={form.unhatch} onChange={e => s('unhatch', e.target.value)} />
+            <Input label="Rejects" type="number" value={form.rejects} onChange={e => s('rejects', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="Egg Weight (g)" type="number" step="0.01" value={form.eggs_weight} onChange={e => s('eggs_weight', e.target.value)} />
+            <Input label="Production Date" type="date" value={form.production_date} onChange={e => s('production_date', e.target.value)} />
+          </FormRow>
+        </div>
+      </Modal>
+    </div>
+  )
+}
 
 // ─── Master Report tab ────────────────────────────────────────────────────────
 
@@ -1074,6 +1230,7 @@ export const HatchabilityPage: React.FC = () => {
           {tab === 'compare'  && <FlockComparison rows={rows} />}
           {tab === 'issues'   && <Issues rows={rows} />}
           {tab === 'graphs'   && <Graphs rows={rows} />}
+          {tab === 'edit'     && <EditRecords rows={rows} flocks={flocks} />}
         </>
       )}
     </div>

@@ -6,13 +6,14 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 } from '@/components/ui'
-import { Plus, Factory, Package, ArrowRight, TrendingUp } from 'lucide-react'
+import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 // ── GRN ENTRY ────────────────────────────────────────────────────
 export const GRNEntry: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
 
   const { data: farms } = useQuery({ queryKey: ['farms'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
   const { data: parties } = useQuery({ queryKey: ['parties_supp'], queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type',['supplier','both']).order('name'); return data ?? [] } })
@@ -40,26 +41,68 @@ export const GRNEntry: React.FC = () => {
   const gstAmt = basic * (parseFloat(form.gst_pct)||0) / 100
   const total  = basic + gstAmt
 
+  const payload = () => ({
+    grn_no: form.grn_no, grn_date: form.grn_date,
+    farm_id: form.farm_id, party_id: form.party_id || null,
+    invoice_no: form.invoice_no || null, invoice_date: form.invoice_date || null,
+    ingredient_id: form.ingredient_id || null, item_name: form.item_name || null,
+    qty: parseFloat(form.qty) || null, unit: form.unit,
+    bags: parseInt(form.bags) || null,
+    price_per_unit: parseFloat(form.price_per_unit) || null,
+    basic_amount: parseFloat(form.basic_amount) || basic || null,
+    gst_pct: parseFloat(form.gst_pct) || 0,
+    total_amount: parseFloat(form.total_amount) || total || null,
+    vehicle_no: form.vehicle_no || null, remarks: form.remarks || null
+  })
+
+  const openAdd = () => {
+    setEditing(null)
+    setForm({ grn_no:'', grn_date:today(), farm_id:'', party_id:'', invoice_no:'',
+      invoice_date:today(), ingredient_id:'', item_name:'', qty:'', unit:'kg',
+      bags:'', price_per_unit:'', basic_amount:'', gst_pct:'0', total_amount:'',
+      vehicle_no:'', remarks:'' })
+    setShowForm(true)
+  }
+
+  const openEdit = (g: any) => {
+    setEditing(g)
+    setForm({
+      grn_no: g.grn_no ?? '', grn_date: g.grn_date ?? today(),
+      farm_id: g.farm_id ?? '', party_id: g.party_id ?? '',
+      invoice_no: g.invoice_no ?? '', invoice_date: g.invoice_date ?? today(),
+      ingredient_id: g.ingredient_id ?? '', item_name: g.item_name ?? '',
+      qty: g.qty?.toString() ?? '', unit: g.unit ?? 'kg',
+      bags: g.bags?.toString() ?? '',
+      price_per_unit: g.price_per_unit?.toString() ?? '',
+      basic_amount: g.basic_amount?.toString() ?? '',
+      gst_pct: g.gst_pct?.toString() ?? '0',
+      total_amount: g.total_amount?.toString() ?? '',
+      vehicle_no: g.vehicle_no ?? '', remarks: g.remarks ?? ''
+    })
+    setShowForm(true)
+  }
+
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.grn_no || !form.grn_date || !form.farm_id) throw new Error('GRN No, date and site required')
-      const { error } = await supabase.from('grn').insert({
-        grn_no: form.grn_no, grn_date: form.grn_date,
-        farm_id: form.farm_id, party_id: form.party_id || null,
-        invoice_no: form.invoice_no || null, invoice_date: form.invoice_date || null,
-        ingredient_id: form.ingredient_id || null,
-        item_name: form.item_name || null,
-        qty: parseFloat(form.qty) || null, unit: form.unit,
-        bags: parseInt(form.bags) || null,
-        price_per_unit: parseFloat(form.price_per_unit) || null,
-        basic_amount: parseFloat(form.basic_amount) || basic || null,
-        gst_pct: parseFloat(form.gst_pct) || 0,
-        total_amount: parseFloat(form.total_amount) || total || null,
-        vehicle_no: form.vehicle_no || null, remarks: form.remarks || null
-      })
+      if (editing) {
+        const { error } = await supabase.from('grn').update(payload()).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('grn').insert(payload())
+        if (error) throw error
+      }
+    },
+    onSuccess: () => { toast.success(editing ? 'GRN updated!' : 'GRN saved!'); qc.invalidateQueries({ queryKey: ['grns'] }); setShowForm(false) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('grn').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('GRN saved!'); qc.invalidateQueries({ queryKey: ['grns'] }); setShowForm(false) },
+    onSuccess: () => { toast.success('GRN deleted'); qc.invalidateQueries({ queryKey: ['grns'] }) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -74,7 +117,7 @@ export const GRNEntry: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="GRN — Goods Received"
         subtitle={`${grns?.length ?? 0} records`}
-        action={<Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add GRN</Button>}
+        action={<Button icon={<Plus size={16}/>} onClick={openAdd}>Add GRN</Button>}
       />
       <div className="grid grid-cols-2 gap-4">
         <StatCard title="Total Qty Received" value={`${(totalQty/1000).toFixed(1)} MT`} icon={<Package size={18}/>} color="text-brand-600" />
@@ -86,7 +129,7 @@ export const GRNEntry: React.FC = () => {
             <thead><tr>
               <Th>GRN No</Th><Th>Date</Th><Th>Site</Th><Th>Party</Th>
               <Th>Item</Th><Th>Invoice No</Th>
-              <Th right>Qty</Th><Th right>Unit Price</Th><Th right>Amount</Th>
+              <Th right>Qty</Th><Th right>Unit Price</Th><Th right>Amount</Th><Th></Th>
             </tr></thead>
             <tbody>
               {grns?.map((g: any) => (
@@ -100,6 +143,12 @@ export const GRNEntry: React.FC = () => {
                   <Td right className="text-xs">{g.qty?.toLocaleString('en-IN') ?? '—'} {g.unit}</Td>
                   <Td right className="text-xs">{g.price_per_unit ? `Rs ${g.price_per_unit}` : '—'}</Td>
                   <Td right className="font-semibold text-xs">{g.total_amount ? inr(g.total_amount) : '—'}</Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(g)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors" title="Edit"><Edit2 size={13}/></button>
+                      <button onClick={() => { if(confirm('Delete this GRN record?')) deleteMut.mutate(g.id) }} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -112,13 +161,13 @@ export const GRNEntry: React.FC = () => {
               </tr></tfoot>
             )}
           </Table>
-          {grns?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No GRN records" action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add GRN</Button>} />}
+          {grns?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No GRN records" action={<Button onClick={openAdd} icon={<Plus size={16}/>}>Add GRN</Button>} />}
         </Card>
       )}
 
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="Add GRN" size="lg"
+      <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit GRN' : 'Add GRN'} size="lg"
         footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
-          <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button></>}>
+          <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>}>
         <div className="space-y-4">
           <FormRow cols={3}>
             <Input label="GRN No" required value={form.grn_no} onChange={e => s('grn_no', e.target.value)} />
