@@ -81,3 +81,18 @@ jobs:
             python3 scripts/run_sql.py "$f"
           done
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: Load Electricity meters and bills (idempotent)
+        run: |
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_electricity_meters.sql
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_electricity_bills.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: Load Employees and Salary data (idempotent)
+        run: |
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_employees.sql
+          for f in $(ls supabase/seeds/chunks/data_salary_monthly_*.sql | sort); do
+            echo "--- $f ---"
+            python3 scripts/run_sql.py "$f"
+          done
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
