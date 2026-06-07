@@ -4081,6 +4081,6 @@ VALUES
   ('PARTNER_5', 'RANU HALDER', 'Partner', NULL, '914010031721005', 'AXIS BANK', TRUE),
   ('PARTNER_6', 'D NARAENDRA REDDY', 'Partner', NULL, '44312574022', 'SBI', TRUE)
 ON CONFLICT (emp_id) DO UPDATE SET
-  emp_name    = EXCLUDED.emp_name,
+  name        = EXCLUDED.name,
   designation = EXCLUDED.designation,
   farm_id     = EXCLUDED.farm_id;
