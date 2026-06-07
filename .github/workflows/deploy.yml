@@ -56,3 +56,12 @@ jobs:
             python3 scripts/run_sql.py "$f"
           done
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: Load Trial Balance and Sales Register (idempotent)
+        run: |
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_trial_balance.sql
+          for f in $(ls supabase/seeds/chunks/data_sales_register_*.sql | sort); do
+            echo "--- $f ---"
+            python3 scripts/run_sql.py "$f"
+          done
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
