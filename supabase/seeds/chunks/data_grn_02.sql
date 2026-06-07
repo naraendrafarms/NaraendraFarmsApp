@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('1533','2024-07-05','FEEDMILL','Gitaa Medical Enterprise','A001046','2024-06-24','Promix  Y Plus 1 Kg',40.0,40.0,NULL,900.0,NULL,0.0,36000.0),
   ('1534','2024-07-05','FEEDMILL','Moin Pumps & Spares','879','2024-07-03','1.5 Hp Motor Rewinding -3  + Bearing Set - 2 + Opening Well Motor rewinding  - 3 + Rotor Filing',9.0,9.0,NULL,13450.0,NULL,0.0,12450.0),

@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('667','2023-06-03','BPET1','Mysore Nandi Tarpaulins MFG.Co','429',NULL,'HDPE Poly Top 180 GSM Taruplins',NULL,NULL,NULL,NULL,49600.0,NULL,58528.0),
   ('668','2023-06-03','BPET1','Mohan JCB-TS36A3363',NULL,NULL,'JCB Work At B Pet-1-06:10 HRS',NULL,NULL,NULL,NULL,NULL,NULL,NULL),

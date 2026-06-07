@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('1724','2024-11-03','FEEDMILL','Sri Shiva Sai Enterprises','52-N/2023-24','2024-11-02','Nustart 200 Grms',18000.0,18000.0,NULL,2.0,NULL,0.0,36000.0),
   ('1725','2024-11-04','FEEDMILL','SLC Vinayaka Enterprises','86','2024-11-03','20 LB Pulp Egg Tray',44000.0,44000.0,NULL,4.5,NULL,0.0,198000.0),

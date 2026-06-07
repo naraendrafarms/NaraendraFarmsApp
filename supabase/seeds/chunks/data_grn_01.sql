@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('1225','2024-04-01','FEEDMILL','Sai Santhosini Traders','1823','2024-04-01','Maize(340 Bags)',20168.0,NULL,NULL,24.35,NULL,0.0,491090.8),
   ('1226','2024-04-01','FEEDMILL','Sai Santhosini Traders','1822','2024-04-01','Maize(185 Bags)',11199.0,NULL,NULL,24.35,NULL,0.0,272695.65),

@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('1200','2024-03-31','PPALLY','Narsimha JCB KR Pally Red Bricks',NULL,'2024-03-31','JCB Work Potlapally & Bpet 1',NULL,3.0,NULL,1000.0,3000.0,NULL,3000.0),
   ('1914','2025-04-01','FEEDMILL','Gayathri Salts','3','2025-04-01','Common Salt & Transport Chrages',75.0,3000.0,NULL,7.6667,NULL,0.0,23000.0),

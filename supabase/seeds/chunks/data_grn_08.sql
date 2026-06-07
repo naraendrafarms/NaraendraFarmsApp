@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('906','2023-04-20','PPALLY','Vishnu Trading Co.','636/23-24','2023-04-20','Copper Wire',NULL,NULL,NULL,NULL,25970.0,NULL,30645.0),
   ('907','2023-04-20','PPALLY','Sri Santosh Southern Minerals','6','2023-04-19','Lime Powder',NULL,35000.0,NULL,5.2,182000.0,NULL,191100.0),

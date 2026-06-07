@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('2275','2025-11-03','FEEDMILL','Stats Speciality Products Pvt Ltd','SSPPL/25-26/2791','2025-11-01','MCP 50 Kg',100.0,5000.0,NULL,76.27,NULL,18.0,449993.0),
   ('2276','2025-11-03','FEEDMILL','Rudra Minerals','S/00143','2025-11-01','Poultry Feed Supplement Shell Grit 25 Kg',1412.0,35285.0,NULL,9.9,NULL,0.0,349322.0),

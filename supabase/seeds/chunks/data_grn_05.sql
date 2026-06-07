@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('566','2023-01-02','FEEDMILL','STATS SPECIALITY PRODUCTS PVT LTD','SSPL/22-23/2327',NULL,'CLOSTAT 12 DRY 25 KG BAG',NULL,200.0,NULL,560.0,112000.0,NULL,112000.0),
   ('567','2023-01-03','FEEDMILL','VARSHA MULTITECH','G-660/22-23/PLY',NULL,'HEPATO CARE PREMIX 25 KG',NULL,20.0,NULL,1250.0,25000.0,NULL,25000.0),

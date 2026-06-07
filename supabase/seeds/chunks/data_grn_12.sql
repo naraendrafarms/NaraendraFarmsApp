@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('2414','2026-03-13','FEEDMILL','Agrioma Life Science','ALS/25-26/970','2026-03-05','Oregostim Powder 5Kg',50.0,250.0,NULL,950.0,NULL,0.0,237500.0),
   ('2415','2026-03-13','FEEDMILL','Jeco Nutri chem Pvt Ltd','JNC/K-2607/25-26','2026-03-07','Microvit C Aquavit Monoph 35% Feed Grade 25 kg',10.0,250.0,NULL,325.0,NULL,0.0,81250.0),

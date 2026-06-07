@@ -3,7 +3,7 @@ INSERT INTO public.grn
 SELECT v.grn_no,v.grn_date::date,
   (SELECT id FROM public.farms WHERE code=v.fc LIMIT 1),
   (SELECT id FROM public.parties WHERE LOWER(name)=LOWER(v.pn) LIMIT 1),
-  v.inv_no,v.inv_date::date,v.item,v.bags,v.qty,v.unit,v.rate,v.bamt,v.gst,v.tamt
+  v.inv_no,v.inv_date::date,v.item,v.bags::integer,v.qty::numeric,v.unit::text,v.rate::numeric,v.bamt::numeric,v.gst::numeric,v.tamt::numeric
 FROM (VALUES
   ('2031','2025-07-10','FEEDMILL','Das Drug Centre Pvt Ltd','DDCP/03619/25-26','2025-07-02','Himflora  5 kg',49.0,245.0,NULL,575.0,NULL,0.0,140875.0),
   ('2109','2025-07-10','PPALLY','Sri Santhosh Southern Minerals','31','2025-07-09','Lime Powder',0.0,40000.0,NULL,5.2,NULL,5.0,218400.0),
