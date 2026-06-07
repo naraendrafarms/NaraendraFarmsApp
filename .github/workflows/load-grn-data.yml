@@ -1,0 +1,29 @@
+name: Load GRN Purchase Data (One-Time)
+
+# Loads purchase/GRN data from all 4 fiscal years into live DB.
+# Safe to run multiple times — uses ON CONFLICT DO NOTHING.
+on:
+  workflow_dispatch:
+
+jobs:
+  load:
+    name: Load GRN Data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 1. Insert parties (vendors/suppliers)
+        run: python3 scripts/run_sql.py supabase/seeds/chunks/data_grn_parties.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: 2. Load GRN records (12 chunks of 250 rows)
+        run: |
+          for f in supabase/seeds/chunks/data_grn_*.sql; do
+            [ "$f" = "supabase/seeds/chunks/data_grn_parties.sql" ] && continue
+            echo "--- $f ---"
+            python3 scripts/run_sql.py "$f"
+          done
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: Done
+        run: echo "GRN data loaded — 2931 records, 679 parties, FY2022-23 to FY2026-27"
