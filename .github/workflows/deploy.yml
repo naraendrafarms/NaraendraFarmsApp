@@ -91,6 +91,7 @@ jobs:
       - name: Load Employees and Salary data (idempotent)
         run: |
           python3 scripts/run_sql.py supabase/seeds/chunks/data_employees.sql
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_salary_apr26.sql
           for f in $(ls supabase/seeds/chunks/data_salary_monthly_*.sql | sort); do
             echo "--- $f ---"
             python3 scripts/run_sql.py "$f"
