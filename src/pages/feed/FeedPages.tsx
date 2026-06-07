@@ -29,10 +29,20 @@ export const GRNEntry: React.FC = () => {
   const { data: allGrns, isLoading } = useQuery({
     queryKey: ['grns'],
     queryFn: async () => {
-      const { data } = await supabase.from('grn')
-        .select('*, farms(name,code), parties(name), feed_ingredients(name,code)')
-        .order('grn_date', { ascending: false })
-      return data ?? []
+      const PAGE = 1000
+      let all: any[] = []
+      let from = 0
+      while (true) {
+        const { data } = await supabase.from('grn')
+          .select('*, farms(name,code), parties(name), feed_ingredients(name,code)')
+          .order('grn_date', { ascending: false })
+          .range(from, from + PAGE - 1)
+        if (!data || data.length === 0) break
+        all = all.concat(data)
+        if (data.length < PAGE) break
+        from += PAGE
+      }
+      return all
     }
   })
 
