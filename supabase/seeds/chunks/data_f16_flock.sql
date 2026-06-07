@@ -8,9 +8,15 @@ INSERT INTO public.flocks (
   '16', 'VENCO-430',
   (SELECT id FROM public.farms WHERE code='KPALLY'),
   (SELECT id FROM public.farms WHERE code='PPALLY'),
-  '2023-11-23', 45707, 5481, 0, 0,
+  -- paid_female=44000, paid_male=5280 (invoiced); free 4% = 1760F+211M
+  -- Total DC = 45760F+5491M = 51251; brooded after transit mort = 45707F+5481M = 51188
+  '2023-11-23', 44000, 5280, 1760, 211,
   320, 'Venkateshwara Hatcheries', 'closed', '2025-04-23'
 )
 ON CONFLICT (flock_no) DO UPDATE SET
-  status = EXCLUDED.status,
-  close_date = EXCLUDED.close_date;
+  paid_female  = EXCLUDED.paid_female,
+  paid_male    = EXCLUDED.paid_male,
+  free_female  = EXCLUDED.free_female,
+  free_male    = EXCLUDED.free_male,
+  status       = EXCLUDED.status,
+  close_date   = EXCLUDED.close_date;
