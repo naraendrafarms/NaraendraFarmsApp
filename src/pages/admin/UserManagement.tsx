@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
+import { supabase, supabaseAdmin } from '@/lib/supabase'
 import { useAuth, type Role } from '@/lib/auth'
 import {
   Card, Button, Input, Select, FormRow, Modal,
@@ -66,18 +66,19 @@ export const UserManagement: React.FC = () => {
   const createMut = useMutation({
     mutationFn: async () => {
       if (!form.email || !form.password || !form.full_name) throw new Error('Name, email and password required')
-      // Create auth user via Supabase service role
-      const { data, error: authErr } = await supabase.auth.admin.createUser({
+      // Create auth user via admin client (service role key)
+      const { data, error: authErr } = await supabaseAdmin.auth.admin.createUser({
         email: form.email,
         password: form.password,
         email_confirm: true,
-        user_metadata: { full_name: form.full_name }
+        user_metadata: { full_name: form.full_name, role: form.role }
       })
       if (authErr) throw authErr
-      // Insert profile
-      const { error: profErr } = await supabase.from('profiles').insert({
+      // Insert profile with email
+      const { error: profErr } = await supabaseAdmin.from('profiles').insert({
         id: data.user.id,
         full_name: form.full_name,
+        email: form.email,
         role: form.role,
         farm_id: form.farm_id || null,
         is_active: form.is_active === 'true',
@@ -100,7 +101,7 @@ export const UserManagement: React.FC = () => {
       if (error) throw error
       // Change password if provided
       if (form.password) {
-        const { error: pwErr } = await supabase.auth.admin.updateUserById(editing.id, { password: form.password })
+        const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(editing.id, { password: form.password })
         if (pwErr) throw pwErr
       }
     },

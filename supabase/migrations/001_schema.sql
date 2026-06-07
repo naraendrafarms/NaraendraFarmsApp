@@ -492,6 +492,7 @@ CREATE TABLE IF NOT EXISTS public.bonus (
 CREATE TABLE IF NOT EXISTS public.profiles (
   id        UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   full_name TEXT,
+  email     TEXT,
   role      TEXT CHECK (role IN ('admin','accounts','site_manager','site_incharge','viewer')) DEFAULT 'viewer',
   farm_id   UUID REFERENCES public.farms(id),
   is_active BOOLEAN DEFAULT TRUE,
