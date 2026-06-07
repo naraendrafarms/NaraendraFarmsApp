@@ -1,6 +1,4 @@
--- File: data_f16_bird_transfers.sql
--- Flock 16 bird transfers (Kpally -> Potlapally)
-
+-- Flock 16 Bird Transfers (Kpally to Potlapally shifting)
 CREATE TABLE IF NOT EXISTS public.bird_transfers (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   flock_id UUID REFERENCES public.flocks(id),
@@ -25,87 +23,655 @@ CREATE POLICY IF NOT EXISTS "auth_delete" ON public.bird_transfers FOR DELETE US
 
 INSERT INTO public.bird_transfers (
   flock_id, transfer_date, dc_no, grade, gender, vehicle_no,
-  no_of_boxes, birds_per_box, total_birds, from_farm_id, to_farm_id
+  no_of_boxes, birds_per_box, total_birds,
+  from_farm_id, to_farm_id
 ) VALUES
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1805', 'A', 'male', 'AP28TA2000', 50, 8, 400, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1806', 'A', 'male', 'AP28TE3623', 50, 8, 400, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1807', 'A', 'male', 'AP23TA2000', 50, 10, 500, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1808', 'A', 'male', 'AP28TE3623', 10, 10, 100, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1808', 'B', 'male', 'AP28TE3623', 40, 10, 400, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1809', 'B', 'male', 'AP23TA2000', 50, 10, 500, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1810', 'B', 'male', 'AP28TE3623', 50, 10, 500, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1811', 'B', 'male', 'AP23TA2000', 3, 10, 30, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-20', '1811', 'C', 'male', 'AP23TA2000', 47, 10, 470, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1812', 'C', 'male', 'AP28TE3623', 50, 10, 500, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1813', 'C', 'male', 'AP23TA2000', 1, 10, 10, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1813', 'D', 'male', 'AP23TA2000', 49, 10, 490, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1814', 'D', 'male', 'AP28TE3623', 50, 10, 500, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1815', 'D', 'male', 'AP23TA2000', 30, 10, 300, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1815', 'A', 'female', 'AP23TA2000', 20, 12, 240, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1816', 'A', 'female', 'AP28TE3623', 50, 12, 600, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1817', 'B', 'female', 'AP23TA2000', 50, 12, 600, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1818', 'B', 'female', 'AP28TE3623', 50, 12, 600, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1819', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1820', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1821', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1822', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1823', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-21', '1824', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1825', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1826', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1827', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1828', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1829', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1830', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1831', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1832', 'B', 'female', 'AP28TE3623', 27, 15, 405, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1832', 'C', 'female', 'AP28TE3623', 23, 15, 345, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1833', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1834', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1835', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-22', '1836', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1837', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1838', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1839', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1840', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1841', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1842', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1843', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1844', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1845', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1846', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1847', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-23', '1848', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '1849', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '1850', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '202', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '203', 'C', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '204', 'C', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '205', 'C', 'female', 'AP23TA2000', 22, 15, 330, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '205', 'B', 'female', 'AP23TA2000', 28, 15, 420, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '206', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '207', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '208', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '209', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '210', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-24', '211', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '212', 'B', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '213', 'B', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '214', 'C', 'female', 'AP23TA2000', 42, 15, 630, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '214', 'A', 'female', 'AP23TA2000', 8, 15, 120, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '215', 'A', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '216', 'A', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '217', 'A', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '218', 'A', 'female', 'AP23TA2000', 34, 15, 510, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '218', 'C', 'female', 'AP23TA2000', 16, 15, 240, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '219', 'C', 'female', 'AP28TE3623', 29, 15, 435, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '219', 'D', 'female', 'AP28TE3623', 21, 15, 315, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '220', 'D', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '221', 'D', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-25', '222', 'D', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-26', '223', 'D', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-26', '224', 'D', 'female', 'AP23TA2000', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-26', '225', 'D', 'female', 'AP28TE3623', 50, 15, 750, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-28', '226', '-', 'male  ', '-', 10, 8, 81, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY')),
-  ((SELECT id FROM public.flocks WHERE flock_no='16'), '2024-03-28', '226', '-', 'female', '-', 27, 12, 328, (SELECT id FROM public.farms WHERE code='KPALLY'), (SELECT id FROM public.farms WHERE code='PPALLY'))
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1805',
+    'A', 'male', 'AP28TA2000',
+    50, 8, 400,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1806',
+    'A', 'male', 'AP28TE3623',
+    50, 8, 400,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1807',
+    'A', 'male', 'AP23TA2000',
+    50, 10, 500,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1808',
+    'A', 'male', 'AP28TE3623',
+    10, 10, 100,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1808',
+    'B', 'male', 'AP28TE3623',
+    40, 10, 400,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1809',
+    'B', 'male', 'AP23TA2000',
+    50, 10, 500,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1810',
+    'B', 'male', 'AP28TE3623',
+    50, 10, 500,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1811',
+    'B', 'male', 'AP23TA2000',
+    3, 10, 30,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-20', '1811',
+    'C', 'male', 'AP23TA2000',
+    47, 10, 470,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1812',
+    'C', 'male', 'AP28TE3623',
+    50, 10, 500,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1813',
+    'C', 'male', 'AP23TA2000',
+    1, 10, 10,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1813',
+    'D', 'male', 'AP23TA2000',
+    49, 10, 490,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1814',
+    'D', 'male', 'AP28TE3623',
+    50, 10, 500,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1815',
+    'D', 'male', 'AP23TA2000',
+    30, 10, 300,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1815',
+    'A', 'female', 'AP23TA2000',
+    20, 12, 240,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1816',
+    'A', 'female', 'AP28TE3623',
+    50, 12, 600,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1817',
+    'B', 'female', 'AP23TA2000',
+    50, 12, 600,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1818',
+    'B', 'female', 'AP28TE3623',
+    50, 12, 600,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1819',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1820',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1821',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1822',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1823',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-21', '1824',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1825',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1826',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1827',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1828',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1829',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1830',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1831',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1832',
+    'B', 'female', 'AP28TE3623',
+    27, 15, 405,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1832',
+    'C', 'female', 'AP28TE3623',
+    23, 15, 345,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1833',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1834',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1835',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-22', '1836',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1837',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1838',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1839',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1840',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1841',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1842',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1843',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1844',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1845',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1846',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1847',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-23', '1848',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '1849',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '1850',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '202',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '203',
+    'C', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '204',
+    'C', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '205',
+    'C', 'female', 'AP23TA2000',
+    22, 15, 330,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '205',
+    'B', 'female', 'AP23TA2000',
+    28, 15, 420,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '206',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '207',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '208',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '209',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '210',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-24', '211',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '212',
+    'B', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '213',
+    'B', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '214',
+    'C', 'female', 'AP23TA2000',
+    42, 15, 630,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '214',
+    'A', 'female', 'AP23TA2000',
+    8, 15, 120,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '215',
+    'A', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '216',
+    'A', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '217',
+    'A', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '218',
+    'A', 'female', 'AP23TA2000',
+    34, 15, 510,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '218',
+    'C', 'female', 'AP23TA2000',
+    16, 15, 240,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '219',
+    'C', 'female', 'AP28TE3623',
+    29, 15, 435,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '219',
+    'D', 'female', 'AP28TE3623',
+    21, 15, 315,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '220',
+    'D', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '221',
+    'D', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-25', '222',
+    'D', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-26', '223',
+    'D', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-26', '224',
+    'D', 'female', 'AP23TA2000',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-26', '225',
+    'D', 'female', 'AP28TE3623',
+    50, 15, 750,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-28', '226',
+    '-', 'male', '-',
+    10, 8, 81,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='16'),
+    '2024-03-28', '226',
+    '-', 'female', '-',
+    27, 12, 328,
+    (SELECT id FROM public.farms WHERE code='KPALLY'),
+    (SELECT id FROM public.farms WHERE code='PPALLY')
+  )
 ON CONFLICT DO NOTHING;
