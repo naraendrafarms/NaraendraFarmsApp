@@ -64,3 +64,8 @@ sql = (
 )
 run_sql(sql)
 print("Admin profile upserted successfully")
+
+# Also add email column to profiles if missing
+add_email_col = "ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT;"
+run_sql(add_email_col)
+print("Email column ensured on profiles table")

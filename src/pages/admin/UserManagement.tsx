@@ -66,17 +66,31 @@ export const UserManagement: React.FC = () => {
   const createMut = useMutation({
     mutationFn: async () => {
       if (!form.email || !form.password || !form.full_name) throw new Error('Name, email and password required')
-      // Create auth user via admin client (service role key)
-      const { data, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-        email: form.email,
-        password: form.password,
-        email_confirm: true,
-        user_metadata: { full_name: form.full_name, role: form.role }
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
+      const SERVICE_KEY  = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY as string
+      if (!SERVICE_KEY) throw new Error('Service key not configured — contact admin')
+      // Create auth user via direct REST call (service role key)
+      const authRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: {
+          'apikey': SERVICE_KEY,
+          'Authorization': `Bearer ${SERVICE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          email_confirm: true,
+          user_metadata: { full_name: form.full_name, role: form.role }
+        })
       })
-      if (authErr) throw authErr
-      // Insert profile with email
+      const authData = await authRes.json()
+      if (!authRes.ok || authData.error || !authData.id) {
+        throw new Error(authData.msg || authData.error_description || authData.message || 'Failed to create auth user')
+      }
+      // Insert profile
       const { error: profErr } = await supabaseAdmin.from('profiles').insert({
-        id: data.user.id,
+        id: authData.id,
         full_name: form.full_name,
         email: form.email,
         role: form.role,
@@ -101,8 +115,14 @@ export const UserManagement: React.FC = () => {
       if (error) throw error
       // Change password if provided
       if (form.password) {
-        const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(editing.id, { password: form.password })
-        if (pwErr) throw pwErr
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
+        const SERVICE_KEY  = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY as string
+        const pwRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${editing.id}`, {
+          method: 'PUT',
+          headers: { 'apikey': SERVICE_KEY, 'Authorization': `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: form.password })
+        })
+        if (!pwRes.ok) { const e = await pwRes.json(); throw new Error(e.msg || 'Failed to update password') }
       }
     },
     onSuccess: () => { toast.success('User updated!'); qc.invalidateQueries({ queryKey: ['users_admin'] }); setShowForm(false) },
