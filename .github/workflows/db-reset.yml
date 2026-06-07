@@ -25,6 +25,10 @@ jobs:
         run: python3 scripts/run_sql.py supabase/migrations/002_hatchability_columns.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
+      - name: 2c. Management role + user creation functions
+        run: python3 scripts/run_sql.py supabase/migrations/003_management_role_and_functions.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
       - name: 3. Reload PostgREST schema cache
         run: |
           python3 - << 'PYEOF'

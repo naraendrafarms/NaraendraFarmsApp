@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase, supabaseAdmin } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { useAuth, type Role } from '@/lib/auth'
 import {
   Card, Button, Input, Select, FormRow, Modal,
@@ -11,6 +11,7 @@ import toast from 'react-hot-toast'
 
 const ROLES: { value: Role; label: string; desc: string }[] = [
   { value: 'admin',         label: 'Administrator',  desc: 'Full access — all data, users, masters' },
+  { value: 'management',    label: 'Management',     desc: 'View all reports, dashboards and financials. No data entry.' },
   { value: 'accounts',      label: 'Accounts',       desc: 'All entry access — financial, salary, GRN, imports' },
   { value: 'site_manager',  label: 'Site Manager',   desc: 'All sites — daily entry, flocks, reports. No salary.' },
   { value: 'site_incharge', label: 'Site Incharge',  desc: 'Own site only — daily entry, HE, medicine' },
@@ -19,6 +20,7 @@ const ROLES: { value: Role; label: string; desc: string }[] = [
 
 const ROLE_COLORS: Record<Role, any> = {
   admin:         'red',
+  management:    'purple',
   accounts:      'blue',
   site_manager:  'orange',
   site_incharge: 'green',
@@ -66,38 +68,16 @@ export const UserManagement: React.FC = () => {
   const createMut = useMutation({
     mutationFn: async () => {
       if (!form.email || !form.password || !form.full_name) throw new Error('Name, email and password required')
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
-      const SERVICE_KEY  = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY as string
-      if (!SERVICE_KEY) throw new Error('Service key not configured — contact admin')
-      // Create auth user via direct REST call (service role key)
-      const authRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-        method: 'POST',
-        headers: {
-          'apikey': SERVICE_KEY,
-          'Authorization': `Bearer ${SERVICE_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: form.email,
-          password: form.password,
-          email_confirm: true,
-          user_metadata: { full_name: form.full_name, role: form.role }
-        })
+      const { data, error } = await supabase.rpc('admin_create_user', {
+        p_email:     form.email,
+        p_password:  form.password,
+        p_full_name: form.full_name,
+        p_role:      form.role,
+        p_farm_id:   form.farm_id || null,
+        p_is_active: form.is_active === 'true',
       })
-      const authData = await authRes.json()
-      if (!authRes.ok || authData.error || !authData.id) {
-        throw new Error(authData.msg || authData.error_description || authData.message || 'Failed to create auth user')
-      }
-      // Insert profile
-      const { error: profErr } = await supabaseAdmin.from('profiles').insert({
-        id: authData.id,
-        full_name: form.full_name,
-        email: form.email,
-        role: form.role,
-        farm_id: form.farm_id || null,
-        is_active: form.is_active === 'true',
-      })
-      if (profErr) throw profErr
+      if (error) throw error
+      if (!data) throw new Error('User creation failed')
     },
     onSuccess: () => { toast.success('User created!'); qc.invalidateQueries({ queryKey: ['users_admin'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
@@ -113,16 +93,12 @@ export const UserManagement: React.FC = () => {
         is_active: form.is_active === 'true',
       }).eq('id', editing.id)
       if (error) throw error
-      // Change password if provided
       if (form.password) {
-        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
-        const SERVICE_KEY  = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY as string
-        const pwRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${editing.id}`, {
-          method: 'PUT',
-          headers: { 'apikey': SERVICE_KEY, 'Authorization': `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: form.password })
+        const { error: pwErr } = await supabase.rpc('admin_update_user_password', {
+          p_user_id:  editing.id,
+          p_password: form.password,
         })
-        if (!pwRes.ok) { const e = await pwRes.json(); throw new Error(e.msg || 'Failed to update password') }
+        if (pwErr) throw pwErr
       }
     },
     onSuccess: () => { toast.success('User updated!'); qc.invalidateQueries({ queryKey: ['users_admin'] }); setShowForm(false) },
@@ -238,6 +214,11 @@ export const UserManagement: React.FC = () => {
           <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-1">
             <p className="font-semibold text-gray-700 mb-1">This role can:</p>
             {form.role === 'admin' && <p>✓ Everything — full admin access including user management</p>}
+            {form.role === 'management' && <>
+              <p>✓ View all reports, dashboards and financial summaries</p>
+              <p>✓ Hatchability, production, P&L reports across all sites</p>
+              <p>✗ Cannot enter or modify data, or manage users</p>
+            </>}
             {form.role === 'accounts' && <>
               <p>✓ Enter and view all data across all sites</p>
               <p>✓ Salary, GRN, Import, Finance</p>
