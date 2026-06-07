@@ -82,10 +82,9 @@ jobs:
           done
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
-      - name: Load Hatchability, extra HE dispatch and production records (idempotent)
+      - name: Load Hatchability and production records (idempotent)
         run: |
           python3 scripts/run_sql.py supabase/seeds/chunks/data_hatchability.sql
-          python3 scripts/run_sql.py supabase/seeds/chunks/data_dispatch.sql
           python3 scripts/run_sql.py supabase/seeds/chunks/data_production.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 

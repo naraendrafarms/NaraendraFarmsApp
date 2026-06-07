@@ -2685,6 +2685,16 @@ INSERT INTO public.he_dispatch (
     18, 0, 18,
     0, 18,
     19.75, 356.0
+  ),
+  (
+    (SELECT id FROM public.flocks WHERE flock_no='20'),
+    '2026-06-01',
+    '2026-06-26',
+    4639,
+    (SELECT id FROM public.parties WHERE LOWER(name)=LOWER('Hitech Hatch Fresh Pvt Ltd') LIMIT 1),
+    70560, 0, 70560,
+    1383, 69177,
+    19.75, 1366246.0
   )
 ON CONFLICT ON CONSTRAINT he_dispatch_unique DO UPDATE SET
   amount = EXCLUDED.amount,
