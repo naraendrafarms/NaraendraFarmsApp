@@ -589,44 +589,81 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         .from('daily_feed')
         .select('*')
         .eq('flock_id', flockId)
-        .order('feed_date', { ascending: false })
+        .order('feed_date', { ascending: true })
       return data ?? []
     }
   })
 
+  // GRN rates for feed types — use latest price per unit per item name
+  const { data: feedGrnRates } = useQuery({
+    queryKey: ['grn_feed_rates'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('grn')
+        .select('item_name,price_per_unit,grn_date')
+        .order('grn_date', { ascending: false })
+      if (!data) return {} as Record<string, number>
+      const map: Record<string, number> = {}
+      for (const g of data) {
+        if (g.item_name && g.price_per_unit) {
+          const k = g.item_name.trim().toLowerCase()
+          if (!(k in map)) map[k] = g.price_per_unit
+        }
+      }
+      return map
+    }
+  })
+
+  // Match feed type code (BCM/BGM/BDM) to GRN item name
+  const getFeedGrnRate = (feedType: string) => {
+    if (!feedGrnRates || !feedType) return null
+    const ft = feedType.trim().toLowerCase()
+    const found = Object.keys(feedGrnRates).find(k => k.includes(ft) || ft.includes(k))
+    return found ? feedGrnRates[found] : null
+  }
+
   const totalFemaleKg = (feedData ?? []).reduce((s: number, r: any) => s + (r.female_kg ?? 0), 0)
   const totalMaleKg   = (feedData ?? []).reduce((s: number, r: any) => s + (r.male_kg ?? 0), 0)
-  const totalCost     = (feedData ?? []).reduce((s: number, r: any) => s + (r.female_cost ?? 0) + (r.male_cost ?? 0), 0)
+  const totalCostExcel = (feedData ?? []).reduce((s: number, r: any) => s + (r.female_cost ?? 0) + (r.male_cost ?? 0), 0)
+  const totalCostGrn  = (feedData ?? []).reduce((s: number, r: any) => {
+    const rate = getFeedGrnRate(r.feed_type) ?? 0
+    return s + ((r.female_kg ?? 0) + (r.male_kg ?? 0)) * rate
+  }, 0)
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard title="Total Female KG" value={`${numFmt(Math.round(totalFemaleKg))} kg`} icon={<Package size={18}/>} color="text-pink-600" />
         <StatCard title="Total Male KG"   value={`${numFmt(Math.round(totalMaleKg))} kg`}   icon={<Package size={18}/>} color="text-blue-600" />
-        <StatCard title="Total Feed Cost" value={inr(totalCost)} icon={<TrendingUp size={18}/>} color="text-brand-600" />
+        <StatCard title="Cost (GRN Rates)" value={inr(totalCostGrn)} icon={<TrendingUp size={18}/>} color="text-green-600" />
+        <StatCard title="Cost (Excel Rates)" value={inr(totalCostExcel)} icon={<TrendingUp size={18}/>} color="text-gray-400" />
       </div>
+      <p className="text-xs text-gray-500">Note: Only rearing period (Nov 2023–Mar 2024) has feed type data. Laying period feed totals are in Daily Records tab. GRN Rate = actual purchase rate from invoices.</p>
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
               <Th>Date</Th><Th>Feed Type</Th>
-              <Th right>Female KG</Th><Th right>Female Cost</Th>
-              <Th right>Male KG</Th><Th right>Male Cost</Th>
-              <Th right>Total KG</Th><Th right>Total Cost</Th>
+              <Th right>Female KG</Th><Th right>Male KG</Th>
+              <Th right>Total KG</Th><Th right>GRN Rate/kg</Th><Th right>Cost (GRN)</Th>
             </tr></thead>
             <tbody>
-              {feedData?.map((r: any) => (
+              {feedData?.map((r: any) => {
+                const grnRate = getFeedGrnRate(r.feed_type)
+                const totalKg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
+                const costGrn = grnRate != null ? totalKg * grnRate : null
+                return (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <Td className="text-xs">{fmtDate(r.feed_date)}</Td>
                   <Td className="text-xs"><Badge color="blue">{r.feed_type ?? '—'}</Badge></Td>
                   <Td right className="text-xs">{r.female_kg != null ? (r.female_kg as number).toFixed(1) : '—'}</Td>
-                  <Td right className="text-xs">{inr(r.female_cost)}</Td>
                   <Td right className="text-xs">{r.male_kg != null ? (r.male_kg as number).toFixed(1) : '—'}</Td>
-                  <Td right className="text-xs">{inr(r.male_cost)}</Td>
-                  <Td right className="text-xs font-semibold">{((r.female_kg ?? 0) + (r.male_kg ?? 0)).toFixed(1)}</Td>
-                  <Td right className="text-xs font-semibold">{inr((r.female_cost ?? 0) + (r.male_cost ?? 0))}</Td>
+                  <Td right className="text-xs font-semibold">{totalKg.toFixed(1)}</Td>
+                  <Td right className="text-xs">{grnRate != null ? <span className="text-green-700">₹{grnRate}/kg</span> : <span className="text-gray-400">—</span>}</Td>
+                  <Td right className="text-xs font-semibold">{costGrn != null ? inr(costGrn) : '—'}</Td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </Table>
           {feedData?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
@@ -646,41 +683,83 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         .from('medicine_usage')
         .select('*, medicines_master(name,type)')
         .eq('flock_id', flockId)
-        .order('usage_date', { ascending: false })
+        .order('usage_date', { ascending: true })
       return data ?? []
     }
   })
 
-  const totalCost = (usages ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  // GRN rates: latest price_per_unit per item_name from actual purchase invoices
+  const { data: grnRates } = useQuery({
+    queryKey: ['grn_med_rates'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('grn')
+        .select('item_name,price_per_unit,grn_date')
+        .order('grn_date', { ascending: false })
+      if (!data) return {} as Record<string, number>
+      const map: Record<string, number> = {}
+      for (const g of data) {
+        if (g.item_name && g.price_per_unit && !(g.item_name in map))
+          map[g.item_name.trim().toLowerCase()] = g.price_per_unit
+      }
+      return map
+    }
+  })
+
+  const getGrnRate = (name: string) => {
+    if (!grnRates || !name) return null
+    const key = name.trim().toLowerCase()
+    // exact match
+    if (grnRates[key] !== undefined) return grnRates[key]
+    // partial match
+    const found = Object.keys(grnRates).find(k => k.includes(key) || key.includes(k))
+    return found ? grnRates[found] : null
+  }
+
+  const calcCost = (r: any) => {
+    const grnRate = getGrnRate(r.medicines_master?.name ?? '')
+    const rate = grnRate ?? r.rate ?? 0
+    return (r.quantity ?? 0) * rate
+  }
+
+  const totalCostGrn = (usages ?? []).reduce((s: number, r: any) => s + calcCost(r), 0)
+  const totalCostExcel = (usages ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 max-w-xs">
-        <StatCard title="Total Medicine Cost" value={inr(totalCost)} icon={<FlaskConical size={18}/>} color="text-red-600" />
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-lg">
+        <StatCard title="Cost (GRN Rates)" value={inr(totalCostGrn)} icon={<FlaskConical size={18}/>} color="text-green-600" />
+        <StatCard title="Cost (Excel Rates)" value={inr(totalCostExcel)} icon={<FlaskConical size={18}/>} color="text-gray-400" />
       </div>
+      <p className="text-xs text-gray-500">GRN Rate = actual purchase rate from GRN invoices (most recent per item). Excel Rate = rate recorded in monthly report — may be inaccurate. Use GRN Rate for accounting.</p>
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
-              <Th>Date</Th><Th>Medicine</Th><Th right>Qty</Th>
-              <Th>Unit</Th><Th right>Rate</Th><Th right>Amount</Th>
+              <Th>Date</Th><Th>Medicine / Vaccine</Th><Th right>Qty</Th>
+              <Th>Unit</Th><Th right>GRN Rate</Th><Th right>Excel Rate</Th><Th right>Cost (GRN)</Th>
             </tr></thead>
             <tbody>
-              {usages?.map((r: any) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <Td className="text-xs">{fmtDate(r.usage_date)}</Td>
-                  <Td className="text-xs font-medium">{r.medicines_master?.name ?? '—'}</Td>
-                  <Td right className="text-xs">{r.quantity}</Td>
-                  <Td className="text-xs text-gray-400">{r.unit ?? r.medicines_master?.unit ?? '—'}</Td>
-                  <Td right className="text-xs">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
-                  <Td right className="text-xs font-semibold">{inr(r.amount)}</Td>
-                </tr>
-              ))}
+              {usages?.map((r: any) => {
+                const grnRate = getGrnRate(r.medicines_master?.name ?? '')
+                const cost = calcCost(r)
+                return (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <Td className="text-xs">{fmtDate(r.usage_date)}</Td>
+                    <Td className="text-xs font-medium">{r.medicines_master?.name ?? '—'}</Td>
+                    <Td right className="text-xs">{r.quantity}</Td>
+                    <Td className="text-xs text-gray-400">{r.unit ?? r.medicines_master?.unit ?? '—'}</Td>
+                    <Td right className="text-xs">{grnRate != null ? <span className="text-green-700 font-medium">₹{grnRate}</span> : <span className="text-gray-400">not in GRN</span>}</Td>
+                    <Td right className="text-xs text-gray-400">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
+                    <Td right className="text-xs font-semibold">{inr(cost)}</Td>
+                  </tr>
+                )
+              })}
             </tbody>
             {(usages?.length ?? 0) > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={5}>TOTAL ({usages?.length})</Td>
-                <Td right>{inr(totalCost)}</Td>
+                <Td colSpan={6}>TOTAL ({usages?.length} records)</Td>
+                <Td right>{inr(totalCostGrn)}</Td>
               </tr></tfoot>
             )}
           </Table>
