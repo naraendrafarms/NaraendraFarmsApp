@@ -15,17 +15,38 @@ export const GRNEntry: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
 
+  // Filters
+  const [fFarm,    setFFarm]    = useState('')
+  const [fParty,   setFParty]   = useState('')
+  const [fItem,    setFItem]    = useState('')
+  const [fFrom,    setFFrom]    = useState('')
+  const [fTo,      setFTo]      = useState('')
+
   const { data: farms } = useQuery({ queryKey: ['farms'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
   const { data: parties } = useQuery({ queryKey: ['parties_supp'], queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type',['supplier','both']).order('name'); return data ?? [] } })
   const { data: ingredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,code,name').eq('is_active',true).order('name'); return data ?? [] } })
 
-  const { data: grns, isLoading } = useQuery({
+  const { data: allGrns, isLoading } = useQuery({
     queryKey: ['grns'],
     queryFn: async () => {
-      const { data } = await supabase.from('grn').select('*, farms(name), parties(name), feed_ingredients(name,code)')
-        .order('grn_date', { ascending: false }).limit(100)
+      const { data } = await supabase.from('grn')
+        .select('*, farms(name,code), parties(name), feed_ingredients(name,code)')
+        .order('grn_date', { ascending: false })
       return data ?? []
     }
+  })
+
+  // Client-side filtering
+  const grns = (allGrns ?? []).filter((g: any) => {
+    if (fFarm  && g.farm_id !== fFarm) return false
+    if (fParty && g.party_id !== fParty) return false
+    if (fItem) {
+      const name = (g.feed_ingredients?.name ?? g.item_name ?? '').toLowerCase()
+      if (!name.includes(fItem.toLowerCase())) return false
+    }
+    if (fFrom && g.grn_date < fFrom) return false
+    if (fTo   && g.grn_date > fTo)   return false
+    return true
   })
 
   const [form, setForm] = useState({
@@ -36,7 +57,6 @@ export const GRNEntry: React.FC = () => {
   })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
-  // Auto-compute totals
   const basic  = (parseFloat(form.qty)||0) * (parseFloat(form.price_per_unit)||0)
   const gstAmt = basic * (parseFloat(form.gst_pct)||0) / 100
   const total  = basic + gstAmt
@@ -110,19 +130,42 @@ export const GRNEntry: React.FC = () => {
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
   const ingrOptions = ingredients?.map((i: any) => ({ value: i.id, label: `${i.code} — ${i.name}` })) ?? []
 
-  const totalQty = grns?.reduce((s: number, g: any) => s + (g.qty ?? 0), 0) ?? 0
-  const totalVal = grns?.reduce((s: number, g: any) => s + (g.total_amount ?? 0), 0) ?? 0
+  const totalQty = grns.reduce((s: number, g: any) => s + (g.qty ?? 0), 0)
+  const totalVal = grns.reduce((s: number, g: any) => s + (g.total_amount ?? 0), 0)
+  const hasFilter = fFarm || fParty || fItem || fFrom || fTo
 
   return (
     <div className="space-y-5">
       <SectionHeader title="GRN — Goods Received"
-        subtitle={`${grns?.length ?? 0} records`}
+        subtitle={`${grns.length} of ${allGrns?.length ?? 0} records`}
         action={<Button icon={<Plus size={16}/>} onClick={openAdd}>Add GRN</Button>}
       />
-      <div className="grid grid-cols-2 gap-4">
-        <StatCard title="Total Qty Received" value={`${(totalQty/1000).toFixed(1)} MT`} icon={<Package size={18}/>} color="text-brand-600" />
-        <StatCard title="Total Purchase Value" value={inr(totalVal)} icon={<TrendingUp size={18}/>} color="text-green-600" />
+
+      {/* Filters */}
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 items-end">
+          <Select label="Site" placeholder="All Sites" options={farmOptions}
+            value={fFarm} onChange={e => setFFarm(e.target.value)} />
+          <Select label="Supplier" placeholder="All Parties" options={partyOptions}
+            value={fParty} onChange={e => setFParty(e.target.value)} />
+          <Input label="Item / Ingredient" placeholder="Search…" value={fItem}
+            onChange={e => setFItem(e.target.value)} />
+          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+        </div>
+        {hasFilter && (
+          <button onClick={() => { setFFarm(''); setFParty(''); setFItem(''); setFFrom(''); setFTo('') }}
+            className="mt-2 text-xs text-brand-600 hover:underline">Clear filters</button>
+        )}
+      </Card>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard title="Records" value={grns.length.toLocaleString('en-IN')} icon={<Package size={18}/>} color="text-brand-600" />
+        <StatCard title="Total Qty" value={`${(totalQty/1000).toFixed(1)} MT`} icon={<Package size={18}/>} color="text-blue-600" />
+        <StatCard title="Purchase Value" value={inr(totalVal)} icon={<TrendingUp size={18}/>} color="text-green-600" />
+        <StatCard title="Avg per Record" value={grns.length ? inr(totalVal/grns.length) : '—'} icon={<TrendingUp size={18}/>} color="text-orange-600" />
       </div>
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
@@ -132,7 +175,7 @@ export const GRNEntry: React.FC = () => {
               <Th right>Qty</Th><Th right>Unit Price</Th><Th right>Amount</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {grns?.map((g: any) => (
+              {grns.map((g: any) => (
                 <tr key={g.id} className="hover:bg-gray-50">
                   <Td><span className="font-mono text-xs font-bold">{g.grn_no}</span></Td>
                   <Td className="text-xs">{fmtDate(g.grn_date)}</Td>
@@ -141,7 +184,7 @@ export const GRNEntry: React.FC = () => {
                   <Td className="text-xs max-w-[120px] truncate">{g.feed_ingredients?.name ?? g.item_name ?? '—'}</Td>
                   <Td className="text-xs text-gray-400">{g.invoice_no ?? '—'}</Td>
                   <Td right className="text-xs">{g.qty?.toLocaleString('en-IN') ?? '—'} {g.unit}</Td>
-                  <Td right className="text-xs">{g.price_per_unit ? `Rs ${g.price_per_unit}` : '—'}</Td>
+                  <Td right className="text-xs">{g.price_per_unit ? `₹${g.price_per_unit}` : '—'}</Td>
                   <Td right className="font-semibold text-xs">{g.total_amount ? inr(g.total_amount) : '—'}</Td>
                   <Td>
                     <div className="flex gap-1">
@@ -152,16 +195,17 @@ export const GRNEntry: React.FC = () => {
                 </tr>
               ))}
             </tbody>
-            {grns && grns.length > 0 && (
-              <tfoot><tr className="bg-gray-50">
-                <Td colSpan={6}><strong>TOTAL</strong></Td>
-                <Td right><strong>{totalQty.toLocaleString('en-IN')} kg</strong></Td>
+            {grns.length > 0 && (
+              <tfoot><tr className="bg-gray-50 font-semibold">
+                <Td colSpan={6}>TOTAL ({grns.length} records)</Td>
+                <Td right>{totalQty.toLocaleString('en-IN')} kg</Td>
                 <Td right>—</Td>
-                <Td right><strong>{inr(totalVal)}</strong></Td>
+                <Td right>{inr(totalVal)}</Td>
+                <Td></Td>
               </tr></tfoot>
             )}
           </Table>
-          {grns?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No GRN records" action={<Button onClick={openAdd} icon={<Plus size={16}/>}>Add GRN</Button>} />}
+          {grns.length === 0 && <EmptyState icon={<Package size={32}/>} title={hasFilter ? 'No records match filters' : 'No GRN records'} action={!hasFilter ? <Button onClick={openAdd} icon={<Plus size={16}/>}>Add GRN</Button> : undefined} />}
         </Card>
       )}
 
@@ -191,7 +235,7 @@ export const GRNEntry: React.FC = () => {
             <Input label="Qty" type="number" step="0.001" value={form.qty} onChange={e => s('qty', e.target.value)} />
             <Input label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} />
             <Input label="Bags / Packs" type="number" value={form.bags} onChange={e => s('bags', e.target.value)} />
-            <Input label="Price/Unit (Rs)" type="number" step="0.001" value={form.price_per_unit}
+            <Input label="Price/Unit (₹)" type="number" step="0.001" value={form.price_per_unit}
               onChange={e => s('price_per_unit', e.target.value)} />
           </FormRow>
           <FormRow cols={3}>
