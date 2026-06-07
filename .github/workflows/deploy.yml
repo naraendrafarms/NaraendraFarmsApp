@@ -30,3 +30,13 @@ jobs:
       - name: Deploy to Cloudflare Pages
         run: wrangler pages deploy dist --project-name=naraendra-farms --branch=main --commit-dirty=true
         env: { CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}", CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" }
+
+      - name: Load GRN seed data (safe — ON CONFLICT DO NOTHING)
+        run: |
+          python3 scripts/run_sql.py supabase/seeds/chunks/data_grn_parties.sql
+          for f in $(ls supabase/seeds/chunks/data_grn_*.sql | sort); do
+            [ "$f" = "supabase/seeds/chunks/data_grn_parties.sql" ] && continue
+            echo "--- $f ---"
+            python3 scripts/run_sql.py "$f"
+          done
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
