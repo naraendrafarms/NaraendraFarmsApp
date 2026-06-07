@@ -24,6 +24,7 @@ import { SetupPage } from '@/pages/setup/SetupPage'
 import { ProductionReport, PLReport, SalaryReport, FeedReport, ExportPage } from '@/pages/reports/ReportsPages'
 import { UserManagement } from '@/pages/admin/UserManagement'
 import { AdminCentre } from '@/pages/admin/AdminCentre'
+import { FlockDashboard, FlockDetail as NewFlockDetail } from '@/pages/flock/FlockPages'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -115,6 +116,10 @@ export const App: React.FC = () => {
             <Route path="import/grn" element={<ImportGRN />} />
             <Route path="admin/users" element={<UserManagement />} />
             <Route path="admin" element={<AdminCentre />} />
+
+            {/* Flock Management (new) */}
+            <Route path="flock" element={<FlockDashboard />} />
+            <Route path="flock/:flockNo" element={<NewFlockDetail />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

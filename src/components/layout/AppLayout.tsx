@@ -20,6 +20,12 @@ interface NavItem {
 const NAV: NavItem[] = [
   { label: 'Dashboard', icon: <LayoutDashboard size={18}/>, to: '/' },
   {
+    label: 'Flock Management', icon: <Bird size={18}/>,
+    children: [
+      { label: 'All Flocks',   to: '/flock' },
+    ]
+  },
+  {
     label: 'Flocks', icon: <Bird size={18}/>,
     children: [
       { label: 'All Flocks',     to: '/flocks' },
