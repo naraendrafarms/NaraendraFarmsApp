@@ -110,6 +110,7 @@ const NAV: NavItem[] = [
 
 const ROLE_LABELS: Record<Role, string> = {
   admin:         'Administrator',
+  management:    'Management',
   accounts:      'Accounts',
   site_manager:  'Site Manager',
   site_incharge: 'Site Incharge',
@@ -117,8 +118,9 @@ const ROLE_LABELS: Record<Role, string> = {
 }
 const ROLE_COLORS: Record<Role, string> = {
   admin:         'bg-red-100 text-red-700',
+  management:    'bg-purple-100 text-purple-700',
   accounts:      'bg-blue-100 text-blue-700',
-  site_manager:  'bg-purple-100 text-purple-700',
+  site_manager:  'bg-orange-100 text-orange-700',
   site_incharge: 'bg-green-100 text-green-700',
   viewer:        'bg-gray-100 text-gray-600',
 }
