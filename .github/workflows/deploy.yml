@@ -73,3 +73,11 @@ jobs:
             python3 scripts/run_sql.py "$f"
           done
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
+      - name: Load Flock 19 and 20 seed data (idempotent)
+        run: |
+          for f in $(ls supabase/seeds/chunks/data_f19_*.sql supabase/seeds/chunks/data_f20_*.sql | sort); do
+            echo "--- $f ---"
+            python3 scripts/run_sql.py "$f"
+          done
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
