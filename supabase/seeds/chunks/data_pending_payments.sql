@@ -103,7 +103,7 @@ VALUES
   ('Das Drug Centre Private Limited', 'PO/NBF/080526/008', '2675', '2026-05-13', '2026-05-08', 338520.0, 'Vaccine', 'Not Paid', NULL, 45, '2026-06-27', NULL, 'Hitech', NULL),
   ('Sri Santosh Southern Minerals', NULL, '2676', '2026-05-09', '2026-05-08', 218400.0, 'Lime Powder', 'Paid', '2026-05-14', 5, '2026-05-14', 'Online', 'HO Office', 'Srinath Reddy Sir'),
   ('Quest Agrovet Services Pvt Ltd', 'PO/NBF/020526/006', '2677', '2026-05-04', '2026-05-07', 296258.0, 'Vaccine', 'Not Paid', NULL, 45, '2026-06-18', NULL, 'HO Office', NULL)
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT pending_payments_unique DO NOTHING;
 
 INSERT INTO public.pending_payments (vendor_name, po_no, grn_no, grn_date, invoice_date, invoice_amount, payment_type, payment_status, paid_date, credit_limit, pay_before_date, account_type, po_raised_by, payment_approved_by)
 VALUES
@@ -138,6 +138,6 @@ VALUES
   ('Sri Mahalaxmi Electrical & Electronics', NULL, '2696', '2026-05-27', '2026-05-27', 5000.0, 'Freezer Repair', 'Paid', '2026-05-30', 1, '2026-05-28', 'Cash', 'HO Office', 'Srinath Reddy Sir'),
   ('Sachin International Protiens Pvt Ltd', NULL, '2735', '2026-05-29', '2026-05-27', 2296219.0, 'Feed Raw Material', 'Paid', '2026-05-27', 0, '2026-05-29', 'Online', 'HO Office', 'Srinath Reddy Sir'),
   ('SM Transport', NULL, '2735', '2026-05-29', '2026-05-27', 47237.0, 'Feedmill Transport Charges', 'Paid', '2026-05-29', 3, '2026-06-01', 'Online', 'HO Office', 'Srinath Reddy Sir')
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT pending_payments_unique DO NOTHING;
 
 -- Total pending_payments records: 131

@@ -215,5 +215,5 @@ JOIN (VALUES
   ('19','2026-06-01'::date,4594,60480,1185,59295,19.75,1171076,'2026-06-26'::date),
   ('20','2026-06-01'::date,4639,70560,1383,69177,19.75,1366246,'2026-06-26'::date)
 ) v(fno,dd,dc,total,fe,ie,rate,amt,he_exp) ON f.flock_no=v.fno
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT he_dispatch_unique DO NOTHING;
 SET session_replication_role = DEFAULT;

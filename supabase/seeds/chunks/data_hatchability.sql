@@ -402,5 +402,5 @@ JOIN (VALUES
   ('19',NULL,NULL,'2026-05-11'::date,'2026-06-01'::date,'NilGanj','25-110-44',0,0.64,9913,167,914,265,7380,0.7445,68.18,1354,270)
 ) v(fno,prod_date,inv_date,setting_date,hatch_date,hatchery,setting_no,dc_no,age_wk,eggs_set,broken,infertile,blasters,chicks,hatch_pct,eggs_wt,unhatch,rejects)
 ON f.flock_no=v.fno
-ON CONFLICT DO NOTHING;
+ON CONFLICT ON CONSTRAINT hatchability_unique DO NOTHING;
 SET session_replication_role = DEFAULT;
