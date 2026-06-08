@@ -12,7 +12,7 @@ INSERT INTO public.flocks (
   (SELECT id FROM public.farms WHERE code='KPALLY'),
   (SELECT id FROM public.farms WHERE code='BPET1'),
   '2025-05-30', 35499, 4259, 1420, 170,
-  NULL, 'Venkateshwara Hatcheries', 'laying'
+  320, 'Venkateshwara Hatcheries', 'laying'
 )
 ON CONFLICT (flock_no) DO UPDATE SET
   breed            = EXCLUDED.breed,
