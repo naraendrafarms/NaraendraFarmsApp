@@ -5,7 +5,7 @@ import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
 } from '@/components/ui'
-import { Plus, Edit2, Settings } from 'lucide-react'
+import { Plus, Edit2, Settings, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { inr } from '@/lib/utils'
 
@@ -183,10 +183,19 @@ export const PartiesMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
+  const [deleteRow, setDeleteRow] = useState<any>(null)
+  const [filterName, setFilterName] = useState('')
+  const [filterType, setFilterType] = useState('')
   const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:''})
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
-  const {data,isLoading}=useQuery({queryKey:['parties'],queryFn:async()=>{const{data}=await supabase.from('parties').select('*').order('name');return data??[]}})
+  const {data:allData,isLoading}=useQuery({queryKey:['parties'],queryFn:async()=>{const{data}=await supabase.from('parties').select('*').order('name');return data??[]}})
+
+  const data = (allData??[]).filter((r:any)=>{
+    if(filterName && !r.name.toLowerCase().includes(filterName.toLowerCase())) return false
+    if(filterType && r.type !== filterType) return false
+    return true
+  })
 
   const open=(row?:any)=>{
     setEditing(row??null)
@@ -205,19 +214,63 @@ export const PartiesMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const delMut=useMutation({
+    mutationFn:async(id:string)=>{ const{error}=await supabase.from('parties').delete().eq('id',id); if(error)throw error },
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['parties']});setDeleteRow(null)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Cannot delete — party has linked records (GRN / sales)')
+      else toast.error(e.message)
+      setDeleteRow(null)
+    }
+  })
+
   return (
     <>
-      <MasterTable title="Parties" subtitle="Buyers and suppliers" loading={isLoading}
-        data={data??[]} onAdd={()=>open()} onEdit={open}
-        columns={[
-          {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
-          {label:'Type',key:'type',render:r=><Badge color={r.type==='buyer'?'green':r.type==='supplier'?'blue':'orange'}>{r.type}</Badge>},
-          {label:'Category',key:'category'},
-          {label:'Contact',key:'contact'},
-          {label:'GSTIN',key:'gstin',render:r=><span className="text-xs font-mono">{r.gstin??'—'}</span>},
-          {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
-        ]}
-      />
+      <div className="space-y-4">
+        <SectionHeader title="Parties" subtitle="Buyers and suppliers"
+          action={<Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Party</Button>} />
+        <div className="flex gap-3 flex-wrap">
+          <Input label="" placeholder="Search by name…" value={filterName} onChange={e=>setFilterName(e.target.value)} className="w-52"/>
+          <Select label="" placeholder="All Types" options={['buyer','supplier','both']} value={filterType} onChange={e=>setFilterType(e.target.value)} className="w-36"/>
+          {(filterName||filterType)&&<Button variant="ghost" size="sm" onClick={()=>{setFilterName('');setFilterType('')}}>Clear</Button>}
+          <span className="text-xs text-gray-400 self-end pb-2">{data.length} of {allData?.length??0}</span>
+        </div>
+        {isLoading?<Spinner/>:(
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th>Name</Th><Th>Type</Th><Th>Category</Th><Th>Contact</Th>
+                <Th>GSTIN</Th><Th>Status</Th><Th></Th>
+              </tr></thead>
+              <tbody>{data.map((r:any)=>(
+                <tr key={r.id} className="hover:bg-gray-50">
+                  <Td><span className="font-medium">{r.name}</span></Td>
+                  <Td><Badge color={r.type==='buyer'?'green':r.type==='supplier'?'blue':'orange'}>{r.type}</Badge></Td>
+                  <Td>{r.category??'—'}</Td>
+                  <Td>{r.contact??'—'}</Td>
+                  <Td><span className="text-xs font-mono">{r.gstin??'—'}</span></Td>
+                  <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                      <button onClick={()=>setDeleteRow(r)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
+                </tr>
+              ))}</tbody>
+            </Table>
+            {data.length===0&&<EmptyState icon={<Settings size={32}/>} title="No parties found" action={<Button onClick={()=>open()} icon={<Plus size={16}/>}>Add</Button>}/>}
+          </Card>
+        )}
+      </div>
+      {deleteRow&&(
+        <Modal open onClose={()=>setDeleteRow(null)} title="Delete Party" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setDeleteRow(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={()=>delMut.mutate(deleteRow.id)}>Delete</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{deleteRow.name}</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Note: deletion will fail if this party has linked GRN / purchase / sales records.</p>
+        </Modal>
+      )}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Party':'Add Party'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">

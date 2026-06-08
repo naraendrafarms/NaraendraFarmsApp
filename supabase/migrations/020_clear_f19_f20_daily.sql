@@ -1,8 +1,5 @@
--- Migration 020: Clear F19 and F20 daily records so seeds re-insert with correct hd_pct
--- Root cause: old DB data had wrong opening_female values causing hd_pct up to 413%
--- Fix: delete records so the seed INSERT runs fresh on every deploy (idempotent).
-
-DELETE FROM public.daily_records
-WHERE flock_id IN (
-  SELECT id FROM public.flocks WHERE flock_no IN ('19', '20')
-);
+-- Migration 020: No-op. Original DELETE replaced because:
+-- Seeds already use ON CONFLICT DO UPDATE SET opening_female = EXCLUDED.opening_female,
+-- and hd_pct is GENERATED ALWAYS AS (total_eggs/opening_female), so it auto-corrects.
+-- Deleting on every deploy caused F19/F20 birds to show 0 during the seed re-insert window.
+SELECT 1;

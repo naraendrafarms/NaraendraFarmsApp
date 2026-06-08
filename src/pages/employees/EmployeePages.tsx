@@ -40,7 +40,7 @@ export const EmployeeList: React.FC = () => {
   const [form, setForm] = useState({
     emp_id:'', name:'', designation:'', farm_id:'', department:'',
     base_salary:'', increment:'0', bank_name:'', bank_branch:'', account_no:'', ifsc:'',
-    joining_date:'', is_active:'true'
+    joining_date:'', dob:'', gender:'', mobile:'', esi_no:'', pf_no:'', is_active:'true'
   })
   const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
 
@@ -53,13 +53,15 @@ export const EmployeeList: React.FC = () => {
         base_salary: emp.base_salary?.toString()??'', increment: emp.increment?.toString()??'0',
         bank_name: emp.bank_name??'', bank_branch: emp.bank_branch??'',
         account_no: emp.account_no??'', ifsc: emp.ifsc??'',
-        joining_date: emp.joining_date??'', is_active: emp.is_active?'true':'false'
+        joining_date: emp.joining_date??'', dob: emp.dob??'', gender: emp.gender??'',
+        mobile: emp.mobile??'', esi_no: emp.esi_no??'', pf_no: emp.pf_no??'',
+        is_active: emp.is_active?'true':'false'
       })
     } else {
       setEditing(null)
       setForm({emp_id:'',name:'',designation:'',farm_id:'',department:'',
         base_salary:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
-        joining_date:'',is_active:'true'})
+        joining_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',is_active:'true'})
     }
     setShowForm(true)
   }
@@ -67,7 +69,7 @@ export const EmployeeList: React.FC = () => {
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.name || !form.farm_id) throw new Error('Name and site required')
-      const payload = {
+      const payload: any = {
         emp_id: form.emp_id || null, name: form.name, designation: form.designation || null,
         farm_id: form.farm_id, department: form.department || null,
         base_salary: parseFloat(form.base_salary) || null,
@@ -75,6 +77,8 @@ export const EmployeeList: React.FC = () => {
         bank_name: form.bank_name || null, bank_branch: form.bank_branch || null,
         account_no: form.account_no || null, ifsc: form.ifsc || null,
         joining_date: form.joining_date || null,
+        dob: form.dob || null, gender: form.gender || null,
+        mobile: form.mobile || null, esi_no: form.esi_no || null, pf_no: form.pf_no || null,
         is_active: form.is_active === 'true'
       }
       if (editing) { const {error}=await supabase.from('employees').update(payload).eq('id',editing.id); if(error)throw error }
@@ -144,6 +148,12 @@ export const EmployeeList: React.FC = () => {
             <Input label="Basic Salary" type="number" value={form.base_salary} onChange={e=>s('base_salary',e.target.value)} />
             <Input label="Increment" type="number" value={form.increment} onChange={e=>s('increment',e.target.value)} />
           </FormRow>
+          <Divider label="Personal Details" />
+          <FormRow>
+            <Input label="Date of Birth" type="date" value={form.dob} onChange={e=>s('dob',e.target.value)} />
+            <Select label="Gender" placeholder="— Select —" options={['Male','Female','Other']} value={form.gender} onChange={e=>s('gender',e.target.value)} />
+            <Input label="Mobile" value={form.mobile} onChange={e=>s('mobile',e.target.value)} />
+          </FormRow>
           <Divider label="Bank Details" />
           <FormRow>
             <Input label="Bank Name" value={form.bank_name} onChange={e=>s('bank_name',e.target.value)} />
@@ -152,6 +162,11 @@ export const EmployeeList: React.FC = () => {
           <FormRow>
             <Input label="Account No" value={form.account_no} onChange={e=>s('account_no',e.target.value)} />
             <Input label="IFSC Code" value={form.ifsc} onChange={e=>s('ifsc',e.target.value)} />
+          </FormRow>
+          <Divider label="Statutory" />
+          <FormRow>
+            <Input label="ESI No" value={form.esi_no} onChange={e=>s('esi_no',e.target.value)} hint="Employee State Insurance No" />
+            <Input label="PF No" value={form.pf_no} onChange={e=>s('pf_no',e.target.value)} hint="Provident Fund No" />
           </FormRow>
           <FormRow>
             <Input label="Joining Date" type="date" value={form.joining_date} onChange={e=>s('joining_date',e.target.value)} />
@@ -163,102 +178,104 @@ export const EmployeeList: React.FC = () => {
   )
 }
 
-// ── SALARY ABSTRACT ENTRY ──────────────────────────────────────────
+// ── SALARY ABSTRACT (auto-computed from salary_monthly) ────────────
 export const SalaryAbstractPage: React.FC = () => {
-  const qc = useQueryClient()
-  const [showForm, setShowForm] = useState(false)
   const [filterMonth, setFilterMonth] = useState('')
 
-  const { data: farms } = useQuery({ queryKey:['farms'], queryFn: async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[]} })
-
-  const { data: abstracts, isLoading } = useQuery({
-    queryKey:['salary_abstract', filterMonth],
+  // Compute abstract directly from salary_monthly joined to employees (for farm)
+  const { data: rows, isLoading } = useQuery({
+    queryKey: ['salary_abstract_computed', filterMonth],
     queryFn: async () => {
-      let q = supabase.from('salary_abstract').select('*, farms(name,code)').order('month',{ascending:false})
-      if (filterMonth) q = q.eq('month', filterMonth+'-01')
-      const {data}=await q; return data??[]
+      let q = supabase
+        .from('salary_monthly')
+        .select('month, earned_salary, advance, net_salary, employees!inner(farm_id, farms(name,code))')
+        .order('month', { ascending: false })
+      if (filterMonth) q = q.eq('month', filterMonth + '-01')
+      const { data, error } = await q
+      if (error) throw error
+
+      // Aggregate by farm + month
+      const agg: Record<string, { farm: string; farmCode: string; month: string; earned: number; advance: number; net: number; count: number }> = {}
+      for (const r of (data ?? [])) {
+        const emp = (r as any).employees
+        const farm = emp?.farms?.name ?? 'Unknown'
+        const farmCode = emp?.farms?.code ?? ''
+        const key = `${emp?.farm_id ?? 'x'}__${r.month}`
+        if (!agg[key]) agg[key] = { farm, farmCode, month: r.month, earned: 0, advance: 0, net: 0, count: 0 }
+        agg[key].earned  += (r as any).earned_salary ?? 0
+        agg[key].advance += (r as any).advance ?? 0
+        agg[key].net     += (r as any).net_salary ?? 0
+        agg[key].count++
+      }
+      return Object.values(agg).sort((a, b) => b.month.localeCompare(a.month) || a.farm.localeCompare(b.farm))
     }
   })
 
-  const [form, setForm] = useState({farm_id:'',month:'',total_salary:'',total_advance:'0',net_salary:'',employee_count:''})
-  const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+  const MONTH_NAMES2 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const fmtMonth = (m: string) => {
+    const [yr, mn] = m.slice(0,7).split('-')
+    return `${MONTH_NAMES2[parseInt(mn)-1]} ${yr}`
+  }
 
-  const mut = useMutation({
-    mutationFn: async () => {
-      if (!form.farm_id||!form.month||!form.total_salary) throw new Error('Site, month and salary required')
-      const {error}=await supabase.from('salary_abstract').upsert({
-        farm_id:form.farm_id, month:form.month+'-01',
-        total_salary:parseFloat(form.total_salary), total_advance:parseFloat(form.total_advance)||0,
-        net_salary:parseFloat(form.net_salary)||parseFloat(form.total_salary)-parseFloat(form.total_advance||'0'),
-        employee_count:parseInt(form.employee_count)||null
-      },{onConflict:'farm_id,month'})
-      if(error) throw error
-    },
-    onSuccess: ()=>{ toast.success('Salary abstract saved!'); qc.invalidateQueries({queryKey:['salary_abstract']}); setShowForm(false) },
-    onError: (e:any)=>toast.error(e.message)
-  })
-
-  const farmOptions=farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
+  // Group by month for display
+  const byMonth: Record<string, typeof rows> = {}
+  for (const r of (rows ?? [])) {
+    const k = r.month.slice(0,7);
+    (byMonth[k] ??= []).push(r)
+  }
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Salary Abstract" subtitle="Site-wise monthly salary summary"
-        action={<Button icon={<Plus size={16}/>} onClick={()=>setShowForm(true)}>Add Entry</Button>} />
+      <SectionHeader title="Salary Abstract" subtitle="Auto-computed site-wise monthly salary summary" />
       <div className="flex gap-3">
         <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-48" />
         {filterMonth&&<Button variant="ghost" size="sm" onClick={()=>setFilterMonth('')}>Clear</Button>}
       </div>
-      {isLoading?<Spinner/>:(
-        <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Site</Th><Th>Month</Th><Th right>Earned Salary</Th><Th right>Advance</Th>
-              <Th right>Net Salary</Th><Th right>Employees</Th>
-            </tr></thead>
-            <tbody>
-              {abstracts?.map((a:any)=>(
-                <tr key={a.id} className="hover:bg-gray-50">
-                  <Td><span className="font-medium">{a.farms?.name}</span></Td>
-                  <Td>{fmtDate(a.month)}</Td>
-                  <Td right>{inr(a.total_salary)}</Td>
-                  <Td right className="text-orange-600">{a.total_advance>0?inr(a.total_advance):'—'}</Td>
-                  <Td right className="font-semibold text-green-700">{inr(a.net_salary)}</Td>
-                  <Td right>{a.employee_count??'—'}</Td>
-                </tr>
-              ))}
-            </tbody>
-            {abstracts&&abstracts.length>0&&(
-              <tfoot><tr className="bg-gray-50">
-                <Td colSpan={2}><strong>TOTAL</strong></Td>
-                <Td right><strong>{inr(abstracts.reduce((s:number,a:any)=>s+a.total_salary,0))}</strong></Td>
-                <Td right><strong>{inr(abstracts.reduce((s:number,a:any)=>s+(a.total_advance||0),0))}</strong></Td>
-                <Td right><strong>{inr(abstracts.reduce((s:number,a:any)=>s+a.net_salary,0))}</strong></Td>
-                <Td right><strong>{abstracts.reduce((s:number,a:any)=>s+(a.employee_count||0),0)}</strong></Td>
-              </tr></tfoot>
-            )}
-          </Table>
-          {abstracts?.length===0&&<EmptyState icon={<IndianRupee size={32}/>} title="No salary data" action={<Button onClick={()=>setShowForm(true)} icon={<Plus size={16}/>}>Add Entry</Button>}/>}
-        </Card>
+      {isLoading?<Spinner/>:rows?.length===0?(
+        <EmptyState icon={<IndianRupee size={32}/>} title="No salary entries yet" />
+      ):(
+        Object.entries(byMonth).sort(([a],[b])=>b.localeCompare(a)).map(([monthKey, mRows])=>{
+          const totEarned = mRows!.reduce((s,r)=>s+r.earned,0)
+          const totAdv    = mRows!.reduce((s,r)=>s+r.advance,0)
+          const totNet    = mRows!.reduce((s,r)=>s+r.net,0)
+          const totEmp    = mRows!.reduce((s,r)=>s+r.count,0)
+          return (
+            <Card key={monthKey} padding={false}>
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900">{fmtMonth(monthKey+'-01')}</h3>
+                <div className="flex gap-4 text-sm">
+                  <span className="text-gray-500">Net: <strong className="text-green-700">{inr(totNet)}</strong></span>
+                  <span className="text-gray-500">Emp: <strong>{totEmp}</strong></span>
+                </div>
+              </div>
+              <Table>
+                <thead><tr>
+                  <Th>Site</Th><Th right>Employees</Th><Th right>Earned Salary</Th>
+                  <Th right>Advance</Th><Th right>Net Salary</Th>
+                </tr></thead>
+                <tbody>
+                  {mRows!.map((r,i)=>(
+                    <tr key={i} className="hover:bg-gray-50">
+                      <Td><span className="font-medium">{r.farm}</span> <span className="text-xs text-gray-400">{r.farmCode}</span></Td>
+                      <Td right>{r.count}</Td>
+                      <Td right>{inr(r.earned)}</Td>
+                      <Td right className="text-orange-600">{r.advance>0?inr(r.advance):'—'}</Td>
+                      <Td right className="font-semibold text-green-700">{inr(r.net)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr className="bg-gray-50">
+                  <Td><strong>TOTAL</strong></Td>
+                  <Td right><strong>{totEmp}</strong></Td>
+                  <Td right><strong>{inr(totEarned)}</strong></Td>
+                  <Td right className="text-orange-600"><strong>{totAdv>0?inr(totAdv):'—'}</strong></Td>
+                  <Td right className="font-semibold text-green-700"><strong>{inr(totNet)}</strong></Td>
+                </tr></tfoot>
+              </Table>
+            </Card>
+          )
+        })
       )}
-      <Modal open={showForm} onClose={()=>setShowForm(false)} title="Add Salary Abstract" size="md"
-        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
-        <div className="space-y-4">
-          <FormRow>
-            <Select label="Site / Farm" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={e=>s('farm_id',e.target.value)} />
-            <Input label="Month" required type="month" value={form.month} onChange={e=>s('month',e.target.value)} />
-          </FormRow>
-          <FormRow>
-            <Input label="Total Earned Salary" required type="number" value={form.total_salary} onChange={e=>s('total_salary',e.target.value)} />
-            <Input label="Total Advance" type="number" value={form.total_advance} onChange={e=>s('total_advance',e.target.value)} />
-          </FormRow>
-          <FormRow>
-            <Input label="Net Salary" type="number" value={form.net_salary}
-              onChange={e=>s('net_salary',e.target.value)}
-              hint={`Auto: ${inr((parseFloat(form.total_salary)||0)-(parseFloat(form.total_advance)||0))}`} />
-            <Input label="No. of Employees" type="number" value={form.employee_count} onChange={e=>s('employee_count',e.target.value)} />
-          </FormRow>
-        </div>
-      </Modal>
     </div>
   )
 }
