@@ -678,8 +678,4 @@ INSERT INTO public.he_dispatch (
     '2025-04-22', 3428, (SELECT id FROM public.parties WHERE LOWER(name)=LOWER('Hitech Hatch Fresh Pvt Ltd') LIMIT 1),
     8670, 0, 8670
   )
-ON CONFLICT ON CONSTRAINT he_dispatch_unique DO UPDATE SET
-  amount = EXCLUDED.amount,
-  rate = EXCLUDED.rate,
-  free_eggs = EXCLUDED.free_eggs,
-  invoice_eggs = EXCLUDED.invoice_eggs;
+ON CONFLICT ON CONSTRAINT he_dispatch_unique DO NOTHING;
