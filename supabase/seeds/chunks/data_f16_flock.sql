@@ -18,5 +18,6 @@ ON CONFLICT (flock_no) DO UPDATE SET
   paid_male    = EXCLUDED.paid_male,
   free_female  = EXCLUDED.free_female,
   free_male    = EXCLUDED.free_male,
+  chick_rate   = EXCLUDED.chick_rate,
   status       = EXCLUDED.status,
   close_date   = EXCLUDED.close_date;

@@ -104,6 +104,10 @@ jobs:
           done
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
 
+      - name: Deduplicate employees (same name+farm -> one canonical ID)
+        run: python3 scripts/run_sql.py supabase/migrations/018_deduplicate_employees.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+
       - name: Load Purchase Orders and Payments data (idempotent)
         run: |
           python3 scripts/run_sql.py supabase/seeds/chunks/data_vendor_bank_details.sql
