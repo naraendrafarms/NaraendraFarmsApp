@@ -7,7 +7,24 @@ import {
 } from '@/components/ui'
 import { Plus, Edit2, Settings, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { inr } from '@/lib/utils'
+
+// ── SHARED BULK HELPERS ──────────────────────────────────────────
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
+
+const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean }> = ({ count, onDelete, onClear, loading }) =>
+  count === 0 ? null : (
+    <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+      <span className="text-sm font-medium text-red-700">{count} selected</span>
+      <button onClick={onClear} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+      <div className="ml-auto">
+        <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={loading} onClick={onDelete}>Delete {count} rows</Button>
+      </div>
+    </div>
+  )
 
 // ── GENERIC MASTER TABLE ─────────────────────────────────────────
 const MasterTable: React.FC<{
@@ -181,11 +198,13 @@ export const IngredientsMaster: React.FC = () => {
 // ── PARTIES MASTER ───────────────────────────────────────────────
 export const PartiesMaster: React.FC = () => {
   const qc = useQueryClient()
-  const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const [deleteRow, setDeleteRow] = useState<any>(null)
-  const [filterName, setFilterName] = useState('')
-  const [filterType, setFilterType] = useState('')
+  const [showForm,    setShowForm]    = useState(false)
+  const [editing,     setEditing]     = useState<any>(null)
+  const [deleteRow,   setDeleteRow]   = useState<any>(null)
+  const [sel,         setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [filterName,  setFilterName]  = useState('')
+  const [filterType,  setFilterType]  = useState('')
   const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:''})
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
@@ -225,6 +244,23 @@ export const PartiesMaster: React.FC = () => {
     }
   })
 
+  const bulkDelMut=useMutation({
+    mutationFn:async(ids:string[])=>{ const{error}=await supabase.from('parties').delete().in('id',ids); if(error)throw error },
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['parties']});setSel(new Set());setBulkConfirm(false)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Some parties could not be deleted — they have linked records')
+      else toast.error(e.message)
+      setBulkConfirm(false)
+    }
+  })
+
+  const partyIds=data.map((r:any)=>r.id)
+  const allSel=partyIds.length>0&&partyIds.every((id:string)=>sel.has(id))
+  const someSel=partyIds.some((id:string)=>sel.has(id))
+  const toggle=(id:string)=>setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
+  const toggleAll=()=>setSel(s=>{const n=new Set(s);allSel?partyIds.forEach((id:string)=>n.delete(id)):partyIds.forEach((id:string)=>n.add(id));return n})
+
   return (
     <>
       <div className="space-y-4">
@@ -236,15 +272,18 @@ export const PartiesMaster: React.FC = () => {
           {(filterName||filterType)&&<Button variant="ghost" size="sm" onClick={()=>{setFilterName('');setFilterType('')}}>Clear</Button>}
           <span className="text-xs text-gray-400 self-end pb-2">{data.length} of {allData?.length??0}</span>
         </div>
+        <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)} />
         {isLoading?<Spinner/>:(
           <Card padding={false}>
             <Table>
               <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel&&!allSel} onChange={toggleAll}/></Th>
                 <Th>Name</Th><Th>Type</Th><Th>Category</Th><Th>Contact</Th>
                 <Th>GSTIN</Th><Th>Status</Th><Th></Th>
               </tr></thead>
               <tbody>{data.map((r:any)=>(
-                <tr key={r.id} className="hover:bg-gray-50">
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-red-50':''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
                   <Td><span className="font-medium">{r.name}</span></Td>
                   <Td><Badge color={r.type==='buyer'?'green':r.type==='supplier'?'blue':'orange'}>{r.type}</Badge></Td>
                   <Td>{r.category??'—'}</Td>
@@ -269,6 +308,13 @@ export const PartiesMaster: React.FC = () => {
           footer={<><Button variant="secondary" onClick={()=>setDeleteRow(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={()=>delMut.mutate(deleteRow.id)}>Delete</Button></>}>
           <p className="text-sm text-gray-700">Delete <strong>{deleteRow.name}</strong>? This cannot be undone.</p>
           <p className="text-xs text-gray-500 mt-2">Note: deletion will fail if this party has linked GRN / purchase / sales records.</p>
+        </Modal>
+      )}
+      {bulkConfirm&&(
+        <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Parties" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} parties</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{sel.size} selected parties</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Note: parties with linked GRN / sales records cannot be deleted.</p>
         </Modal>
       )}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Party':'Add Party'} size="md"
@@ -349,8 +395,6 @@ export const MedicinesMaster: React.FC = () => {
     </>
   )
 }
-
-// ── SHEDS MASTER ─────────────────────────────────────────────────
 export const ShedsMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)

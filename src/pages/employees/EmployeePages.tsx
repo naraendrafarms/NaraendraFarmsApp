@@ -6,18 +6,37 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 } from '@/components/ui'
-import { Plus, Users, IndianRupee, Edit2 } from 'lucide-react'
+import { Plus, Users, IndianRupee, Edit2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const DESIGNATIONS = ['Site Incharge','Farm Manager','Computer Operator','Site Supervisor',
   'Feed Mill Operator','Store Keeper','Driver','Security','Hatchery Staff','Watchman','Helper','Other']
 
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
+
+const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean }> = ({ count, onDelete, onClear, loading }) =>
+  count === 0 ? null : (
+    <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+      <span className="text-sm font-medium text-red-700">{count} selected</span>
+      <button onClick={onClear} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+      <div className="ml-auto">
+        <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={loading} onClick={onDelete}>Delete {count} employees</Button>
+      </div>
+    </div>
+  )
+
 // ── EMPLOYEE LIST ────────────────────────────────────────────────
 export const EmployeeList: React.FC = () => {
   const qc = useQueryClient()
-  const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const [farmFilter, setFarmFilter] = useState('')
+  const [showForm,    setShowForm]    = useState(false)
+  const [editing,     setEditing]     = useState<any>(null)
+  const [farmFilter,  setFarmFilter]  = useState('')
+  const [sel,         setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -69,7 +88,7 @@ export const EmployeeList: React.FC = () => {
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.name || !form.farm_id) throw new Error('Name and site required')
-      const payload: any = {
+      const payload = {
         emp_id: form.emp_id || null, name: form.name, designation: form.designation || null,
         farm_id: form.farm_id, department: form.department || null,
         base_salary: parseFloat(form.base_salary) || null,
@@ -88,6 +107,16 @@ export const EmployeeList: React.FC = () => {
     onError: (e:any) => toast.error(e.message)
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => { const{error}=await supabase.from('employees').delete().in('id',ids); if(error)throw error },
+    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({queryKey:['employees']}); setSel(new Set()); setBulkConfirm(false) },
+    onError: (e:any) => { toast.error(e.message); setBulkConfirm(false) }
+  })
+
+  const allEmpIds = (employees??[]).map((e:any)=>e.id)
+  const allSel = allEmpIds.length > 0 && allEmpIds.every((id:string)=>sel.has(id))
+  const toggle = (id:string) => setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
+
   const farmOptions = farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
   const byFarm = employees?.reduce((acc:any,e:any)=>{ const k=e.farms?.name||'Unknown'; (acc[k]??=[]).push(e); return acc; },{})??{}
 
@@ -102,8 +131,14 @@ export const EmployeeList: React.FC = () => {
           onChange={e=>setFarmFilter(e.target.value)} className="w-52" />
         {farmFilter && <Button variant="ghost" size="sm" onClick={()=>setFarmFilter('')}>Clear</Button>}
       </div>
+      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)} />
       {isLoading ? <Spinner/> : (
-        Object.entries(byFarm).map(([farm, emps]:any) => (
+        Object.entries(byFarm).map(([farm, emps]:any) => {
+          const farmIds = emps.map((e:any)=>e.id)
+          const farmAllSel = farmIds.length>0 && farmIds.every((id:string)=>sel.has(id))
+          const farmSomeSel = farmIds.some((id:string)=>sel.has(id))
+          const toggleFarm = () => setSel(s=>{const n=new Set(s);farmAllSel?farmIds.forEach((id:string)=>n.delete(id)):farmIds.forEach((id:string)=>n.add(id));return n})
+          return (
           <Card key={farm} padding={false}>
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">{farm}</h3>
@@ -111,12 +146,14 @@ export const EmployeeList: React.FC = () => {
             </div>
             <Table>
               <thead><tr>
+                <Th><CB checked={farmAllSel} indeterminate={farmSomeSel&&!farmAllSel} onChange={toggleFarm}/></Th>
                 <Th>Emp ID</Th><Th>Name</Th><Th>Designation</Th>
                 <Th right>Basic Salary</Th><Th right>Increment</Th>
                 <Th>Bank</Th><Th>Status</Th><Th></Th>
               </tr></thead>
               <tbody>{emps.map((e:any)=>(
-                <tr key={e.id} className="hover:bg-gray-50">
+                <tr key={e.id} className={`hover:bg-gray-50 ${sel.has(e.id)?'bg-red-50':''}`}>
+                  <Td><CB checked={sel.has(e.id)} onChange={()=>toggle(e.id)}/></Td>
                   <Td className="text-xs text-gray-400">{e.emp_id??'—'}</Td>
                   <Td><span className="font-medium">{e.name}</span></Td>
                   <Td className="text-xs">{e.designation??'—'}</Td>
@@ -129,9 +166,17 @@ export const EmployeeList: React.FC = () => {
               ))}</tbody>
             </Table>
           </Card>
-        ))
+          )
+        })
       )}
       {employees?.length===0 && <EmptyState icon={<Users size={32}/>} title="No employees yet" action={<Button onClick={()=>openEdit()} icon={<Plus size={16}/>}>Add Employee</Button>}/>}
+
+      {bulkConfirm&&(
+        <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Employees" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} employees</Button></>}>
+          <p className="text-sm text-gray-700">Permanently delete <strong>{sel.size} selected employees</strong>? This cannot be undone.</p>
+        </Modal>
+      )}
 
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Employee':'Add Employee'} size="lg"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
@@ -182,7 +227,6 @@ export const EmployeeList: React.FC = () => {
 export const SalaryAbstractPage: React.FC = () => {
   const [filterMonth, setFilterMonth] = useState('')
 
-  // Compute abstract directly from salary_monthly joined to employees (for farm)
   const { data: rows, isLoading } = useQuery({
     queryKey: ['salary_abstract_computed', filterMonth],
     queryFn: async () => {
@@ -194,7 +238,6 @@ export const SalaryAbstractPage: React.FC = () => {
       const { data, error } = await q
       if (error) throw error
 
-      // Aggregate by farm + month
       const agg: Record<string, { farm: string; farmCode: string; month: string; earned: number; advance: number; net: number; count: number }> = {}
       for (const r of (data ?? [])) {
         const emp = (r as any).employees
@@ -217,8 +260,7 @@ export const SalaryAbstractPage: React.FC = () => {
     return `${MONTH_NAMES2[parseInt(mn)-1]} ${yr}`
   }
 
-  // Group by month for display
-  const byMonth: Record<string, typeof rows> = {}
+  const byMonth: Record<string, any[]> = {}
   for (const r of (rows ?? [])) {
     const k = r.month.slice(0,7);
     (byMonth[k] ??= []).push(r)
@@ -231,22 +273,17 @@ export const SalaryAbstractPage: React.FC = () => {
         <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-48" />
         {filterMonth&&<Button variant="ghost" size="sm" onClick={()=>setFilterMonth('')}>Clear</Button>}
       </div>
-      {isLoading?<Spinner/>:rows?.length===0?(
-        <EmptyState icon={<IndianRupee size={32}/>} title="No salary entries yet" />
-      ):(
-        Object.entries(byMonth).sort(([a],[b])=>b.localeCompare(a)).map(([monthKey, mRows])=>{
-          const totEarned = mRows!.reduce((s,r)=>s+r.earned,0)
-          const totAdv    = mRows!.reduce((s,r)=>s+r.advance,0)
-          const totNet    = mRows!.reduce((s,r)=>s+r.net,0)
-          const totEmp    = mRows!.reduce((s,r)=>s+r.count,0)
+      {isLoading?<Spinner/>:(
+        Object.entries(byMonth).map(([monthKey, farmRows]) => {
+          const totEarned = farmRows.reduce((s,r)=>s+r.earned,0)
+          const totAdv    = farmRows.reduce((s,r)=>s+r.advance,0)
+          const totNet    = farmRows.reduce((s,r)=>s+r.net,0)
+          const totCount  = farmRows.reduce((s,r)=>s+r.count,0)
           return (
             <Card key={monthKey} padding={false}>
               <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-semibold text-gray-900">{fmtMonth(monthKey+'-01')}</h3>
-                <div className="flex gap-4 text-sm">
-                  <span className="text-gray-500">Net: <strong className="text-green-700">{inr(totNet)}</strong></span>
-                  <span className="text-gray-500">Emp: <strong>{totEmp}</strong></span>
-                </div>
+                <Badge color="gray">{totCount} employees</Badge>
               </div>
               <Table>
                 <thead><tr>
@@ -254,9 +291,9 @@ export const SalaryAbstractPage: React.FC = () => {
                   <Th right>Advance</Th><Th right>Net Salary</Th>
                 </tr></thead>
                 <tbody>
-                  {mRows!.map((r,i)=>(
-                    <tr key={i} className="hover:bg-gray-50">
-                      <Td><span className="font-medium">{r.farm}</span> <span className="text-xs text-gray-400">{r.farmCode}</span></Td>
+                  {farmRows.map(r=>(
+                    <tr key={r.farm+r.month} className="hover:bg-gray-50">
+                      <Td><span className="font-medium">{r.farm}</span>{r.farmCode&&<span className="text-xs text-gray-400 ml-1">({r.farmCode})</span>}</Td>
                       <Td right>{r.count}</Td>
                       <Td right>{inr(r.earned)}</Td>
                       <Td right className="text-orange-600">{r.advance>0?inr(r.advance):'—'}</Td>
@@ -264,23 +301,22 @@ export const SalaryAbstractPage: React.FC = () => {
                     </tr>
                   ))}
                 </tbody>
-                <tfoot><tr className="bg-gray-50">
-                  <Td><strong>TOTAL</strong></Td>
-                  <Td right><strong>{totEmp}</strong></Td>
-                  <Td right><strong>{inr(totEarned)}</strong></Td>
-                  <Td right className="text-orange-600"><strong>{totAdv>0?inr(totAdv):'—'}</strong></Td>
-                  <Td right className="font-semibold text-green-700"><strong>{inr(totNet)}</strong></Td>
+                <tfoot><tr className="bg-gray-50 font-semibold">
+                  <Td>TOTAL</Td>
+                  <Td right>{totCount}</Td>
+                  <Td right>{inr(totEarned)}</Td>
+                  <Td right className="text-orange-600">{totAdv>0?inr(totAdv):'—'}</Td>
+                  <Td right className="text-green-700">{inr(totNet)}</Td>
                 </tr></tfoot>
               </Table>
             </Card>
           )
         })
       )}
+      {rows?.length===0&&<EmptyState icon={<IndianRupee size={32}/>} title="No salary data loaded" />}
     </div>
   )
 }
-
-// ── INDIVIDUAL SALARY ENTRY ──────────────────────────────────────
 const FY_OPTIONS = [
   {value:'2024-25',label:'FY 2024-25'},
   {value:'2025-26',label:'FY 2025-26'},
