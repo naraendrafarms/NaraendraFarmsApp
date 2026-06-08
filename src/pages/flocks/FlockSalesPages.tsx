@@ -7,8 +7,38 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 } from '@/components/ui'
-import { Plus, Package, Edit2, Egg } from 'lucide-react'
+import { Plus, Package, Edit2, Egg, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+// ── Bulk selection helpers ────────────────────────────────────────
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
+
+const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean }> = ({ count, onDelete, onClear, loading }) => count === 0 ? null : (
+  <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+    <span className="text-sm font-medium text-red-700">{count} selected</span>
+    <button onClick={onClear} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+    <div className="ml-auto">
+      <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={loading} onClick={onDelete}>Delete {count} rows</Button>
+    </div>
+  </div>
+)
+
+const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="bg-white rounded-xl shadow-xl p-6 w-80">
+      <p className="font-semibold text-gray-900 mb-1">Delete records?</p>
+      <p className="text-sm text-gray-500 mb-5">{label}</p>
+      <div className="flex gap-3 justify-end">
+        <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="danger" size="sm" onClick={onConfirm}>Delete</Button>
+      </div>
+    </div>
+  </div>
+)
 
 // ── HE DISPATCH ──────────────────────────────────────────────────
 export const HEDispatch: React.FC = () => {
@@ -17,6 +47,8 @@ export const HEDispatch: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [flockFilter, setFlockFilter] = useState('')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
@@ -92,6 +124,11 @@ export const HEDispatch: React.FC = () => {
     setShowForm(true)
   }
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('he_dispatch').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['he_dispatch'] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.flock_id || !form.dispatch_date || !form.total_dispatched)
@@ -124,6 +161,12 @@ export const HEDispatch: React.FC = () => {
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
   const hatchOptions = hatcheries?.map((h: any) => ({ value: h.id, label: h.name })) ?? []
 
+  const dispIds = (dispatches ?? []).map((d: any) => d.id)
+  const allSel = dispIds.length > 0 && dispIds.every((id: string) => sel.has(id))
+  const someSel = dispIds.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? dispIds.forEach((id: string) => n.delete(id)) : dispIds.forEach((id: string) => n.add(id)); return n })
+
   return (
     <div className="space-y-5">
       <SectionHeader title="HE Dispatch & Sales"
@@ -147,10 +190,13 @@ export const HEDispatch: React.FC = () => {
         </div>
       )}
 
+      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
+              <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Dispatch Date</Th><Th>Prod Date</Th>
               <Th right>DC No</Th><Th>Party</Th><Th>Hatchery</Th>
               <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice</Th>
@@ -158,7 +204,8 @@ export const HEDispatch: React.FC = () => {
             </tr></thead>
             <tbody>
               {dispatches?.map((d: any) => (
-                <tr key={d.id} className="hover:bg-gray-50">
+                <tr key={d.id} className={`hover:bg-gray-50 ${sel.has(d.id) ? 'bg-red-50' : ''}`}>
+                  <Td><CB checked={sel.has(d.id)} onChange={() => toggle(d.id)}/></Td>
                   <Td><Badge color="green">F-{d.flocks?.flock_no}</Badge></Td>
                   <Td className="text-xs">{fmtDate(d.dispatch_date)}</Td>
                   <Td className="text-xs text-gray-400">{fmtDate(d.prod_date)}</Td>
@@ -181,7 +228,7 @@ export const HEDispatch: React.FC = () => {
             </tbody>
             {dispatches && dispatches.length > 0 && (
               <tfoot><tr className="bg-gray-50">
-                <Td colSpan={6}><strong>TOTAL ({dispatches.length} records)</strong></Td>
+                <Td colSpan={7}><strong>TOTAL ({dispatches.length} records)</strong></Td>
                 <Td right><strong>{totalDisp.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{totalFree.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{(totalDisp - totalFree).toLocaleString('en-IN')}</strong></Td>
@@ -197,6 +244,11 @@ export const HEDispatch: React.FC = () => {
             />
           )}
         </Card>
+      )}
+
+      {bulkConfirm && (
+        <ConfirmBulkDelete label={`Delete ${sel.size} HE dispatch records? This cannot be undone.`}
+          onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
 
       <Modal open={showForm} onClose={() => setShowForm(false)}
@@ -270,6 +322,8 @@ export const NHESales: React.FC = () => {
   const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [showForm, setShowForm] = useState(false)
   const [flockFilter, setFlockFilter] = useState('')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
@@ -300,6 +354,11 @@ export const NHESales: React.FC = () => {
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
   const autoAmt = (parseFloat(form.quantity)||0) * (parseFloat(form.rate)||0)
 
+  const bulkDelMutNHE = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('nhe_sales').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['nhe_sales'] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.flock_id || !form.sale_date || !form.amount) throw new Error('Flock, date and amount required')
@@ -319,6 +378,12 @@ export const NHESales: React.FC = () => {
 
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
+
+  const saleIds = (sales ?? []).map((s: any) => s.id)
+  const allSelNHE = saleIds.length > 0 && saleIds.every((id: string) => sel.has(id))
+  const someSelNHE = saleIds.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSelNHE ? saleIds.forEach((id: string) => n.delete(id)) : saleIds.forEach((id: string) => n.add(id)); return n })
 
   // Group by type for summary
   const byType = sales?.reduce((acc: any, s: any) => {
@@ -349,16 +414,20 @@ export const NHESales: React.FC = () => {
         </div>
       )}
 
+      <BulkBar count={sel.size} loading={bulkDelMutNHE.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
+              <Th><CB checked={allSelNHE} indeterminate={someSelNHE && !allSelNHE} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Date</Th><Th>Type</Th><Th>Party</Th>
               <Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th><Th>Remarks</Th>
             </tr></thead>
             <tbody>
               {sales?.map((s: any) => (
-                <tr key={s.id} className="hover:bg-gray-50">
+                <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''}`}>
+                  <Td><CB checked={sel.has(s.id)} onChange={() => toggle(s.id)}/></Td>
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
                   <Td className="text-xs">{fmtDate(s.sale_date)}</Td>
                   <Td className="text-xs">{NHE_TYPES.find(t => t.value === s.sale_type)?.label ?? s.sale_type}</Td>
@@ -372,7 +441,7 @@ export const NHESales: React.FC = () => {
             </tbody>
             {sales && sales.length > 0 && (
               <tfoot><tr className="bg-gray-50">
-                <Td colSpan={6}><strong>TOTAL</strong></Td>
+                <Td colSpan={7}><strong>TOTAL</strong></Td>
                 <Td right><strong className="text-green-700">{inr(sales.reduce((sum: number, s: any) => sum + s.amount, 0))}</strong></Td>
                 <Td> </Td>
               </tr></tfoot>
@@ -380,6 +449,11 @@ export const NHESales: React.FC = () => {
           </Table>
           {sales?.length === 0 && <EmptyState icon={<Egg size={32}/>} title="No sales yet" action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add</Button>} />}
         </Card>
+      )}
+
+      {bulkConfirm && (
+        <ConfirmBulkDelete label={`Delete ${sel.size} NHE/bird sale records? This cannot be undone.`}
+          onConfirm={() => bulkDelMutNHE.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Record NHE / Bird Sale" size="md"
