@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
@@ -9,7 +9,7 @@ import {
 } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, ChevronLeft, ChevronRight,
-  Package, Truck, FlaskConical, ShoppingCart
+  Package, Truck, FlaskConical, ShoppingCart, Pencil, Trash2, X, Check
 } from 'lucide-react'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -30,6 +30,83 @@ function pctFmt(v: number | null | undefined, decimals = 1) {
 }
 
 const PAGE_SIZE = 50
+
+// ── SHARED: Delete confirmation ───────────────────────────────────────────────
+
+const ConfirmDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="bg-white rounded-xl shadow-xl p-6 w-80">
+      <p className="font-semibold text-gray-900 mb-1">Delete record?</p>
+      <p className="text-sm text-gray-500 mb-5">{label}</p>
+      <div className="flex gap-3 justify-end">
+        <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="danger" size="sm" onClick={onConfirm}>Delete</Button>
+      </div>
+    </div>
+  </div>
+)
+
+// ── SHARED: Generic Edit Modal ─────────────────────────────────────────────────
+
+interface FieldDef {
+  key: string
+  label: string
+  type?: 'text' | 'number' | 'date' | 'select'
+  options?: { value: string; label: string }[]
+  step?: string
+}
+
+const EditModal: React.FC<{
+  title: string
+  fields: FieldDef[]
+  data: Record<string, any>
+  onSave: (data: Record<string, any>) => void
+  onClose: () => void
+  saving?: boolean
+}> = ({ title, fields, data, onSave, onClose, saving }) => {
+  const [form, setForm] = useState<Record<string, any>>({ ...data })
+
+  const set = (key: string, val: any) => setForm(f => ({ ...f, [key]: val }))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-4 border-b">
+          <p className="font-semibold text-gray-900">{title}</p>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+        </div>
+        <div className="p-4 grid grid-cols-2 gap-3">
+          {fields.map(f => (
+            <div key={f.key} className={f.type === 'date' || f.type === 'select' ? '' : ''}>
+              {f.type === 'select' ? (
+                <Select
+                  label={f.label}
+                  options={f.options ?? []}
+                  value={form[f.key] ?? ''}
+                  onChange={e => set(f.key, e.target.value)}
+                />
+              ) : (
+                <Input
+                  label={f.label}
+                  type={f.type ?? 'text'}
+                  step={f.step}
+                  value={form[f.key] ?? ''}
+                  onChange={e => set(f.key, e.target.value)}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-3 justify-end p-4 border-t">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" icon={<Check size={14}/>} onClick={() => onSave(form)} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 
@@ -244,12 +321,11 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
   const totalHE   = daily.reduce((s: number, r: any) => s + (r.he_eggs ?? 0), 0)
   const totalHEDisp = (heDispatch ?? []).reduce((s: number, r: any) => s + (r.total_dispatched ?? 0), 0)
 
-  const hdRows = daily.filter((r: any) => r.hd_pct != null)
+  const hdRows = daily.filter((r: any) => r.hd_pct != null && (r.total_eggs ?? 0) > 0)
   const avgHD  = hdRows.length ? hdRows.reduce((s: number, r: any) => s + r.hd_pct, 0) / hdRows.length : null
   const heRows = daily.filter((r: any) => r.he_pct != null && (r.total_eggs ?? 0) > 0)
   const avgHE  = heRows.length ? heRows.reduce((s: number, r: any) => s + r.he_pct, 0) / heRows.length : null
 
-  // Monthly summary
   const monthly: Record<string, { eggs: number; heEggs: number; mort: number; birdDays: number; days: number }> = {}
   daily.forEach((r: any) => {
     const month = (r.record_date as string)?.slice(0, 7) ?? ''
@@ -306,11 +382,29 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
 
 // ── DAILY RECORDS TAB ─────────────────────────────────────────────────────────
 
+const DAILY_FIELDS: FieldDef[] = [
+  { key: 'record_date',      label: 'Date',           type: 'date' },
+  { key: 'age_weeks',        label: 'Age (weeks)',     type: 'number', step: '0.1' },
+  { key: 'opening_female',   label: 'Open Female',     type: 'number' },
+  { key: 'opening_male',     label: 'Open Male',       type: 'number' },
+  { key: 'mortality_female', label: 'Mortality F',     type: 'number' },
+  { key: 'mortality_male',   label: 'Mortality M',     type: 'number' },
+  { key: 'closing_female',   label: 'Closing Female',  type: 'number' },
+  { key: 'closing_male',     label: 'Closing Male',    type: 'number' },
+  { key: 'feed_female_kg',   label: 'Feed F (kg)',     type: 'number', step: '0.1' },
+  { key: 'feed_male_kg',     label: 'Feed M (kg)',     type: 'number', step: '0.1' },
+  { key: 'total_eggs',       label: 'Total Eggs',      type: 'number' },
+  { key: 'he_eggs',          label: 'HE Eggs',         type: 'number' },
+]
+
 const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const qc = useQueryClient()
   const [fFarm, setFFarm] = useState('')
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
   const [page,  setPage]  = useState(0)
+  const [editRow,   setEditRow]   = useState<any | null>(null)
+  const [deleteRow, setDeleteRow] = useState<any | null>(null)
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -342,6 +436,16 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => { await supabase.from('daily_records').delete().eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_records', flockId] }); qc.invalidateQueries({ queryKey: ['flock_daily_all', flockId] }); setDeleteRow(null) }
+  })
+
+  const updateMut = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('daily_records').update(data).eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_records', flockId] }); qc.invalidateQueries({ queryKey: ['flock_daily_all', flockId] }); setEditRow(null) }
+  })
+
   const filtered = (allRecords ?? []).filter((r: any) => {
     if (fFarm && r.farm_id !== fFarm) return false
     if (fFrom && r.record_date < fFrom) return false
@@ -354,7 +458,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const totalEggs = filtered.reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0)
   const totalMort = filtered.reduce((s: number, r: any) => s + (r.mortality_female ?? 0) + (r.mortality_male ?? 0), 0)
-  const hdRows = filtered.filter((r: any) => r.hd_pct != null)
+  const hdRows = filtered.filter((r: any) => r.hd_pct != null && (r.total_eggs ?? 0) > 0)
   const avgHD  = hdRows.length ? hdRows.reduce((s: number, r: any) => s + r.hd_pct, 0) / hdRows.length : null
 
   const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))
@@ -396,6 +500,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                 <Th right>Mort F</Th><Th right>Mort M</Th>
                 <Th right>Close F</Th><Th right>Close M</Th>
                 <Th right>Age/Wk</Th>
+                <Th></Th>
               </tr></thead>
               <tbody>
                 {rows.map((r: any) => (
@@ -415,6 +520,12 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                     <Td right className="text-xs">{numFmt(r.closing_female)}</Td>
                     <Td right className="text-xs">{numFmt(r.closing_male)}</Td>
                     <Td right className="text-xs text-gray-400">{r.age_weeks ?? '—'}</Td>
+                    <Td>
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={() => setEditRow(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                        <button onClick={() => setDeleteRow(r)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                      </div>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -437,13 +548,62 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           )}
         </>
       )}
+
+      {editRow && (
+        <EditModal
+          title={`Edit Daily Record — ${fmtDate(editRow.record_date)}`}
+          fields={DAILY_FIELDS}
+          data={editRow}
+          saving={updateMut.isPending}
+          onClose={() => setEditRow(null)}
+          onSave={form => updateMut.mutate({ id: editRow.id, data: {
+            record_date: form.record_date,
+            age_weeks: form.age_weeks !== '' ? Number(form.age_weeks) : null,
+            opening_female: Number(form.opening_female) || 0,
+            opening_male:   Number(form.opening_male)   || 0,
+            mortality_female: Number(form.mortality_female) || 0,
+            mortality_male:   Number(form.mortality_male)   || 0,
+            closing_female: Number(form.closing_female) || 0,
+            closing_male:   Number(form.closing_male)   || 0,
+            feed_female_kg: form.feed_female_kg !== '' ? Number(form.feed_female_kg) : null,
+            feed_male_kg:   form.feed_male_kg   !== '' ? Number(form.feed_male_kg)   : null,
+            total_eggs: Number(form.total_eggs) || 0,
+            he_eggs:    Number(form.he_eggs)    || 0,
+          }})}
+        />
+      )}
+
+      {deleteRow && (
+        <ConfirmDelete
+          label={`Date: ${fmtDate(deleteRow.record_date)} · ${deleteRow.farms?.code ?? ''}`}
+          onConfirm={() => deleteMut.mutate(deleteRow.id)}
+          onCancel={() => setDeleteRow(null)}
+        />
+      )}
     </div>
   )
 }
 
 // ── BIRD TRANSFERS TAB ────────────────────────────────────────────────────────
 
+const TRANSFER_FIELDS: FieldDef[] = [
+  { key: 'transfer_date',  label: 'Date',           type: 'date' },
+  { key: 'dc_no',          label: 'DC No',          type: 'text' },
+  { key: 'grade',          label: 'Grade',          type: 'text' },
+  { key: 'gender',         label: 'Gender',         type: 'text' },
+  { key: 'vehicle_no',     label: 'Vehicle No',     type: 'text' },
+  { key: 'no_of_boxes',    label: 'No of Boxes',    type: 'number' },
+  { key: 'birds_per_box',  label: 'Birds/Box',      type: 'number' },
+  { key: 'total_birds',    label: 'Total Birds',    type: 'number' },
+]
+
 const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const qc = useQueryClient()
+  const [fFrom, setFFrom] = useState('')
+  const [fTo,   setFTo]   = useState('')
+  const [editRow,   setEditRow]   = useState<any | null>(null)
+  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+
   const { data: transfers, isLoading } = useQuery({
     queryKey: ['flock_bird_transfers', flockId],
     queryFn: async () => {
@@ -456,13 +616,42 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
-  const totalBirds = (transfers ?? []).reduce((s: number, r: any) => s + (r.total_birds ?? 0), 0)
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => { await supabase.from('bird_transfers').delete().eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setDeleteRow(null) }
+  })
+
+  const updateMut = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('bird_transfers').update(data).eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setEditRow(null) }
+  })
+
+  const filtered = (transfers ?? []).filter((r: any) => {
+    if (fFrom && r.transfer_date < fFrom) return false
+    if (fTo   && r.transfer_date > fTo)   return false
+    return true
+  })
+
+  const totalBirds = filtered.reduce((s: number, r: any) => s + (r.total_birds ?? 0), 0)
 
   return (
     <div className="space-y-4">
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
+          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          {(fFrom || fTo) && (
+            <div className="flex items-end">
+              <button onClick={() => { setFFrom(''); setFTo('') }} className="text-xs text-brand-600 hover:underline">Clear</button>
+            </div>
+          )}
+        </div>
+      </Card>
+
       <div className="grid grid-cols-1 gap-4 max-w-xs">
         <StatCard title="Total Birds Transferred" value={numFmt(totalBirds)} icon={<Truck size={18}/>} color="text-purple-600" />
       </div>
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
@@ -470,9 +659,10 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               <Th>Date</Th><Th>DC No</Th><Th>Grade</Th><Th>Gender</Th>
               <Th>Vehicle</Th><Th right>Boxes</Th><Th right>Birds/Box</Th>
               <Th right>Total Birds</Th><Th>From → To</Th>
+              <Th></Th>
             </tr></thead>
             <tbody>
-              {transfers?.map((t: any) => (
+              {filtered.map((t: any) => (
                 <tr key={t.id} className="hover:bg-gray-50">
                   <Td className="text-xs">{fmtDate(t.transfer_date)}</Td>
                   <Td className="text-xs font-mono">{t.dc_no ?? '—'}</Td>
@@ -483,12 +673,46 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                   <Td right className="text-xs">{numFmt(t.birds_per_box)}</Td>
                   <Td right className="text-xs font-semibold">{numFmt(t.total_birds)}</Td>
                   <Td className="text-xs">{t.from_farm?.code ?? '?'} → {t.to_farm?.code ?? '?'}</Td>
+                  <Td>
+                    <div className="flex gap-1 justify-end">
+                      <button onClick={() => setEditRow(t)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                      <button onClick={() => setDeleteRow(t)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
-          {transfers?.length === 0 && <EmptyState icon={<Truck size={32}/>} title="No bird transfers" />}
+          {filtered.length === 0 && <EmptyState icon={<Truck size={32}/>} title="No bird transfers" />}
         </Card>
+      )}
+
+      {editRow && (
+        <EditModal
+          title={`Edit Transfer — ${fmtDate(editRow.transfer_date)}`}
+          fields={TRANSFER_FIELDS}
+          data={editRow}
+          saving={updateMut.isPending}
+          onClose={() => setEditRow(null)}
+          onSave={form => updateMut.mutate({ id: editRow.id, data: {
+            transfer_date: form.transfer_date,
+            dc_no: form.dc_no || null,
+            grade: form.grade || null,
+            gender: form.gender || null,
+            vehicle_no: form.vehicle_no || null,
+            no_of_boxes: Number(form.no_of_boxes) || 0,
+            birds_per_box: Number(form.birds_per_box) || 0,
+            total_birds: Number(form.total_birds) || 0,
+          }})}
+        />
+      )}
+
+      {deleteRow && (
+        <ConfirmDelete
+          label={`Date: ${fmtDate(deleteRow.transfer_date)} · ${numFmt(deleteRow.total_birds)} birds`}
+          onConfirm={() => deleteMut.mutate(deleteRow.id)}
+          onCancel={() => setDeleteRow(null)}
+        />
       )}
     </div>
   )
@@ -496,9 +720,22 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
 // ── HE DISPATCH TAB ───────────────────────────────────────────────────────────
 
+const HE_DISPATCH_FIELDS: FieldDef[] = [
+  { key: 'dispatch_date',    label: 'Date',        type: 'date' },
+  { key: 'dc_no',            label: 'DC No',       type: 'text' },
+  { key: 'grade_a',          label: 'Grade A',     type: 'number' },
+  { key: 'grade_b',          label: 'Grade B',     type: 'number' },
+  { key: 'total_dispatched', label: 'Total',       type: 'number' },
+  { key: 'rate',             label: 'Rate (₹)',    type: 'number', step: '0.01' },
+  { key: 'amount',           label: 'Amount (₹)', type: 'number', step: '0.01' },
+]
+
 const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const qc = useQueryClient()
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
+  const [editRow,   setEditRow]   = useState<any | null>(null)
+  const [deleteRow, setDeleteRow] = useState<any | null>(null)
 
   const { data: allDisp, isLoading } = useQuery({
     queryKey: ['flock_he_dispatch', flockId],
@@ -510,6 +747,16 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         .order('dispatch_date', { ascending: false })
       return data ?? []
     }
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => { await supabase.from('he_dispatch').delete().eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_he_dispatch', flockId] }); qc.invalidateQueries({ queryKey: ['flock_he_dispatch_all', flockId] }); setDeleteRow(null) }
+  })
+
+  const updateMut = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('he_dispatch').update(data).eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_he_dispatch', flockId] }); qc.invalidateQueries({ queryKey: ['flock_he_dispatch_all', flockId] }); setEditRow(null) }
   })
 
   const dispatches = (allDisp ?? []).filter((r: any) => {
@@ -548,6 +795,7 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               <Th>Date</Th><Th>DC No</Th><Th>Party</Th>
               <Th right>Grade A</Th><Th right>Grade B</Th>
               <Th right>Total</Th><Th right>Rate</Th><Th right>Amount</Th>
+              <Th></Th>
             </tr></thead>
             <tbody>
               {dispatches.map((d: any) => (
@@ -560,6 +808,12 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                   <Td right className="text-xs font-semibold">{numFmt(d.total_dispatched)}</Td>
                   <Td right className="text-xs">{d.rate != null ? `₹${d.rate}` : '—'}</Td>
                   <Td right className="text-xs font-semibold">{inr(d.amount)}</Td>
+                  <Td>
+                    <div className="flex gap-1 justify-end">
+                      <button onClick={() => setEditRow(d)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                      <button onClick={() => setDeleteRow(d)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -569,11 +823,39 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                 <Td right>{numFmt(totalDisp)}</Td>
                 <Td right>—</Td>
                 <Td right>{inr(totalAmount)}</Td>
+                <Td></Td>
               </tr></tfoot>
             )}
           </Table>
           {dispatches.length === 0 && <EmptyState icon={<Egg size={32}/>} title="No HE dispatch records" />}
         </Card>
+      )}
+
+      {editRow && (
+        <EditModal
+          title={`Edit HE Dispatch — ${fmtDate(editRow.dispatch_date)}`}
+          fields={HE_DISPATCH_FIELDS}
+          data={editRow}
+          saving={updateMut.isPending}
+          onClose={() => setEditRow(null)}
+          onSave={form => updateMut.mutate({ id: editRow.id, data: {
+            dispatch_date:    form.dispatch_date,
+            dc_no:            form.dc_no || null,
+            grade_a:          Number(form.grade_a)          || 0,
+            grade_b:          Number(form.grade_b)          || 0,
+            total_dispatched: Number(form.total_dispatched) || 0,
+            rate:             form.rate   !== '' ? Number(form.rate)   : null,
+            amount:           form.amount !== '' ? Number(form.amount) : null,
+          }})}
+        />
+      )}
+
+      {deleteRow && (
+        <ConfirmDelete
+          label={`Date: ${fmtDate(deleteRow.dispatch_date)} · ${numFmt(deleteRow.total_dispatched)} eggs`}
+          onConfirm={() => deleteMut.mutate(deleteRow.id)}
+          onCancel={() => setDeleteRow(null)}
+        />
       )}
     </div>
   )
@@ -581,7 +863,22 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
 // ── FEED TAB ──────────────────────────────────────────────────────────────────
 
+const FEED_FIELDS: FieldDef[] = [
+  { key: 'feed_date',   label: 'Date',       type: 'date' },
+  { key: 'feed_type',   label: 'Feed Type',  type: 'text' },
+  { key: 'female_kg',   label: 'Female KG',  type: 'number', step: '0.1' },
+  { key: 'male_kg',     label: 'Male KG',    type: 'number', step: '0.1' },
+  { key: 'female_cost', label: 'Female Cost',type: 'number', step: '0.01' },
+  { key: 'male_cost',   label: 'Male Cost',  type: 'number', step: '0.01' },
+]
+
 const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const qc = useQueryClient()
+  const [fFrom, setFFrom] = useState('')
+  const [fTo,   setFTo]   = useState('')
+  const [editRow,   setEditRow]   = useState<any | null>(null)
+  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+
   const { data: feedData, isLoading } = useQuery({
     queryKey: ['flock_daily_feed', flockId],
     queryFn: async () => {
@@ -594,7 +891,6 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
-  // GRN rates for feed types — use latest price per unit per item name
   const { data: feedGrnRates } = useQuery({
     queryKey: ['grn_feed_rates'],
     queryFn: async () => {
@@ -614,7 +910,16 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
-  // Match feed type code (BCM/BGM/BDM) to GRN item name
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => { await supabase.from('daily_feed').delete().eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setDeleteRow(null) }
+  })
+
+  const updateMut = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('daily_feed').update(data).eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setEditRow(null) }
+  })
+
   const getFeedGrnRate = (feedType: string) => {
     if (!feedGrnRates || !feedType) return null
     const ft = feedType.trim().toLowerCase()
@@ -622,23 +927,39 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     return found ? feedGrnRates[found] : null
   }
 
-  const totalFemaleKg = (feedData ?? []).reduce((s: number, r: any) => s + (r.female_kg ?? 0), 0)
-  const totalMaleKg   = (feedData ?? []).reduce((s: number, r: any) => s + (r.male_kg ?? 0), 0)
-  const totalCostExcel = (feedData ?? []).reduce((s: number, r: any) => s + (r.female_cost ?? 0) + (r.male_cost ?? 0), 0)
-  const totalCostGrn  = (feedData ?? []).reduce((s: number, r: any) => {
+  const filtered = (feedData ?? []).filter((r: any) => {
+    if (fFrom && r.feed_date < fFrom) return false
+    if (fTo   && r.feed_date > fTo)   return false
+    return true
+  })
+
+  const totalFemaleKg = filtered.reduce((s: number, r: any) => s + (r.female_kg ?? 0), 0)
+  const totalMaleKg   = filtered.reduce((s: number, r: any) => s + (r.male_kg ?? 0), 0)
+  const totalCostGrn  = filtered.reduce((s: number, r: any) => {
     const rate = getFeedGrnRate(r.feed_type) ?? 0
     return s + ((r.female_kg ?? 0) + (r.male_kg ?? 0)) * rate
   }, 0)
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
+          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          {(fFrom || fTo) && (
+            <div className="flex items-end">
+              <button onClick={() => { setFFrom(''); setFTo('') }} className="text-xs text-brand-600 hover:underline">Clear</button>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <StatCard title="Total Female KG" value={`${numFmt(Math.round(totalFemaleKg))} kg`} icon={<Package size={18}/>} color="text-pink-600" />
         <StatCard title="Total Male KG"   value={`${numFmt(Math.round(totalMaleKg))} kg`}   icon={<Package size={18}/>} color="text-blue-600" />
         <StatCard title="Cost (GRN Rates)" value={inr(totalCostGrn)} icon={<TrendingUp size={18}/>} color="text-green-600" />
-        <StatCard title="Cost (Excel Rates)" value={inr(totalCostExcel)} icon={<TrendingUp size={18}/>} color="text-gray-400" />
       </div>
-      <p className="text-xs text-gray-500">Note: Only rearing period (Nov 2023–Mar 2024) has feed type data. Laying period feed totals are in Daily Records tab. GRN Rate = actual purchase rate from invoices.</p>
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
@@ -646,28 +967,61 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               <Th>Date</Th><Th>Feed Type</Th>
               <Th right>Female KG</Th><Th right>Male KG</Th>
               <Th right>Total KG</Th><Th right>GRN Rate/kg</Th><Th right>Cost (GRN)</Th>
+              <Th></Th>
             </tr></thead>
             <tbody>
-              {feedData?.map((r: any) => {
+              {filtered.map((r: any) => {
                 const grnRate = getFeedGrnRate(r.feed_type)
                 const totalKg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
                 const costGrn = grnRate != null ? totalKg * grnRate : null
                 return (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <Td className="text-xs">{fmtDate(r.feed_date)}</Td>
-                  <Td className="text-xs"><Badge color="blue">{r.feed_type ?? '—'}</Badge></Td>
-                  <Td right className="text-xs">{r.female_kg != null ? (r.female_kg as number).toFixed(1) : '—'}</Td>
-                  <Td right className="text-xs">{r.male_kg != null ? (r.male_kg as number).toFixed(1) : '—'}</Td>
-                  <Td right className="text-xs font-semibold">{totalKg.toFixed(1)}</Td>
-                  <Td right className="text-xs">{grnRate != null ? <span className="text-green-700">₹{grnRate}/kg</span> : <span className="text-gray-400">—</span>}</Td>
-                  <Td right className="text-xs font-semibold">{costGrn != null ? inr(costGrn) : '—'}</Td>
-                </tr>
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <Td className="text-xs">{fmtDate(r.feed_date)}</Td>
+                    <Td className="text-xs"><Badge color="blue">{r.feed_type ?? '—'}</Badge></Td>
+                    <Td right className="text-xs">{r.female_kg != null ? (r.female_kg as number).toFixed(1) : '—'}</Td>
+                    <Td right className="text-xs">{r.male_kg != null ? (r.male_kg as number).toFixed(1) : '—'}</Td>
+                    <Td right className="text-xs font-semibold">{totalKg.toFixed(1)}</Td>
+                    <Td right className="text-xs">{grnRate != null ? <span className="text-green-700">₹{grnRate}/kg</span> : <span className="text-gray-400">—</span>}</Td>
+                    <Td right className="text-xs font-semibold">{costGrn != null ? inr(costGrn) : '—'}</Td>
+                    <Td>
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={() => setEditRow(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                        <button onClick={() => setDeleteRow(r)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                      </div>
+                    </Td>
+                  </tr>
                 )
               })}
             </tbody>
           </Table>
-          {feedData?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
+          {filtered.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
         </Card>
+      )}
+
+      {editRow && (
+        <EditModal
+          title={`Edit Feed — ${fmtDate(editRow.feed_date)}`}
+          fields={FEED_FIELDS}
+          data={editRow}
+          saving={updateMut.isPending}
+          onClose={() => setEditRow(null)}
+          onSave={form => updateMut.mutate({ id: editRow.id, data: {
+            feed_date:   form.feed_date,
+            feed_type:   form.feed_type || null,
+            female_kg:   form.female_kg   !== '' ? Number(form.female_kg)   : null,
+            male_kg:     form.male_kg     !== '' ? Number(form.male_kg)     : null,
+            female_cost: form.female_cost !== '' ? Number(form.female_cost) : null,
+            male_cost:   form.male_cost   !== '' ? Number(form.male_cost)   : null,
+          }})}
+        />
+      )}
+
+      {deleteRow && (
+        <ConfirmDelete
+          label={`Date: ${fmtDate(deleteRow.feed_date)} · ${deleteRow.feed_type ?? ''}`}
+          onConfirm={() => deleteMut.mutate(deleteRow.id)}
+          onCancel={() => setDeleteRow(null)}
+        />
       )}
     </div>
   )
@@ -675,7 +1029,21 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
 // ── MEDICINE TAB ──────────────────────────────────────────────────────────────
 
+const MEDICINE_FIELDS: FieldDef[] = [
+  { key: 'usage_date', label: 'Date',         type: 'date' },
+  { key: 'quantity',   label: 'Quantity',     type: 'number', step: '0.001' },
+  { key: 'unit',       label: 'Unit',         type: 'text' },
+  { key: 'rate',       label: 'Rate (₹)',     type: 'number', step: '0.01' },
+  { key: 'amount',     label: 'Amount (₹)',  type: 'number', step: '0.01' },
+]
+
 const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const qc = useQueryClient()
+  const [fFrom, setFFrom] = useState('')
+  const [fTo,   setFTo]   = useState('')
+  const [editRow,   setEditRow]   = useState<any | null>(null)
+  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+
   const { data: usages, isLoading } = useQuery({
     queryKey: ['flock_medicine', flockId],
     queryFn: async () => {
@@ -688,7 +1056,6 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
-  // GRN rates: latest price_per_unit per item_name from actual purchase invoices
   const { data: grnRates } = useQuery({
     queryKey: ['grn_med_rates'],
     queryFn: async () => {
@@ -706,12 +1073,20 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => { await supabase.from('medicine_usage').delete().eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setDeleteRow(null) }
+  })
+
+  const updateMut = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('medicine_usage').update(data).eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setEditRow(null) }
+  })
+
   const getGrnRate = (name: string) => {
     if (!grnRates || !name) return null
     const key = name.trim().toLowerCase()
-    // exact match
     if (grnRates[key] !== undefined) return grnRates[key]
-    // partial match
     const found = Object.keys(grnRates).find(k => k.includes(key) || key.includes(k))
     return found ? grnRates[found] : null
   }
@@ -722,25 +1097,44 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     return (r.quantity ?? 0) * rate
   }
 
-  const totalCostGrn = (usages ?? []).reduce((s: number, r: any) => s + calcCost(r), 0)
-  const totalCostExcel = (usages ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const filtered = (usages ?? []).filter((r: any) => {
+    if (fFrom && r.usage_date < fFrom) return false
+    if (fTo   && r.usage_date > fTo)   return false
+    return true
+  })
+
+  const totalCostGrn   = filtered.reduce((s: number, r: any) => s + calcCost(r), 0)
+  const totalCostExcel = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-lg">
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
+          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          {(fFrom || fTo) && (
+            <div className="flex items-end">
+              <button onClick={() => { setFFrom(''); setFTo('') }} className="text-xs text-brand-600 hover:underline">Clear</button>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 gap-4 max-w-sm">
         <StatCard title="Cost (GRN Rates)" value={inr(totalCostGrn)} icon={<FlaskConical size={18}/>} color="text-green-600" />
         <StatCard title="Cost (Excel Rates)" value={inr(totalCostExcel)} icon={<FlaskConical size={18}/>} color="text-gray-400" />
       </div>
-      <p className="text-xs text-gray-500">GRN Rate = actual purchase rate from GRN invoices (most recent per item). Excel Rate = rate recorded in monthly report — may be inaccurate. Use GRN Rate for accounting.</p>
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
               <Th>Date</Th><Th>Medicine / Vaccine</Th><Th right>Qty</Th>
               <Th>Unit</Th><Th right>GRN Rate</Th><Th right>Excel Rate</Th><Th right>Cost (GRN)</Th>
+              <Th></Th>
             </tr></thead>
             <tbody>
-              {usages?.map((r: any) => {
+              {filtered.map((r: any) => {
                 const grnRate = getGrnRate(r.medicines_master?.name ?? '')
                 const cost = calcCost(r)
                 return (
@@ -752,19 +1146,51 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                     <Td right className="text-xs">{grnRate != null ? <span className="text-green-700 font-medium">₹{grnRate}</span> : <span className="text-gray-400">not in GRN</span>}</Td>
                     <Td right className="text-xs text-gray-400">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
                     <Td right className="text-xs font-semibold">{inr(cost)}</Td>
+                    <Td>
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={() => setEditRow(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                        <button onClick={() => setDeleteRow(r)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                      </div>
+                    </Td>
                   </tr>
                 )
               })}
             </tbody>
-            {(usages?.length ?? 0) > 0 && (
+            {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={6}>TOTAL ({usages?.length} records)</Td>
+                <Td colSpan={6}>TOTAL ({filtered.length} records)</Td>
                 <Td right>{inr(totalCostGrn)}</Td>
+                <Td></Td>
               </tr></tfoot>
             )}
           </Table>
-          {usages?.length === 0 && <EmptyState icon={<FlaskConical size={32}/>} title="No medicine records" />}
+          {filtered.length === 0 && <EmptyState icon={<FlaskConical size={32}/>} title="No medicine records" />}
         </Card>
+      )}
+
+      {editRow && (
+        <EditModal
+          title={`Edit Medicine — ${fmtDate(editRow.usage_date)}`}
+          fields={MEDICINE_FIELDS}
+          data={editRow}
+          saving={updateMut.isPending}
+          onClose={() => setEditRow(null)}
+          onSave={form => updateMut.mutate({ id: editRow.id, data: {
+            usage_date: form.usage_date,
+            quantity:   form.quantity !== '' ? Number(form.quantity) : null,
+            unit:       form.unit || null,
+            rate:       form.rate   !== '' ? Number(form.rate)   : null,
+            amount:     form.amount !== '' ? Number(form.amount) : null,
+          }})}
+        />
+      )}
+
+      {deleteRow && (
+        <ConfirmDelete
+          label={`Date: ${fmtDate(deleteRow.usage_date)} · ${deleteRow.medicines_master?.name ?? ''}`}
+          onConfirm={() => deleteMut.mutate(deleteRow.id)}
+          onCancel={() => setDeleteRow(null)}
+        />
       )}
     </div>
   )
@@ -772,7 +1198,24 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
 // ── BIRD SALES TAB ────────────────────────────────────────────────────────────
 
+const BIRD_SALES_FIELDS: FieldDef[] = [
+  { key: 'sale_date',  label: 'Date',        type: 'date' },
+  { key: 'dc_no',      label: 'DC No',       type: 'text' },
+  { key: 'sale_type',  label: 'Sale Type',   type: 'text' },
+  { key: 'quantity',   label: 'Quantity',    type: 'number' },
+  { key: 'unit',       label: 'Unit',        type: 'text' },
+  { key: 'rate',       label: 'Rate (₹)',   type: 'number', step: '0.01' },
+  { key: 'amount',     label: 'Amount (₹)', type: 'number', step: '0.01' },
+]
+
 const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const qc = useQueryClient()
+  const [fFrom, setFFrom] = useState('')
+  const [fTo,   setFTo]   = useState('')
+  const [fType, setFType] = useState('')
+  const [editRow,   setEditRow]   = useState<any | null>(null)
+  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+
   const { data: sales, isLoading } = useQuery({
     queryKey: ['flock_nhe_sales', flockId],
     queryFn: async () => {
@@ -785,13 +1228,48 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
-  const totalAmount = (sales ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => { await supabase.from('nhe_sales').delete().eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_nhe_sales', flockId] }); setDeleteRow(null) }
+  })
+
+  const updateMut = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('nhe_sales').update(data).eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_nhe_sales', flockId] }); setEditRow(null) }
+  })
+
+  const saleTypes = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))]
+  const typeOptions = saleTypes.map(t => ({ value: t as string, label: t as string }))
+
+  const filtered = (sales ?? []).filter((r: any) => {
+    if (fFrom && r.sale_date < fFrom) return false
+    if (fTo   && r.sale_date > fTo)   return false
+    if (fType && r.sale_type !== fType) return false
+    return true
+  })
+
+  const totalAmount = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 max-w-xs">
-        <StatCard title="Total Sale Amount" value={inr(totalAmount)} icon={<ShoppingCart size={18}/>} color="text-green-600" />
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <Select label="Type" placeholder="All Types" options={typeOptions} value={fType} onChange={e => setFType(e.target.value)} />
+          {(fFrom || fTo || fType) && (
+            <div className="flex items-end">
+              <button onClick={() => { setFFrom(''); setFTo(''); setFType('') }} className="text-xs text-brand-600 hover:underline">Clear</button>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 gap-4 max-w-sm">
+        <StatCard title="Total Amount" value={inr(totalAmount)} icon={<ShoppingCart size={18}/>} color="text-green-600" />
+        <StatCard title="Records" value={filtered.length.toString()} icon={<ShoppingCart size={18}/>} color="text-blue-600" />
       </div>
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
@@ -799,9 +1277,10 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               <Th>Date</Th><Th>DC No</Th><Th>Type</Th>
               <Th right>Qty</Th><Th>Unit</Th>
               <Th right>Rate</Th><Th right>Amount</Th>
+              <Th></Th>
             </tr></thead>
             <tbody>
-              {sales?.map((r: any) => (
+              {filtered.map((r: any) => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <Td className="text-xs">{fmtDate(r.sale_date)}</Td>
                   <Td className="text-xs font-mono">{r.dc_no ?? '—'}</Td>
@@ -810,18 +1289,52 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                   <Td className="text-xs text-gray-400">{r.unit ?? '—'}</Td>
                   <Td right className="text-xs">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
                   <Td right className="text-xs font-semibold">{inr(r.amount)}</Td>
+                  <Td>
+                    <div className="flex gap-1 justify-end">
+                      <button onClick={() => setEditRow(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                      <button onClick={() => setDeleteRow(r)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-            {(sales?.length ?? 0) > 0 && (
+            {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={6}>TOTAL ({sales?.length})</Td>
+                <Td colSpan={6}>TOTAL ({filtered.length})</Td>
                 <Td right>{inr(totalAmount)}</Td>
+                <Td></Td>
               </tr></tfoot>
             )}
           </Table>
-          {sales?.length === 0 && <EmptyState icon={<ShoppingCart size={32}/>} title="No bird sales records" />}
+          {filtered.length === 0 && <EmptyState icon={<ShoppingCart size={32}/>} title="No bird sales records" />}
         </Card>
+      )}
+
+      {editRow && (
+        <EditModal
+          title={`Edit Sale — ${fmtDate(editRow.sale_date)}`}
+          fields={BIRD_SALES_FIELDS}
+          data={editRow}
+          saving={updateMut.isPending}
+          onClose={() => setEditRow(null)}
+          onSave={form => updateMut.mutate({ id: editRow.id, data: {
+            sale_date:  form.sale_date,
+            dc_no:      form.dc_no || null,
+            sale_type:  form.sale_type || null,
+            quantity:   form.quantity !== '' ? Number(form.quantity) : null,
+            unit:       form.unit || null,
+            rate:       form.rate   !== '' ? Number(form.rate)   : null,
+            amount:     form.amount !== '' ? Number(form.amount) : null,
+          }})}
+        />
+      )}
+
+      {deleteRow && (
+        <ConfirmDelete
+          label={`Date: ${fmtDate(deleteRow.sale_date)} · ${deleteRow.sale_type ?? ''} · ${inr(deleteRow.amount)}`}
+          onConfirm={() => deleteMut.mutate(deleteRow.id)}
+          onCancel={() => setDeleteRow(null)}
+        />
       )}
     </div>
   )
