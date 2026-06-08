@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, pct, fmtDate, flockAgeWeeks } from '@/lib/utils'
 import {
@@ -9,8 +9,38 @@ import {
 } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, Calendar,
-  BarChart2, DollarSign, Package
+  BarChart2, DollarSign, Package, Trash2
 } from 'lucide-react'
+
+// ── Bulk selection helpers ─────────────────────────────────────────────────────
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
+
+const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean }> = ({ count, onDelete, onClear, loading }) => count === 0 ? null : (
+  <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+    <span className="text-sm font-medium text-red-700">{count} selected</span>
+    <button onClick={onClear} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+    <div className="ml-auto">
+      <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={loading} onClick={onDelete}>Delete {count} rows</Button>
+    </div>
+  </div>
+)
+
+const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="bg-white rounded-xl shadow-xl p-6 w-80">
+      <p className="font-semibold text-gray-900 mb-1">Delete records?</p>
+      <p className="text-sm text-gray-500 mb-5">{label}</p>
+      <div className="flex gap-3 justify-end">
+        <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="danger" size="sm" onClick={onConfirm}>Delete</Button>
+      </div>
+    </div>
+  </div>
+)
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, BarChart, Bar, Legend
@@ -18,7 +48,10 @@ import {
 
 export const FlockDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
+  const qc = useQueryClient()
   const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'>('overview')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: flock, isLoading } = useQuery({
     queryKey: ['flock', id],
@@ -66,6 +99,11 @@ export const FlockDetail: React.FC = () => {
     }
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('daily_records').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily', id] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   if (isLoading) return <Spinner />
   if (!flock) return <div className="p-8 text-center text-gray-500">Flock not found</div>
 
@@ -79,6 +117,13 @@ export const FlockDetail: React.FC = () => {
   const totalFeedF = daily?.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0) ?? 0
   const totalFeedM = daily?.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0) ?? 0
   const hePct = totalEggs > 0 ? totalHE / totalEggs : 0
+
+  // Bulk selection helpers for daily tab
+  const dailyIds = (daily ?? []).map((d: any) => d.id)
+  const allDailySel = dailyIds.length > 0 && dailyIds.every((id: string) => sel.has(id))
+  const someDailySel = dailyIds.some((id: string) => sel.has(id))
+  const toggleDaily = (rowId: string) => setSel(s => { const n = new Set(s); n.has(rowId) ? n.delete(rowId) : n.add(rowId); return n })
+  const toggleAllDaily = () => setSel(s => { const n = new Set(s); allDailySel ? dailyIds.forEach((rowId: string) => n.delete(rowId)) : dailyIds.forEach((rowId: string) => n.add(rowId)); return n })
 
   const heRevenue  = heDispatch?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
   const nheRevenue = nheSales?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
@@ -229,84 +274,94 @@ export const FlockDetail: React.FC = () => {
 
       {/* DAILY TAB */}
       {tab === 'daily' && (
-        <Card padding={false}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="px-2 py-2 text-left font-semibold text-gray-600 sticky left-0 bg-gray-50">Date</th>
-                  <th className="px-2 py-2 text-left font-semibold text-gray-600">Wk</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♀</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♂</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♀</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♂</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Eggs</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HD%</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HE</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HE%</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Tr+Cull ♀</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Mort ♀</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Mort ♂</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♀</th>
-                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♂</th>
-                </tr>
-              </thead>
-              <tbody>
-                {daily?.map((d, i) => {
-                  const isLayingPeriod = flock.laying_start_date && d.record_date >= flock.laying_start_date
-                  return (
-                    <tr key={d.id} className={`border-b border-gray-50 hover:bg-gray-50
-                      ${isLayingPeriod ? 'bg-green-50/30' : 'bg-yellow-50/30'}`}>
-                      <td className="px-2 py-1.5 sticky left-0 font-medium"
-                        style={{ backgroundColor: isLayingPeriod ? '#f0fdf4' : '#fefce8' }}>
-                        {fmtDate(d.record_date)}
-                      </td>
-                      <td className="px-2 py-1.5 text-gray-400">{Math.floor(i/7)+1}</td>
-                      <td className="px-2 py-1.5 text-right">{d.opening_female?.toLocaleString('en-IN')}</td>
-                      <td className="px-2 py-1.5 text-right">{d.opening_male?.toLocaleString('en-IN')}</td>
-                      <td className="px-2 py-1.5 text-right">{d.feed_female_kg?.toLocaleString('en-IN')}</td>
-                      <td className="px-2 py-1.5 text-right">{d.feed_male_kg?.toLocaleString('en-IN')}</td>
-                      <td className="px-2 py-1.5 text-right font-medium">{d.total_eggs?.toLocaleString('en-IN')}</td>
-                      <td className={`px-2 py-1.5 text-right ${(d.hd_pct??0)>0.85?'text-green-600':'text-orange-500'}`}>
-                        {pct(d.hd_pct, 1)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right font-medium text-blue-600">{d.he_eggs?.toLocaleString('en-IN')}</td>
-                      <td className={`px-2 py-1.5 text-right ${(d.he_pct??0)>0.88?'text-green-600':'text-orange-500'}`}>
-                        {pct(d.he_pct, 1)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right text-orange-500">{d.trcull_female > 0 ? d.trcull_female : '—'}</td>
-                      <td className="px-2 py-1.5 text-right text-red-500">{d.mortality_female > 0 ? d.mortality_female : '—'}</td>
-                      <td className="px-2 py-1.5 text-right text-red-500">{d.mortality_male > 0 ? d.mortality_male : '—'}</td>
-                      <td className="px-2 py-1.5 text-right">{d.closing_female?.toLocaleString('en-IN')}</td>
-                      <td className="px-2 py-1.5 text-right">{d.closing_male?.toLocaleString('en-IN')}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-              {/* Totals row */}
-              {daily && daily.length > 0 && (
-                <tfoot>
-                  <tr className="bg-yellow-50 font-bold text-xs">
-                    <td className="px-2 py-2 sticky left-0 bg-yellow-50" colSpan={2}>TOTAL ({daily.length} days)</td>
-                    <td className="px-2 py-2 text-right">—</td>
-                    <td className="px-2 py-2 text-right">—</td>
-                    <td className="px-2 py-2 text-right">{totalFeedF.toLocaleString('en-IN')}</td>
-                    <td className="px-2 py-2 text-right">{totalFeedM.toLocaleString('en-IN')}</td>
-                    <td className="px-2 py-2 text-right">{totalEggs.toLocaleString('en-IN')}</td>
-                    <td className="px-2 py-2 text-right">{pct(hePct,1)}</td>
-                    <td className="px-2 py-2 text-right">{totalHE.toLocaleString('en-IN')}</td>
-                    <td className="px-2 py-2 text-right">{pct(hePct,1)}</td>
-                    <td className="px-2 py-2 text-right">{totalTrF.toLocaleString('en-IN')}</td>
-                    <td className="px-2 py-2 text-right">{totalMortF.toLocaleString('en-IN')}</td>
-                    <td className="px-2 py-2 text-right">{totalMortM.toLocaleString('en-IN')}</td>
-                    <td className="px-2 py-2 text-right">{lastRecord?.closing_female?.toLocaleString('en-IN')}</td>
-                    <td className="px-2 py-2 text-right">{lastRecord?.closing_male?.toLocaleString('en-IN')}</td>
+        <>
+          <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <Card padding={false}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="px-2 py-2 sticky left-0 bg-gray-50"><CB checked={allDailySel} indeterminate={someDailySel && !allDailySel} onChange={toggleAllDaily}/></th>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-600 sticky left-0 bg-gray-50">Date</th>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Wk</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♀</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♂</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♀</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♂</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Eggs</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">HD%</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">HE</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">HE%</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Tr+Cull ♀</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Mort ♀</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Mort ♂</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♀</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♂</th>
                   </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        </Card>
+                </thead>
+                <tbody>
+                  {daily?.map((d, i) => {
+                    const isLayingPeriod = flock.laying_start_date && d.record_date >= flock.laying_start_date
+                    return (
+                      <tr key={d.id} className={`border-b border-gray-50 hover:bg-gray-50
+                        ${sel.has(d.id) ? 'bg-red-50' : isLayingPeriod ? 'bg-green-50/30' : 'bg-yellow-50/30'}`}>
+                        <td className="px-2 py-1.5"><CB checked={sel.has(d.id)} onChange={() => toggleDaily(d.id)}/></td>
+                        <td className="px-2 py-1.5 sticky left-0 font-medium"
+                          style={{ backgroundColor: sel.has(d.id) ? '#fef2f2' : isLayingPeriod ? '#f0fdf4' : '#fefce8' }}>
+                          {fmtDate(d.record_date)}
+                        </td>
+                        <td className="px-2 py-1.5 text-gray-400">{Math.floor(i/7)+1}</td>
+                        <td className="px-2 py-1.5 text-right">{d.opening_female?.toLocaleString('en-IN')}</td>
+                        <td className="px-2 py-1.5 text-right">{d.opening_male?.toLocaleString('en-IN')}</td>
+                        <td className="px-2 py-1.5 text-right">{d.feed_female_kg?.toLocaleString('en-IN')}</td>
+                        <td className="px-2 py-1.5 text-right">{d.feed_male_kg?.toLocaleString('en-IN')}</td>
+                        <td className="px-2 py-1.5 text-right font-medium">{d.total_eggs?.toLocaleString('en-IN')}</td>
+                        <td className={`px-2 py-1.5 text-right ${(d.hd_pct??0)>0.85?'text-green-600':'text-orange-500'}`}>
+                          {pct(d.hd_pct, 1)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-medium text-blue-600">{d.he_eggs?.toLocaleString('en-IN')}</td>
+                        <td className={`px-2 py-1.5 text-right ${(d.he_pct??0)>0.88?'text-green-600':'text-orange-500'}`}>
+                          {pct(d.he_pct, 1)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-orange-500">{d.trcull_female > 0 ? d.trcull_female : '—'}</td>
+                        <td className="px-2 py-1.5 text-right text-red-500">{d.mortality_female > 0 ? d.mortality_female : '—'}</td>
+                        <td className="px-2 py-1.5 text-right text-red-500">{d.mortality_male > 0 ? d.mortality_male : '—'}</td>
+                        <td className="px-2 py-1.5 text-right">{d.closing_female?.toLocaleString('en-IN')}</td>
+                        <td className="px-2 py-1.5 text-right">{d.closing_male?.toLocaleString('en-IN')}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                {/* Totals row */}
+                {daily && daily.length > 0 && (
+                  <tfoot>
+                    <tr className="bg-yellow-50 font-bold text-xs">
+                      <td className="px-2 py-2"></td>
+                      <td className="px-2 py-2 sticky left-0 bg-yellow-50" colSpan={2}>TOTAL ({daily.length} days)</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">—</td>
+                      <td className="px-2 py-2 text-right">{totalFeedF.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{totalFeedM.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{totalEggs.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{pct(hePct,1)}</td>
+                      <td className="px-2 py-2 text-right">{totalHE.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{pct(hePct,1)}</td>
+                      <td className="px-2 py-2 text-right">{totalTrF.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{totalMortF.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{totalMortM.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{lastRecord?.closing_female?.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{lastRecord?.closing_male?.toLocaleString('en-IN')}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </Card>
+          {bulkConfirm && (
+            <ConfirmBulkDelete label={`Delete ${sel.size} daily records? This cannot be undone.`}
+              onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+          )}
+        </>
       )}
 
       {/* MONTHLY TAB */}

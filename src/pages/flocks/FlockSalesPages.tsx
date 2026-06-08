@@ -494,6 +494,8 @@ export const MedicineEntry: React.FC = () => {
   const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [showForm, setShowForm] = useState(false)
   const [flockFilter, setFlockFilter] = useState('')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
@@ -571,8 +573,19 @@ export const MedicineEntry: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  const bulkDelMutMed = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('medicine_usage').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['medicine_usage'] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const medOptions = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.unit})` })) ?? []
+
+  const usageIds = (usage ?? []).map((u: any) => u.id)
+  const allUsageSel = usageIds.length > 0 && usageIds.every((id: string) => sel.has(id))
+  const someUsageSel = usageIds.some((id: string) => sel.has(id))
+  const toggleUsage = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAllUsage = () => setSel(s => { const n = new Set(s); allUsageSel ? usageIds.forEach((id: string) => n.delete(id)) : usageIds.forEach((id: string) => n.add(id)); return n })
 
   return (
     <div className="space-y-5">
@@ -620,27 +633,36 @@ export const MedicineEntry: React.FC = () => {
           {monthly?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No medicine data" action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add Monthly Total</Button>} />}
         </Card>
       ) : (
-        <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Flock</Th><Th>Date</Th><Th>Medicine</Th>
-              <Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th>
-            </tr></thead>
-            <tbody>
-              {usage?.map((u: any) => (
-                <tr key={u.id} className="hover:bg-gray-50">
-                  <Td><Badge color="green">F-{u.flocks?.flock_no}</Badge></Td>
-                  <Td className="text-xs">{fmtDate(u.usage_date)}</Td>
-                  <Td className="text-sm">{u.medicines_master?.name ?? '—'}</Td>
-                  <Td right className="text-xs">{u.quantity ?? '—'} {u.unit}</Td>
-                  <Td right className="text-xs">{u.rate ? `Rs ${u.rate}` : '—'}</Td>
-                  <Td right className="font-semibold text-xs">{u.amount ? inr(u.amount) : '—'}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-          {usage?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No usage records" />}
-        </Card>
+        <>
+          <BulkBar count={sel.size} loading={bulkDelMutMed.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allUsageSel} indeterminate={someUsageSel && !allUsageSel} onChange={toggleAllUsage}/></Th>
+                <Th>Flock</Th><Th>Date</Th><Th>Medicine</Th>
+                <Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th>
+              </tr></thead>
+              <tbody>
+                {usage?.map((u: any) => (
+                  <tr key={u.id} className={`hover:bg-gray-50 ${sel.has(u.id) ? 'bg-red-50' : ''}`}>
+                    <Td><CB checked={sel.has(u.id)} onChange={() => toggleUsage(u.id)}/></Td>
+                    <Td><Badge color="green">F-{u.flocks?.flock_no}</Badge></Td>
+                    <Td className="text-xs">{fmtDate(u.usage_date)}</Td>
+                    <Td className="text-sm">{u.medicines_master?.name ?? '—'}</Td>
+                    <Td right className="text-xs">{u.quantity ?? '—'} {u.unit}</Td>
+                    <Td right className="text-xs">{u.rate ? `Rs ${u.rate}` : '—'}</Td>
+                    <Td right className="font-semibold text-xs">{u.amount ? inr(u.amount) : '—'}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            {usage?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No usage records" />}
+          </Card>
+          {bulkConfirm && (
+            <ConfirmBulkDelete label={`Delete ${sel.size} medicine usage records? This cannot be undone.`}
+              onConfirm={() => bulkDelMutMed.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+          )}
+        </>
       )}
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add Medicine Entry" size="md"
