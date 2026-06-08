@@ -264,13 +264,30 @@ export const SalaryAbstractPage: React.FC = () => {
 }
 
 // ── INDIVIDUAL SALARY ENTRY ──────────────────────────────────────
+const FY_OPTIONS = [
+  {value:'2024-25',label:'FY 2024-25'},
+  {value:'2025-26',label:'FY 2025-26'},
+]
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+function fyMonths(fy: string): string[] {
+  const [startY] = fy.split('-').map(Number)
+  const months: string[] = []
+  for (let m = 4; m <= 12; m++) months.push(`${startY}-${String(m).padStart(2,'0')}-01`)
+  for (let m = 1; m <= 3; m++) months.push(`${startY+1}-${String(m).padStart(2,'0')}-01`)
+  return months
+}
+
 export const SalaryEntryPage: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
-  const [filterMonth, setFilterMonth] = useState('')
   const [filterFarm, setFilterFarm] = useState('')
+  const [selectedFY, setSelectedFY] = useState('2025-26')
+  const [selectedMonth, setSelectedMonth] = useState('')
   const [form, setForm] = useState({employee_id:'',month:'',days_worked:'',advance:'0',tds:'0',hold:'0',arrears:'0',ot_bonus:'0',net_salary:''})
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+
+  const months = fyMonths(selectedFY)
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
   const {data:employees}=useQuery({
@@ -281,11 +298,39 @@ export const SalaryEntryPage: React.FC = () => {
       const{data}=await q;return data??[]
     }
   })
-  const {data:salaries,isLoading}=useQuery({
-    queryKey:['salary_monthly',filterMonth,filterFarm],
+
+  // Monthly totals for the whole FY (for summary cards)
+  const {data:monthlySummary}=useQuery({
+    queryKey:['salary_fy_summary',selectedFY,filterFarm],
     queryFn:async()=>{
-      let q=supabase.from('salary_monthly').select('*, employees(name,emp_id,base_salary,designation,farms(name,code))').order('month',{ascending:false})
-      if(filterMonth)q=q.eq('month',filterMonth+'-01')
+      const [startM, endM] = [months[0], months[months.length-1]]
+      let q=supabase.from('salary_monthly')
+        .select('month,net_salary,earned_salary,advance,employees!inner(farm_id)')
+        .gte('month',startM).lte('month',endM)
+      if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
+      const{data}=await q
+      const agg: Record<string,{net:number,earned:number,advance:number,count:number}> = {}
+      for (const r of (data??[])) {
+        const k = r.month.slice(0,7)
+        if(!agg[k]) agg[k]={net:0,earned:0,advance:0,count:0}
+        agg[k].net += r.net_salary??0
+        agg[k].earned += r.earned_salary??0
+        agg[k].advance += r.advance??0
+        agg[k].count++
+      }
+      return agg
+    }
+  })
+
+  // Detailed records for selected month
+  const {data:salaries,isLoading:loadingDetail}=useQuery({
+    queryKey:['salary_monthly_detail',selectedMonth,filterFarm],
+    enabled:!!selectedMonth,
+    queryFn:async()=>{
+      let q=supabase.from('salary_monthly')
+        .select('*, employees(name,emp_id,base_salary,designation,farms(name,code))')
+        .eq('month',selectedMonth).order('net_salary',{ascending:false})
+      if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
       const{data}=await q;return data??[]
     }
   })
@@ -311,47 +356,119 @@ export const SalaryEntryPage: React.FC = () => {
       },{onConflict:'employee_id,month'})
       if(error)throw error
     },
-    onSuccess:()=>{toast.success('Salary saved!');qc.invalidateQueries({queryKey:['salary_monthly']});setShowForm(false)},
+    onSuccess:()=>{toast.success('Salary saved!');qc.invalidateQueries({queryKey:['salary_monthly','salary_fy_summary']});setShowForm(false)},
     onError:(e:any)=>toast.error(e.message)
   })
 
   const farmOptions=farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
   const empOptions=employees?.map((e:any)=>({value:e.id,label:`${e.name} (${e.emp_id??e.farms?.code})`}))??[]
 
+  const fyTotal = Object.values(monthlySummary??{}).reduce((s,m)=>s+m.net,0)
+  const fyEmployees = Object.values(monthlySummary??{}).reduce((s,m)=>s+m.count,0)
+
+  const selectedMonthData = selectedMonth && monthlySummary?.[selectedMonth.slice(0,7)]
+
   return (
     <div className="space-y-5">
-      <SectionHeader title="Individual Salary Entry" subtitle="Per-employee monthly salary details"
+      <SectionHeader title="Salary Register" subtitle="Year-wise and month-wise salary details"
         action={<Button icon={<Plus size={16}/>} onClick={()=>{setForm({employee_id:'',month:'',days_worked:'',advance:'0',tds:'0',hold:'0',arrears:'0',ot_bonus:'0',net_salary:''});setShowForm(true)}}>Add Entry</Button>}/>
-      <div className="flex gap-3 flex-wrap">
+
+      {/* Filters */}
+      <div className="flex gap-3 flex-wrap items-end">
+        <Select label="Financial Year" options={FY_OPTIONS} value={selectedFY} onChange={e=>{setSelectedFY(e.target.value);setSelectedMonth('')}} className="w-40"/>
         <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
-        <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-40"/>
-        {(filterFarm||filterMonth)&&<Button variant="ghost" size="sm" onClick={()=>{setFilterFarm('');setFilterMonth('')}}>Clear</Button>}
+        {filterFarm&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
       </div>
-      {isLoading?<Spinner/>:(
+
+      {/* FY Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card>
+          <div className="text-xs text-gray-500">FY Total Net Salary</div>
+          <div className="text-xl font-bold text-brand-700 mt-1">{inr(fyTotal)}</div>
+        </Card>
+        <Card>
+          <div className="text-xs text-gray-500">Monthly Avg</div>
+          <div className="text-xl font-bold text-gray-800 mt-1">{inr(fyTotal/12)}</div>
+        </Card>
+        <Card>
+          <div className="text-xs text-gray-500">Total Employee-Months</div>
+          <div className="text-xl font-bold text-gray-800 mt-1">{fyEmployees.toLocaleString('en-IN')}</div>
+        </Card>
+      </div>
+
+      {/* Month grid */}
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+        {months.map(m => {
+          const key = m.slice(0,7)
+          const d = monthlySummary?.[key]
+          const [yr,mn] = key.split('-')
+          const label = `${MONTH_NAMES[parseInt(mn)-1]} ${yr}`
+          const isSelected = selectedMonth === m
+          return (
+            <button key={m} onClick={()=>setSelectedMonth(isSelected?'':m)}
+              className={`rounded-lg border p-3 text-left transition-all ${isSelected?'border-brand-500 bg-brand-50':'border-gray-200 bg-white hover:border-brand-300'}`}>
+              <div className="text-xs font-semibold text-gray-600">{label}</div>
+              {d ? (
+                <>
+                  <div className="text-sm font-bold text-brand-700 mt-1">{inr(d.net)}</div>
+                  <div className="text-[10px] text-gray-400">{d.count} employees</div>
+                </>
+              ) : (
+                <div className="text-xs text-gray-300 mt-1">No data</div>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Detail table for selected month */}
+      {selectedMonth && (
         <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Employee</Th><Th>Site</Th><Th>Month</Th><Th right>Days</Th>
-              <Th right>Advance</Th><Th right>TDS</Th><Th right>OT/Bonus</Th><Th right>Net Salary</Th>
-            </tr></thead>
-            <tbody>
-              {salaries?.map((s:any)=>(
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <Td><span className="font-medium">{s.employees?.name}</span><span className="text-xs text-gray-400 ml-1">{s.employees?.emp_id}</span></Td>
-                  <Td className="text-xs">{s.employees?.farms?.name}</Td>
-                  <Td>{new Date(s.month).toLocaleDateString('en-IN',{month:'short',year:'numeric'})}</Td>
-                  <Td right>{s.days_worked??'—'}</Td>
-                  <Td right className="text-orange-600">{s.advance>0?inr(s.advance):'—'}</Td>
-                  <Td right>{s.tds>0?inr(s.tds):'—'}</Td>
-                  <Td right className="text-blue-600">{s.ot_bonus>0?inr(s.ot_bonus):'—'}</Td>
-                  <Td right className="font-semibold text-green-700">{inr(s.net_salary)}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-          {!salaries?.length&&<EmptyState icon={<IndianRupee size={32}/>} title="No salary entries" action={<Button onClick={()=>setShowForm(true)} icon={<Plus size={16}/>}>Add Entry</Button>}/>}
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-gray-900">
+                {MONTH_NAMES[parseInt(selectedMonth.slice(5,7))-1]} {selectedMonth.slice(0,4)} — Salary Details
+              </h3>
+              {selectedMonthData && (
+                <p className="text-xs text-gray-500">{selectedMonthData.count} employees · Net: {inr(selectedMonthData.net)} · Advance: {inr(selectedMonthData.advance)}</p>
+              )}
+            </div>
+            <button onClick={()=>setSelectedMonth('')} className="text-gray-400 hover:text-gray-600 text-sm">✕ Close</button>
+          </div>
+          {loadingDetail?<div className="p-6 text-center"><Spinner/></div>:(
+            <Table>
+              <thead><tr>
+                <Th>Employee</Th><Th>Site</Th><Th right>Days</Th>
+                <Th right>Earned</Th><Th right>Advance</Th><Th right>TDS</Th><Th right>Net Salary</Th>
+              </tr></thead>
+              <tbody>
+                {salaries?.map((s:any)=>(
+                  <tr key={s.id} className="hover:bg-gray-50">
+                    <Td><span className="font-medium">{s.employees?.name}</span><span className="text-xs text-gray-400 ml-1">{s.employees?.emp_id}</span></Td>
+                    <Td className="text-xs">{s.employees?.farms?.name??'HO/Others'}</Td>
+                    <Td right>{s.days_worked??'—'}</Td>
+                    <Td right>{s.earned_salary?inr(s.earned_salary):'—'}</Td>
+                    <Td right className="text-orange-600">{s.advance>0?inr(s.advance):'—'}</Td>
+                    <Td right>{s.tds>0?inr(s.tds):'—'}</Td>
+                    <Td right className="font-semibold text-green-700">{inr(s.net_salary)}</Td>
+                  </tr>
+                ))}
+                {salaries && salaries.length>0 && (
+                  <tr className="bg-gray-50 font-semibold">
+                    <Td colSpan={3}>Total ({salaries.length} employees)</Td>
+                    <Td right>{inr(salaries.reduce((s:number,r:any)=>s+(r.earned_salary??0),0))}</Td>
+                    <Td right className="text-orange-600">{inr(salaries.reduce((s:number,r:any)=>s+(r.advance??0),0))}</Td>
+                    <Td right>{inr(salaries.reduce((s:number,r:any)=>s+(r.tds??0),0))}</Td>
+                    <Td right className="text-green-700">{inr(salaries.reduce((s:number,r:any)=>s+(r.net_salary??0),0))}</Td>
+                  </tr>
+                )}
+              </tbody>
+            </Table>
+          )}
+          {!loadingDetail&&!salaries?.length&&<EmptyState icon={<IndianRupee size={32}/>} title="No salary entries for this month" action={<Button onClick={()=>setShowForm(true)} icon={<Plus size={16}/>}>Add Entry</Button>}/>}
         </Card>
       )}
+
       <Modal open={showForm} onClose={()=>setShowForm(false)} title="Add Salary Entry" size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
