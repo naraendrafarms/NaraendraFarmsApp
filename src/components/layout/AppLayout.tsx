@@ -95,8 +95,7 @@ const NAV: NavItem[] = [
   {
     label: 'Purchase & Payments', icon: <ShoppingCart size={18}/>,
     children: [
-      { label: 'Purchase Orders',    to: '/purchase-orders' },
-      { label: 'Pending Payments',   to: '/pending-payments' },
+      { label: 'Purchase & Payments', to: '/purchase-orders' },
     ]
   },
   {
