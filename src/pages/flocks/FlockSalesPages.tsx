@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
@@ -7,7 +7,7 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 } from '@/components/ui'
-import { Plus, Package, Edit2, Egg, Trash2 } from 'lucide-react'
+import { Plus, Package, Edit2, Egg, Trash2, Upload, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 // ── Bulk selection helpers ────────────────────────────────────────
@@ -47,8 +47,12 @@ export const HEDispatch: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [flockFilter, setFlockFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
@@ -77,14 +81,18 @@ export const HEDispatch: React.FC = () => {
     }
   })
 
+  const hasFilter = !!(flockFilter || fromDate || toDate)
+
   const { data: dispatches, isLoading } = useQuery({
-    queryKey: ['he_dispatch', flockFilter],
+    queryKey: ['he_dispatch', flockFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('he_dispatch')
         .select('*, flocks(flock_no), parties(name), hatcheries(name)')
         .order('dispatch_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
-      else q = q.limit(200)
+      if (fromDate) q = q.gte('dispatch_date', fromDate)
+      if (toDate) q = q.lte('dispatch_date', toDate)
+      if (!hasFilter) q = q.limit(200)
       const { data } = await q; return data ?? []
     }
   })
@@ -168,6 +176,79 @@ export const HEDispatch: React.FC = () => {
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? dispIds.forEach((id: string) => n.delete(id)) : dispIds.forEach((id: string) => n.add(id)); return n })
 
+  // CSV template download
+  const handleDownloadTemplate = () => {
+    const headers = 'flock_no,dispatch_date,prod_date,dc_no,grade_a,grade_b,total_dispatched,free_eggs,rate,amount,party_name,remarks'
+    const blob = new Blob([headers + '\n'], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'he_dispatch_template.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // CSV import handler
+  const handleImport = async (file: File) => {
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const lines = text.trim().split('\n').filter(Boolean)
+      if (lines.length < 2) { toast.error('Empty file'); return }
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+      const records = lines.slice(1).map(line => {
+        const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+        const obj: any = {}
+        headers.forEach((h, i) => { obj[h] = vals[i] ?? '' })
+        return obj
+      })
+
+      const rows = records.map((r: any) => {
+        const flockMatch = flocks?.find((f: any) => String(f.flock_no) === String(r.flock_no))
+        const partyMatch = parties?.find((p: any) => p.name === r.party_name)
+        const totalDispatched = parseInt(r.total_dispatched) || 0
+        const freeEggs = parseInt(r.free_eggs) || 0
+        return {
+          flock_id: flockMatch?.id ?? null,
+          dispatch_date: r.dispatch_date || null,
+          prod_date: r.prod_date || null,
+          dc_no: parseInt(r.dc_no) || null,
+          grade_a: parseInt(r.grade_a) || 0,
+          grade_b: parseInt(r.grade_b) || 0,
+          total_dispatched: totalDispatched,
+          free_eggs: freeEggs,
+          invoice_eggs: totalDispatched - freeEggs,
+          rate: parseFloat(r.rate) || null,
+          amount: parseFloat(r.amount) || null,
+          party_id: partyMatch?.id ?? null,
+          remarks: r.remarks || null,
+        }
+      }).filter((r: any) => r.flock_id && r.dispatch_date)
+
+      if (rows.length === 0) {
+        toast.error('No valid rows found. Check flock_no values match existing flocks.')
+        return
+      }
+
+      const { error } = await supabase.from('he_dispatch').insert(rows)
+      if (error) {
+        if (error.message.includes('duplicate') || error.message.includes('unique')) {
+          toast.error('Some records already exist (duplicate dispatch dates). Please check your data.')
+        } else {
+          throw error
+        }
+        return
+      }
+      toast.success(`Imported ${rows.length} dispatch records!`)
+      qc.invalidateQueries({ queryKey: ['he_dispatch'] })
+    } catch (e: any) {
+      toast.error('Import failed: ' + e.message)
+    } finally {
+      setImporting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="HE Dispatch & Sales"
@@ -175,11 +256,41 @@ export const HEDispatch: React.FC = () => {
         action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Dispatch</Button>}
       />
 
-      {/* Flock filter */}
-      <div className="flex gap-3 flex-wrap">
+      {/* Filter row */}
+      <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
-        {flockFilter && <Button variant="ghost" size="sm" onClick={() => setFlockFilter('')}>Clear</Button>}
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          From
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          To
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        </label>
+        {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>}
+        <div className="ml-auto flex gap-2">
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>
+            Download Template
+          </Button>
+          <Button variant="outline" size="sm" icon={<Upload size={14}/>}
+            loading={importing}
+            onClick={() => fileInputRef.current?.click()}>
+            Import CSV
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) handleImport(file)
+            }}
+          />
+        </div>
       </div>
 
       {/* Summary */}
@@ -323,6 +434,8 @@ export const NHESales: React.FC = () => {
   const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [showForm, setShowForm] = useState(false)
   const [flockFilter, setFlockFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
@@ -338,12 +451,18 @@ export const NHESales: React.FC = () => {
     queryKey: ['parties_buyers'],
     queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type',['buyer','both']).order('name'); return data ?? [] }
   })
+
+  const hasFilter = !!(flockFilter || fromDate || toDate)
+
   const { data: sales, isLoading } = useQuery({
-    queryKey: ['nhe_sales', flockFilter],
+    queryKey: ['nhe_sales', flockFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name)')
-        .order('sale_date', { ascending: false }).limit(200)
+        .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
+      if (fromDate) q = q.gte('sale_date', fromDate)
+      if (toDate) q = q.lte('sale_date', toDate)
+      if (!hasFilter) q = q.limit(200)
       const { data } = await q; return data ?? []
     }
   })
@@ -398,10 +517,20 @@ export const NHESales: React.FC = () => {
         subtitle="Non-hatching eggs, bird sales, gas, manure income"
         action={<Button icon={<Plus size={16}/>} onClick={() => { setShowForm(true); setForm(f => ({ ...f, flock_id: flockFilter })) }}>Add Sale</Button>}
       />
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
-        {flockFilter && <Button variant="ghost" size="sm" onClick={() => setFlockFilter('')}>Clear</Button>}
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          From
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          To
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        </label>
+        {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>}
       </div>
 
       {Object.keys(byType).length > 0 && (
@@ -495,6 +624,8 @@ export const MedicineEntry: React.FC = () => {
   const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [showForm, setShowForm] = useState(false)
   const [flockFilter, setFlockFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
@@ -511,13 +642,18 @@ export const MedicineEntry: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('medicines_master').select('id,name,unit,rate').eq('is_active',true).order('name'); return data ?? [] }
   })
 
+  const hasFilter = !!(flockFilter || fromDate || toDate)
+
   const { data: usage, isLoading } = useQuery({
-    queryKey: ['medicine_usage', flockFilter],
+    queryKey: ['medicine_usage', flockFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('medicine_usage')
         .select('*, flocks(flock_no), medicines_master(name,unit)')
-        .order('usage_date', { ascending: false }).limit(200)
+        .order('usage_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
+      if (fromDate) q = q.gte('usage_date', fromDate)
+      if (toDate) q = q.lte('usage_date', toDate)
+      if (!hasFilter) q = q.limit(200)
       const { data } = await q; return data ?? []
     }
   })
@@ -594,10 +730,20 @@ export const MedicineEntry: React.FC = () => {
         subtitle="Record medicine usage and monthly totals"
         action={<Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add Entry</Button>}
       />
-      <div className="flex gap-3 flex-wrap">
+      <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
-        {flockFilter && <Button variant="ghost" size="sm" onClick={() => setFlockFilter('')}>Clear</Button>}
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          From
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          To
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        </label>
+        {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>}
         <div className="flex rounded-lg border border-gray-200 overflow-hidden ml-auto">
           {(['monthly','daily'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
