@@ -31,6 +31,25 @@ function pctFmt(v: number | null | undefined, decimals = 1) {
 
 const PAGE_SIZE = 50
 
+// ── SHARED: Bulk select helpers ───────────────────────────────────────────────
+
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
+
+const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean }> = ({ count, onDelete, onClear, loading }) =>
+  count === 0 ? null : (
+    <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+      <span className="text-sm font-medium text-red-700">{count} selected</span>
+      <button onClick={onClear} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+      <div className="ml-auto">
+        <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={loading} onClick={onDelete}>Delete {count} rows</Button>
+      </div>
+    </div>
+  )
+
 // ── SHARED: Delete confirmation ───────────────────────────────────────────────
 
 const ConfirmDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
@@ -403,8 +422,10 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
   const [page,  setPage]  = useState(0)
-  const [editRow,   setEditRow]   = useState<any | null>(null)
-  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+  const [editRow,     setEditRow]     = useState<any | null>(null)
+  const [deleteRow,   setDeleteRow]   = useState<any | null>(null)
+  const [sel,         setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -446,6 +467,11 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_records', flockId] }); qc.invalidateQueries({ queryKey: ['flock_daily_all', flockId] }); setEditRow(null) }
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('daily_records').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_records', flockId] }); qc.invalidateQueries({ queryKey: ['flock_daily_all', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const filtered = (allRecords ?? []).filter((r: any) => {
     if (fFarm && r.farm_id !== fFarm) return false
     if (fFrom && r.record_date < fFrom) return false
@@ -455,6 +481,11 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const rows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const rowIds = rows.map((r: any) => r.id)
+  const allSel = rowIds.length > 0 && rowIds.every((id: string) => sel.has(id))
+  const someSel = rowIds.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? rowIds.forEach((id: string) => n.delete(id)) : rowIds.forEach((id: string) => n.add(id)); return n })
 
   const totalEggs = filtered.reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0)
   const totalMort = filtered.reduce((s: number, r: any) => s + (r.mortality_female ?? 0) + (r.mortality_male ?? 0), 0)
@@ -489,9 +520,11 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
       {isLoading ? <Spinner /> : (
         <>
+          <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
           <Card padding={false}>
             <Table>
               <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
                 <Th>Date</Th><Th>Site</Th>
                 <Th right>Open F</Th><Th right>Open M</Th>
                 <Th right>Feed F kg</Th><Th right>Feed M kg</Th>
@@ -504,7 +537,8 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               </tr></thead>
               <tbody>
                 {rows.map((r: any) => (
-                  <tr key={r.id} className="hover:bg-gray-50">
+                  <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-red-50' : ''}`}>
+                    <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
                     <Td className="text-xs font-medium">{fmtDate(r.record_date)}</Td>
                     <Td className="text-xs">{r.farms?.code ?? '—'}</Td>
                     <Td right className="text-xs">{numFmt(r.opening_female)}</Td>
@@ -580,6 +614,10 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           onCancel={() => setDeleteRow(null)}
         />
       )}
+      {bulkConfirm && (
+        <ConfirmDelete label={`Delete ${sel.size} daily records?`}
+          onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+      )}
     </div>
   )
 }
@@ -601,8 +639,10 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const qc = useQueryClient()
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
-  const [editRow,   setEditRow]   = useState<any | null>(null)
-  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+  const [editRow,     setEditRow]     = useState<any | null>(null)
+  const [deleteRow,   setDeleteRow]   = useState<any | null>(null)
+  const [sel,         setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: transfers, isLoading } = useQuery({
     queryKey: ['flock_bird_transfers', flockId],
@@ -626,6 +666,11 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setEditRow(null) }
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('bird_transfers').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const filtered = (transfers ?? []).filter((r: any) => {
     if (fFrom && r.transfer_date < fFrom) return false
     if (fTo   && r.transfer_date > fTo)   return false
@@ -633,6 +678,11 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const totalBirds = filtered.reduce((s: number, r: any) => s + (r.total_birds ?? 0), 0)
+  const tIds = filtered.map((r: any) => r.id)
+  const allSel = tIds.length > 0 && tIds.every((id: string) => sel.has(id))
+  const someSel = tIds.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? tIds.forEach((id: string) => n.delete(id)) : tIds.forEach((id: string) => n.add(id)); return n })
 
   return (
     <div className="space-y-4">
@@ -653,18 +703,22 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
 
       {isLoading ? <Spinner /> : (
-        <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Date</Th><Th>DC No</Th><Th>Grade</Th><Th>Gender</Th>
-              <Th>Vehicle</Th><Th right>Boxes</Th><Th right>Birds/Box</Th>
-              <Th right>Total Birds</Th><Th>From → To</Th>
-              <Th></Th>
-            </tr></thead>
-            <tbody>
-              {filtered.map((t: any) => (
-                <tr key={t.id} className="hover:bg-gray-50">
-                  <Td className="text-xs">{fmtDate(t.transfer_date)}</Td>
+        <>
+          <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
+                <Th>Date</Th><Th>DC No</Th><Th>Grade</Th><Th>Gender</Th>
+                <Th>Vehicle</Th><Th right>Boxes</Th><Th right>Birds/Box</Th>
+                <Th right>Total Birds</Th><Th>From → To</Th>
+                <Th></Th>
+              </tr></thead>
+              <tbody>
+                {filtered.map((t: any) => (
+                  <tr key={t.id} className={`hover:bg-gray-50 ${sel.has(t.id) ? 'bg-red-50' : ''}`}>
+                    <Td><CB checked={sel.has(t.id)} onChange={() => toggle(t.id)}/></Td>
+                    <Td className="text-xs">{fmtDate(t.transfer_date)}</Td>
                   <Td className="text-xs font-mono">{t.dc_no ?? '—'}</Td>
                   <Td className="text-xs">{t.grade ?? '—'}</Td>
                   <Td className="text-xs">{t.gender ?? '—'}</Td>
@@ -683,8 +737,9 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               ))}
             </tbody>
           </Table>
-          {filtered.length === 0 && <EmptyState icon={<Truck size={32}/>} title="No bird transfers" />}
-        </Card>
+            {filtered.length === 0 && <EmptyState icon={<Truck size={32}/>} title="No bird transfers" />}
+          </Card>
+        </>
       )}
 
       {editRow && (
@@ -714,6 +769,10 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           onCancel={() => setDeleteRow(null)}
         />
       )}
+      {bulkConfirm && (
+        <ConfirmDelete label={`Delete ${sel.size} transfer records?`}
+          onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+      )}
     </div>
   )
 }
@@ -734,8 +793,10 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const qc = useQueryClient()
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
-  const [editRow,   setEditRow]   = useState<any | null>(null)
-  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+  const [editRow,     setEditRow]     = useState<any | null>(null)
+  const [deleteRow,   setDeleteRow]   = useState<any | null>(null)
+  const [sel,         setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: allDisp, isLoading } = useQuery({
     queryKey: ['flock_he_dispatch', flockId],
@@ -759,6 +820,11 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_he_dispatch', flockId] }); qc.invalidateQueries({ queryKey: ['flock_he_dispatch_all', flockId] }); setEditRow(null) }
   })
 
+  const bulkDelMutHE = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('he_dispatch').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_he_dispatch', flockId] }); qc.invalidateQueries({ queryKey: ['flock_he_dispatch_all', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const dispatches = (allDisp ?? []).filter((r: any) => {
     if (fFrom && r.dispatch_date < fFrom) return false
     if (fTo   && r.dispatch_date > fTo)   return false
@@ -767,6 +833,11 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const totalDisp   = dispatches.reduce((s: number, r: any) => s + (r.total_dispatched ?? 0), 0)
   const totalAmount = dispatches.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const dIds = dispatches.map((r: any) => r.id)
+  const allSel = dIds.length > 0 && dIds.every((id: string) => sel.has(id))
+  const someSel = dIds.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? dIds.forEach((id: string) => n.delete(id)) : dIds.forEach((id: string) => n.add(id)); return n })
 
   return (
     <div className="space-y-4">
@@ -789,18 +860,22 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
 
       {isLoading ? <Spinner /> : (
-        <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Date</Th><Th>DC No</Th><Th>Party</Th>
-              <Th right>Grade A</Th><Th right>Grade B</Th>
-              <Th right>Total</Th><Th right>Rate</Th><Th right>Amount</Th>
-              <Th></Th>
-            </tr></thead>
-            <tbody>
-              {dispatches.map((d: any) => (
-                <tr key={d.id} className="hover:bg-gray-50">
-                  <Td className="text-xs">{fmtDate(d.dispatch_date)}</Td>
+        <>
+          <BulkBar count={sel.size} loading={bulkDelMutHE.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
+                <Th>Date</Th><Th>DC No</Th><Th>Party</Th>
+                <Th right>Grade A</Th><Th right>Grade B</Th>
+                <Th right>Total</Th><Th right>Rate</Th><Th right>Amount</Th>
+                <Th></Th>
+              </tr></thead>
+              <tbody>
+                {dispatches.map((d: any) => (
+                  <tr key={d.id} className={`hover:bg-gray-50 ${sel.has(d.id) ? 'bg-red-50' : ''}`}>
+                    <Td><CB checked={sel.has(d.id)} onChange={() => toggle(d.id)}/></Td>
+                    <Td className="text-xs">{fmtDate(d.dispatch_date)}</Td>
                   <Td className="text-xs font-mono">{d.dc_no ?? '—'}</Td>
                   <Td className="text-xs">{d.parties?.name ?? '—'}</Td>
                   <Td right className="text-xs">{numFmt(d.grade_a)}</Td>
@@ -819,7 +894,7 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             </tbody>
             {dispatches.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={5}>TOTAL ({dispatches.length})</Td>
+                <Td colSpan={6}>TOTAL ({dispatches.length})</Td>
                 <Td right>{numFmt(totalDisp)}</Td>
                 <Td right>—</Td>
                 <Td right>{inr(totalAmount)}</Td>
@@ -828,7 +903,8 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             )}
           </Table>
           {dispatches.length === 0 && <EmptyState icon={<Egg size={32}/>} title="No HE dispatch records" />}
-        </Card>
+          </Card>
+        </>
       )}
 
       {editRow && (
@@ -857,6 +933,10 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           onCancel={() => setDeleteRow(null)}
         />
       )}
+      {bulkConfirm && (
+        <ConfirmDelete label={`Delete ${sel.size} HE dispatch records?`}
+          onConfirm={() => bulkDelMutHE.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+      )}
     </div>
   )
 }
@@ -876,8 +956,10 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const qc = useQueryClient()
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
-  const [editRow,   setEditRow]   = useState<any | null>(null)
-  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+  const [editRow,     setEditRow]     = useState<any | null>(null)
+  const [deleteRow,   setDeleteRow]   = useState<any | null>(null)
+  const [sel,         setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: feedData, isLoading } = useQuery({
     queryKey: ['flock_daily_feed', flockId],
@@ -915,6 +997,11 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setDeleteRow(null) }
   })
 
+  const bulkDelMutFeed = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('daily_feed').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const updateMut = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('daily_feed').update(data).eq('id', id) },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setEditRow(null) }
@@ -935,6 +1022,11 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const totalFemaleKg = filtered.reduce((s: number, r: any) => s + (r.female_kg ?? 0), 0)
   const totalMaleKg   = filtered.reduce((s: number, r: any) => s + (r.male_kg ?? 0), 0)
+  const feedIds = filtered.map((r: any) => r.id)
+  const allSel = feedIds.length > 0 && feedIds.every((id: string) => sel.has(id))
+  const someSel = feedIds.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? feedIds.forEach((id: string) => n.delete(id)) : feedIds.forEach((id: string) => n.add(id)); return n })
   const totalCostGrn  = filtered.reduce((s: number, r: any) => {
     const rate = getFeedGrnRate(r.feed_type) ?? 0
     return s + ((r.female_kg ?? 0) + (r.male_kg ?? 0)) * rate
@@ -961,22 +1053,26 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
 
       {isLoading ? <Spinner /> : (
-        <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Date</Th><Th>Feed Type</Th>
-              <Th right>Female KG</Th><Th right>Male KG</Th>
-              <Th right>Total KG</Th><Th right>GRN Rate/kg</Th><Th right>Cost (GRN)</Th>
-              <Th></Th>
-            </tr></thead>
-            <tbody>
-              {filtered.map((r: any) => {
-                const grnRate = getFeedGrnRate(r.feed_type)
-                const totalKg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
-                const costGrn = grnRate != null ? totalKg * grnRate : null
-                return (
-                  <tr key={r.id} className="hover:bg-gray-50">
-                    <Td className="text-xs">{fmtDate(r.feed_date)}</Td>
+        <>
+          <BulkBar count={sel.size} loading={bulkDelMutFeed.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
+                <Th>Date</Th><Th>Feed Type</Th>
+                <Th right>Female KG</Th><Th right>Male KG</Th>
+                <Th right>Total KG</Th><Th right>GRN Rate/kg</Th><Th right>Cost (GRN)</Th>
+                <Th></Th>
+              </tr></thead>
+              <tbody>
+                {filtered.map((r: any) => {
+                  const grnRate = getFeedGrnRate(r.feed_type)
+                  const totalKg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
+                  const costGrn = grnRate != null ? totalKg * grnRate : null
+                  return (
+                    <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-red-50' : ''}`}>
+                      <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
+                      <Td className="text-xs">{fmtDate(r.feed_date)}</Td>
                     <Td className="text-xs"><Badge color="blue">{r.feed_type ?? '—'}</Badge></Td>
                     <Td right className="text-xs">{r.female_kg != null ? (r.female_kg as number).toFixed(1) : '—'}</Td>
                     <Td right className="text-xs">{r.male_kg != null ? (r.male_kg as number).toFixed(1) : '—'}</Td>
@@ -994,8 +1090,9 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               })}
             </tbody>
           </Table>
-          {filtered.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
-        </Card>
+            {filtered.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
+          </Card>
+        </>
       )}
 
       {editRow && (
@@ -1023,6 +1120,10 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           onCancel={() => setDeleteRow(null)}
         />
       )}
+      {bulkConfirm && (
+        <ConfirmDelete label={`Delete ${sel.size} feed records?`}
+          onConfirm={() => bulkDelMutFeed.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+      )}
     </div>
   )
 }
@@ -1041,8 +1142,10 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const qc = useQueryClient()
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
-  const [editRow,   setEditRow]   = useState<any | null>(null)
-  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+  const [editRow,     setEditRow]     = useState<any | null>(null)
+  const [deleteRow,   setDeleteRow]   = useState<any | null>(null)
+  const [sel,         setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: usages, isLoading } = useQuery({
     queryKey: ['flock_medicine', flockId],
@@ -1083,6 +1186,11 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setEditRow(null) }
   })
 
+  const bulkDelMutMed = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('medicine_usage').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const getGrnRate = (name: string) => {
     if (!grnRates || !name) return null
     const key = name.trim().toLowerCase()
@@ -1102,6 +1210,11 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     if (fTo   && r.usage_date > fTo)   return false
     return true
   })
+  const medIds = filtered.map((r: any) => r.id)
+  const allSel = medIds.length > 0 && medIds.every((id: string) => sel.has(id))
+  const someSel = medIds.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? medIds.forEach((id: string) => n.delete(id)) : medIds.forEach((id: string) => n.add(id)); return n })
 
   const totalCostGrn   = filtered.reduce((s: number, r: any) => s + calcCost(r), 0)
   const totalCostExcel = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
@@ -1126,20 +1239,24 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
 
       {isLoading ? <Spinner /> : (
-        <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Date</Th><Th>Medicine / Vaccine</Th><Th right>Qty</Th>
-              <Th>Unit</Th><Th right>GRN Rate</Th><Th right>Excel Rate</Th><Th right>Cost (GRN)</Th>
-              <Th></Th>
-            </tr></thead>
-            <tbody>
-              {filtered.map((r: any) => {
-                const grnRate = getGrnRate(r.medicines_master?.name ?? '')
-                const cost = calcCost(r)
-                return (
-                  <tr key={r.id} className="hover:bg-gray-50">
-                    <Td className="text-xs">{fmtDate(r.usage_date)}</Td>
+        <>
+          <BulkBar count={sel.size} loading={bulkDelMutMed.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
+                <Th>Date</Th><Th>Medicine / Vaccine</Th><Th right>Qty</Th>
+                <Th>Unit</Th><Th right>GRN Rate</Th><Th right>Excel Rate</Th><Th right>Cost (GRN)</Th>
+                <Th></Th>
+              </tr></thead>
+              <tbody>
+                {filtered.map((r: any) => {
+                  const grnRate = getGrnRate(r.medicines_master?.name ?? '')
+                  const cost = calcCost(r)
+                  return (
+                    <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-red-50' : ''}`}>
+                      <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
+                      <Td className="text-xs">{fmtDate(r.usage_date)}</Td>
                     <Td className="text-xs font-medium">{r.medicines_master?.name ?? '—'}</Td>
                     <Td right className="text-xs">{r.quantity}</Td>
                     <Td className="text-xs text-gray-400">{r.unit ?? r.medicines_master?.unit ?? '—'}</Td>
@@ -1158,14 +1275,15 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             </tbody>
             {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={6}>TOTAL ({filtered.length} records)</Td>
+                <Td colSpan={7}>TOTAL ({filtered.length} records)</Td>
                 <Td right>{inr(totalCostGrn)}</Td>
                 <Td></Td>
               </tr></tfoot>
             )}
           </Table>
           {filtered.length === 0 && <EmptyState icon={<FlaskConical size={32}/>} title="No medicine records" />}
-        </Card>
+          </Card>
+        </>
       )}
 
       {editRow && (
@@ -1192,6 +1310,10 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           onCancel={() => setDeleteRow(null)}
         />
       )}
+      {bulkConfirm && (
+        <ConfirmDelete label={`Delete ${sel.size} medicine records?`}
+          onConfirm={() => bulkDelMutMed.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+      )}
     </div>
   )
 }
@@ -1213,8 +1335,10 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
   const [fType, setFType] = useState('')
-  const [editRow,   setEditRow]   = useState<any | null>(null)
-  const [deleteRow, setDeleteRow] = useState<any | null>(null)
+  const [editRow,     setEditRow]     = useState<any | null>(null)
+  const [deleteRow,   setDeleteRow]   = useState<any | null>(null)
+  const [sel,         setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: sales, isLoading } = useQuery({
     queryKey: ['flock_nhe_sales', flockId],
@@ -1248,7 +1372,17 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     return true
   })
 
+  const bulkDelMutSales = useMutation({
+    mutationFn: async (ids: string[]) => { await supabase.from('nhe_sales').delete().in('id', ids) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_nhe_sales', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+  })
+
   const totalAmount = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const saleIds = filtered.map((r: any) => r.id)
+  const allSel = saleIds.length > 0 && saleIds.every((id: string) => sel.has(id))
+  const someSel = saleIds.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? saleIds.forEach((id: string) => n.delete(id)) : saleIds.forEach((id: string) => n.add(id)); return n })
 
   return (
     <div className="space-y-4">
@@ -1271,18 +1405,22 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
 
       {isLoading ? <Spinner /> : (
-        <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Date</Th><Th>DC No</Th><Th>Type</Th>
-              <Th right>Qty</Th><Th>Unit</Th>
-              <Th right>Rate</Th><Th right>Amount</Th>
-              <Th></Th>
-            </tr></thead>
-            <tbody>
-              {filtered.map((r: any) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <Td className="text-xs">{fmtDate(r.sale_date)}</Td>
+        <>
+          <BulkBar count={sel.size} loading={bulkDelMutSales.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
+                <Th>Date</Th><Th>DC No</Th><Th>Type</Th>
+                <Th right>Qty</Th><Th>Unit</Th>
+                <Th right>Rate</Th><Th right>Amount</Th>
+                <Th></Th>
+              </tr></thead>
+              <tbody>
+                {filtered.map((r: any) => (
+                  <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-red-50' : ''}`}>
+                    <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
+                    <Td className="text-xs">{fmtDate(r.sale_date)}</Td>
                   <Td className="text-xs font-mono">{r.dc_no ?? '—'}</Td>
                   <Td className="text-xs"><Badge color="gray">{r.sale_type ?? '—'}</Badge></Td>
                   <Td right className="text-xs">{numFmt(r.quantity)}</Td>
@@ -1300,14 +1438,15 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             </tbody>
             {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={6}>TOTAL ({filtered.length})</Td>
+                <Td colSpan={7}>TOTAL ({filtered.length})</Td>
                 <Td right>{inr(totalAmount)}</Td>
                 <Td></Td>
               </tr></tfoot>
             )}
           </Table>
           {filtered.length === 0 && <EmptyState icon={<ShoppingCart size={32}/>} title="No bird sales records" />}
-        </Card>
+          </Card>
+        </>
       )}
 
       {editRow && (
@@ -1335,6 +1474,10 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           onConfirm={() => deleteMut.mutate(deleteRow.id)}
           onCancel={() => setDeleteRow(null)}
         />
+      )}
+      {bulkConfirm && (
+        <ConfirmDelete label={`Delete ${sel.size} bird sale records?`}
+          onConfirm={() => bulkDelMutSales.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
     </div>
   )
