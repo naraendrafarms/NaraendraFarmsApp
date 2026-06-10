@@ -64,6 +64,8 @@ const NAV: NavItem[] = [
       { label: 'Salary Entry',    to: '/employees/salary' },
       { label: 'Salary Abstract', to: '/employees/abstract' },
       { label: 'Bonus',           to: '/employees/bonus' },
+      { label: 'ESI / PF Report', to: '/employees/esi-pf' },
+      { label: 'Payroll Summary', to: '/employees/payroll-summary' },
     ]
   },
   {

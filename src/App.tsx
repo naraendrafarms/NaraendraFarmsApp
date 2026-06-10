@@ -14,7 +14,7 @@ import { HEDispatch, NHESales, MedicineEntry } from '@/pages/flocks/FlockSalesPa
 import { FeedDashboard, GRNEntry, FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
 import { StockPage } from '@/pages/feed/StockPage'
 import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
-import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage } from '@/pages/employees/EmployeePages'
+import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage } from '@/pages/employees/EmployeePages'
 import {
   FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster,
   ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster
@@ -108,6 +108,8 @@ export const App: React.FC = () => {
             <Route path="employees/salary" element={<SalaryEntryPage />} />
             <Route path="employees/abstract" element={<SalaryAbstractPage />} />
             <Route path="employees/bonus" element={<BonusPage />} />
+            <Route path="employees/esi-pf" element={<ESIPFReportPage />} />
+            <Route path="employees/payroll-summary" element={<PayrollSummaryPage />} />
 
             {/* Masters */}
             <Route path="masters/farms" element={<FarmsMaster />} />
