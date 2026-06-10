@@ -968,7 +968,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         .from('daily_feed')
         .select('*')
         .eq('flock_id', flockId)
-        .order('feed_date', { ascending: true })
+        .order('feed_date', { ascending: false })
       return data ?? []
     }
   })
@@ -1154,7 +1154,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         .from('medicine_usage')
         .select('*, medicines_master(name,type)')
         .eq('flock_id', flockId)
-        .order('usage_date', { ascending: true })
+        .order('usage_date', { ascending: false })
       return data ?? []
     }
   })
