@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
@@ -9,8 +9,9 @@ import {
 } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, Calendar,
-  BarChart2, DollarSign, Package, Trash2
+  BarChart2, DollarSign, Package, Trash2, Upload, Download
 } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 // ── Bulk selection helpers ─────────────────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
@@ -60,6 +61,18 @@ export const FlockDetail: React.FC = () => {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
+  // Date filter state for daily tab
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+
+  // Date filter state for financial tab HE dispatch
+  const [heFromDate, setHeFromDate] = useState('')
+  const [heToDate, setHeToDate] = useState('')
+
+  // CSV import state
+  const [importing, setImporting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const { data: flock, isLoading } = useQuery({
     queryKey: ['flock', id],
     queryFn: async () => {
@@ -83,7 +96,7 @@ export const FlockDetail: React.FC = () => {
     queryKey: ['flock_he', id],
     queryFn: async () => {
       const { data } = await supabase.from('he_dispatch')
-        .select('*').eq('flock_id', id!).order('dispatch_date')
+        .select('*').eq('flock_id', id!).order('dispatch_date', { ascending: false })
       return data ?? []
     }
   })
@@ -92,7 +105,7 @@ export const FlockDetail: React.FC = () => {
     queryKey: ['flock_nhe', id],
     queryFn: async () => {
       const { data } = await supabase.from('nhe_sales')
-        .select('*').eq('flock_id', id!).order('sale_date')
+        .select('*').eq('flock_id', id!).order('sale_date', { ascending: false })
       return data ?? []
     }
   })
@@ -101,7 +114,7 @@ export const FlockDetail: React.FC = () => {
     queryKey: ['flock_med', id],
     queryFn: async () => {
       const { data } = await supabase.from('medicine_monthly')
-        .select('*').eq('flock_id', id!).order('month')
+        .select('*').eq('flock_id', id!).order('month', { ascending: false })
       return data ?? []
     }
   })
@@ -114,7 +127,7 @@ export const FlockDetail: React.FC = () => {
   if (isLoading) return <Spinner />
   if (!flock) return <div className="p-8 text-center text-gray-500">Flock not found</div>
 
-  // Computed totals
+  // Computed totals (always from full ascending daily array)
   const totalEggs = daily?.reduce((s, d) => s + (d.total_eggs ?? 0), 0) ?? 0
   const totalHE   = daily?.reduce((s, d) => s + (d.he_eggs ?? 0), 0) ?? 0
   const totalMortF = daily?.reduce((s, d) => s + (d.mortality_female ?? 0), 0) ?? 0
@@ -139,7 +152,7 @@ export const FlockDetail: React.FC = () => {
   const totalRevenue = heRevenue + nheRevenue
   const totalCost    = chickCost + medCost  // feed cost requires rate lookup
 
-  // Monthly chart data
+  // Monthly chart data (from full ascending daily array)
   const monthlyData = daily?.reduce((acc: any[], d) => {
     const m = d.record_date.slice(0, 7)
     const existing = acc.find(x => x.month === m)
@@ -154,8 +167,87 @@ export const FlockDetail: React.FC = () => {
     return acc
   }, []) ?? []
 
+  // lastRecord = last in ascending order = most recent
   const lastRecord = daily?.[daily.length - 1]
   const ageWeeks = flockAgeWeeks(flock.placement_date)
+
+  // dailyIndexMap: maps record id → original ascending index (for week number)
+  const dailyIndexMap = useMemo<Map<string, number>>(() => {
+    const m = new Map<string, number>()
+    ;(daily ?? []).forEach((d, i) => m.set(d.id, i))
+    return m
+  }, [daily])
+
+  // displayDaily: reversed + date filtered
+  const displayDaily = useMemo(() => {
+    let arr = [...(daily ?? [])].reverse()
+    if (fromDate) arr = arr.filter(d => d.record_date >= fromDate)
+    if (toDate) arr = arr.filter(d => d.record_date <= toDate)
+    return arr
+  }, [daily, fromDate, toDate])
+
+  // heDispatch filtered for financial tab
+  const displayHeDispatch = useMemo(() => {
+    let arr = heDispatch ?? []
+    if (heFromDate) arr = arr.filter(d => d.dispatch_date >= heFromDate)
+    if (heToDate) arr = arr.filter(d => d.dispatch_date <= heToDate)
+    return arr
+  }, [heDispatch, heFromDate, heToDate])
+
+  // CSV template download
+  const handleDownloadTemplate = () => {
+    const headers = 'flock_no,record_date,opening_female,opening_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,trcull_female,trcull_male,mortality_female,mortality_male,closing_female,closing_male'
+    const blob = new Blob([headers + '\n'], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `daily_records_template.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // CSV import handler
+  const handleImport = async (file: File) => {
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const lines = text.trim().split('\n').filter(Boolean)
+      if (lines.length < 2) { toast.error('Empty file'); return }
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+      const records = lines.slice(1).map(line => {
+        const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+        const obj: any = {}
+        headers.forEach((h, i) => { obj[h] = vals[i] ?? '' })
+        return obj
+      })
+      const rows = records.map((r: any) => ({
+        flock_id: id,
+        record_date: r.record_date,
+        opening_female: parseInt(r.opening_female) || null,
+        opening_male: parseInt(r.opening_male) || null,
+        feed_female_kg: parseFloat(r.feed_female_kg) || null,
+        feed_male_kg: parseFloat(r.feed_male_kg) || null,
+        total_eggs: parseInt(r.total_eggs) || null,
+        he_eggs: parseInt(r.he_eggs) || null,
+        trcull_female: parseInt(r.trcull_female) || 0,
+        trcull_male: parseInt(r.trcull_male) || 0,
+        mortality_female: parseInt(r.mortality_female) || 0,
+        mortality_male: parseInt(r.mortality_male) || 0,
+        closing_female: parseInt(r.closing_female) || null,
+        closing_male: parseInt(r.closing_male) || null,
+      })).filter((r: any) => r.record_date)
+
+      const { error } = await supabase.from('daily_records').upsert(rows, { onConflict: 'flock_id,record_date' })
+      if (error) throw error
+      toast.success(`Imported ${rows.length} records!`)
+      qc.invalidateQueries({ queryKey: ['flock_daily', id] })
+    } catch (e: any) {
+      toast.error('Import failed: ' + e.message)
+    } finally {
+      setImporting(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -282,6 +374,50 @@ export const FlockDetail: React.FC = () => {
       {/* DAILY TAB */}
       {tab === 'daily' && (
         <>
+          {/* Daily tab action bar: import/export buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>
+              Download Template
+            </Button>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>}
+              loading={importing}
+              onClick={() => fileInputRef.current?.click()}>
+              Import CSV
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0]
+                if (file) handleImport(file)
+              }}
+            />
+          </div>
+
+          {/* Date filter bar */}
+          <div className="flex items-center gap-3 flex-wrap bg-gray-50 border border-gray-200 rounded-lg px-4 py-2">
+            <span className="text-sm font-medium text-gray-600">Filter:</span>
+            <label className="flex items-center gap-1.5 text-sm text-gray-600">
+              From
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm" />
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-gray-600">
+              To
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm" />
+            </label>
+            {(fromDate || toDate) && (
+              <button onClick={() => { setFromDate(''); setToDate('') }}
+                className="text-xs text-brand-600 hover:text-brand-800 underline">Clear</button>
+            )}
+            <span className="text-xs text-gray-500 ml-auto">
+              Showing {displayDaily.length} of {daily?.length ?? 0} days
+            </span>
+          </div>
+
           <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
           <Card padding={false}>
             <div className="overflow-x-auto">
@@ -307,8 +443,9 @@ export const FlockDetail: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {daily?.map((d, i) => {
+                  {displayDaily.map((d) => {
                     const isLayingPeriod = flock.laying_start_date && d.record_date >= flock.laying_start_date
+                    const weekNum = Math.floor((dailyIndexMap.get(d.id) ?? 0) / 7) + 1
                     return (
                       <tr key={d.id} className={`border-b border-gray-50 hover:bg-gray-50
                         ${sel.has(d.id) ? 'bg-red-50' : isLayingPeriod ? 'bg-green-50/30' : 'bg-yellow-50/30'}`}>
@@ -317,7 +454,7 @@ export const FlockDetail: React.FC = () => {
                           style={{ backgroundColor: sel.has(d.id) ? '#fef2f2' : isLayingPeriod ? '#f0fdf4' : '#fefce8' }}>
                           {fmtDate(d.record_date)}
                         </td>
-                        <td className="px-2 py-1.5 text-gray-400">{Math.floor(i/7)+1}</td>
+                        <td className="px-2 py-1.5 text-gray-400">{weekNum}</td>
                         <td className="px-2 py-1.5 text-right">{d.opening_female?.toLocaleString('en-IN')}</td>
                         <td className="px-2 py-1.5 text-right">{d.opening_male?.toLocaleString('en-IN')}</td>
                         <td className="px-2 py-1.5 text-right">{d.feed_female_kg?.toLocaleString('en-IN')}</td>
@@ -469,6 +606,27 @@ export const FlockDetail: React.FC = () => {
           {/* HE Dispatch table */}
           <Card>
             <CardHeader title={`HE Dispatch (${heDispatch?.length ?? 0} records)`} />
+            {/* Date filter for HE dispatch */}
+            <div className="flex items-center gap-3 flex-wrap mb-3 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2">
+              <span className="text-sm font-medium text-gray-600">Filter:</span>
+              <label className="flex items-center gap-1.5 text-sm text-gray-600">
+                From
+                <input type="date" value={heFromDate} onChange={e => setHeFromDate(e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm" />
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-gray-600">
+                To
+                <input type="date" value={heToDate} onChange={e => setHeToDate(e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm" />
+              </label>
+              {(heFromDate || heToDate) && (
+                <button onClick={() => { setHeFromDate(''); setHeToDate('') }}
+                  className="text-xs text-brand-600 hover:text-brand-800 underline">Clear</button>
+              )}
+              <span className="text-xs text-gray-500 ml-auto">
+                Showing {displayHeDispatch.length} of {heDispatch?.length ?? 0} records
+              </span>
+            </div>
             <div className="overflow-x-auto">
               <Table>
                 <thead><tr>
@@ -477,7 +635,7 @@ export const FlockDetail: React.FC = () => {
                   <Th right>Rate</Th><Th right>Amount</Th>
                 </tr></thead>
                 <tbody>
-                  {heDispatch?.map((d: any) => (
+                  {displayHeDispatch.map((d: any) => (
                     <tr key={d.id} className="hover:bg-gray-50">
                       <Td className="text-xs">{fmtDate(d.dispatch_date)}</Td>
                       <Td className="text-xs text-gray-400">{fmtDate(d.prod_date)}</Td>

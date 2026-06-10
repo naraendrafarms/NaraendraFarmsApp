@@ -6,7 +6,7 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 } from '@/components/ui'
-import { Plus, Users, IndianRupee, Edit2, Trash2 } from 'lucide-react'
+import { Plus, Users, IndianRupee, Edit2, Trash2, Merge } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const DESIGNATIONS = ['Site Incharge','Farm Manager','Computer Operator','Site Supervisor',
@@ -18,12 +18,15 @@ const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => 
   return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
 }
 
-const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean }> = ({ count, onDelete, onClear, loading }) =>
+const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; onMerge?: () => void; loading?: boolean }> = ({ count, onDelete, onClear, onMerge, loading }) =>
   count === 0 ? null : (
     <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
       <span className="text-sm font-medium text-red-700">{count} selected</span>
       <button onClick={onClear} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
-      <div className="ml-auto">
+      <div className="ml-auto flex gap-2">
+        {onMerge && count >= 2 && (
+          <Button variant="outline" size="sm" icon={<Merge size={14}/>} onClick={onMerge}>Merge {count} into 1</Button>
+        )}
         <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={loading} onClick={onDelete}>Delete {count} employees</Button>
       </div>
     </div>
@@ -34,9 +37,11 @@ export const EmployeeList: React.FC = () => {
   const qc = useQueryClient()
   const [showForm,    setShowForm]    = useState(false)
   const [editing,     setEditing]     = useState<any>(null)
-  const [farmFilter,  setFarmFilter]  = useState('')
-  const [sel,         setSel]         = useState<Set<string>>(new Set())
-  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [farmFilter,   setFarmFilter]  = useState('')
+  const [sel,          setSel]         = useState<Set<string>>(new Set())
+  const [bulkConfirm,  setBulkConfirm] = useState(false)
+  const [mergeOpen,    setMergeOpen]   = useState(false)
+  const [mergeKeepId,  setMergeKeepId] = useState('')
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -113,6 +118,22 @@ export const EmployeeList: React.FC = () => {
     onError: (e:any) => { toast.error(e.message); setBulkConfirm(false) }
   })
 
+  const mergeMut = useMutation({
+    mutationFn: async ({ keepId, dropIds }: { keepId: string; dropIds: string[] }) => {
+      for (const oldId of dropIds) {
+        await supabase.from('salary_monthly').update({ employee_id: keepId }).eq('employee_id', oldId)
+        const { error } = await supabase.from('employees').delete().eq('id', oldId)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      toast.success('Merged — salary records remapped to kept employee')
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      setSel(new Set()); setMergeOpen(false)
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
   const allEmpIds = (employees??[]).map((e:any)=>e.id)
   const allSel = allEmpIds.length > 0 && allEmpIds.every((id:string)=>sel.has(id))
   const toggle = (id:string) => setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
@@ -131,7 +152,8 @@ export const EmployeeList: React.FC = () => {
           onChange={e=>setFarmFilter(e.target.value)} className="w-52" />
         {farmFilter && <Button variant="ghost" size="sm" onClick={()=>setFarmFilter('')}>Clear</Button>}
       </div>
-      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)} />
+      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
+        onMerge={()=>{ const first=[...sel][0]; setMergeKeepId(first); setMergeOpen(true) }} />
       {isLoading ? <Spinner/> : (
         Object.entries(byFarm).map(([farm, emps]:any) => {
           const farmIds = emps.map((e:any)=>e.id)
@@ -175,6 +197,35 @@ export const EmployeeList: React.FC = () => {
         <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Employees" size="sm"
           footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} employees</Button></>}>
           <p className="text-sm text-gray-700">Permanently delete <strong>{sel.size} selected employees</strong>? This cannot be undone.</p>
+        </Modal>
+      )}
+      {mergeOpen && (
+        <Modal open onClose={()=>setMergeOpen(false)} title="Merge Duplicate Employees" size="md"
+          footer={<>
+            <Button variant="secondary" onClick={()=>setMergeOpen(false)}>Cancel</Button>
+            <Button loading={mergeMut.isPending} onClick={()=>mergeMut.mutate({ keepId: mergeKeepId, dropIds: [...sel].filter(id=>id!==mergeKeepId) })}>
+              Merge — Keep Selected
+            </Button>
+          </>}>
+          <p className="text-sm text-gray-600 mb-4">Select which record to <strong>keep</strong>. All salary records linked to the others will be remapped to the kept employee, then duplicates are deleted.</p>
+          <div className="space-y-2">
+            {[...sel].map(id => {
+              const emp = employees?.find((e:any)=>e.id===id)
+              if (!emp) return null
+              return (
+                <label key={id} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${mergeKeepId===id?'border-brand-500 bg-brand-50':'border-gray-200 hover:border-gray-300'}`}>
+                  <input type="radio" name="mergeEmp" value={id} checked={mergeKeepId===id} onChange={()=>setMergeKeepId(id)} className="mt-0.5 text-brand-600"/>
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">{emp.name}</p>
+                    <p className="text-xs text-gray-500">{emp.emp_id??'No ID'} • {emp.designation??'No designation'} • {emp.farms?.name??'No site'}</p>
+                    <p className="text-xs text-gray-400">Salary: {emp.base_salary?`Rs ${emp.base_salary.toLocaleString('en-IN')}`:'—'}</p>
+                    {mergeKeepId===id ? <span className="text-xs text-brand-600 font-medium">← Keep this one</span>
+                      : <span className="text-xs text-red-500">Will be deleted after remapping</span>}
+                  </div>
+                </label>
+              )
+            })}
+          </div>
         </Modal>
       )}
 

@@ -5,7 +5,7 @@ import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
 } from '@/components/ui'
-import { Plus, Edit2, Settings, Trash2 } from 'lucide-react'
+import { Plus, Edit2, Settings, Trash2, Merge } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 // ── SHARED BULK HELPERS ──────────────────────────────────────────
@@ -15,12 +15,15 @@ const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => 
   return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
 }
 
-const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean }> = ({ count, onDelete, onClear, loading }) =>
+const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; onMerge?: () => void; loading?: boolean }> = ({ count, onDelete, onClear, onMerge, loading }) =>
   count === 0 ? null : (
     <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
       <span className="text-sm font-medium text-red-700">{count} selected</span>
       <button onClick={onClear} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
-      <div className="ml-auto">
+      <div className="ml-auto flex gap-2">
+        {onMerge && count >= 2 && (
+          <Button variant="outline" size="sm" icon={<Merge size={14}/>} onClick={onMerge}>Merge {count} into 1</Button>
+        )}
         <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={loading} onClick={onDelete}>Delete {count} rows</Button>
       </div>
     </div>
@@ -201,10 +204,12 @@ export const PartiesMaster: React.FC = () => {
   const [showForm,    setShowForm]    = useState(false)
   const [editing,     setEditing]     = useState<any>(null)
   const [deleteRow,   setDeleteRow]   = useState<any>(null)
-  const [sel,         setSel]         = useState<Set<string>>(new Set())
-  const [bulkConfirm, setBulkConfirm] = useState(false)
-  const [filterName,  setFilterName]  = useState('')
-  const [filterType,  setFilterType]  = useState('')
+  const [sel,          setSel]          = useState<Set<string>>(new Set())
+  const [bulkConfirm,  setBulkConfirm]  = useState(false)
+  const [mergeOpen,    setMergeOpen]    = useState(false)
+  const [mergeKeepId,  setMergeKeepId]  = useState('')
+  const [filterName,   setFilterName]   = useState('')
+  const [filterType,   setFilterType]   = useState('')
   const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:''})
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
@@ -255,6 +260,24 @@ export const PartiesMaster: React.FC = () => {
     }
   })
 
+  const mergeMut = useMutation({
+    mutationFn: async ({ keepId, dropIds }: { keepId: string; dropIds: string[] }) => {
+      for (const oldId of dropIds) {
+        await supabase.from('grn').update({ party_id: keepId }).eq('party_id', oldId)
+        await supabase.from('he_dispatch').update({ party_id: keepId }).eq('party_id', oldId)
+        await supabase.from('nhe_sales').update({ party_id: keepId }).eq('party_id', oldId)
+        const { error } = await supabase.from('parties').delete().eq('id', oldId)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      toast.success('Merged successfully — all linked records updated')
+      qc.invalidateQueries({ queryKey: ['parties'] })
+      setSel(new Set()); setMergeOpen(false)
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
   const partyIds=data.map((r:any)=>r.id)
   const allSel=partyIds.length>0&&partyIds.every((id:string)=>sel.has(id))
   const someSel=partyIds.some((id:string)=>sel.has(id))
@@ -272,7 +295,8 @@ export const PartiesMaster: React.FC = () => {
           {(filterName||filterType)&&<Button variant="ghost" size="sm" onClick={()=>{setFilterName('');setFilterType('')}}>Clear</Button>}
           <span className="text-xs text-gray-400 self-end pb-2">{data.length} of {allData?.length??0}</span>
         </div>
-        <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)} />
+        <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
+          onMerge={()=>{ const first=[...sel][0]; setMergeKeepId(first); setMergeOpen(true) }} />
         {isLoading?<Spinner/>:(
           <Card padding={false}>
             <Table>
@@ -315,6 +339,34 @@ export const PartiesMaster: React.FC = () => {
           footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} parties</Button></>}>
           <p className="text-sm text-gray-700">Delete <strong>{sel.size} selected parties</strong>? This cannot be undone.</p>
           <p className="text-xs text-gray-500 mt-2">Note: parties with linked GRN / sales records cannot be deleted.</p>
+        </Modal>
+      )}
+      {mergeOpen && (
+        <Modal open onClose={()=>setMergeOpen(false)} title="Merge Duplicate Parties" size="md"
+          footer={<>
+            <Button variant="secondary" onClick={()=>setMergeOpen(false)}>Cancel</Button>
+            <Button loading={mergeMut.isPending} onClick={()=>mergeMut.mutate({ keepId: mergeKeepId, dropIds: [...sel].filter(id=>id!==mergeKeepId) })}>
+              Merge — Keep Selected
+            </Button>
+          </>}>
+          <p className="text-sm text-gray-600 mb-4">Select which record to <strong>keep</strong>. All GRN, HE dispatch and sales linked to the others will be remapped to the kept record, then duplicates are deleted.</p>
+          <div className="space-y-2">
+            {[...sel].map(id => {
+              const row = allData?.find((r:any)=>r.id===id)
+              if (!row) return null
+              return (
+                <label key={id} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${mergeKeepId===id?'border-brand-500 bg-brand-50':'border-gray-200 hover:border-gray-300'}`}>
+                  <input type="radio" name="mergeKeep" value={id} checked={mergeKeepId===id} onChange={()=>setMergeKeepId(id)} className="mt-0.5 text-brand-600"/>
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">{row.name}</p>
+                    <p className="text-xs text-gray-500">{row.type} {row.category?`• ${row.category}`:''} {row.contact?`• ${row.contact}`:''}</p>
+                    {mergeKeepId===id && <span className="text-xs text-brand-600 font-medium">← Keep this one</span>}
+                    {mergeKeepId!==id && <span className="text-xs text-red-500">Will be deleted after remapping</span>}
+                  </div>
+                </label>
+              )
+            })}
+          </div>
         </Modal>
       )}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Party':'Add Party'} size="md"
