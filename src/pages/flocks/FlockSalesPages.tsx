@@ -428,16 +428,26 @@ const NHE_TYPES = [
   { value: 'manure',         label: 'Manure / Litter' },
   { value: 'other',          label: 'Other Income' },
 ]
+const BIRD_SALE_TYPES = ['bird_cull','bird_lame','bird_weak','bird_sex_error']
+
+const EMPTY_NHE_FORM = {
+  flock_id: '', sale_date: today(), sale_type: 'je',
+  party_id: '', dc_no: '', quantity: '', unit: 'nos', rate: '', amount: '', remarks: ''
+}
 
 export const NHESales: React.FC = () => {
   const qc = useQueryClient()
   const { applyFlockFarmFilter, farmId } = useFarmScope()
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm]   = useState(false)
+  const [editing, setEditing]     = useState<any>(null)
   const [flockFilter, setFlockFilter] = useState('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
-  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [typeFilter, setTypeFilter]   = useState('')
+  const [fromDate, setFromDate]   = useState('')
+  const [toDate, setToDate]       = useState('')
+  const [sel, setSel]             = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
@@ -467,150 +477,287 @@ export const NHESales: React.FC = () => {
     }
   })
 
-  const [form, setForm] = useState({
-    flock_id: '', sale_date: today(), sale_type: 'je',
-    party_id: '', dc_no: '', quantity: '', unit: 'nos', rate: '', amount: '', remarks: ''
-  })
-  const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const [form, setForm] = useState<any>(EMPTY_NHE_FORM)
+  const sv = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }))
   const autoAmt = (parseFloat(form.quantity)||0) * (parseFloat(form.rate)||0)
 
-  const bulkDelMutNHE = useMutation({
+  const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => { await supabase.from('nhe_sales').delete().in('id', ids) },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['nhe_sales'] }); setSel(new Set()); setBulkConfirm(false) }
   })
 
-  const mut = useMutation({
+  const saveMut = useMutation({
     mutationFn: async () => {
       if (!form.flock_id || !form.sale_date || !form.amount) throw new Error('Flock, date and amount required')
-      const { error } = await supabase.from('nhe_sales').insert({
+      const payload = {
         flock_id: form.flock_id, sale_date: form.sale_date, sale_type: form.sale_type,
         party_id: form.party_id || null, dc_no: form.dc_no || null,
         quantity: parseFloat(form.quantity) || null, unit: form.unit,
         rate: parseFloat(form.rate) || null,
         amount: parseFloat(form.amount) || autoAmt,
         remarks: form.remarks || null
-      })
-      if (error) throw error
+      }
+      if (editing) {
+        const { error } = await supabase.from('nhe_sales').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('nhe_sales').insert(payload)
+        if (error) throw error
+      }
     },
-    onSuccess: () => { toast.success('Sale recorded!'); qc.invalidateQueries({ queryKey: ['nhe_sales'] }); setShowForm(false) },
+    onSuccess: () => {
+      toast.success(editing ? 'Updated!' : 'Sale recorded!')
+      qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+      setShowForm(false); setEditing(null)
+    },
     onError: (e: any) => toast.error(e.message)
   })
+
+  const openNew = () => {
+    setEditing(null)
+    setForm({ ...EMPTY_NHE_FORM, flock_id: flockFilter })
+    setShowForm(true)
+  }
+  const openEdit = (row: any) => {
+    setEditing(row)
+    setForm({
+      flock_id: row.flock_id, sale_date: row.sale_date, sale_type: row.sale_type,
+      party_id: row.party_id ?? '', dc_no: row.dc_no ?? '',
+      quantity: row.quantity ?? '', unit: row.unit ?? 'nos',
+      rate: row.rate ?? '', amount: row.amount ?? '', remarks: row.remarks ?? ''
+    })
+    setShowForm(true)
+  }
+
+  // Download template
+  const handleDownloadTemplate = () => {
+    const headers = 'flock_no,sale_date,sale_type,party_name,dc_no,quantity,unit,rate,amount,remarks'
+    const example = [
+      '19,2025-06-01,bird_cull,Party Name,DC001,100,nos,150,15000,Cull birds sale',
+      '19,2025-06-01,je,Party Name,DC002,500,nos,8.5,4250,Jumbo eggs',
+    ].join('\n')
+    const notes = [
+      '# sale_type values: je | te | be | bird_cull | bird_lame | bird_weak | bird_sex_error | gas | manure | other',
+      '# unit: nos (birds/eggs) | kg | ltrs | bags',
+      '# amount = quantity × rate (auto-calculated if left blank)',
+    ].join('\n')
+    const blob = new Blob([notes + '\n' + headers + '\n' + example], { type: 'text/csv' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+    a.download = 'nhe_bird_sales_template.csv'; a.click()
+  }
+
+  // Import CSV
+  const handleImport = async (file: File) => {
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+      const header = lines[0].split(',').map(h => h.trim().toLowerCase())
+      const rows = lines.slice(1).map(line => {
+        const vals = line.split(',')
+        const obj: any = {}
+        header.forEach((h, i) => { obj[h] = vals[i]?.trim() ?? '' })
+        return obj
+      }).filter(r => r.sale_date && r.flock_no)
+
+      // Resolve flock_no → flock_id, party_name → party_id
+      const flockMap: Record<string, string> = {}
+      flocks?.forEach((f: any) => { flockMap[String(f.flock_no)] = f.id })
+      const partyMap: Record<string, string> = {}
+      parties?.forEach((p: any) => { partyMap[p.name.toLowerCase()] = p.id })
+
+      const records = rows.map(r => ({
+        flock_id: flockMap[r.flock_no] ?? null,
+        sale_date: r.sale_date,
+        sale_type: r.sale_type || 'other',
+        party_id: r.party_name ? (partyMap[r.party_name.toLowerCase()] ?? null) : null,
+        dc_no: r.dc_no || null,
+        quantity: r.quantity !== '' ? Number(r.quantity) : null,
+        unit: r.unit || 'nos',
+        rate: r.rate !== '' ? Number(r.rate) : null,
+        amount: r.amount !== '' ? Number(r.amount) : (Number(r.quantity||0) * Number(r.rate||0)) || null,
+        remarks: r.remarks || null,
+      })).filter(r => r.flock_id && r.amount)
+
+      if (records.length === 0) throw new Error('No valid rows found. Check flock_no and amount columns.')
+      const { error } = await supabase.from('nhe_sales').insert(records)
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+      toast.success(`Imported ${records.length} records!`)
+    } catch (e: any) {
+      toast.error('Import failed: ' + e.message)
+    } finally {
+      setImporting(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
 
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
 
-  const saleIds = (sales ?? []).map((s: any) => s.id)
-  const allSelNHE = saleIds.length > 0 && saleIds.every((id: string) => sel.has(id))
-  const someSelNHE = saleIds.some((id: string) => sel.has(id))
-  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const toggleAll = () => setSel(s => { const n = new Set(s); allSelNHE ? saleIds.forEach((id: string) => n.delete(id)) : saleIds.forEach((id: string) => n.add(id)); return n })
+  const filtered = (sales ?? []).filter((s: any) => !typeFilter || s.sale_type === typeFilter)
 
-  // Group by type for summary
-  const byType = sales?.reduce((acc: any, s: any) => {
-    acc[s.sale_type] = (acc[s.sale_type] ?? 0) + s.amount
+  const saleIds = filtered.map((s: any) => s.id)
+  const allSel  = saleIds.length > 0 && saleIds.every((id: string) => sel.has(id))
+  const someSel = saleIds.some((id: string) => sel.has(id))
+  const toggle    = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? saleIds.forEach((id: string) => n.delete(id)) : saleIds.forEach((id: string) => n.add(id)); return n })
+
+  // Summary by type
+  const byType = (sales ?? []).reduce((acc: any, s: any) => {
+    if (!acc[s.sale_type]) acc[s.sale_type] = { amount: 0, qty: 0, count: 0 }
+    acc[s.sale_type].amount += Number(s.amount ?? 0)
+    acc[s.sale_type].qty   += Number(s.quantity ?? 0)
+    acc[s.sale_type].count += 1
     return acc
-  }, {}) ?? {}
+  }, {})
+
+  // Bird sales summary: avg rate per type
+  const birdSummary = BIRD_SALE_TYPES.filter(t => byType[t]).map(t => {
+    const d = byType[t]
+    const avgRate = d.qty > 0 ? d.amount / d.qty : 0
+    return { type: t, label: NHE_TYPES.find(x => x.value === t)?.label ?? t, ...d, avgRate }
+  })
 
   return (
     <div className="space-y-5">
       <SectionHeader title="NHE & Bird Sales"
         subtitle="Non-hatching eggs, bird sales, gas, manure income"
-        action={<Button icon={<Plus size={16}/>} onClick={() => { setShowForm(true); setForm(f => ({ ...f, flock_id: flockFilter })) }}>Add Sale</Button>}
+        action={<Button icon={<Plus size={16}/>} onClick={openNew}>Add Sale</Button>}
       />
+
+      {/* Toolbar */}
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+          className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <option value="">All Types</option>
+          {NHE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
-          From
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+          From <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
-          To
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+          To <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
-        {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>}
+        {(hasFilter||typeFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setTypeFilter('') }}>Clear</Button>}
+        <div className="ml-auto flex gap-2">
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Template</Button>
+          <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => fileRef.current?.click()}>Import CSV</Button>
+          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
+        </div>
       </div>
 
-      {Object.keys(byType).length > 0 && (
+      {/* Bird Sales Summary */}
+      {birdSummary.length > 0 && (
+        <Card>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Bird Sales Summary</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {birdSummary.map(b => (
+              <div key={b.type} className="bg-orange-50 border border-orange-100 rounded-lg p-3">
+                <p className="text-xs text-orange-700 font-medium">{b.label}</p>
+                <p className="text-sm font-bold text-gray-900 mt-1">{inr(b.amount)}</p>
+                <p className="text-xs text-gray-500">{b.qty.toLocaleString('en-IN')} birds · {b.count} entries</p>
+                <p className="text-xs text-orange-600 font-semibold">Avg Rate: ₹{b.avgRate.toFixed(2)}/bird</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Other income summary */}
+      {Object.keys(byType).filter(t => !BIRD_SALE_TYPES.includes(t)).length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Object.entries(byType).map(([type, amt]: any) => (
+          {Object.entries(byType).filter(([t]) => !BIRD_SALE_TYPES.includes(t)).map(([type, d]: any) => (
             <Card key={type} className="!p-3">
               <p className="text-xs text-gray-500">{NHE_TYPES.find(t => t.value === type)?.label ?? type}</p>
-              <p className="text-sm font-bold text-gray-900 mt-1">{inr(amt)}</p>
+              <p className="text-sm font-bold text-gray-900 mt-1">{inr(d.amount)}</p>
+              <p className="text-xs text-gray-400">{d.count} entries · {d.qty > 0 ? `${d.qty.toLocaleString('en-IN')} nos` : ''}</p>
             </Card>
           ))}
         </div>
       )}
 
-      <BulkBar count={sel.size} loading={bulkDelMutNHE.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
 
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
-              <Th><CB checked={allSelNHE} indeterminate={someSelNHE && !allSelNHE} onChange={toggleAll}/></Th>
+              <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Date</Th><Th>Type</Th><Th>Party</Th>
-              <Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th><Th>Remarks</Th>
+              <Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th>
+              <Th>DC No</Th><Th>Remarks</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {sales?.map((s: any) => (
-                <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''}`}>
+              {filtered.map((s: any) => (
+                <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''} ${BIRD_SALE_TYPES.includes(s.sale_type) ? 'bg-orange-50/40' : ''}`}>
                   <Td><CB checked={sel.has(s.id)} onChange={() => toggle(s.id)}/></Td>
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
                   <Td className="text-xs">{fmtDate(s.sale_date)}</Td>
-                  <Td className="text-xs">{NHE_TYPES.find(t => t.value === s.sale_type)?.label ?? s.sale_type}</Td>
-                  <Td className="text-xs text-gray-400">{s.parties?.name ?? '—'}</Td>
-                  <Td right className="text-xs">{s.quantity?.toLocaleString('en-IN') ?? '—'} {s.unit}</Td>
-                  <Td right className="text-xs">{s.rate ? `Rs ${s.rate}` : '—'}</Td>
+                  <Td className="text-xs">
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${BIRD_SALE_TYPES.includes(s.sale_type) ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {NHE_TYPES.find(t => t.value === s.sale_type)?.label ?? s.sale_type}
+                    </span>
+                  </Td>
+                  <Td className="text-xs text-gray-500">{s.parties?.name ?? '—'}</Td>
+                  <Td right className="text-xs">{s.quantity != null ? s.quantity.toLocaleString('en-IN') : '—'} <span className="text-gray-400">{s.unit}</span></Td>
+                  <Td right className="text-xs">{s.rate ? `₹${s.rate}` : '—'}</Td>
                   <Td right className="font-semibold text-green-700 text-xs">{inr(s.amount)}</Td>
-                  <Td className="text-xs text-gray-400 max-w-xs truncate">{s.remarks ?? ''}</Td>
+                  <Td className="text-xs text-gray-400">{s.dc_no ?? '—'}</Td>
+                  <Td className="text-xs text-gray-400 max-w-[140px] truncate">{s.remarks ?? ''}</Td>
+                  <Td>
+                    <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600"><Edit2 size={13}/></button>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-            {sales && sales.length > 0 && (
-              <tfoot><tr className="bg-gray-50">
-                <Td colSpan={7}><strong>TOTAL</strong></Td>
-                <Td right><strong className="text-green-700">{inr(sales.reduce((sum: number, s: any) => sum + s.amount, 0))}</strong></Td>
-                <Td> </Td>
+            {filtered.length > 0 && (
+              <tfoot><tr className="bg-gray-50 font-semibold">
+                <Td colSpan={7}>TOTAL ({filtered.length} records)</Td>
+                <Td right className="text-green-700">{inr(filtered.reduce((sum: number, s: any) => sum + Number(s.amount ?? 0), 0))}</Td>
+                <Td colSpan={3}></Td>
               </tr></tfoot>
             )}
           </Table>
-          {sales?.length === 0 && <EmptyState icon={<Egg size={32}/>} title="No sales yet" action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add</Button>} />}
+          {filtered.length === 0 && <EmptyState icon={<Egg size={32}/>} title="No sales yet" action={<Button onClick={openNew} icon={<Plus size={16}/>}>Add</Button>} />}
         </Card>
       )}
 
       {bulkConfirm && (
         <ConfirmBulkDelete label={`Delete ${sel.size} NHE/bird sale records? This cannot be undone.`}
-          onConfirm={() => bulkDelMutNHE.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+          onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
 
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="Record NHE / Bird Sale" size="md"
-        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
-          <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button></>}>
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }}
+        title={editing ? 'Edit NHE / Bird Sale' : 'Record NHE / Bird Sale'} size="md"
+        footer={<><Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
+          <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <FormRow>
             <Select label="Flock" required placeholder="— Select —" options={flockOptions}
-              value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
-            <Input label="Sale Date" required type="date" value={form.sale_date} onChange={e => s('sale_date', e.target.value)} />
+              value={form.flock_id} onChange={e => sv('flock_id', e.target.value)} />
+            <Input label="Sale Date" required type="date" value={form.sale_date} onChange={e => sv('sale_date', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Select label="Sale Type" required options={NHE_TYPES} value={form.sale_type} onChange={e => s('sale_type', e.target.value)} />
+            <Select label="Sale Type" required options={NHE_TYPES} value={form.sale_type} onChange={e => sv('sale_type', e.target.value)} />
             <Select label="Party" placeholder="— Select —" options={partyOptions}
-              value={form.party_id} onChange={e => s('party_id', e.target.value)} />
+              value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
           </FormRow>
           <FormRow cols={4}>
-            <Input label="Qty" type="number" value={form.quantity} onChange={e => s('quantity', e.target.value)} />
-            <Input label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} />
-            <Input label="Rate" type="number" step="0.01" value={form.rate} onChange={e => s('rate', e.target.value)} />
-            <Input label="Amount" required type="number" step="0.01" value={form.amount}
-              onChange={e => s('amount', e.target.value)}
+            <Input label="Qty" type="number" value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
+            <Input label="Unit" value={form.unit} onChange={e => sv('unit', e.target.value)} />
+            <Input label="Rate (₹)" type="number" step="0.01" value={form.rate} onChange={e => sv('rate', e.target.value)} />
+            <Input label="Amount (₹)" required type="number" step="0.01" value={form.amount}
+              onChange={e => sv('amount', e.target.value)}
               hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : undefined} />
           </FormRow>
           <FormRow>
-            <Input label="DC No" value={form.dc_no} onChange={e => s('dc_no', e.target.value)} />
-            <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
+            <Input label="DC No" value={form.dc_no} onChange={e => sv('dc_no', e.target.value)} />
+            <Input label="Remarks" value={form.remarks} onChange={e => sv('remarks', e.target.value)} />
           </FormRow>
         </div>
       </Modal>
