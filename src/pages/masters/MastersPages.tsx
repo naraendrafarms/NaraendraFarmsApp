@@ -208,7 +208,7 @@ export const PartiesMaster: React.FC = () => {
   const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:''})
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
-  const {data:allData,isLoading}=useQuery({queryKey:['parties'],queryFn:async()=>{const{data}=await supabase.from('parties').select('*').order('name');return data??[]}})
+  const {data:allData,isLoading}=useQuery({queryKey:['parties'],queryFn:async()=>{const{data}=await supabase.from('parties').select('*').order('created_at',{ascending:false});return data??[]}})
 
   const data = (allData??[]).filter((r:any)=>{
     if(filterName && !r.name.toLowerCase().includes(filterName.toLowerCase())) return false
