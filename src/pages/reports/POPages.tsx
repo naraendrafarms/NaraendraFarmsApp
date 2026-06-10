@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef } from 'react'
+import React, { useState, useMemo, useRef, useCallback } from 'react'
+import * as XLSX from 'xlsx'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
@@ -10,8 +11,12 @@ import {
 import {
   ShoppingCart, Clock, CheckCircle, AlertCircle, Plus, Pencil, Trash2,
   Building2, Landmark, CreditCard, TrendingUp, TrendingDown, AlertTriangle,
-  Download, PackageCheck, User, BarChart3, Lock
+  Download, PackageCheck, User, BarChart3, Lock, Upload, LineChart
 } from 'lucide-react'
+import {
+  LineChart as ReLineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer
+} from 'recharts'
 import toast from 'react-hot-toast'
 
 // ── constants ─────────────────────────────────────────────────────
@@ -49,7 +54,13 @@ const RowCls = (p: any) => {
   if (diff <= 7) return 'bg-yellow-50 hover:bg-yellow-100'
   return 'hover:bg-gray-50'
 }
+// simple flat CSV for rate analysis
+const exportFlatCSV = (filename: string, headers: string[], rows: (string|number|null|undefined)[][]) => {
+  const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
+}
 
+// ── export CSV helper ──────────────────────────────────────────────
 // ── export CSV helper ─────────────────────────────────────────────
 const exportCSV = (filename: string, rows: any[], cols: { key: string; label: string }[]) => {
   const header = cols.map(c => c.label).join(',')
@@ -63,7 +74,7 @@ const exportCSV = (filename: string, rows: any[], cols: { key: string; label: st
 }
 
 // ── TABS ──────────────────────────────────────────────────────────
-type Tab = 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Bank Ledger'
+type Tab = 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Bank Ledger' | 'Rate Analysis'
 
 // ── MAIN EXPORT ───────────────────────────────────────────────────
 export const PurchaseOrdersPage: React.FC = () => {
@@ -78,6 +89,7 @@ export const PurchaseOrdersPage: React.FC = () => {
     { id: 'Vendor Statement',icon: <User size={14}/> },
     { id: 'Vendor Banks',    icon: <Building2 size={14}/> },
     { id: 'Bank Ledger',     icon: <Landmark size={14}/>, locked: !can.viewBankLedger(role) },
+    { id: 'Rate Analysis',   icon: <LineChart size={14}/> },
   ]
 
   return (
@@ -103,6 +115,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           <Lock size={32}/><p className="text-sm">Bank Ledger is restricted to Admin and Accounts roles.</p>
         </div>
       ))}
+      {tab === 'Rate Analysis'    && <RateAnalysisTab />}
     </div>
   )
 }
@@ -1285,6 +1298,544 @@ const BankLedgerTab: React.FC = () => {
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelTxn(null)}>Cancel</Button><Button variant="danger" onClick={() => delTxn && delTxnMut.mutate(delTxn)} loading={delTxnMut.isPending}>Delete</Button></div>}>
         <p className="text-sm text-gray-600">Delete this transaction? Running balance will be recalculated.</p>
       </Modal>
+    </div>
+  )
+}
+
+// ── RATE ANALYSIS TAB ─────────────────────────────────────────────
+const COLORS = ['#6366f1','#22c55e','#f59e0b','#ef4444','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4']
+
+// Expected Excel column names (case-insensitive, flexible matching)
+const COL_MAP: Record<string, string[]> = {
+  po_no:          ['po no','po_no','po number','order no','order number'],
+  po_date:        ['po date','po_date','order date','date'],
+  fiscal_year:    ['fiscal year','fiscal_year','fy','year','financial year'],
+  vendor_name:    ['vendor','vendor name','vendor_name','supplier','company','party'],
+  item_name:      ['item','item name','item_name','material','product','description'],
+  material_type:  ['material type','material_type','type','category'],
+  quantity:       ['qty','quantity','amount','volume'],
+  unit:           ['unit','uom','unit of measure'],
+  rate:           ['rate','price','unit price','unit rate','rate per unit','cost'],
+  gst_pct:        ['gst%','gst pct','gst_pct','gst','tax%','tax'],
+  total_amount:   ['total','total amount','total_amount','value','invoice value'],
+  grn_no:         ['grn no','grn_no','grn number','receipt no'],
+  grn_date:       ['grn date','grn_date','receipt date'],
+  material_status:['status','material status','material_status','po status'],
+}
+
+function matchCol(headers: string[], aliases: string[]): string | undefined {
+  const lower = headers.map(h => h.toLowerCase().trim())
+  for (const alias of aliases) {
+    const idx = lower.indexOf(alias)
+    if (idx !== -1) return headers[idx]
+  }
+  return undefined
+}
+
+function parseDateVal(v: any): string | null {
+  if (!v) return null
+  if (typeof v === 'number') {
+    // Excel serial date
+    const d = XLSX.SSF.parse_date_code(v)
+    if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`
+  }
+  const s = String(v).trim()
+  if (!s) return null
+  // Try dd-mm-yyyy, dd/mm/yyyy, yyyy-mm-dd
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/)
+  if (dmy) {
+    const [,d,m,y] = dmy
+    const yr = y.length===2 ? `20${y}` : y
+    return `${yr}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
+  }
+  const iso = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/)
+  if (iso) return `${iso[1]}-${iso[2].padStart(2,'0')}-${iso[3].padStart(2,'0')}`
+  return null
+}
+
+function inferFY(dateStr: string | null): string {
+  if (!dateStr) return 'Unknown'
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return 'Unknown'
+  const m = d.getMonth() + 1 // 1-12
+  const y = d.getFullYear()
+  return m >= 4 ? `${y}-${String(y+1).slice(2)}` : `${y-1}-${String(y).slice(2)}`
+}
+
+const RateAnalysisTab: React.FC = () => {
+  const qc = useQueryClient()
+  const importRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+  const [preview, setPreview] = useState<{rows:any[], mapped:Record<string,string>, headers:string[]} | null>(null)
+  const [selectedItem, setSelectedItem] = useState('')
+  const [selectedVendor, setSelectedVendor] = useState('')
+  const [viewMode, setViewMode] = useState<'trend'|'vendor'|'table'>('trend')
+
+  // All PO data for analysis
+  const { data: pos, isLoading } = useQuery({
+    queryKey: ['po_rate_analysis'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('purchase_orders')
+        .select('po_no,po_date,fiscal_year,vendor_name,item_name,material_type,quantity,unit,rate,gst_pct,total_amount')
+        .not('rate', 'is', null)
+        .order('po_date', { ascending: true })
+      return data ?? []
+    }
+  })
+
+  const importMut = useMutation({
+    mutationFn: async (rows: any[]) => {
+      const chunks = []
+      for (let i = 0; i < rows.length; i += 200) chunks.push(rows.slice(i, i+200))
+      let inserted = 0
+      for (const chunk of chunks) {
+        const { error, count } = await supabase.from('purchase_orders')
+          .upsert(chunk, { onConflict: 'po_no,item_name', ignoreDuplicates: false })
+          .select('id')
+        if (error) throw error
+        inserted += count ?? chunk.length
+      }
+      return inserted
+    },
+    onSuccess: (n) => {
+      toast.success(`Imported ${n} PO records`)
+      qc.invalidateQueries({ queryKey: ['po_rate_analysis'] })
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] })
+      setPreview(null)
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const handleFile = useCallback((file: File) => {
+    setImporting(true)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target?.result, { type: 'binary', cellDates: false })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+        if (raw.length < 2) { toast.error('Sheet is empty'); setImporting(false); return }
+        const headers = raw[0].map((h: any) => String(h).trim())
+        // Map columns
+        const mapped: Record<string, string> = {}
+        for (const [field, aliases] of Object.entries(COL_MAP)) {
+          const match = matchCol(headers, aliases)
+          if (match) mapped[field] = match
+        }
+        if (!mapped.vendor_name || !mapped.item_name) {
+          toast.error('Could not find vendor or item columns. Check your Excel headers.')
+          setImporting(false); return
+        }
+        const dataRows = raw.slice(1).filter(r => r.some((v:any) => v !== ''))
+        setPreview({ rows: dataRows, mapped, headers })
+      } catch (err: any) {
+        toast.error('Failed to read file: ' + err.message)
+      }
+      setImporting(false)
+    }
+    reader.readAsBinaryString(file)
+  }, [])
+
+  const handleConfirmImport = () => {
+    if (!preview) return
+    const { rows, mapped, headers } = preview
+    const getVal = (row: any[], field: string) => {
+      const col = mapped[field]
+      if (!col) return null
+      return row[headers.indexOf(col)]
+    }
+    const records = rows.map(row => {
+      const dateStr = parseDateVal(getVal(row, 'po_date'))
+      const fy = getVal(row, 'fiscal_year') ? String(getVal(row, 'fiscal_year')).trim() : inferFY(dateStr)
+      const poNo = getVal(row, 'po_no') ? String(getVal(row, 'po_no')).trim() : `IMP-${Date.now()}-${Math.random().toString(36).slice(2,6)}`
+      const rate = parseFloat(String(getVal(row, 'rate'))) || null
+      const qty  = parseFloat(String(getVal(row, 'quantity'))) || null
+      const gst  = parseFloat(String(getVal(row, 'gst_pct'))) || null
+      const total= parseFloat(String(getVal(row, 'total_amount'))) || (rate && qty ? rate * qty : null)
+      return {
+        po_no:           poNo,
+        po_date:         dateStr,
+        fiscal_year:     fy || 'Unknown',
+        vendor_name:     String(getVal(row, 'vendor_name') ?? '').trim() || 'Unknown',
+        item_name:       String(getVal(row, 'item_name') ?? '').trim() || 'Unknown',
+        material_type:   String(getVal(row, 'material_type') ?? '').trim() || null,
+        quantity:        qty,
+        unit:            String(getVal(row, 'unit') ?? '').trim() || null,
+        rate:            rate,
+        gst_pct:         gst,
+        total_amount:    total,
+        grn_no:          getVal(row, 'grn_no') ? String(getVal(row, 'grn_no')).trim() : null,
+        grn_date:        parseDateVal(getVal(row, 'grn_date')),
+        material_status: getVal(row, 'material_status') ? String(getVal(row, 'material_status')).trim() : 'Received',
+      }
+    }).filter(r => r.vendor_name && r.item_name && r.vendor_name !== 'Unknown')
+    importMut.mutate(records)
+  }
+
+  // Derived data for analysis
+  const items   = useMemo(() => [...new Set((pos??[]).map(p => p.item_name).filter(Boolean))].sort(), [pos])
+  const vendors = useMemo(() => [...new Set((pos??[]).map(p => p.vendor_name).filter(Boolean))].sort(), [pos])
+  const fiscalYears = useMemo(() => [...new Set((pos??[]).map(p => p.fiscal_year).filter(Boolean))].sort(), [pos])
+
+  // Trend data: for selected item, avg rate per FY per vendor
+  const trendData = useMemo(() => {
+    if (!selectedItem || !pos) return []
+    const filtered = pos.filter(p => p.item_name === selectedItem && p.rate)
+    // group by FY
+    const byFY: Record<string, Record<string, {sum:number,cnt:number}>> = {}
+    for (const p of filtered) {
+      const fy = p.fiscal_year ?? 'Unknown'
+      const v  = p.vendor_name ?? 'Unknown'
+      if (!byFY[fy]) byFY[fy] = {}
+      if (!byFY[fy][v]) byFY[fy][v] = {sum:0,cnt:0}
+      byFY[fy][v].sum += p.rate!
+      byFY[fy][v].cnt++
+    }
+    const allVendors = [...new Set(filtered.map(p=>p.vendor_name))]
+    return Object.entries(byFY).sort(([a],[b])=>a.localeCompare(b)).map(([fy, vmap]) => {
+      const row: any = { fy }
+      for (const v of allVendors) {
+        if (vmap[v]) row[v] = +(vmap[v].sum / vmap[v].cnt).toFixed(2)
+      }
+      return row
+    })
+  }, [pos, selectedItem])
+
+  const trendVendors = useMemo(() => {
+    if (!selectedItem || !pos) return []
+    return [...new Set(pos.filter(p=>p.item_name===selectedItem).map(p=>p.vendor_name))].filter(Boolean)
+  }, [pos, selectedItem])
+
+  // Vendor comparison: for selected item, all vendors side by side with stats
+  const vendorCompData = useMemo(() => {
+    if (!selectedItem || !pos) return []
+    const filtered = pos.filter(p => p.item_name === selectedItem && p.rate)
+    const byVendor: Record<string, number[]> = {}
+    for (const p of filtered) {
+      const v = p.vendor_name ?? 'Unknown'
+      if (!byVendor[v]) byVendor[v] = []
+      byVendor[v].push(p.rate!)
+    }
+    return Object.entries(byVendor).map(([vendor, rates]) => ({
+      vendor,
+      avg: +(rates.reduce((s,r)=>s+r,0)/rates.length).toFixed(2),
+      min: +Math.min(...rates).toFixed(2),
+      max: +Math.max(...rates).toFixed(2),
+      orders: rates.length,
+    })).sort((a,b) => a.avg - b.avg)
+  }, [pos, selectedItem])
+
+  // Summary rate table: item × FY showing avg rate + cheapest vendor
+  const rateTable = useMemo(() => {
+    if (!pos) return []
+    const byItem: Record<string, Record<string,{sum:number,cnt:number,vendors:Record<string,number>}>> = {}
+    for (const p of pos) {
+      if (!p.item_name || !p.rate) continue
+      const fy = p.fiscal_year ?? 'Unknown'
+      if (!byItem[p.item_name]) byItem[p.item_name] = {}
+      if (!byItem[p.item_name][fy]) byItem[p.item_name][fy] = {sum:0,cnt:0,vendors:{}}
+      byItem[p.item_name][fy].sum += p.rate
+      byItem[p.item_name][fy].cnt++
+      const v = p.vendor_name ?? 'Unknown'
+      if (!byItem[p.item_name][fy].vendors[v]) byItem[p.item_name][fy].vendors[v] = 0
+      byItem[p.item_name][fy].vendors[v] += p.rate / (byItem[p.item_name][fy].cnt || 1)
+    }
+    // Re-compute vendor avg properly
+    const byItemVendorFY: Record<string, Record<string, Record<string,{sum:number,cnt:number}>>> = {}
+    for (const p of pos) {
+      if (!p.item_name || !p.rate) continue
+      const fy = p.fiscal_year ?? 'Unknown'
+      const v  = p.vendor_name ?? 'Unknown'
+      if (!byItemVendorFY[p.item_name]) byItemVendorFY[p.item_name] = {}
+      if (!byItemVendorFY[p.item_name][fy]) byItemVendorFY[p.item_name][fy] = {}
+      if (!byItemVendorFY[p.item_name][fy][v]) byItemVendorFY[p.item_name][fy][v] = {sum:0,cnt:0}
+      byItemVendorFY[p.item_name][fy][v].sum += p.rate
+      byItemVendorFY[p.item_name][fy][v].cnt++
+    }
+    return Object.entries(byItem).map(([item, fyData]) => {
+      const fys = Object.keys(fyData).sort()
+      return {
+        item,
+        fys: fys.map(fy => {
+          const d = fyData[fy]
+          const avg = +(d.sum/d.cnt).toFixed(2)
+          // cheapest vendor this FY
+          const vmap = byItemVendorFY[item][fy]
+          const cheapest = Object.entries(vmap).map(([v,x])=>({v,avg:x.sum/x.cnt})).sort((a,b)=>a.avg-b.avg)[0]
+          return { fy, avg, cheapest: cheapest?.v ?? '—', cheapestRate: +cheapest?.avg.toFixed(2) }
+        })
+      }
+    }).sort((a,b)=>a.item.localeCompare(b.item))
+  }, [pos])
+
+  const handleDownloadTemplate = () => {
+    const headers = ['po_no','po_date','fiscal_year','vendor_name','item_name','material_type','quantity','unit','rate','gst_pct','total_amount','grn_no','grn_date','material_status']
+    const sample  = ['PO-2022-001','01-04-2022','2022-23','ABC Company','Maize','Feed Raw Material','100','Tons','18500','5','1942500','GRN001','05-04-2022','Received']
+    exportFlatCSV('po_import_template.csv', headers, [sample])
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Rate Analysis</h2>
+          <p className="text-xs text-gray-500">Compare yearly rates and vendor prices across all products</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Download Template</Button>
+          <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()} loading={importing}>
+            Import Excel / CSV
+          </Button>
+          <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if(f) handleFile(f); e.target.value='' }} />
+        </div>
+      </div>
+
+      {/* Import preview */}
+      {preview && (
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="font-semibold text-gray-900">Import Preview</p>
+              <p className="text-xs text-gray-500">{preview.rows.length} rows found · Mapped columns: {Object.keys(preview.mapped).join(', ')}</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={()=>setPreview(null)}>Cancel</Button>
+              <Button size="sm" loading={importMut.isPending} onClick={handleConfirmImport}>Confirm Import</Button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="text-xs w-full">
+              <thead><tr className="bg-gray-50">
+                {preview.headers.map(h=><th key={h} className="px-2 py-1 text-left text-gray-500 font-medium border-b">{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {preview.rows.slice(0,5).map((row,i)=>(
+                  <tr key={i} className="border-b hover:bg-gray-50">
+                    {row.map((cell:any,j:number)=><td key={j} className="px-2 py-1 text-gray-700">{String(cell)}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {preview.rows.length > 5 && <p className="text-xs text-gray-400 px-2 py-1">…and {preview.rows.length-5} more rows</p>}
+          </div>
+        </Card>
+      )}
+
+      {isLoading ? <Spinner/> : (
+        <>
+          {/* Summary stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card><div className="text-xs text-gray-500">Total PO Records</div><div className="text-xl font-bold text-gray-800 mt-1">{(pos??[]).length.toLocaleString('en-IN')}</div></Card>
+            <Card><div className="text-xs text-gray-500">Unique Items</div><div className="text-xl font-bold text-brand-700 mt-1">{items.length}</div></Card>
+            <Card><div className="text-xs text-gray-500">Unique Vendors</div><div className="text-xl font-bold text-gray-800 mt-1">{vendors.length}</div></Card>
+            <Card><div className="text-xs text-gray-500">Years of Data</div><div className="text-xl font-bold text-gray-800 mt-1">{fiscalYears.length}</div></Card>
+          </div>
+
+          {/* View mode switcher + item selector */}
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+              {(['trend','vendor','table'] as const).map(m=>(
+                <button key={m} onClick={()=>setViewMode(m)}
+                  className={`px-4 py-1.5 text-sm font-medium transition-colors capitalize
+                    ${viewMode===m?'bg-brand-600 text-white':'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                  {m==='trend'?'Yearly Trend':m==='vendor'?'Vendor Compare':'Rate Table'}
+                </button>
+              ))}
+            </div>
+            {viewMode !== 'table' && (
+              <div className="flex-1 min-w-48">
+                <label className="block text-xs text-gray-500 mb-1">Select Item / Product</label>
+                <select value={selectedItem} onChange={e=>setSelectedItem(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                  <option value="">— All Items —</option>
+                  {items.map(i=><option key={i} value={i}>{i}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* YEARLY TREND VIEW */}
+          {viewMode === 'trend' && (
+            <div className="space-y-4">
+              {!selectedItem ? (
+                <Card>
+                  <p className="text-sm text-gray-500 text-center py-8">Select a product above to see its yearly rate trend</p>
+                </Card>
+              ) : trendData.length === 0 ? (
+                <Card><p className="text-sm text-gray-400 text-center py-8">No rate data for {selectedItem}</p></Card>
+              ) : (
+                <>
+                  <Card>
+                    <p className="font-semibold text-gray-800 mb-4">Yearly Rate Trend — {selectedItem}</p>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <ReLineChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+                        <XAxis dataKey="fy" tick={{fontSize:12}}/>
+                        <YAxis tick={{fontSize:12}} tickFormatter={v=>`₹${(v/1000).toFixed(0)}K`}/>
+                        <Tooltip formatter={(v:number)=>`₹${v.toLocaleString('en-IN')}`}/>
+                        <Legend/>
+                        {trendVendors.map((v,i)=>(
+                          <Line key={v} type="monotone" dataKey={v} stroke={COLORS[i%COLORS.length]}
+                            strokeWidth={2} dot={{r:4}} name={v}/>
+                        ))}
+                      </ReLineChart>
+                    </ResponsiveContainer>
+                  </Card>
+                  <Card padding={false}>
+                    <div className="px-4 py-3 border-b border-gray-100"><p className="font-semibold text-gray-800">Rate Data — {selectedItem}</p></div>
+                    <Table>
+                      <thead><tr>
+                        <Th>FY</Th>
+                        {trendVendors.map(v=><Th key={v} right>{v}</Th>)}
+                      </tr></thead>
+                      <tbody>
+                        {trendData.map(row=>(
+                          <tr key={row.fy} className="hover:bg-gray-50">
+                            <Td className="font-medium">{row.fy}</Td>
+                            {trendVendors.map(v=>{
+                              const rate = row[v]
+                              return <Td key={v} right className={rate?'text-gray-800':'text-gray-300'}>
+                                {rate ? `₹${rate.toLocaleString('en-IN')}` : '—'}
+                              </Td>
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </Card>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* VENDOR COMPARISON VIEW */}
+          {viewMode === 'vendor' && (
+            <div className="space-y-4">
+              {!selectedItem ? (
+                <Card><p className="text-sm text-gray-500 text-center py-8">Select a product above to compare vendors</p></Card>
+              ) : vendorCompData.length === 0 ? (
+                <Card><p className="text-sm text-gray-400 text-center py-8">No vendor data for {selectedItem}</p></Card>
+              ) : (
+                <>
+                  <Card>
+                    <p className="font-semibold text-gray-800 mb-4">Vendor Rate Comparison — {selectedItem}</p>
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={vendorCompData} layout="vertical" margin={{left:120}}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+                        <XAxis type="number" tick={{fontSize:11}} tickFormatter={v=>`₹${(v/1000).toFixed(0)}K`}/>
+                        <YAxis type="category" dataKey="vendor" tick={{fontSize:11}} width={120}/>
+                        <Tooltip formatter={(v:number)=>`₹${v.toLocaleString('en-IN')}`}/>
+                        <Bar dataKey="avg" name="Avg Rate" fill="#6366f1" radius={[0,4,4,0]}/>
+                        <Bar dataKey="min" name="Min Rate" fill="#22c55e" radius={[0,4,4,0]}/>
+                        <Bar dataKey="max" name="Max Rate" fill="#f59e0b" radius={[0,4,4,0]}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Card>
+                  <Card padding={false}>
+                    <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                      <p className="font-semibold text-gray-800">Vendor Summary — {selectedItem}</p>
+                      <Badge color="green">Sorted cheapest first</Badge>
+                    </div>
+                    <Table>
+                      <thead><tr>
+                        <Th>#</Th><Th>Vendor</Th>
+                        <Th right>Avg Rate</Th><Th right>Min Rate</Th><Th right>Max Rate</Th>
+                        <Th right>Orders</Th><Th right>Saving vs Costliest</Th>
+                      </tr></thead>
+                      <tbody>
+                        {vendorCompData.map((v,i)=>{
+                          const maxAvg = vendorCompData[vendorCompData.length-1].avg
+                          const saving = maxAvg - v.avg
+                          return (
+                            <tr key={v.vendor} className={`hover:bg-gray-50 ${i===0?'bg-green-50':''}`}>
+                              <Td className="text-gray-400 text-xs">{i+1}</Td>
+                              <Td><span className="font-medium">{v.vendor}</span>{i===0&&<Badge color="green">Cheapest</Badge>}</Td>
+                              <Td right className="font-semibold">₹{v.avg.toLocaleString('en-IN')}</Td>
+                              <Td right className="text-green-600">₹{v.min.toLocaleString('en-IN')}</Td>
+                              <Td right className="text-red-500">₹{v.max.toLocaleString('en-IN')}</Td>
+                              <Td right>{v.orders}</Td>
+                              <Td right className={saving>0?'text-green-600 font-medium':'text-gray-400'}>
+                                {saving>0?`₹${saving.toLocaleString('en-IN')} cheaper`:'—'}
+                              </Td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </Table>
+                  </Card>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* RATE TABLE VIEW */}
+          {viewMode === 'table' && (
+            <Card padding={false}>
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <p className="font-semibold text-gray-800">All Items — Avg Rate by FY</p>
+                <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>{
+                  exportFlatCSV('rate_analysis.csv',
+                    ['Item',...fiscalYears.flatMap(fy=>[`${fy} Avg Rate`,`${fy} Cheapest Vendor`,`${fy} Cheapest Rate`])],
+                    rateTable.map(r=>[r.item,...fiscalYears.flatMap(fy=>{
+                      const d=r.fys.find(f=>f.fy===fy)
+                      return d?[d.avg,d.cheapest,d.cheapestRate]:['—','—','—']
+                    })])
+                  )
+                }}>Export CSV</Button>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr>
+                    <Th>Item / Product</Th>
+                    {fiscalYears.map(fy=>(
+                      <React.Fragment key={fy}>
+                        <Th right>{fy} Avg</Th>
+                        <Th>{fy} Best Vendor</Th>
+                      </React.Fragment>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {rateTable.map(row=>(
+                      <tr key={row.item} className="hover:bg-gray-50">
+                        <Td className="font-medium text-sm">{row.item}</Td>
+                        {fiscalYears.map(fy=>{
+                          const d = row.fys.find(f=>f.fy===fy)
+                          // YoY change
+                          const fyi = fiscalYears.indexOf(fy)
+                          const prev = fyi>0 ? row.fys.find(f=>f.fy===fiscalYears[fyi-1]) : null
+                          const chg = d && prev ? ((d.avg-prev.avg)/prev.avg*100) : null
+                          return (
+                            <React.Fragment key={fy}>
+                              <Td right>
+                                {d ? (
+                                  <div>
+                                    <span className="font-semibold">₹{d.avg.toLocaleString('en-IN')}</span>
+                                    {chg !== null && (
+                                      <span className={`text-xs ml-1 ${chg>0?'text-red-500':'text-green-600'}`}>
+                                        {chg>0?'↑':'↓'}{Math.abs(chg).toFixed(1)}%
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : <span className="text-gray-300">—</span>}
+                              </Td>
+                              <Td className="text-xs text-gray-500">
+                                {d ? <span title={`₹${d.cheapestRate}`}>{d.cheapest}</span> : '—'}
+                              </Td>
+                            </React.Fragment>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                    {rateTable.length===0&&<tr><Td colSpan={fiscalYears.length*2+1} className="text-center text-gray-400 py-6">No rate data yet. Import your Excel file above.</Td></tr>}
+                  </tbody>
+                </Table>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
     </div>
   )
 }
