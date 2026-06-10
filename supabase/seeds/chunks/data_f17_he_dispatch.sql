@@ -776,7 +776,10 @@ INSERT INTO public.he_dispatch (
     19.75, 131812.0
   )
 ON CONFLICT ON CONSTRAINT he_dispatch_unique DO UPDATE SET
-  amount = EXCLUDED.amount,
-  rate = EXCLUDED.rate,
-  free_eggs = EXCLUDED.free_eggs,
-  invoice_eggs = EXCLUDED.invoice_eggs;
+  grade_a          = EXCLUDED.grade_a,
+  grade_b          = EXCLUDED.grade_b,
+  party_id         = EXCLUDED.party_id,
+  free_eggs        = EXCLUDED.free_eggs,
+  invoice_eggs     = EXCLUDED.invoice_eggs,
+  rate             = EXCLUDED.rate,
+  amount           = EXCLUDED.amount;
