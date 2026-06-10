@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import toast from 'react-hot-toast'
 import { inr, fmtDate } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select,
@@ -9,7 +10,8 @@ import {
 } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, ChevronLeft, ChevronRight,
-  Package, Truck, FlaskConical, ShoppingCart, Pencil, Trash2, X, Check
+  Package, Truck, FlaskConical, ShoppingCart, Pencil, Trash2, X, Check,
+  Upload, Download
 } from 'lucide-react'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -960,6 +962,8 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const [deleteRow,   setDeleteRow]   = useState<any | null>(null)
   const [sel,         setSel]         = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const { data: feedData, isLoading } = useQuery({
     queryKey: ['flock_daily_feed', flockId],
@@ -1007,6 +1011,46 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setEditRow(null) }
   })
 
+  const handleDownloadFeedTemplate = () => {
+    const headers = 'feed_date,feed_type,female_kg,male_kg,female_cost,male_cost'
+    const example = '2025-06-01,Chick,2150.0,57.0,,'
+    const blob = new Blob([headers + '\n' + example], { type: 'text/csv' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+    a.download = 'feed_template.csv'; a.click()
+  }
+
+  const handleImportFeed = async (file: File) => {
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+      const header = lines[0].split(',').map(h => h.trim().toLowerCase())
+      const rows = lines.slice(1).map(line => {
+        const vals = line.split(',')
+        const obj: any = {}
+        header.forEach((h, i) => { obj[h] = vals[i]?.trim() ?? '' })
+        return {
+          flock_id: flockId,
+          feed_date:   obj.feed_date,
+          feed_type:   obj.feed_type || null,
+          female_kg:   obj.female_kg   !== '' ? Number(obj.female_kg)   : null,
+          male_kg:     obj.male_kg     !== '' ? Number(obj.male_kg)     : null,
+          female_cost: obj.female_cost !== '' ? Number(obj.female_cost) : null,
+          male_cost:   obj.male_cost   !== '' ? Number(obj.male_cost)   : null,
+        }
+      }).filter(r => r.feed_date)
+      const { error } = await supabase.from('daily_feed').upsert(rows, { onConflict: 'flock_id,feed_date,feed_type' })
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] })
+      toast.success(`Imported ${rows.length} feed records!`)
+    } catch (e: any) {
+      toast.error('Import failed: ' + e.message)
+    } finally {
+      setImporting(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
   const getFeedGrnRate = (feedType: string) => {
     if (!feedGrnRates || !feedType) return null
     const ft = feedType.trim().toLowerCase()
@@ -1045,6 +1089,18 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           )}
         </div>
       </Card>
+
+      <div className="flex gap-2 flex-wrap">
+        <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadFeedTemplate}>
+          Download Template
+        </Button>
+        <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing}
+          onClick={() => fileRef.current?.click()}>
+          Import CSV
+        </Button>
+        <input ref={fileRef} type="file" accept=".csv" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleImportFeed(f) }} />
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <StatCard title="Total Female KG" value={`${numFmt(Math.round(totalFemaleKg))} kg`} icon={<Package size={18}/>} color="text-pink-600" />
