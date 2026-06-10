@@ -12,3 +12,6 @@ jobs:
       - name: Run migration 024
         run: python3 scripts/run_sql.py supabase/migrations/024_payments_bank_ledger.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 025
+        run: python3 scripts/run_sql.py supabase/migrations/025_po_receipts.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
