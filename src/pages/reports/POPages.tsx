@@ -1,5 +1,8 @@
 import React, { useState, useMemo, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
+import * as pdfjsLib from 'pdfjs-dist'
+// @ts-ignore
+if (typeof window !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url).href
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
@@ -137,6 +140,7 @@ const POTab: React.FC = () => {
   const { profile } = useAuth()
   const canEdit = can.editPurchase(profile?.role)
   const canDel  = can.delete(profile?.role)
+  const [importOpen, setImportOpen] = useState(false)
   const [fy, setFy]       = useState('2025-26')
   const [typeF, setTypeF] = useState('')
   const [statusF, setStatusF] = useState('')
@@ -243,9 +247,11 @@ const POTab: React.FC = () => {
             {key:'material_type',label:'Type'},{key:'quantity',label:'Qty'},{key:'unit',label:'Unit'},{key:'rate',label:'Rate'},
             {key:'gst_pct',label:'GST%'},{key:'total_amount',label:'Amount'},{key:'grn_no',label:'GRN No'},{key:'grn_date',label:'GRN Date'},{key:'material_status',label:'Status'}
           ])}>Export CSV</Button>
+          {canEdit && <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={()=>setImportOpen(true)}>Import PO</Button>}
           {canEdit && <Button size="sm" onClick={openNew} icon={<Plus size={14}/>}>New PO</Button>}
         </div>
       </div>
+      <POImportModal open={importOpen} onClose={()=>{ setImportOpen(false); qc.invalidateQueries({queryKey:['purchase_orders']}) }} />
 
       <Card padding={false}>
         <div className="overflow-x-auto">
@@ -1836,6 +1842,540 @@ const RateAnalysisTab: React.FC = () => {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+// ── PO IMPORT MODAL (Excel NBF format + PDF PO) ───────────────────
+
+function fmtISODate(v: any): string | null {
+  if (!v) return null
+  if (v instanceof Date) {
+    const y = v.getFullYear(), m = String(v.getMonth()+1).padStart(2,'0'), d = String(v.getDate()).padStart(2,'0')
+    return `${y}-${m}-${d}`
+  }
+  const s = String(v).trim()
+  // dd-Mon-yy or dd-Mon-yyyy  e.g. 10-Jun-26
+  const mnames: Record<string,string> = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'}
+  const m1 = s.match(/^(\d{1,2})[\/\-]([A-Za-z]{3})[\/\-](\d{2,4})$/)
+  if (m1) {
+    const mo = mnames[m1[2].toLowerCase()] ?? '01'
+    const yr = m1[3].length===2 ? `20${m1[3]}` : m1[3]
+    return `${yr}-${mo}-${m1[1].padStart(2,'0')}`
+  }
+  // dd/mm/yyyy or dd-mm-yyyy
+  const m2 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/)
+  if (m2) {
+    const yr = m2[3].length===2?`20${m2[3]}`:m2[3]
+    return `${yr}-${m2[2].padStart(2,'0')}-${m2[1].padStart(2,'0')}`
+  }
+  // yyyy-mm-dd already
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  return null
+}
+
+function fyFromDate(dateStr: string | null): string {
+  if (!dateStr) return 'Unknown'
+  const d = new Date(dateStr); if (isNaN(d.getTime())) return 'Unknown'
+  const m = d.getMonth()+1, y = d.getFullYear()
+  return m>=4 ? `${y}-${String(y+1).slice(2)}` : `${y-1}-${String(y).slice(2)}`
+}
+
+function normPct(v: any): number {
+  if (v === null || v === undefined || v === '') return 0
+  const n = parseFloat(String(v))
+  if (isNaN(n)) return 0
+  return n <= 1 ? +(n*100).toFixed(2) : n
+}
+
+// Parse Excel NBF Order file — all "Order Details" sheets
+function parseNBFExcel(wb: any): any[] {
+  const records: any[] = []
+  for (const sname of wb.SheetNames as string[]) {
+    if (!sname.toLowerCase().includes('order details')) continue
+    const ws = wb.Sheets[sname]
+    const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true })
+
+    // Detect FY from sheet name e.g. "Aug22-Mar23" → "2022-23"
+    const fyMatch = sname.match(/(\d{2,4})[-–].*?(\d{2,4})/)
+    let sheetFY = 'Unknown'
+    if (fyMatch) {
+      const y1 = fyMatch[1].length===2?`20${fyMatch[1]}`:fyMatch[1]
+      const y2 = fyMatch[2].length===2?`20${fyMatch[2]}`:fyMatch[2]
+      sheetFY = `${y1}-${y2.slice(2)}`
+    }
+
+    // Find actual header row (contains DATE OF INDENT or similar)
+    let headerRow = -1
+    for (let i=0;i<20;i++) {
+      const r = rows[i] ?? []
+      if (r.some(v=>v&&String(v).toUpperCase().includes('INDENT'))) { headerRow=i; break }
+    }
+    if (headerRow<0) continue
+
+    // Detect layout by checking column header positions
+    const hdr = rows[headerRow] ?? []
+    const isNewLayout = hdr.some((v:any)=>v&&String(v).toUpperCase().includes('PACK SIZE') &&
+      (hdr.indexOf(v) < (hdr.findIndex((x:any)=>x&&String(x).toUpperCase().includes('UOM')))))
+
+    // Col indices
+    // Old: [1]=indent_date, [3]=item, [6]=uom, [7]=pack, [8]=qty, [10]=price, [11]=gst%, [12]=gst_chg, [13]=net, [15]=po_date, [17]=po_no, [19]=supplier
+    // New: [1]=indent_date, [3]=item, [6]=pack, [7]=qty, [8]=uom, [10]=price, [11]=gst%, [12]=gst_chg, [13]=net, [15]=po_date, [17]=po_no, [19]=supplier
+    const C = isNewLayout
+      ? { date:1, item:3, pack:6, qty:7, uom:8, price:10, gstP:11, gstC:12, net:13, poDate:15, poNo:17, vendor:19 }
+      : { date:1, item:3, uom:6, pack:7, qty:8, price:10, gstP:11, gstC:12, net:13, poDate:15, poNo:17, vendor:19 }
+
+    for (let i=headerRow+2; i<rows.length; i++) {
+      const r = rows[i]
+      if (!r || !r.some(v=>v!==null)) continue
+      const item = r[C.item] ? String(r[C.item]).trim() : null
+      const poNo = r[C.poNo] ? String(r[C.poNo]).trim() : null
+      const vendor = r[C.vendor] ? String(r[C.vendor]).trim() : null
+      if (!item || !poNo || !vendor) continue
+      if (poNo.endsWith('/') || poNo === 'PO / NBF /') continue // empty PO
+      if (String(item).toLowerCase().includes('not required') || String(item).toLowerCase().includes('not issued')) continue
+
+      const poDateStr = fmtISODate(r[C.poDate])
+      const fy = poDateStr ? fyFromDate(poDateStr) : sheetFY
+
+      const price = parseFloat(r[C.price]) || null
+      const gstP  = normPct(r[C.gstP])
+      const gstC  = parseFloat(r[C.gstC]) || 0
+      const net   = parseFloat(r[C.net]) || null
+      const qty   = parseFloat(r[C.qty]) || null
+
+      records.push({
+        po_no:          poNo.replace(/\s+/g,' ').trim(),
+        po_date:        poDateStr,
+        fiscal_year:    fy,
+        vendor_name:    vendor,
+        item_name:      item,
+        unit:           r[C.uom] ? String(r[C.uom]).trim() : null,
+        quantity:       qty,
+        rate:           price,
+        gst_pct:        gstP,
+        total_amount:   net,
+        material_status:'Pending',
+      })
+    }
+  }
+  return records
+}
+
+// Parse Account Details sheets → payment records
+function parseNBFAccountDetails(wb: any): any[] {
+  const records: any[] = []
+  for (const sname of wb.SheetNames as string[]) {
+    if (!sname.toLowerCase().includes('account details')) continue
+    const ws = wb.Sheets[sname]
+    const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true })
+
+    let headerRow = -1
+    for (let i=0;i<20;i++) {
+      const r=rows[i]??[]
+      if (r.some((v:any)=>v&&String(v).toUpperCase().includes('SUPPLIER'))) { headerRow=i; break }
+    }
+    if (headerRow<0) continue
+
+    const hdr = rows[headerRow]??[]
+    // Detect new layout (Apr25+): no 'NAME OF ITEM' col in old position
+    // Old: [1]=po_date, [3]=supplier, [5]=item, [7]=uom, [8]=qty, [10]=po_no, [13]=payable, [15]=grn_date, [16]=grn_no, [17]=cr_limit, [20]=payment_amount, [19]=payment_date
+    // New: [1]=po_date, [3]=supplier, [5]=item, [7]=qty, [8]=uom, [10]=po_no, [13]=payable, [15]=grn_date, [16]=grn_no, [17]=cr_limit, [20 or 21]=payment_amount, [19 or 20]=payment_date
+    const isNew = hdr.findIndex((v:any)=>v&&String(v).toUpperCase().includes('GRN DATE')) >= 15
+
+    for (let i=headerRow+2; i<rows.length; i++) {
+      const r = rows[i]
+      if (!r||!r.some(v=>v!==null)) continue
+      const poNo  = r[10] ? String(r[10]).trim() : null
+      const item  = r[5]  ? String(r[5]).trim()  : null
+      const vendor= r[3]  ? String(r[3]).trim()  : null
+      if (!poNo||!item||!vendor) continue
+      if (poNo.endsWith('/')||poNo==='PO / NBF /') continue
+
+      const payable = parseFloat(r[13]) || null
+      const crLimit = r[17] !== null ? parseInt(String(r[17])||'0') : null
+      const grnDate = fmtISODate(r[15])
+      const grnNo   = r[16] ? String(r[16]).trim() : null
+      const payDate = fmtISODate(r[isNew?20:19])
+      const payAmt  = parseFloat(r[isNew?21:20]||'0') || null
+
+      if (payable) records.push({
+        po_no:      poNo.replace(/\s+/g,' ').trim(),
+        vendor_name:vendor,
+        item_name:  item,
+        amount:     payable,
+        credit_limit_days: crLimit,
+        grn_date:   grnDate,
+        grn_no:     grnNo,
+        paid_date:  payDate,
+        paid_amount:payAmt,
+        status:     payDate ? 'Paid' : 'Pending',
+      })
+    }
+  }
+  return records
+}
+
+// Parse PDF PO text → PO records
+async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: boolean; poNo: string; summary: string }> {
+  const buf = await file.arrayBuffer()
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise
+  let fullText = ''
+  for (let p=1; p<=pdf.numPages; p++) {
+    const page = await pdf.getPage(p)
+    const tc = await page.getTextContent()
+    fullText += tc.items.map((it:any)=>it.str).join(' ') + '\n'
+  }
+
+  const isAmendment = /AMENDMENT/i.test(fullText)
+
+  // PO number: PO / NBF / DDMMYY / NNN
+  const poMatch = fullText.match(/PO\s*\/\s*NBF\s*\/\s*[\d]+\s*\/\s*\d+/i)
+  const poNo = poMatch ? poMatch[0].replace(/\s+/g,' ').trim() : ''
+
+  // Order date
+  const dateMatch = fullText.match(/Order\s+Date[^\d]*(\d{1,2}[\/\-][A-Za-z]{3}[\/\-]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i)
+  const poDate = fmtISODate(dateMatch?.[1] ?? null)
+
+  // Vendor: "Seller :" block — grab CAPS line after it
+  const sellerMatch = fullText.match(/Seller\s*:([^G]+?)GSTIN/i)
+  const vendor = sellerMatch ? sellerMatch[1].replace(/\s+/g,' ').trim().split(/\s{2,}/)[0] : 'Unknown'
+
+  // Credit limit days
+  const clMatch = fullText.match(/Credit\s+Limit[^\d]*(\d+)\s*Days/i)
+  const creditDays = clMatch ? parseInt(clMatch[1]) : null
+
+  // Delivery date
+  const dlvMatch = fullText.match(/Best\s+Delivery\s+By\s+[A-Za-z]*\s*(\d{1,2}[\/\-][A-Za-z]{3}[\/\-]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i)
+  const deliveryDate = fmtISODate(dlvMatch?.[1] ?? null)
+
+  // Buyer GSTIN
+  const buyerGST = fullText.match(/GSTIN[^\d]*(\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1})/)?.[1] ?? null
+
+  const fy = fyFromDate(poDate)
+
+  // Items: parse lines with pattern: number | description | qty | pack | order | uom | rate | ...
+  // The text looks like: "1 100 50 5000 Kg 1822.46 182,245.5 18% 32,804.2 215,050"
+  // With item name on separate token: "ALKAKARB (Tata Chemicals)"
+  // Strategy: find numbered lines between header and total
+  const records: any[] = []
+
+  // Tokenise text line by line
+  const lines = fullText.split(/\n+/).map(l=>l.trim()).filter(Boolean)
+
+  // Find item lines: starts with a digit 1-9 followed by item name and numbers
+  // Pattern: serial_no, then description (text), then numbers
+  for (const line of lines) {
+    // Match: digit(s) CAPS_WORD ... numbers
+    const itemLineRx = /^([1-9])\s+(.+?)\s+([\d,]+)\s+(\d+)\s+([\d,]+)\s+(Kg|Ltr|Dose|KG|LTR|No|Nos|Pcs|Bag|Bags)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d.]+%?)\s+([\d,]+\.?\d*)\s+([\d,]+)/i
+    const m = line.match(itemLineRx)
+    if (m) {
+      const qty_packs = parseInt(m[3].replace(/,/g,''))
+      const packSize  = parseInt(m[4])
+      const orderQty  = parseInt(m[5].replace(/,/g,''))
+      const uom       = m[6]
+      const rate      = parseFloat(m[7].replace(/,/g,''))
+      const amount    = parseFloat(m[8].replace(/,/g,''))
+      const gstPct    = parseFloat(m[9].replace('%',''))
+      const netAmount = parseFloat(m[11].replace(/,/g,''))
+
+      records.push({
+        po_no:           poNo,
+        po_date:         poDate,
+        fiscal_year:     fy,
+        vendor_name:     vendor,
+        item_name:       m[2].trim(),
+        quantity:        orderQty,
+        unit:            uom,
+        rate:            rate,
+        gst_pct:         gstPct,
+        total_amount:    netAmount,
+        material_status: 'Pending',
+        credit_limit_days: creditDays,
+        delivery_date:   deliveryDate,
+        is_amendment:    isAmendment,
+      })
+    }
+  }
+
+  // If regex didn't catch items, try simpler approach - find lines with serial numbers
+  if (records.length === 0) {
+    // Look for pattern: num + any text ending in digits near Total Amount
+    const itemSection = fullText.match(/Serial\s+No.+?Total\s+Amount/is)?.[0] ?? ''
+    const simpleRx = /([1-9])\s+([A-Z][A-Za-z\s\(\)]+?)\s+([\d,.]+)\s+([\d]+)\s+([\d,]+)\s+(\w+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d.]+%?)\s+([\d,.]+)\s+([\d,.]+)/g
+    let sm
+    while ((sm = simpleRx.exec(itemSection)) !== null) {
+      records.push({
+        po_no:           poNo,
+        po_date:         poDate,
+        fiscal_year:     fy,
+        vendor_name:     vendor,
+        item_name:       sm[2].trim(),
+        quantity:        parseFloat(sm[5].replace(/,/g,'')),
+        unit:            sm[6],
+        rate:            parseFloat(sm[7].replace(/,/g,'')),
+        gst_pct:         parseFloat(sm[9].replace('%','')),
+        total_amount:    parseFloat(sm[11].replace(/,/g,'')),
+        material_status: 'Pending',
+        credit_limit_days: creditDays,
+        delivery_date:   deliveryDate,
+        is_amendment:    isAmendment,
+      })
+    }
+  }
+
+  const summary = `PO: ${poNo} | Vendor: ${vendor} | Date: ${poDate} | Credit: ${creditDays} days | ${records.length} items${isAmendment?' | ⚠️ AMENDMENT':''}`
+  return { records, isAmendment, poNo, summary }
+}
+
+export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+  const qc = useQueryClient()
+  const xlsxRef = useRef<HTMLInputElement>(null)
+  const pdfRef  = useRef<HTMLInputElement>(null)
+  const [step, setStep]       = useState<'idle'|'preview'>('idle')
+  const [saving, setSaving]   = useState(false)
+  const [preview, setPreview] = useState<{type:'excel'|'pdf'; rows: any[]; payRows?: any[]; summary: string; isAmendment?: boolean; poNo?: string} | null>(null)
+  const [parsing, setParsing] = useState(false)
+
+  const reset = () => { setStep('idle'); setPreview(null); setParsing(false) }
+
+  const handleExcel = async (file: File) => {
+    setParsing(true)
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type:'array', cellDates:true })
+      const rows = parseNBFExcel(wb)
+      const payRows = parseNBFAccountDetails(wb)
+      setPreview({ type:'excel', rows, payRows,
+        summary: `${rows.length} PO line items from ${wb.SheetNames.filter((s:string)=>s.toLowerCase().includes('order details')).length} sheets · ${payRows.length} payment records` })
+      setStep('preview')
+    } catch(e:any) { toast.error('Excel parse error: ' + e.message) }
+    setParsing(false)
+  }
+
+  const handlePDF = async (file: File) => {
+    setParsing(true)
+    try {
+      const result = await parsePOPdf(file)
+      if (result.records.length === 0) {
+        toast.error('Could not extract items from PDF. Please check the file.')
+        setParsing(false); return
+      }
+      setPreview({ type:'pdf', rows: result.records, summary: result.summary,
+        isAmendment: result.isAmendment, poNo: result.poNo })
+      setStep('preview')
+    } catch(e:any) { toast.error('PDF parse error: ' + e.message) }
+    setParsing(false)
+  }
+
+  const handleSave = async () => {
+    if (!preview) return
+    setSaving(true)
+    try {
+      if (preview.type === 'excel') {
+        // Upsert PO lines
+        if (preview.rows.length > 0) {
+          const chunks = []
+          for (let i=0;i<preview.rows.length;i+=200) chunks.push(preview.rows.slice(i,i+200))
+          for (const chunk of chunks) {
+            const { error } = await supabase.from('purchase_orders').upsert(chunk, { onConflict:'po_no,item_name' })
+            if (error) throw error
+          }
+        }
+        // Upsert payment records linked by po_no lookup
+        if (preview.payRows && preview.payRows.length > 0) {
+          // fetch po_ids for po_no mapping
+          const poNos = [...new Set(preview.payRows.map((r:any)=>r.po_no))]
+          const { data: poData } = await supabase.from('purchase_orders').select('id,po_no').in('po_no', poNos)
+          const poMap: Record<string,string> = {}
+          for (const p of poData??[]) poMap[p.po_no] = p.id
+          const payments = preview.payRows.filter((r:any)=>r.amount>0).map((r:any)=>({
+            vendor_name: r.vendor_name, invoice_date: r.grn_date ?? r.paid_date ?? null,
+            amount: r.amount, status: r.status ?? 'Pending',
+            paid_date: r.paid_date ?? null, grn_no: r.grn_no ?? null,
+            po_id: poMap[r.po_no] ?? null,
+            credit_limit_days: r.credit_limit_days ?? null,
+          }))
+          if (payments.length > 0) {
+            const { error } = await supabase.from('pending_payments').upsert(payments, { onConflict:'vendor_name,invoice_date,amount', ignoreDuplicates:true })
+            if (error) console.warn('Payment upsert warning:', error.message)
+          }
+        }
+        toast.success(`Imported ${preview.rows.length} PO records`)
+      } else {
+        // PDF import
+        if (preview.isAmendment && preview.poNo) {
+          // Update existing PO lines with amended data
+          for (const rec of preview.rows) {
+            const { credit_limit_days, delivery_date, is_amendment, ...poFields } = rec
+            // Try to update existing row first
+            const { data: existing } = await supabase.from('purchase_orders')
+              .select('id').eq('po_no', rec.po_no).eq('item_name', rec.item_name).single()
+            if (existing) {
+              await supabase.from('purchase_orders').update({
+                rate: poFields.rate, gst_pct: poFields.gst_pct,
+                total_amount: poFields.total_amount, quantity: poFields.quantity,
+              }).eq('id', existing.id)
+            } else {
+              await supabase.from('purchase_orders').insert(poFields)
+            }
+          }
+          // Update pending_payments credit limit for this PO
+          if (preview.rows[0]?.credit_limit_days) {
+            await supabase.from('pending_payments')
+              .update({ credit_limit_days: preview.rows[0].credit_limit_days })
+              .eq('po_id', (await supabase.from('purchase_orders').select('id').eq('po_no', preview.poNo).limit(1).single())?.data?.id ?? '')
+          }
+          toast.success(`Amendment applied — ${preview.rows.length} items updated`)
+        } else {
+          // New PO — insert
+          const cleanRows = preview.rows.map(({ credit_limit_days, delivery_date, is_amendment, ...r }: any) => r)
+          const { error } = await supabase.from('purchase_orders').upsert(cleanRows, { onConflict:'po_no,item_name' })
+          if (error) throw error
+          toast.success(`PO imported — ${preview.rows.length} items`)
+        }
+      }
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] })
+      qc.invalidateQueries({ queryKey: ['po_rate_analysis'] })
+      setSaving(false); reset(); onClose()
+    } catch(e:any) { toast.error(e.message); setSaving(false) }
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-gray-900">Import Purchase Orders</h2>
+            <p className="text-xs text-gray-500">Upload NBF Excel register or PDF purchase order</p>
+          </div>
+          <button onClick={()=>{reset();onClose()}} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {step === 'idle' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Excel upload */}
+              <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-brand-400 transition-colors cursor-pointer"
+                onClick={()=>xlsxRef.current?.click()}>
+                <div className="text-3xl mb-2">📊</div>
+                <p className="font-semibold text-gray-800 text-sm">NBF Order Register</p>
+                <p className="text-xs text-gray-400 mt-1">Excel file with all FY sheets<br/>(NBF_ORDER_At_A_Glance.xlsx)</p>
+                <p className="text-xs text-brand-600 mt-2">Imports all years at once</p>
+                {parsing && <p className="text-xs text-orange-500 mt-2">Parsing...</p>}
+                <input ref={xlsxRef} type="file" accept=".xlsx,.xls" className="hidden"
+                  onChange={e=>{const f=e.target.files?.[0];if(f)handleExcel(f);e.target.value=''}}/>
+              </div>
+              {/* PDF upload */}
+              <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-brand-400 transition-colors cursor-pointer"
+                onClick={()=>pdfRef.current?.click()}>
+                <div className="text-3xl mb-2">📄</div>
+                <p className="font-semibold text-gray-800 text-sm">PDF Purchase Order</p>
+                <p className="text-xs text-gray-400 mt-1">Individual PO PDF from vendor<br/>Works for both PO and Amendment</p>
+                <p className="text-xs text-brand-600 mt-2">Auto-detects AMENDMENT</p>
+                {parsing && <p className="text-xs text-orange-500 mt-2">Extracting text...</p>}
+                <input ref={pdfRef} type="file" accept=".pdf" className="hidden"
+                  onChange={e=>{const f=e.target.files?.[0];if(f)handlePDF(f);e.target.value=''}}/>
+              </div>
+            </div>
+          )}
+
+          {step === 'preview' && preview && (
+            <div className="space-y-4">
+              {/* Summary banner */}
+              <div className={`rounded-lg px-4 py-3 text-sm font-medium ${preview.isAmendment ? 'bg-orange-50 border border-orange-200 text-orange-800' : 'bg-green-50 border border-green-200 text-green-800'}`}>
+                {preview.isAmendment && <span className="mr-2 bg-orange-600 text-white text-xs px-2 py-0.5 rounded">AMENDMENT</span>}
+                {preview.summary}
+              </div>
+
+              {/* PO items preview table */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">PO Lines ({preview.rows.length})</p>
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="text-xs w-full">
+                    <thead className="bg-gray-50"><tr>
+                      <th className="px-2 py-1.5 text-left text-gray-500">PO No</th>
+                      <th className="px-2 py-1.5 text-left text-gray-500">Vendor</th>
+                      <th className="px-2 py-1.5 text-left text-gray-500">Item</th>
+                      <th className="px-2 py-1.5 text-right text-gray-500">Qty</th>
+                      <th className="px-2 py-1.5 text-left text-gray-500">UOM</th>
+                      <th className="px-2 py-1.5 text-right text-gray-500">Rate</th>
+                      <th className="px-2 py-1.5 text-right text-gray-500">GST%</th>
+                      <th className="px-2 py-1.5 text-right text-gray-500">Net Amt</th>
+                      <th className="px-2 py-1.5 text-left text-gray-500">FY</th>
+                    </tr></thead>
+                    <tbody>
+                      {preview.rows.slice(0,30).map((r,i)=>(
+                        <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
+                          <td className="px-2 py-1 text-gray-600 whitespace-nowrap">{r.po_no}</td>
+                          <td className="px-2 py-1 max-w-[140px] truncate text-gray-700">{r.vendor_name}</td>
+                          <td className="px-2 py-1 max-w-[150px] truncate font-medium">{r.item_name}</td>
+                          <td className="px-2 py-1 text-right text-gray-700">{r.quantity?.toLocaleString('en-IN')}</td>
+                          <td className="px-2 py-1 text-gray-500">{r.unit}</td>
+                          <td className="px-2 py-1 text-right font-medium">{r.rate ? `₹${r.rate.toLocaleString('en-IN')}` : '—'}</td>
+                          <td className="px-2 py-1 text-right text-gray-500">{r.gst_pct ? `${r.gst_pct}%` : '—'}</td>
+                          <td className="px-2 py-1 text-right text-green-700 font-semibold">{r.total_amount ? `₹${r.total_amount.toLocaleString('en-IN')}` : '—'}</td>
+                          <td className="px-2 py-1 text-gray-400">{r.fiscal_year}</td>
+                        </tr>
+                      ))}
+                      {preview.rows.length > 30 && (
+                        <tr><td colSpan={9} className="px-2 py-1 text-gray-400 text-center">…and {preview.rows.length-30} more rows</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Payment records preview */}
+              {preview.payRows && preview.payRows.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Payment Records ({preview.payRows.length})</p>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="text-xs w-full">
+                      <thead className="bg-gray-50"><tr>
+                        <th className="px-2 py-1.5 text-left text-gray-500">PO No</th>
+                        <th className="px-2 py-1.5 text-left text-gray-500">Vendor</th>
+                        <th className="px-2 py-1.5 text-left text-gray-500">Item</th>
+                        <th className="px-2 py-1.5 text-right text-gray-500">Amount</th>
+                        <th className="px-2 py-1.5 text-right text-gray-500">Credit Days</th>
+                        <th className="px-2 py-1.5 text-left text-gray-500">Status</th>
+                      </tr></thead>
+                      <tbody>
+                        {preview.payRows.slice(0,20).map((r:any,i:number)=>(
+                          <tr key={i} className="border-t border-gray-100">
+                            <td className="px-2 py-1 text-gray-600">{r.po_no}</td>
+                            <td className="px-2 py-1 max-w-[120px] truncate">{r.vendor_name}</td>
+                            <td className="px-2 py-1 max-w-[120px] truncate">{r.item_name}</td>
+                            <td className="px-2 py-1 text-right font-medium text-green-700">₹{r.amount?.toLocaleString('en-IN')}</td>
+                            <td className="px-2 py-1 text-right text-gray-500">{r.credit_limit_days ?? '—'}</td>
+                            <td className="px-2 py-1"><span className={`px-1.5 py-0.5 rounded text-xs ${r.status==='Paid'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}`}>{r.status}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-between items-center">
+          <button onClick={reset} className="text-sm text-gray-500 hover:text-gray-700">
+            {step==='preview' ? '← Back' : 'Cancel'}
+          </button>
+          {step === 'preview' && (
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={()=>{reset();onClose()}}>Cancel</Button>
+              <Button loading={saving} onClick={handleSave}>
+                {preview?.isAmendment ? 'Apply Amendment' : `Import ${preview?.rows.length} records`}
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
