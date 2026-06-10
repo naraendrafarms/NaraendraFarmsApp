@@ -1,0 +1,14 @@
+name: Run Pending Migrations
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    name: Apply Migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run migration 024
+        run: python3 scripts/run_sql.py supabase/migrations/024_payments_bank_ledger.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
