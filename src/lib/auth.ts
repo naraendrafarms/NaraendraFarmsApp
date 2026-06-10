@@ -20,11 +20,27 @@ export const can = {
 
   // Can see salary / employee / financial data
   viewFinancial: (r?: Role) =>
+    r === 'admin' || r === 'accounts' || r === 'management',
+
+  // Can see Purchase Orders and Payments pages
+  viewPurchase: (r?: Role) =>
+    r === 'admin' || r === 'accounts' || r === 'management',
+
+  // Can add/edit Purchase Orders and Payments
+  editPurchase: (r?: Role) =>
+    r === 'admin' || r === 'accounts',
+
+  // Can view Bank Ledger (sensitive — bank balances)
+  viewBankLedger: (r?: Role) =>
+    r === 'admin' || r === 'accounts',
+
+  // Can approve / mark payments as Paid
+  approvePayment: (r?: Role) =>
     r === 'admin' || r === 'accounts',
 
   // Can see all sites (not limited to one farm)
   viewAllSites: (r?: Role) =>
-    r === 'admin' || r === 'accounts' || r === 'site_manager' || r === 'viewer',
+    r === 'admin' || r === 'accounts' || r === 'site_manager' || r === 'viewer' || r === 'management',
 
   // Can manage master data (farms, ingredients, parties etc.)
   manageMasters: (r?: Role) =>
@@ -40,7 +56,7 @@ export const can = {
 
   // Can delete records
   delete: (r?: Role) =>
-    r === 'admin',
+    r === 'admin' || r === 'accounts',
 }
 
 interface AuthState {

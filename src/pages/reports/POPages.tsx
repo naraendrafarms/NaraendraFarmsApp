@@ -1,14 +1,16 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
+import { useAuth, can } from '@/lib/auth'
 import {
   Card, SectionHeader, Spinner, Table, Th, Td,
   Button, Input, Modal, Badge, StatCard, EmptyState
 } from '@/components/ui'
 import {
   ShoppingCart, Clock, CheckCircle, AlertCircle, Plus, Pencil, Trash2,
-  Building2, Landmark, CreditCard, TrendingUp, TrendingDown, AlertTriangle
+  Building2, Landmark, CreditCard, TrendingUp, TrendingDown, AlertTriangle,
+  Download, PackageCheck, User, BarChart3, Lock
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -48,28 +50,59 @@ const RowCls = (p: any) => {
   return 'hover:bg-gray-50'
 }
 
+// ── export CSV helper ─────────────────────────────────────────────
+const exportCSV = (filename: string, rows: any[], cols: { key: string; label: string }[]) => {
+  const header = cols.map(c => c.label).join(',')
+  const body = rows.map(r => cols.map(c => {
+    const v = c.key.split('.').reduce((o, k) => o?.[k], r) ?? ''
+    return `"${String(v).replace(/"/g,'""')}"`
+  }).join(',')).join('\n')
+  const blob = new Blob([header + '\n' + body], { type: 'text/csv' })
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+  a.download = filename; a.click()
+}
+
 // ── TABS ──────────────────────────────────────────────────────────
-type Tab = 'Purchase Orders' | 'Payments' | 'Vendor Banks' | 'Bank Ledger'
-const TABS: Tab[] = ['Purchase Orders','Payments','Vendor Banks','Bank Ledger']
+type Tab = 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Bank Ledger'
 
 // ── MAIN EXPORT ───────────────────────────────────────────────────
 export const PurchaseOrdersPage: React.FC = () => {
+  const { profile } = useAuth()
+  const role = profile?.role
   const [tab, setTab] = useState<Tab>('Purchase Orders')
+
+  const TABS: { id: Tab; icon: any; locked?: boolean }[] = [
+    { id: 'Purchase Orders', icon: <ShoppingCart size={14}/> },
+    { id: 'Payments',        icon: <Clock size={14}/> },
+    { id: 'Aging Report',    icon: <BarChart3 size={14}/> },
+    { id: 'Vendor Statement',icon: <User size={14}/> },
+    { id: 'Vendor Banks',    icon: <Building2 size={14}/> },
+    { id: 'Bank Ledger',     icon: <Landmark size={14}/>, locked: !can.viewBankLedger(role) },
+  ]
+
   return (
     <div className="space-y-4">
-      <SectionHeader title="Purchase & Payments" subtitle="Manage POs, vendor payments, bank accounts and ledger" />
-      <div className="flex gap-1 border-b border-gray-200">
+      <SectionHeader title="Purchase & Payments" subtitle="POs · Payments · Vendors · Bank Ledger" />
+      <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
         {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab===t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {t}
+          <button key={t.id} onClick={() => !t.locked && setTab(t.id)}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap transition-colors
+              ${tab===t.id ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}
+              ${t.locked ? 'opacity-40 cursor-not-allowed' : ''}`}>
+            {t.icon}{t.id}{t.locked && <Lock size={11}/>}
           </button>
         ))}
       </div>
-      {tab === 'Purchase Orders' && <POTab />}
-      {tab === 'Payments'        && <PaymentsTab />}
-      {tab === 'Vendor Banks'    && <VendorBanksTab />}
-      {tab === 'Bank Ledger'     && <BankLedgerTab />}
+      {tab === 'Purchase Orders'  && <POTab />}
+      {tab === 'Payments'         && <PaymentsTab />}
+      {tab === 'Aging Report'     && <AgingReportTab />}
+      {tab === 'Vendor Statement' && <VendorStatementTab />}
+      {tab === 'Vendor Banks'     && <VendorBanksTab />}
+      {tab === 'Bank Ledger'      && (can.viewBankLedger(role) ? <BankLedgerTab /> : (
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400">
+          <Lock size={32}/><p className="text-sm">Bank Ledger is restricted to Admin and Accounts roles.</p>
+        </div>
+      ))}
     </div>
   )
 }
@@ -88,6 +121,9 @@ const EMPTY_PO = {
 
 const POTab: React.FC = () => {
   const qc = useQueryClient()
+  const { profile } = useAuth()
+  const canEdit = can.editPurchase(profile?.role)
+  const canDel  = can.delete(profile?.role)
   const [fy, setFy]       = useState('2025-26')
   const [typeF, setTypeF] = useState('')
   const [statusF, setStatusF] = useState('')
@@ -96,6 +132,10 @@ const POTab: React.FC = () => {
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm]       = useState<any>(EMPTY_PO)
   const [delId, setDelId]     = useState<string|null>(null)
+  const [receiptOpen, setReceiptOpen] = useState(false)
+  const [receiptPO, setReceiptPO]     = useState<any>(null)
+  const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', remarks: '' })
+  const rf = (k: string) => (e: any) => setReceiptForm((p: any) => ({...p,[k]:e.target.value}))
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
 
   const { data: orders=[], isLoading } = useQuery({
@@ -133,6 +173,27 @@ const POTab: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setDelId(null); toast.success('Deleted') },
   })
 
+  const receiptMut = useMutation({
+    mutationFn: async () => {
+      if (!receiptPO) return
+      const { error } = await supabase.from('po_receipts').insert({
+        po_id: receiptPO.id,
+        receipt_date: receiptForm.receipt_date,
+        qty_received: receiptForm.qty_received ? Number(receiptForm.qty_received) : null,
+        unit: receiptForm.unit || receiptPO.unit || null,
+        condition: receiptForm.condition,
+        vehicle_no: receiptForm.vehicle_no || null,
+        received_by: receiptForm.received_by || null,
+        remarks: receiptForm.remarks || null,
+      })
+      if (error) throw error
+      // auto-update PO status to Received
+      await supabase.from('purchase_orders').update({ material_status: 'Received', grn_date: receiptForm.receipt_date }).eq('id', receiptPO.id)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setReceiptOpen(false); toast.success('Stock receipt recorded & PO marked Received') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   const filtered = useMemo(() => orders.filter((o: any) => {
     if (typeF   && o.material_type !== typeF) return false
     if (statusF && o.material_status !== statusF) return false
@@ -163,7 +224,14 @@ const POTab: React.FC = () => {
         <Sel value={statusF} onChange={(e:any)=>setStatusF(e.target.value)} options={[{value:'',label:'All Status'},...MAT_STATUS.map(s=>({value:s,label:s}))]} />
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search vendor / PO / item..."
           className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-56" />
-        <Button size="sm" onClick={openNew} icon={<Plus size={14}/>}>New PO</Button>
+        <div className="ml-auto flex gap-2">
+          <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV(`purchase_orders_${fy}.csv`, filtered, [
+            {key:'po_no',label:'PO No'},{key:'po_date',label:'Date'},{key:'vendor_name',label:'Vendor'},{key:'item_name',label:'Item'},
+            {key:'material_type',label:'Type'},{key:'quantity',label:'Qty'},{key:'unit',label:'Unit'},{key:'rate',label:'Rate'},
+            {key:'gst_pct',label:'GST%'},{key:'total_amount',label:'Amount'},{key:'grn_no',label:'GRN No'},{key:'grn_date',label:'GRN Date'},{key:'material_status',label:'Status'}
+          ])}>Export CSV</Button>
+          {canEdit && <Button size="sm" onClick={openNew} icon={<Plus size={14}/>}>New PO</Button>}
+        </div>
       </div>
 
       <Card padding={false}>
@@ -192,8 +260,12 @@ const POTab: React.FC = () => {
                   <Td><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[o.material_status] ?? 'bg-gray-100 text-gray-500'}`}>{o.material_status ?? '—'}</span></Td>
                   <Td>
                     <div className="flex gap-1">
-                      <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600"><Pencil size={13}/></button>
-                      <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={13}/></button>
+                      {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
+                      {canEdit && o.material_status !== 'Received' && (
+                        <button onClick={() => { setReceiptPO(o); setReceiptForm(f => ({...f, unit: o.unit||'', qty_received: o.quantity||''})); setReceiptOpen(true) }}
+                          className="p-1 text-green-500 hover:text-green-700" title="Record Stock Receipt"><PackageCheck size={13}/></button>
+                      )}
+                      {canDel && <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600" title="Delete"><Trash2 size={13}/></button>}
                     </div>
                   </Td>
                 </tr>
@@ -236,6 +308,32 @@ const POTab: React.FC = () => {
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelId(null)}>Cancel</Button><Button variant="danger" onClick={() => delId && delMut.mutate(delId)} loading={delMut.isPending}>Delete</Button></div>}>
         <p className="text-sm text-gray-600">Delete this purchase order? This cannot be undone.</p>
       </Modal>
+
+      {/* Stock Receipt Modal */}
+      <Modal open={receiptOpen} onClose={() => setReceiptOpen(false)} title={`Record Stock Receipt — PO ${receiptPO?.po_no}`}
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setReceiptOpen(false)}>Cancel</Button><Button onClick={() => receiptMut.mutate()} loading={receiptMut.isPending}>Save Receipt</Button></div>}>
+        {receiptPO && (
+          <div className="space-y-3">
+            <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700">
+              <strong>{receiptPO.vendor_name}</strong> · {receiptPO.item_name} · Ordered: {receiptPO.quantity} {receiptPO.unit}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Receipt Date *" type="date" value={receiptForm.receipt_date} onChange={rf('receipt_date')} />
+              <Input label="Qty Received" type="number" value={receiptForm.qty_received} onChange={rf('qty_received')} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Unit" value={receiptForm.unit} onChange={rf('unit')} />
+              <Sel label="Condition" value={receiptForm.condition} onChange={rf('condition')} options={['Good','Partial','Damaged'].map(c=>({value:c,label:c}))} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Vehicle No" value={receiptForm.vehicle_no} onChange={rf('vehicle_no')} />
+              <Input label="Received By" value={receiptForm.received_by} onChange={rf('received_by')} />
+            </div>
+            <Input label="Remarks" value={receiptForm.remarks} onChange={rf('remarks')} />
+            <p className="text-xs text-green-600">✓ PO will be automatically marked as Received</p>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
@@ -253,6 +351,9 @@ const EMPTY_PAY = {
 
 const PaymentsTab: React.FC = () => {
   const qc = useQueryClient()
+  const { profile } = useAuth()
+  const canEdit = can.editPurchase(profile?.role)
+  const canDel  = can.delete(profile?.role)
   const [statusF, setStatusF]   = useState('')
   const [typeF, setTypeF]       = useState('')
   const [monthF, setMonthF]     = useState('')
@@ -288,6 +389,17 @@ const PaymentsTab: React.FC = () => {
     queryKey: ['bank_accounts'],
     queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('*').eq('is_active',true).order('bank_name'); return data ?? [] }
   })
+
+  // Credit limit warning
+  const creditWarning = useMemo(() => {
+    if (!form.invoice_date || !form.credit_limit) return null
+    const due = new Date(form.invoice_date)
+    due.setDate(due.getDate() + Number(form.credit_limit))
+    const days = Math.ceil((due.getTime() - Date.now()) / 86400000)
+    if (days < 0) return `⚠️ Credit limit exceeded by ${Math.abs(days)} days!`
+    if (days <= 3) return `⚠️ Payment due in ${days} day(s) — within credit limit`
+    return null
+  }, [form.invoice_date, form.credit_limit])
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -422,7 +534,13 @@ const PaymentsTab: React.FC = () => {
         {(statusF||typeF||monthF||alertF||search) && <button onClick={()=>{setStatusF('');setTypeF('');setMonthF('');setAlertF('');setSearch('')}} className="text-xs text-brand-600 hover:underline">Clear all</button>}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm text-gray-500">{filtered.length} records · {inr(filteredTotal)}</span>
-          <Button size="sm" onClick={openNew} icon={<Plus size={14}/>}>Add Payment</Button>
+          <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV('payments.csv', filtered, [
+            {key:'vendor_name',label:'Vendor'},{key:'invoice_no',label:'Invoice No'},{key:'invoice_date',label:'Invoice Date'},
+            {key:'invoice_amount',label:'Amount'},{key:'payment_type',label:'Type'},{key:'pay_before_date',label:'Pay Before'},
+            {key:'po_no',label:'PO No'},{key:'grn_no',label:'GRN No'},{key:'account_type',label:'Account Type'},
+            {key:'utr_no',label:'UTR No'},{key:'cheque_no',label:'Cheque No'},{key:'payment_status',label:'Status'},{key:'paid_date',label:'Paid Date'},{key:'remarks',label:'Remarks'}
+          ])}>Export</Button>
+          {canEdit && <Button size="sm" onClick={openNew} icon={<Plus size={14}/>}>Add Payment</Button>}
         </div>
       </div>
 
@@ -459,8 +577,8 @@ const PaymentsTab: React.FC = () => {
                     <Td className="text-xs">{p.paid_date ? fmtDate(p.paid_date) : '—'}</Td>
                     <Td>
                       <div className="flex gap-1">
-                        <button onClick={() => openEdit(p)} className="p-1 text-blue-400 hover:text-blue-600"><Pencil size={13}/></button>
-                        <button onClick={() => setDelId(p.id)} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={13}/></button>
+                        {canEdit && <button onClick={() => openEdit(p)} className="p-1 text-blue-400 hover:text-blue-600"><Pencil size={13}/></button>}
+                        {canDel  && <button onClick={() => setDelId(p.id)} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={13}/></button>}
                       </div>
                     </Td>
                   </tr>
@@ -504,6 +622,7 @@ const PaymentsTab: React.FC = () => {
             <Input label="Pay Before Date" type="date" value={form.pay_before_date} onChange={f('pay_before_date')} />
             <Sel label="Account Type" value={form.account_type} onChange={f('account_type')} options={[{value:'',label:'Select'},...ACCT_TYPES.map(a=>({value:a,label:a}))]} />
           </div>
+          {creditWarning && <div className="bg-yellow-50 border border-yellow-200 rounded px-3 py-2 text-xs text-yellow-700">{creditWarning}</div>}
           {/* Bank account */}
           {bankAccounts.length > 0 && (
             <div>
@@ -540,6 +659,289 @@ const PaymentsTab: React.FC = () => {
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelId(null)}>Cancel</Button><Button variant="danger" onClick={() => delId && delMut.mutate(delId)} loading={delMut.isPending}>Delete</Button></div>}>
         <p className="text-sm text-gray-600">Delete this payment record? This cannot be undone.</p>
       </Modal>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════
+// AGING REPORT TAB
+// ══════════════════════════════════════════════════════════════════
+const AGING_BUCKETS = [
+  { label: 'Current (not due)', min: 1,    max: Infinity },
+  { label: '0–30 days overdue', min: 0,    max: 30 },
+  { label: '31–60 days',        min: 31,   max: 60 },
+  { label: '61–90 days',        min: 61,   max: 90 },
+  { label: '90+ days',          min: 91,   max: Infinity },
+]
+
+const AgingReportTab: React.FC = () => {
+  const { data: payments=[], isLoading } = useQuery({
+    queryKey: ['pending_payments'],
+    queryFn: async () => {
+      let all: any[]=[], from=0
+      while (true) {
+        const { data } = await supabase.from('pending_payments').select('*').order('invoice_date',{ascending:false}).range(from,from+999)
+        if (!data||data.length===0) break; all=all.concat(data); if(data.length<1000)break; from+=1000
+      }
+      return all
+    }
+  })
+
+  const unpaid = payments.filter((p: any) => p.payment_status !== 'Paid')
+
+  const buckets = useMemo(() => {
+    const today = Date.now()
+    return [
+      {
+        label: 'Not Yet Due',
+        cls: 'bg-green-50 border-green-200',
+        hdr: 'text-green-700',
+        rows: unpaid.filter((p: any) => {
+          if (!p.pay_before_date) return true
+          return Math.ceil((new Date(p.pay_before_date).getTime() - today) / 86400000) > 0
+        })
+      },
+      {
+        label: '0–30 Days Overdue',
+        cls: 'bg-yellow-50 border-yellow-200',
+        hdr: 'text-yellow-700',
+        rows: unpaid.filter((p: any) => {
+          if (!p.pay_before_date) return false
+          const d = Math.ceil((today - new Date(p.pay_before_date).getTime()) / 86400000)
+          return d >= 0 && d <= 30
+        })
+      },
+      {
+        label: '31–60 Days Overdue',
+        cls: 'bg-orange-50 border-orange-200',
+        hdr: 'text-orange-700',
+        rows: unpaid.filter((p: any) => {
+          if (!p.pay_before_date) return false
+          const d = Math.ceil((today - new Date(p.pay_before_date).getTime()) / 86400000)
+          return d > 30 && d <= 60
+        })
+      },
+      {
+        label: '61–90 Days Overdue',
+        cls: 'bg-red-50 border-red-200',
+        hdr: 'text-red-600',
+        rows: unpaid.filter((p: any) => {
+          if (!p.pay_before_date) return false
+          const d = Math.ceil((today - new Date(p.pay_before_date).getTime()) / 86400000)
+          return d > 60 && d <= 90
+        })
+      },
+      {
+        label: '90+ Days Overdue',
+        cls: 'bg-red-100 border-red-300',
+        hdr: 'text-red-800',
+        rows: unpaid.filter((p: any) => {
+          if (!p.pay_before_date) return false
+          const d = Math.ceil((today - new Date(p.pay_before_date).getTime()) / 86400000)
+          return d > 90
+        })
+      },
+    ]
+  }, [unpaid])
+
+  const totalUnpaid = unpaid.reduce((s: number, p: any) => s + Number(p.invoice_amount ?? 0), 0)
+
+  if (isLoading) return <Spinner />
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <div>
+          <h3 className="font-semibold text-gray-800">Payment Aging Report</h3>
+          <p className="text-xs text-gray-500">Total outstanding: {inr(totalUnpaid)} across {unpaid.length} invoices</p>
+        </div>
+        <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV('aging_report.csv', unpaid, [
+          {key:'vendor_name',label:'Vendor'},{key:'invoice_no',label:'Invoice No'},{key:'invoice_date',label:'Invoice Date'},
+          {key:'invoice_amount',label:'Amount'},{key:'pay_before_date',label:'Pay Before'},{key:'payment_status',label:'Status'},{key:'payment_type',label:'Type'}
+        ])}>Export CSV</Button>
+      </div>
+
+      {/* Summary grid */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {buckets.map(b => (
+          <div key={b.label} className={`border rounded-xl p-3 ${b.cls}`}>
+            <p className={`text-xs font-semibold ${b.hdr}`}>{b.label}</p>
+            <p className="text-base font-bold text-gray-800 mt-1">{inr(b.rows.reduce((s: number, p: any) => s + Number(p.invoice_amount ?? 0), 0))}</p>
+            <p className="text-xs text-gray-500">{b.rows.length} invoices</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Detail per bucket */}
+      {buckets.filter(b => b.rows.length > 0).map(b => (
+        <Card key={b.label} padding={false}>
+          <div className={`px-4 py-2 ${b.cls} border-b`}>
+            <span className={`text-sm font-semibold ${b.hdr}`}>{b.label} — {b.rows.length} invoices · {inr(b.rows.reduce((s: number, p: any) => s + Number(p.invoice_amount ?? 0), 0))}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr>
+                <Th>Vendor</Th><Th>Invoice No</Th><Th>Invoice Date</Th>
+                <Th right>Amount</Th><Th>Pay Before</Th><Th>Days</Th><Th>Type</Th><Th>Status</Th>
+              </tr></thead>
+              <tbody>
+                {b.rows.map((p: any) => {
+                  const days = p.pay_before_date ? Math.ceil((Date.now() - new Date(p.pay_before_date).getTime()) / 86400000) : null
+                  return (
+                    <tr key={p.id} className="text-sm hover:bg-gray-50">
+                      <Td className="font-medium">{p.vendor_name}</Td>
+                      <Td className="text-xs text-gray-500">{p.invoice_no ?? '—'}</Td>
+                      <Td className="text-xs">{p.invoice_date ? fmtDate(p.invoice_date) : '—'}</Td>
+                      <Td right className="font-semibold">{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
+                      <Td className="text-xs">{p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}</Td>
+                      <Td className="text-xs text-center">{days !== null ? <span className={days > 0 ? 'text-red-600 font-bold' : 'text-green-600'}>{days > 0 ? `${days}d late` : 'on time'}</span> : '—'}</Td>
+                      <Td className="text-xs text-gray-500">{p.payment_type ?? '—'}</Td>
+                      <Td><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[p.payment_status] ?? 'bg-gray-100 text-gray-500'}`}>{p.payment_status}</span></Td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </Table>
+          </div>
+        </Card>
+      ))}
+      {unpaid.length === 0 && <EmptyState icon={<CheckCircle size={32}/>} title="All payments are up to date!" />}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VENDOR STATEMENT TAB
+// ══════════════════════════════════════════════════════════════════
+const VendorStatementTab: React.FC = () => {
+  const [vendor, setVendor] = useState('')
+
+  const { data: payments=[], isLoading: payLoading } = useQuery({
+    queryKey: ['pending_payments'],
+    queryFn: async () => {
+      let all: any[]=[], from=0
+      while (true) {
+        const { data } = await supabase.from('pending_payments').select('*').order('invoice_date',{ascending:false}).range(from,from+999)
+        if (!data||data.length===0) break; all=all.concat(data); if(data.length<1000)break; from+=1000
+      }
+      return all
+    }
+  })
+
+  const { data: orders=[], isLoading: poLoading } = useQuery({
+    queryKey: ['purchase_orders_all'],
+    queryFn: async () => { const { data } = await supabase.from('purchase_orders').select('*').order('po_date',{ascending:false}); return data ?? [] }
+  })
+
+  const vendors = useMemo(() => {
+    const s = new Set<string>()
+    payments.forEach((p: any) => p.vendor_name && s.add(p.vendor_name))
+    orders.forEach((o: any) => o.vendor_name && s.add(o.vendor_name))
+    return Array.from(s).sort()
+  }, [payments, orders])
+
+  const vendorPOs  = useMemo(() => vendor ? orders.filter((o: any) => o.vendor_name === vendor) : [], [orders, vendor])
+  const vendorPays = useMemo(() => vendor ? payments.filter((p: any) => p.vendor_name === vendor) : [], [payments, vendor])
+
+  const totalOrdered = vendorPOs.reduce((s: number, o: any) => s + Number(o.total_amount ?? 0), 0)
+  const totalInvoiced = vendorPays.reduce((s: number, p: any) => s + Number(p.invoice_amount ?? 0), 0)
+  const totalPaid  = vendorPays.filter((p: any) => p.payment_status === 'Paid').reduce((s: number, p: any) => s + Number(p.invoice_amount ?? 0), 0)
+  const outstanding = totalInvoiced - totalPaid
+
+  if (payLoading || poLoading) return <Spinner />
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-3 items-end">
+        <div className="flex-1 max-w-sm">
+          <label className="block text-xs font-medium text-gray-700 mb-1">Select Vendor</label>
+          <select value={vendor} onChange={e => setVendor(e.target.value)}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <option value="">— Select a vendor —</option>
+            {vendors.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
+        {vendor && (
+          <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={() => {
+            exportCSV(`vendor_statement_${vendor}.csv`, vendorPays, [
+              {key:'invoice_no',label:'Invoice No'},{key:'invoice_date',label:'Invoice Date'},{key:'invoice_amount',label:'Amount'},
+              {key:'payment_type',label:'Type'},{key:'pay_before_date',label:'Pay Before'},{key:'payment_status',label:'Status'},
+              {key:'paid_date',label:'Paid Date'},{key:'utr_no',label:'UTR No'},{key:'cheque_no',label:'Cheque No'},{key:'remarks',label:'Remarks'}
+            ])
+          }}>Export Statement</Button>
+        )}
+      </div>
+
+      {vendor && (
+        <>
+          {/* Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard title="Total POs" value={inr(totalOrdered)} icon={<ShoppingCart size={18}/>} color="text-brand-600" />
+            <StatCard title="Total Invoiced" value={inr(totalInvoiced)} icon={<TrendingUp size={18}/>} color="text-blue-600" />
+            <StatCard title="Total Paid" value={inr(totalPaid)} icon={<CheckCircle size={18}/>} color="text-green-600" />
+            <StatCard title="Outstanding" value={inr(outstanding)} icon={<AlertCircle size={18}/>} color={outstanding > 0 ? 'text-red-600' : 'text-green-600'} />
+          </div>
+
+          {/* PO History */}
+          {vendorPOs.length > 0 && (
+            <Card padding={false}>
+              <div className="px-4 py-2 bg-gray-50 border-b">
+                <span className="text-sm font-semibold text-gray-700">Purchase Orders ({vendorPOs.length})</span>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr><Th>PO No</Th><Th>Date</Th><Th>Item</Th><Th>Type</Th><Th right>Amount</Th><Th>GRN No</Th><Th>Status</Th></tr></thead>
+                  <tbody>
+                    {vendorPOs.map((o: any) => (
+                      <tr key={o.id} className="text-sm hover:bg-gray-50">
+                        <Td className="font-mono text-xs font-semibold text-brand-700">{o.po_no}</Td>
+                        <Td className="text-xs">{o.po_date ? fmtDate(o.po_date) : '—'}</Td>
+                        <Td className="text-xs">{o.item_name ?? '—'}</Td>
+                        <Td className="text-xs text-gray-500">{o.material_type ?? '—'}</Td>
+                        <Td right className="font-semibold">{o.total_amount ? inr(o.total_amount) : '—'}</Td>
+                        <Td className="text-xs text-gray-500">{o.grn_no ?? '—'}</Td>
+                        <Td><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[o.material_status] ?? 'bg-gray-100'}`}>{o.material_status ?? '—'}</span></Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
+            </Card>
+          )}
+
+          {/* Payment History */}
+          {vendorPays.length > 0 && (
+            <Card padding={false}>
+              <div className="px-4 py-2 bg-gray-50 border-b">
+                <span className="text-sm font-semibold text-gray-700">Payments ({vendorPays.length}) · Outstanding: <span className={outstanding > 0 ? 'text-red-600' : 'text-green-600'}>{inr(outstanding)}</span></span>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr><Th>Invoice No</Th><Th>Invoice Date</Th><Th right>Amount</Th><Th>Pay Before</Th><Th>Status</Th><Th>Paid Date</Th><Th>UTR/Cheque</Th><Th>Remarks</Th></tr></thead>
+                  <tbody>
+                    {vendorPays.map((p: any) => (
+                      <tr key={p.id} className={`text-sm ${RowCls(p)}`}>
+                        <Td className="text-xs text-gray-500">{p.invoice_no ?? '—'}</Td>
+                        <Td className="text-xs">{p.invoice_date ? fmtDate(p.invoice_date) : '—'}</Td>
+                        <Td right className="font-semibold">{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
+                        <Td className="text-xs">{p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}</Td>
+                        <Td><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[p.payment_status] ?? 'bg-gray-100'}`}>{p.payment_status}</span></Td>
+                        <Td className="text-xs">{p.paid_date ? fmtDate(p.paid_date) : '—'}</Td>
+                        <Td className="text-xs font-mono text-gray-500">{p.utr_no ?? p.cheque_no ?? '—'}</Td>
+                        <Td className="text-xs text-gray-400 max-w-[160px] truncate">{p.remarks ?? '—'}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
+            </Card>
+          )}
+
+          {vendorPOs.length === 0 && vendorPays.length === 0 && (
+            <EmptyState icon={<Building2 size={32}/>} title="No records found for this vendor" />
+          )}
+        </>
+      )}
     </div>
   )
 }

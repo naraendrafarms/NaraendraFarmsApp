@@ -2,7 +2,8 @@ import React, { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
-import { useAuth } from '@/lib/auth'
+import { useAuth, can } from '@/lib/auth'
+import type { Role } from '@/lib/auth'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { Login }  from '@/pages/auth/Login'
 import { Dashboard } from '@/pages/dashboard/Dashboard'
@@ -49,6 +50,22 @@ const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
     </div>
   )
   return user ? <>{children}</> : <Navigate to="/login" replace />
+}
+
+// Guards a route to specific roles — shows 403 page if not allowed
+const RequireRole: React.FC<{ check: (r?: Role) => boolean; children: React.ReactNode }> = ({ check, children }) => {
+  const { profile } = useAuth()
+  if (!check(profile?.role)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center px-6">
+        <div className="text-5xl">🔒</div>
+        <h2 className="text-xl font-bold text-gray-800">Access Restricted</h2>
+        <p className="text-gray-500 text-sm max-w-sm">You don't have permission to view this page. Contact your administrator to request access.</p>
+        <p className="text-xs text-gray-400">Your role: <span className="font-semibold">{profile?.role ?? 'unknown'}</span></p>
+      </div>
+    )
+  }
+  return <>{children}</>
 }
 
 export const App: React.FC = () => {
@@ -113,8 +130,8 @@ export const App: React.FC = () => {
             <Route path="reports/costs" element={<CostOverviewPage />} />
             <Route path="reports/electricity" element={<ElectricityCostPage />} />
             <Route path="reports/salary-analysis" element={<SalaryCostPage />} />
-            <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
-            <Route path="pending-payments" element={<PendingPaymentsPage />} />
+            <Route path="purchase-orders" element={<RequireRole check={can.viewPurchase}><PurchaseOrdersPage /></RequireRole>} />
+            <Route path="pending-payments" element={<RequireRole check={can.viewPurchase}><PendingPaymentsPage /></RequireRole>} />
 
             {/* Import */}
             <Route path="import/daily" element={<ImportDaily />} />
@@ -122,8 +139,8 @@ export const App: React.FC = () => {
             <Route path="import/salary" element={<ImportSalary />} />
             <Route path="import/electricity" element={<ImportElectricity />} />
             <Route path="import/grn" element={<ImportGRN />} />
-            <Route path="admin/users" element={<UserManagement />} />
-            <Route path="admin" element={<AdminCentre />} />
+            <Route path="admin/users" element={<RequireRole check={can.manageUsers}><UserManagement /></RequireRole>} />
+            <Route path="admin" element={<RequireRole check={can.manageUsers}><AdminCentre /></RequireRole>} />
 
             {/* Flock Management (new) */}
             <Route path="flock" element={<FlockDashboard />} />
