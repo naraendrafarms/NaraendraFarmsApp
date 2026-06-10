@@ -843,16 +843,28 @@ export const SalaryEntryPage: React.FC = () => {
             <Input label="HRA" type="number" value={form.hra} onChange={e=>s('hra',e.target.value)}/>
             <Input label="Gross Salary" type="number" value={form.gross_salary} onChange={e=>s('gross_salary',e.target.value)}/>
           </FormRow>
-          <Divider label="Statutory Deductions"/>
-          <FormRow>
-            <Input label="ESI Employee (0.75%)" type="number" value={form.esi_employee} onChange={e=>s('esi_employee',e.target.value)}/>
-            <Input label="ESI Employer (3.25%)" type="number" value={form.esi_employer} onChange={e=>s('esi_employer',e.target.value)}/>
-          </FormRow>
-          <FormRow>
-            <Input label="PF Employee (12%)" type="number" value={form.pf_employee} onChange={e=>s('pf_employee',e.target.value)}/>
-            <Input label="PF Employer (12%)" type="number" value={form.pf_employer} onChange={e=>s('pf_employer',e.target.value)}/>
-            <Input label="PT (Professional Tax)" type="number" value={form.pt} onChange={e=>s('pt',e.target.value)}/>
-          </FormRow>
+          {(() => {
+            const selEmp = employees?.find((e:any)=>e.id===form.employee_id)
+            const hasESI = selEmp?.esi_applicable
+            const hasPF  = selEmp?.pf_applicable
+            const hasPT  = selEmp?.pt_applicable
+            if (!selEmp) return null
+            if (!hasESI && !hasPF && !hasPT) return (
+              <div className="text-xs text-gray-400 bg-gray-50 rounded px-3 py-2">No statutory deductions (ESI/PF/PT) applicable for this employee</div>
+            )
+            return (<>
+              <Divider label="Statutory Deductions"/>
+              {hasESI && <FormRow>
+                <Input label="ESI Employee (0.75%)" type="number" value={form.esi_employee} onChange={e=>s('esi_employee',e.target.value)}/>
+                <Input label="ESI Employer (3.25%)" type="number" value={form.esi_employer} onChange={e=>s('esi_employer',e.target.value)}/>
+              </FormRow>}
+              {(hasPF||hasPT) && <FormRow>
+                {hasPF && <Input label="PF Employee (12%)" type="number" value={form.pf_employee} onChange={e=>s('pf_employee',e.target.value)}/>}
+                {hasPF && <Input label="PF Employer (12%)" type="number" value={form.pf_employer} onChange={e=>s('pf_employer',e.target.value)}/>}
+                {hasPT && <Input label="PT (Professional Tax)" type="number" value={form.pt} onChange={e=>s('pt',e.target.value)}/>}
+              </FormRow>}
+            </>)
+          })()}
           <Divider label="Other Deductions &amp; Additions"/>
           <FormRow>
             <Input label="Advance" type="number" value={form.advance} onChange={e=>s('advance',e.target.value)}/>
@@ -1167,11 +1179,11 @@ export const ESIPFReportPage: React.FC = () => {
 export const PayrollSummaryPage: React.FC = () => {
   const [selectedFY, setSelectedFY] = useState('2025-26')
   const months = fyMonths(selectedFY)
+  const [startM, endM] = [months[0], months[months.length-1]]
 
   const {data:summaryData, isLoading}=useQuery({
     queryKey:['payroll_summary',selectedFY],
     queryFn:async()=>{
-      const [startM, endM] = [months[0], months[months.length-1]]
       const{data,error}=await supabase.from('salary_monthly')
         .select('month,gross_salary,net_salary,advance,esi_employee,esi_employer,pf_employee,pf_employer,pt,employees!inner(farm_id,farms(name,code))')
         .gte('month',startM).lte('month',endM)
@@ -1179,6 +1191,16 @@ export const PayrollSummaryPage: React.FC = () => {
       return data??[]
     }
   })
+
+  const bonusYears = Array.from(new Set(months.map(m=>parseInt(m.slice(0,4)))))
+  const {data:bonusData}=useQuery({
+    queryKey:['bonus_fy',selectedFY],
+    queryFn:async()=>{
+      const{data}=await supabase.from('bonus').select('amount,bonus_year').in('bonus_year',bonusYears)
+      return data??[]
+    }
+  })
+  const totalBonus = (bonusData??[]).reduce((s:number,b:any)=>s+(b.amount??0),0)
 
   const byMonth: Record<string,{label:string,gross:number,net:number,advance:number,esi:number,pf:number,pt:number,count:number}> = {}
   for (const m of months) {
@@ -1229,6 +1251,7 @@ export const PayrollSummaryPage: React.FC = () => {
           {label:'Total ESI',val:totals.esi,color:'text-blue-700'},
           {label:'Total PF',val:totals.pf,color:'text-purple-700'},
           {label:'Total PT',val:totals.pt,color:'text-orange-700'},
+          {label:'Total Bonus',val:totalBonus,color:'text-yellow-700'},
         ].map(c=>(
           <Card key={c.label}>
             <div className="text-xs text-gray-500">{c.label}</div>
@@ -1293,6 +1316,101 @@ export const PayrollSummaryPage: React.FC = () => {
             </tbody>
           </Table>
         </Card>
+      )}
+    </div>
+  )
+}
+
+// ── ATTENDANCE REGISTER (yearly working days grid) ────────────────
+export const AttendanceRegisterPage: React.FC = () => {
+  const [selectedFY, setSelectedFY] = useState('2025-26')
+  const [filterFarm, setFilterFarm] = useState('')
+  const months = fyMonths(selectedFY)
+
+  const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
+
+  const {data:salaries, isLoading}=useQuery({
+    queryKey:['attendance_fy',selectedFY,filterFarm],
+    queryFn:async()=>{
+      const [startM, endM] = [months[0], months[months.length-1]]
+      let q = supabase.from('salary_monthly')
+        .select('employee_id,month,days_worked,employees!inner(name,emp_id,farm_id,farms(name,code))')
+        .gte('month',startM).lte('month',endM)
+      if (filterFarm) q = q.eq('employees.farm_id', filterFarm)
+      const {data} = await q
+      return data ?? []
+    }
+  })
+
+  // Build: empId → { emp info, monthKey → days }
+  const empMap: Record<string,{name:string,empId:string,site:string,months:Record<string,number|null>}> = {}
+  for (const r of (salaries??[])) {
+    const emp = (r as any).employees
+    const id = r.employee_id
+    if (!empMap[id]) empMap[id] = {name:emp?.name??'',empId:emp?.emp_id??'',site:emp?.farms?.name??'—',months:{}}
+    empMap[id].months[r.month.slice(0,7)] = r.days_worked ?? null
+  }
+  const empRows = Object.values(empMap).sort((a,b)=>a.site.localeCompare(b.site)||a.name.localeCompare(b.name))
+
+  const farmOptions = (farms??[]).map((f:any)=>({value:f.id,label:f.name}))
+  const MONTH_LABELS = months.map(m=>{const[yr,mn]=m.slice(0,7).split('-');return `${MONTH_NAMES[parseInt(mn)-1]} ${yr.slice(2)}`})
+
+  const handleExport = () => {
+    exportCSV(`attendance_${selectedFY}.csv`,
+      ['Employee','Emp ID','Site',...MONTH_LABELS,'Total Days'],
+      empRows.map(e=>{
+        const mDays = months.map(m=>e.months[m.slice(0,7)]??'')
+        const total = months.reduce((s,m)=>s+(e.months[m.slice(0,7)]??0),0)
+        return [e.name,e.empId,e.site,...mDays,total]
+      })
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Attendance Register"
+        subtitle="Year-wise working days per employee"
+        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>}
+      />
+      <div className="flex gap-3 flex-wrap items-end">
+        <Select label="Financial Year" options={FY_OPTIONS} value={selectedFY} onChange={e=>setSelectedFY(e.target.value)} className="w-40"/>
+        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
+        {filterFarm&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
+      </div>
+      {isLoading ? <Spinner/> : (
+        <div className="overflow-x-auto">
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th>Employee</Th><Th>Site</Th>
+                {MONTH_LABELS.map((m,i)=><Th key={i} right className="text-xs px-2">{m}</Th>)}
+                <Th right>Total</Th>
+              </tr></thead>
+              <tbody>
+                {empRows.map(e=>{
+                  const total = months.reduce((s,m)=>s+(e.months[m.slice(0,7)]??0),0)
+                  return (
+                    <tr key={e.empId+e.name} className="hover:bg-gray-50">
+                      <Td>
+                        <span className="font-medium text-sm">{e.name}</span>
+                        {e.empId&&<span className="text-xs text-gray-400 ml-1">({e.empId})</span>}
+                      </Td>
+                      <Td className="text-xs text-gray-500">{e.site}</Td>
+                      {months.map(m=>{
+                        const d = e.months[m.slice(0,7)]
+                        return <Td key={m} right className={`text-sm px-2 ${d!=null&&d<20?'text-red-500':d!=null&&d>=26?'text-green-600':'text-gray-700'}`}>
+                          {d!=null?d:'—'}
+                        </Td>
+                      })}
+                      <Td right className="font-semibold">{total||'—'}</Td>
+                    </tr>
+                  )
+                })}
+                {empRows.length===0&&<tr><Td colSpan={months.length+3} className="text-center text-gray-400 py-6">No data for this FY</Td></tr>}
+              </tbody>
+            </Table>
+          </Card>
+        </div>
       )}
     </div>
   )
