@@ -124,6 +124,30 @@ export const FlockDetail: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily', id] }); setSel(new Set()); setBulkConfirm(false) }
   })
 
+  // dailyIndexMap: maps record id → original ascending index (for week number)
+  // MUST be before early returns — useMemo is a hook
+  const dailyIndexMap = useMemo<Map<string, number>>(() => {
+    const m = new Map<string, number>()
+    ;(daily ?? []).forEach((d, i) => m.set(d.id, i))
+    return m
+  }, [daily])
+
+  // displayDaily: reversed + date filtered
+  const displayDaily = useMemo(() => {
+    let arr = [...(daily ?? [])].reverse()
+    if (fromDate) arr = arr.filter(d => d.record_date >= fromDate)
+    if (toDate) arr = arr.filter(d => d.record_date <= toDate)
+    return arr
+  }, [daily, fromDate, toDate])
+
+  // heDispatch filtered for financial tab
+  const displayHeDispatch = useMemo(() => {
+    let arr = heDispatch ?? []
+    if (heFromDate) arr = arr.filter(d => d.dispatch_date >= heFromDate)
+    if (heToDate) arr = arr.filter(d => d.dispatch_date <= heToDate)
+    return arr
+  }, [heDispatch, heFromDate, heToDate])
+
   if (isLoading) return <Spinner />
   if (!flock) return <div className="p-8 text-center text-gray-500">Flock not found</div>
 
@@ -150,7 +174,7 @@ export const FlockDetail: React.FC = () => {
   const medCost    = medMonthly?.reduce((s, m) => s + (m.total_amount ?? 0), 0) ?? 0
   const chickCost  = flock.chick_cost ?? 0
   const totalRevenue = heRevenue + nheRevenue
-  const totalCost    = chickCost + medCost  // feed cost requires rate lookup
+  const totalCost    = chickCost + medCost
 
   // Monthly chart data (from full ascending daily array)
   const monthlyData = daily?.reduce((acc: any[], d) => {
@@ -170,29 +194,6 @@ export const FlockDetail: React.FC = () => {
   // lastRecord = last in ascending order = most recent
   const lastRecord = daily?.[daily.length - 1]
   const ageWeeks = flockAgeWeeks(flock.placement_date)
-
-  // dailyIndexMap: maps record id → original ascending index (for week number)
-  const dailyIndexMap = useMemo<Map<string, number>>(() => {
-    const m = new Map<string, number>()
-    ;(daily ?? []).forEach((d, i) => m.set(d.id, i))
-    return m
-  }, [daily])
-
-  // displayDaily: reversed + date filtered
-  const displayDaily = useMemo(() => {
-    let arr = [...(daily ?? [])].reverse()
-    if (fromDate) arr = arr.filter(d => d.record_date >= fromDate)
-    if (toDate) arr = arr.filter(d => d.record_date <= toDate)
-    return arr
-  }, [daily, fromDate, toDate])
-
-  // heDispatch filtered for financial tab
-  const displayHeDispatch = useMemo(() => {
-    let arr = heDispatch ?? []
-    if (heFromDate) arr = arr.filter(d => d.dispatch_date >= heFromDate)
-    if (heToDate) arr = arr.filter(d => d.dispatch_date <= heToDate)
-    return arr
-  }, [heDispatch, heFromDate, heToDate])
 
   // CSV template download
   const handleDownloadTemplate = () => {
