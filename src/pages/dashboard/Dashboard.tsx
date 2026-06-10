@@ -25,11 +25,13 @@ export const Dashboard: React.FC = () => {
   const { data: recentDaily } = useQuery({
     queryKey: ['recent_daily'],
     queryFn: async () => {
+      const today = new Date().toISOString().slice(0, 10)
       const { data } = await supabase
         .from('daily_records')
         .select('record_date, total_eggs, he_eggs, mortality_female, mortality_male, flock_id, flocks(flock_no)')
+        .lte('record_date', today)
         .order('record_date', { ascending: false })
-        .limit(30)
+        .limit(100)
       return data ?? []
     }
   })
