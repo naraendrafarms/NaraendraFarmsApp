@@ -267,28 +267,23 @@ def parse_excel(path):
 
 # ── generate SQL ─────────────────────────────────────────────────────────────
 
-def generate_sql(po_records, vendors):
-    lines = []
-    lines.append("-- Auto-generated PO import from NBF_ORDER_At_A_Glance.xlsx")
-    lines.append("BEGIN;")
-
-    # 1. Parties upsert (vendor names + category)
-    lines.append("\n-- Vendors / Parties")
+def make_vendor_statements(vendors):
+    """One INSERT per vendor — no transaction wrapper (Supabase API limitation)."""
+    stmts = []
     for v in vendors:
-        cat = v["category"]
-        lines.append(
+        stmts.append(
             f"INSERT INTO public.parties (name, type, category, is_active) "
-            f"VALUES ({sq(v['name'])}, 'supplier', {sq(cat)}, true) "
+            f"VALUES ({sq(v['name'])}, 'supplier', {sq(v['category'])}, true) "
             f"ON CONFLICT (lower(trim(name)), type) DO UPDATE SET "
-            f"category = EXCLUDED.category WHERE public.parties.category IS NULL;"
+            f"category = EXCLUDED.category WHERE public.parties.category IS NULL"
         )
+    return stmts
 
-    # 2. purchase_orders upsert in batches
-    lines.append("\n-- Purchase Orders")
+def make_po_statements(po_records, batch_size=50):
+    """Batch INSERT statements — no transaction wrapper."""
     cols = ["po_no","po_date","fiscal_year","vendor_name","item_name","material_type",
             "quantity","unit","rate","gst_pct","total_amount","material_status"]
-
-    batch_size = 100
+    stmts = []
     for i in range(0, len(po_records), batch_size):
         batch = po_records[i:i+batch_size]
         vals_list = []
@@ -301,17 +296,15 @@ def generate_sql(po_records, vendors):
                 f"{r['total_amount']},{r['material_status']})"
             )
         vals_str = ",\n  ".join(vals_list)
-        lines.append(
+        stmts.append(
             f"INSERT INTO public.purchase_orders ({','.join(cols)}) VALUES\n  {vals_str}\n"
             f"ON CONFLICT (po_no, item_name) DO UPDATE SET\n"
             f"  po_date=EXCLUDED.po_date, fiscal_year=EXCLUDED.fiscal_year,\n"
             f"  vendor_name=EXCLUDED.vendor_name, material_type=EXCLUDED.material_type,\n"
             f"  quantity=EXCLUDED.quantity, unit=EXCLUDED.unit, rate=EXCLUDED.rate,\n"
-            f"  gst_pct=EXCLUDED.gst_pct, total_amount=EXCLUDED.total_amount;"
+            f"  gst_pct=EXCLUDED.gst_pct, total_amount=EXCLUDED.total_amount"
         )
-
-    lines.append("\nCOMMIT;")
-    return "\n".join(lines)
+    return stmts
 
 # ── run SQL via Supabase Management API ──────────────────────────────────────
 
@@ -356,30 +349,22 @@ if __name__ == "__main__":
         print("No records found — check Excel format")
         sys.exit(1)
 
-    sql = generate_sql(po_records, vendors)
-
-    # Save SQL for inspection
-    sql_path = Path(__file__).parent.parent / "data" / "nbf_po_import.sql"
-    sql_path.write_text(sql)
-    print(f"  SQL saved to {sql_path.name} ({len(sql)//1024}KB)")
-
-    # Split into chunks (Supabase Management API has ~1MB query limit)
-    # Run parties first, then POs in smaller batches
+    # Vendors first
     print("Upserting vendors into parties table ...")
-    vendor_lines = [l for l in sql.split("\n") if l.startswith("INSERT INTO public.parties")]
-    if vendor_lines:
-        vendor_sql = "BEGIN;\n" + "\n".join(vendor_lines) + "\nCOMMIT;"
-        run_sql(vendor_sql)
-        print(f"  {len(vendor_lines)} vendors upserted")
+    vendor_stmts = make_vendor_statements(vendors)
+    ok = 0
+    for stmt in vendor_stmts:
+        run_sql(stmt)
+        ok += 1
+    print(f"  {ok} vendors upserted")
 
+    # PO records in batches of 50
     print("Importing purchase orders ...")
-    po_lines = sql.split("INSERT INTO public.purchase_orders")
-    po_chunks = [c for c in po_lines if c.strip() and "ON CONFLICT" in c]
-    total = 0
-    for idx, chunk in enumerate(po_chunks):
-        batch_sql = f"BEGIN;\nINSERT INTO public.purchase_orders{chunk}\nCOMMIT;"
-        run_sql(batch_sql)
-        total += 100  # approx per chunk
-        print(f"  Batch {idx+1}/{len(po_chunks)} done")
+    po_stmts = make_po_statements(po_records, batch_size=50)
+    inserted = 0
+    for idx, stmt in enumerate(po_stmts):
+        run_sql(stmt)
+        inserted += 50
+        print(f"  Batch {idx+1}/{len(po_stmts)} done (~{min(inserted, len(po_records))} of {len(po_records)} records)")
 
     print(f"\nDone. {len(po_records)} PO records imported, {len(vendors)} vendors added to parties.")
