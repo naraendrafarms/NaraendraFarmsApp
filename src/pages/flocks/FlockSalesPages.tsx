@@ -82,8 +82,9 @@ export const HEDispatch: React.FC = () => {
     queryFn: async () => {
       let q = supabase.from('he_dispatch')
         .select('*, flocks(flock_no), parties(name), hatcheries(name)')
-        .order('dispatch_date', { ascending: false }).limit(200)
+        .order('dispatch_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
+      else q = q.limit(200)
       const { data } = await q; return data ?? []
     }
   })

@@ -46,6 +46,13 @@ import {
   CartesianGrid, BarChart, Bar, Legend
 } from 'recharts'
 
+const NHE_LABEL: Record<string, string> = {
+  je: 'Jumbo Eggs (JE)', te: 'Table Eggs (TE)', be: 'Broken/Crack Eggs (BE)',
+  bird_cull: 'Bird Sales — Cull', bird_lame: 'Bird Sales — Lame',
+  bird_weak: 'Bird Sales — Weak', bird_sex_error: 'Bird Sales — Sex Error',
+  gas: 'Gas Cylinders', manure: 'Manure / Litter', other: 'Other Income',
+}
+
 export const FlockDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
@@ -420,7 +427,7 @@ export const FlockDetail: React.FC = () => {
                     acc[s.sale_type] = (acc[s.sale_type] ?? 0) + s.amount; return acc
                   }, {}) ?? {}).map(([type, amt]: any) => (
                     <tr key={type} className="border-b border-gray-50">
-                      <td className="py-2 text-gray-500 pl-4">• {type}</td>
+                      <td className="py-2 text-gray-500 pl-4">• {NHE_LABEL[type] ?? type}</td>
                       <td className="py-2 text-right font-medium">{inr(amt)}</td>
                     </tr>
                   ))}
