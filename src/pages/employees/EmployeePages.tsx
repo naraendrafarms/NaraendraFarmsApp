@@ -1065,10 +1065,14 @@ export const BonusPage: React.FC = () => {
 
 // ── ESI / PF REPORT ───────────────────────────────────────────────
 export const ESIPFReportPage: React.FC = () => {
+  const qc = useQueryClient()
   const now = new Date()
   const defaultMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
   const [filterMonth, setFilterMonth] = useState(defaultMonth)
   const [filterFarm, setFilterFarm] = useState('')
+  const [editRec, setEditRec] = useState<any>(null)
+  const [editForm, setEditForm] = useState<any>({})
+  const ef = (k:string) => (e:any) => setEditForm((p:any)=>({...p,[k]:e.target.value}))
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
 
@@ -1077,13 +1081,51 @@ export const ESIPFReportPage: React.FC = () => {
     enabled:!!filterMonth,
     queryFn:async()=>{
       let q=supabase.from('salary_monthly')
-        .select('*, employees!inner(name,emp_id,farm_id,farms(name,code))')
+        .select('*, employees!inner(name,emp_id,esi_applicable,pf_applicable,pt_applicable,farm_id,farms(name,code))')
         .eq('month',filterMonth+'-01')
       if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
       const{data,error}=await q
       if(error)throw error
       return data??[]
     }
+  })
+
+  const openEdit = (r: any) => {
+    setEditRec(r)
+    setEditForm({
+      gross_salary: r.gross_salary?.toString()??'',
+      esi_employee: r.esi_employee?.toString()??'0',
+      esi_employer: r.esi_employer?.toString()??'0',
+      pf_employee: r.pf_employee?.toString()??'0',
+      pf_employer: r.pf_employer?.toString()??'0',
+      pt: r.pt?.toString()??'0',
+      net_salary: r.net_salary?.toString()??'',
+      is_paid: r.is_paid?'true':'false',
+      payment_mode: r.payment_mode??'Cash',
+      payment_ref: r.payment_ref??'',
+      remarks: r.remarks??'',
+    })
+  }
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('salary_monthly').update({
+        gross_salary: parseFloat(editForm.gross_salary)||null,
+        esi_employee: parseFloat(editForm.esi_employee)||0,
+        esi_employer: parseFloat(editForm.esi_employer)||0,
+        pf_employee: parseFloat(editForm.pf_employee)||0,
+        pf_employer: parseFloat(editForm.pf_employer)||0,
+        pt: parseFloat(editForm.pt)||0,
+        net_salary: parseFloat(editForm.net_salary)||0,
+        is_paid: editForm.is_paid==='true',
+        payment_mode: editForm.payment_mode||'Cash',
+        payment_ref: editForm.payment_ref||null,
+        remarks: editForm.remarks||null,
+      }).eq('id', editRec.id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Saved'); qc.invalidateQueries({queryKey:['esipf_report']}); setEditRec(null) },
+    onError: (e:any) => toast.error(e.message),
   })
 
   const totals = (rows??[]).reduce((acc:any,r:any)=>{
@@ -1141,6 +1183,7 @@ export const ESIPFReportPage: React.FC = () => {
               <Th>Employee</Th><Th>Site</Th><Th right>Gross</Th>
               <Th right>ESI (Emp)</Th><Th right>ESI (Employer)</Th>
               <Th right>PF (Emp)</Th><Th right>PF (Employer)</Th><Th right>PT</Th>
+              <Th right>Net</Th><Th>Paid</Th><Th></Th>
             </tr></thead>
             <tbody>
               {(rows??[]).map((r:any)=>(
@@ -1153,6 +1196,9 @@ export const ESIPFReportPage: React.FC = () => {
                   <Td right>{r.pf_employee>0?inr(r.pf_employee):'—'}</Td>
                   <Td right>{r.pf_employer>0?inr(r.pf_employer):'—'}</Td>
                   <Td right>{r.pt>0?inr(r.pt):'—'}</Td>
+                  <Td right className="font-semibold text-green-700">{r.net_salary?inr(r.net_salary):'—'}</Td>
+                  <Td><Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge></Td>
+                  <Td><button onClick={()=>openEdit(r)} className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit"><Edit2 size={12}/></button></Td>
                 </tr>
               ))}
               {(rows??[]).length>0 && (
@@ -1164,6 +1210,8 @@ export const ESIPFReportPage: React.FC = () => {
                   <Td right>{inr(totals.pf_emp)}</Td>
                   <Td right>{inr(totals.pf_er)}</Td>
                   <Td right>{inr(totals.pt)}</Td>
+                  <Td right className="text-green-700">{inr((rows??[]).reduce((s:number,r:any)=>s+(r.net_salary??0),0))}</Td>
+                  <Td colSpan={2}></Td>
                 </tr>
               )}
             </tbody>
@@ -1171,6 +1219,34 @@ export const ESIPFReportPage: React.FC = () => {
           {!(rows??[]).length&&<EmptyState icon={<FileText size={32}/>} title="No data for selected month"/>}
         </Card>
       )}
+
+      <Modal open={!!editRec} onClose={()=>setEditRec(null)} title={`Edit Salary — ${editRec?.employees?.name} (${filterMonth})`} size="md"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={()=>setEditRec(null)}>Cancel</Button><Button loading={saveMut.isPending} onClick={()=>saveMut.mutate()}>Save</Button></div>}>
+        {editRec && (
+          <div className="space-y-3">
+            <FormRow>
+              <Input label="Gross Salary" type="number" value={editForm.gross_salary} onChange={ef('gross_salary')}/>
+              <Input label="Net Salary" type="number" value={editForm.net_salary} onChange={ef('net_salary')}/>
+            </FormRow>
+            {editRec.employees?.esi_applicable && <FormRow>
+              <Input label="ESI Employee (0.75%)" type="number" value={editForm.esi_employee} onChange={ef('esi_employee')}/>
+              <Input label="ESI Employer (3.25%)" type="number" value={editForm.esi_employer} onChange={ef('esi_employer')}/>
+            </FormRow>}
+            {editRec.employees?.pf_applicable && <FormRow>
+              <Input label="PF Employee (12%)" type="number" value={editForm.pf_employee} onChange={ef('pf_employee')}/>
+              <Input label="PF Employer (12%)" type="number" value={editForm.pf_employer} onChange={ef('pf_employer')}/>
+            </FormRow>}
+            {editRec.employees?.pt_applicable && <Input label="PT (Professional Tax)" type="number" value={editForm.pt} onChange={ef('pt')}/>}
+            <Divider label="Payment"/>
+            <FormRow>
+              <Select label="Payment Mode" options={['Cash','Bank Transfer','Cheque']} value={editForm.payment_mode} onChange={ef('payment_mode')}/>
+              <Input label="UTR / Cheque No" value={editForm.payment_ref} onChange={ef('payment_ref')}/>
+              <Select label="Paid?" options={[{value:'false',label:'Pending'},{value:'true',label:'Paid'}]} value={editForm.is_paid} onChange={ef('is_paid')}/>
+            </FormRow>
+            <Input label="Remarks" value={editForm.remarks} onChange={ef('remarks')}/>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
@@ -1323,9 +1399,14 @@ export const PayrollSummaryPage: React.FC = () => {
 
 // ── ATTENDANCE REGISTER (yearly working days grid) ────────────────
 export const AttendanceRegisterPage: React.FC = () => {
+  const qc = useQueryClient()
   const [selectedFY, setSelectedFY] = useState('2025-26')
   const [filterFarm, setFilterFarm] = useState('')
   const months = fyMonths(selectedFY)
+
+  // inline edit state: { empId, month, currentDays }
+  const [editCell, setEditCell] = useState<{empId:string;month:string;days:string}|null>(null)
+  const [savingCell, setSavingCell] = useState(false)
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
 
@@ -1334,7 +1415,7 @@ export const AttendanceRegisterPage: React.FC = () => {
     queryFn:async()=>{
       const [startM, endM] = [months[0], months[months.length-1]]
       let q = supabase.from('salary_monthly')
-        .select('employee_id,month,days_worked,employees!inner(name,emp_id,farm_id,farms(name,code))')
+        .select('id,employee_id,month,days_worked,employees!inner(name,emp_id,farm_id,farms(name,code))')
         .gte('month',startM).lte('month',endM)
       if (filterFarm) q = q.eq('employees.farm_id', filterFarm)
       const {data} = await q
@@ -1342,25 +1423,39 @@ export const AttendanceRegisterPage: React.FC = () => {
     }
   })
 
-  // Build: empId → { emp info, monthKey → days }
-  const empMap: Record<string,{name:string,empId:string,site:string,months:Record<string,number|null>}> = {}
+  // Build: empId → { emp info, monthKey → {id, days} }
+  const empMap: Record<string,{name:string,empId:string,site:string,months:Record<string,{id:string;days:number|null}>}> = {}
   for (const r of (salaries??[])) {
     const emp = (r as any).employees
     const id = r.employee_id
     if (!empMap[id]) empMap[id] = {name:emp?.name??'',empId:emp?.emp_id??'',site:emp?.farms?.name??'—',months:{}}
-    empMap[id].months[r.month.slice(0,7)] = r.days_worked ?? null
+    empMap[id].months[r.month.slice(0,7)] = { id: (r as any).id, days: r.days_worked ?? null }
   }
   const empRows = Object.values(empMap).sort((a,b)=>a.site.localeCompare(b.site)||a.name.localeCompare(b.name))
 
   const farmOptions = (farms??[]).map((f:any)=>({value:f.id,label:f.name}))
   const MONTH_LABELS = months.map(m=>{const[yr,mn]=m.slice(0,7).split('-');return `${MONTH_NAMES[parseInt(mn)-1]} ${yr.slice(2)}`})
 
+  const saveDays = async () => {
+    if (!editCell) return
+    setSavingCell(true)
+    const entry = empMap[editCell.empId]?.months[editCell.month]
+    const days = parseInt(editCell.days) || null
+    if (entry?.id) {
+      await supabase.from('salary_monthly').update({ days_worked: days }).eq('id', entry.id)
+    }
+    qc.invalidateQueries({ queryKey: ['attendance_fy'] })
+    setSavingCell(false)
+    setEditCell(null)
+    toast.success('Days updated')
+  }
+
   const handleExport = () => {
     exportCSV(`attendance_${selectedFY}.csv`,
       ['Employee','Emp ID','Site',...MONTH_LABELS,'Total Days'],
       empRows.map(e=>{
-        const mDays = months.map(m=>e.months[m.slice(0,7)]??'')
-        const total = months.reduce((s,m)=>s+(e.months[m.slice(0,7)]??0),0)
+        const mDays = months.map(m=>e.months[m.slice(0,7)]?.days??'')
+        const total = months.reduce((s,m)=>s+(e.months[m.slice(0,7)]?.days??0),0)
         return [e.name,e.empId,e.site,...mDays,total]
       })
     )
@@ -1369,7 +1464,7 @@ export const AttendanceRegisterPage: React.FC = () => {
   return (
     <div className="space-y-5">
       <SectionHeader title="Attendance Register"
-        subtitle="Year-wise working days per employee"
+        subtitle="Year-wise working days per employee — click any cell to edit"
         action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>}
       />
       <div className="flex gap-3 flex-wrap items-end">
@@ -1388,7 +1483,7 @@ export const AttendanceRegisterPage: React.FC = () => {
               </tr></thead>
               <tbody>
                 {empRows.map(e=>{
-                  const total = months.reduce((s,m)=>s+(e.months[m.slice(0,7)]??0),0)
+                  const total = months.reduce((s,m)=>s+(e.months[m.slice(0,7)]?.days??0),0)
                   return (
                     <tr key={e.empId+e.name} className="hover:bg-gray-50">
                       <Td>
@@ -1397,10 +1492,28 @@ export const AttendanceRegisterPage: React.FC = () => {
                       </Td>
                       <Td className="text-xs text-gray-500">{e.site}</Td>
                       {months.map(m=>{
-                        const d = e.months[m.slice(0,7)]
-                        return <Td key={m} right className={`text-sm px-2 ${d!=null&&d<20?'text-red-500':d!=null&&d>=26?'text-green-600':'text-gray-700'}`}>
-                          {d!=null?d:'—'}
-                        </Td>
+                        const key = m.slice(0,7)
+                        const entry = e.months[key]
+                        const d = entry?.days
+                        const isEditing = editCell?.empId===e.empId && editCell?.month===key && !!entry?.id
+                        if (!entry?.id) return <Td key={m} right className="text-gray-300 text-xs px-2">—</Td>
+                        if (isEditing) return (
+                          <Td key={m} right className="px-1">
+                            <input autoFocus type="number" min={0} max={31} value={editCell!.days}
+                              onChange={ev=>setEditCell(c=>c?({...c,days:ev.target.value}):c)}
+                              onKeyDown={ev=>{ if(ev.key==='Enter') saveDays(); if(ev.key==='Escape') setEditCell(null) }}
+                              onBlur={saveDays}
+                              className="w-12 border border-brand-400 rounded text-center text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 py-0.5"
+                            />
+                          </Td>
+                        )
+                        return (
+                          <td key={m} className={`text-sm px-2 text-right cursor-pointer hover:bg-brand-50 rounded border-b border-gray-100 py-2 ${d!=null&&d<20?'text-red-500':d!=null&&d>=26?'text-green-600':'text-gray-700'}`}
+                            title="Click to edit"
+                            onClick={()=>setEditCell({empId:e.empId,month:key,days:d?.toString()??''})}>
+                            {d!=null?d:'—'}
+                          </td>
+                        )
                       })}
                       <Td right className="font-semibold">{total||'—'}</Td>
                     </tr>
@@ -1412,6 +1525,7 @@ export const AttendanceRegisterPage: React.FC = () => {
           </Card>
         </div>
       )}
+      {savingCell && <div className="fixed bottom-4 right-4 bg-brand-600 text-white text-sm px-4 py-2 rounded-lg shadow">Saving...</div>}
     </div>
   )
 }
