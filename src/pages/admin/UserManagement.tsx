@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
+import { supabase, supabaseAdmin } from '@/lib/supabase'
 import { useAuth, type Role } from '@/lib/auth'
 import {
   Card, Button, Input, Select, FormRow, Modal,
@@ -68,16 +68,25 @@ export const UserManagement: React.FC = () => {
   const createMut = useMutation({
     mutationFn: async () => {
       if (!form.email || !form.password || !form.full_name) throw new Error('Name, email and password required')
-      const { data, error } = await supabase.rpc('admin_create_user', {
-        p_email:     form.email,
-        p_password:  form.password,
-        p_full_name: form.full_name,
-        p_role:      form.role,
-        p_farm_id:   form.farm_id || null,
-        p_is_active: form.is_active === 'true',
+      // Create auth user via Admin API (service role) — avoids direct auth.users SQL issues
+      const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+        email: form.email,
+        password: form.password,
+        email_confirm: true,
+        user_metadata: { full_name: form.full_name, role: form.role },
       })
-      if (error) throw error
-      if (!data) throw new Error('User creation failed')
+      if (authErr) throw authErr
+      const userId = authData.user.id
+      // Upsert profile row
+      const { error: profErr } = await supabase.from('profiles').upsert({
+        id: userId,
+        full_name: form.full_name,
+        email: form.email,
+        role: form.role,
+        farm_id: form.farm_id || null,
+        is_active: form.is_active === 'true',
+      }, { onConflict: 'id' })
+      if (profErr) throw profErr
     },
     onSuccess: () => { toast.success('User created!'); qc.invalidateQueries({ queryKey: ['users_admin'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
@@ -94,9 +103,8 @@ export const UserManagement: React.FC = () => {
       }).eq('id', editing.id)
       if (error) throw error
       if (form.password) {
-        const { error: pwErr } = await supabase.rpc('admin_update_user_password', {
-          p_user_id:  editing.id,
-          p_password: form.password,
+        const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(editing.id, {
+          password: form.password,
         })
         if (pwErr) throw pwErr
       }
@@ -107,12 +115,9 @@ export const UserManagement: React.FC = () => {
 
   const deleteUser = async (u: any) => {
     if (!confirm(`Delete user "${u.full_name}"? This cannot be undone.`)) return
-    const { error } = await supabase.rpc('admin_delete_user', { p_user_id: u.id })
-    if (error) {
-      // fallback: just delete from profiles if RPC doesn't exist
-      const { error: e2 } = await supabase.from('profiles').delete().eq('id', u.id)
-      if (e2) { toast.error(e2.message); return }
-    }
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(u.id)
+    if (error) { toast.error(error.message); return }
+    await supabase.from('profiles').delete().eq('id', u.id)
     toast.success('User deleted')
     qc.invalidateQueries({ queryKey: ['users_admin'] })
   }
