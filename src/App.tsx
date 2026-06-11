@@ -13,6 +13,7 @@ import { DailyEntry } from '@/pages/flocks/DailyEntry'
 import { HEDispatch, NHESales, MedicineEntry } from '@/pages/flocks/FlockSalesPages'
 import { FeedDashboard, GRNEntry, FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
 import { StockPage } from '@/pages/feed/StockPage'
+import { FeedMillPage } from '@/pages/feed/FeedMillPages'
 import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
 import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage } from '@/pages/employees/EmployeePages'
 import {
@@ -97,6 +98,7 @@ export const App: React.FC = () => {
             <Route path="feed/production" element={<FeedProduction />} />
             <Route path="feed/transfer" element={<FeedTransfer />} />
             <Route path="feed/stock" element={<StockPage />} />
+            <Route path="feed/mill" element={<FeedMillPage />} />
 
             {/* Electricity */}
             <Route path="electricity" element={<ElectricityEntry />} />
