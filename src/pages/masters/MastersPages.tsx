@@ -7,6 +7,7 @@ import {
 } from '@/components/ui'
 import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { parseFile } from '@/lib/parseFile'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -304,15 +305,8 @@ export const PartiesMaster: React.FC = () => {
   }
 
   const handleImportParties = async (file: File) => {
-    const text = await file.text()
-    const lines = text.trim().split('\n')
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
-    const records = lines.slice(1).map(line => {
-      const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
-      const obj: Record<string,string> = {}
-      headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
-      return obj
-    })
+    const { headers: hdrs, rows } = await parseFile(file)
+    const records = rows.map(vals => { const obj: Record<string,string> = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
     const toUpsert = records.filter(r=>r.name).map(r=>({
       name: r.name, type: r.type||'supplier',
       category: r.category||null, contact: r.contact||null,
@@ -333,8 +327,8 @@ export const PartiesMaster: React.FC = () => {
           action={
             <div className="flex gap-2">
               <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('parties_template.csv',['name','type','category','contact','address','gstin'],[['NBF Feeds Ltd','supplier','Feed','9876543210','Chennai','29ABCDE1234F1Z5']])}>Template</Button>
-              <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
-              <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportParties(f)}}/>
+              <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
+              <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportParties(f)}}/>
               <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportParties}>Export CSV</Button>
               <Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Party</Button>
             </div>
@@ -476,15 +470,8 @@ export const MedicinesMaster: React.FC = () => {
   }
 
   const handleImportMeds = async (file: File) => {
-    const text = await file.text()
-    const lines = text.trim().split('\n')
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
-    const records = lines.slice(1).map(line => {
-      const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
-      const obj: Record<string,string> = {}
-      headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
-      return obj
-    })
+    const { headers: hdrs, rows } = await parseFile(file)
+    const records = rows.map(vals => { const obj: Record<string,string> = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
     const toUpsert = records.filter(r=>r.name).map(r=>({
       name: r.name, type: r.type||'medicine', unit: r.unit||'ml',
       manufacturer: r.manufacturer||null, rate: parseFloat(r.rate)||null,
@@ -504,8 +491,8 @@ export const MedicinesMaster: React.FC = () => {
         headerAction={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('medicines_template.csv',['name','type','unit','manufacturer','rate'],[['Newcastle Vaccine','vaccine','dose','Zoetis','15']])}>Template</Button>
-            <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>medImportRef.current?.click()}>Import CSV</Button>
-            <input ref={medImportRef} type="file" accept=".csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportMeds(f)}}/>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>medImportRef.current?.click()}>Import</Button>
+            <input ref={medImportRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportMeds(f)}}/>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportMeds}>Export CSV</Button>
           </div>
         }

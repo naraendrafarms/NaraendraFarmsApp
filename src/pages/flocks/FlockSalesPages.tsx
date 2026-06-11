@@ -9,6 +9,7 @@ import {
 } from '@/components/ui'
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { parseFile } from '@/lib/parseFile'
 
 // ── CSV helper ────────────────────────────────────────────────────
 function exportFlatCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -194,20 +195,13 @@ export const HEDispatch: React.FC = () => {
     URL.revokeObjectURL(url)
   }
 
-  // CSV import handler
+  // Import handler (CSV or Excel)
   const handleImport = async (file: File) => {
     setImporting(true)
     try {
-      const text = await file.text()
-      const lines = text.trim().split('\n').filter(Boolean)
-      if (lines.length < 2) { toast.error('Empty file'); return }
-      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
-      const records = lines.slice(1).map(line => {
-        const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
-        const obj: any = {}
-        headers.forEach((h, i) => { obj[h] = vals[i] ?? '' })
-        return obj
-      })
+      const { headers: hdrs, rows: rawRows } = await parseFile(file)
+      if (rawRows.length === 0) { toast.error('Empty file'); return }
+      const records = rawRows.map(vals => { const obj: any = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
 
       const rows = records.map((r: any) => {
         const flockMatch = flocks?.find((f: any) => String(f.flock_no) === String(r.flock_no))
@@ -284,12 +278,12 @@ export const HEDispatch: React.FC = () => {
           <Button variant="outline" size="sm" icon={<Upload size={14}/>}
             loading={importing}
             onClick={() => fileInputRef.current?.click()}>
-            Import CSV
+            Import
           </Button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv"
+            accept=".xlsx,.xls,.csv"
             className="hidden"
             onChange={e => {
               const file = e.target.files?.[0]
@@ -556,15 +550,8 @@ export const NHESales: React.FC = () => {
   const handleImport = async (file: File) => {
     setImporting(true)
     try {
-      const text = await file.text()
-      const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
-      const header = lines[0].split(',').map(h => h.trim().toLowerCase())
-      const rows = lines.slice(1).map(line => {
-        const vals = line.split(',')
-        const obj: any = {}
-        header.forEach((h, i) => { obj[h] = vals[i]?.trim() ?? '' })
-        return obj
-      }).filter(r => r.sale_date && r.flock_no)
+      const { headers: header, rows: rawRows } = await parseFile(file)
+      const rows = rawRows.map(vals => { const obj: any = {}; header.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj }).filter(r => r.sale_date && r.flock_no)
 
       // Resolve flock_no → flock_id, party_name → party_id
       const flockMap: Record<string, string> = {}
@@ -652,8 +639,8 @@ export const NHESales: React.FC = () => {
         {(hasFilter||typeFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setTypeFilter('') }}>Clear</Button>}
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Template</Button>
-          <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => fileRef.current?.click()}>Import CSV</Button>
-          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
+          <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => fileRef.current?.click()}>Import</Button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
         </div>
       </div>
 

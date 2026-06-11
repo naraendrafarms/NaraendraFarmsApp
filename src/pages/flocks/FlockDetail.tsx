@@ -12,6 +12,7 @@ import {
   BarChart2, DollarSign, Package, Trash2, Upload, Download
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { parseFile } from '@/lib/parseFile'
 
 // ── Bulk selection helpers ─────────────────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
@@ -207,20 +208,13 @@ export const FlockDetail: React.FC = () => {
     URL.revokeObjectURL(url)
   }
 
-  // CSV import handler
+  // Import handler (CSV or Excel)
   const handleImport = async (file: File) => {
     setImporting(true)
     try {
-      const text = await file.text()
-      const lines = text.trim().split('\n').filter(Boolean)
-      if (lines.length < 2) { toast.error('Empty file'); return }
-      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
-      const records = lines.slice(1).map(line => {
-        const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
-        const obj: any = {}
-        headers.forEach((h, i) => { obj[h] = vals[i] ?? '' })
-        return obj
-      })
+      const { headers: hdrs, rows: rawRows } = await parseFile(file)
+      if (rawRows.length === 0) { toast.error('Empty file'); return }
+      const records = rawRows.map(vals => { const obj: any = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
       const rows = records.map((r: any) => ({
         flock_id: id,
         record_date: r.record_date,
@@ -388,7 +382,7 @@ export const FlockDetail: React.FC = () => {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept=".xlsx,.xls,.csv"
               className="hidden"
               onChange={e => {
                 const file = e.target.files?.[0]

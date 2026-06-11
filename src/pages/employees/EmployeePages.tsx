@@ -10,6 +10,7 @@ import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileT
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 import { useAuth, can } from '@/lib/auth'
+import { parseFile } from '@/lib/parseFile'
 
 // ── CSV export helper ─────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -178,16 +179,9 @@ export const EmployeeList: React.FC = () => {
   const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const text = await file.text()
-    const lines = text.trim().split('\n')
-    if (lines.length < 2) { toast.error('Empty CSV'); return }
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
-    const records = lines.slice(1).map(line => {
-      const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
-      const obj: Record<string,string> = {}
-      headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
-      return obj
-    })
+    const { headers: hdrs, rows } = await parseFile(file)
+    if (rows.length === 0) { toast.error('Empty file'); return }
+    const records = rows.map(vals => { const obj: Record<string,string> = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
     // Resolve farm names
     const { data: allFarms } = await supabase.from('farms').select('id,name')
     const farmMap: Record<string,string> = {}
@@ -237,7 +231,7 @@ export const EmployeeList: React.FC = () => {
           <div className="flex gap-2">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={downloadTemplate}>Template</Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
-            <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImportCSV}/>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportCSV}/>
             <Button icon={<Plus size={16}/>} onClick={()=>openEdit()}>Add Employee</Button>
           </div>
         }
@@ -638,16 +632,9 @@ export const SalaryEntryPage: React.FC = () => {
   const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const text = await file.text()
-    const lines = text.trim().split('\n')
-    if (lines.length < 2) { toast.error('Empty CSV'); return }
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
-    const records = lines.slice(1).map(line => {
-      const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
-      const obj: Record<string,string> = {}
-      headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
-      return obj
-    })
+    const { headers: hdrs, rows } = await parseFile(file)
+    if (rows.length === 0) { toast.error('Empty file'); return }
+    const records = rows.map(vals => { const obj: Record<string,string> = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
     const { data: allEmps } = await supabase.from('employees').select('id,emp_id')
     const empMap: Record<string,string> = {}
     for (const e of (allEmps??[])) if(e.emp_id) empMap[e.emp_id] = e.id
@@ -710,7 +697,7 @@ export const SalaryEntryPage: React.FC = () => {
           <div className="flex gap-2">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('salary_import_template.csv',['emp_id','month','days_worked','basic_salary','hra','advance','arrears','ot_bonus','tds','esi_employee','pf_employee','pt','remarks'],[['BPS4001','2025-06','26','8000','2000','0','0','0','0','','','','']]) }>Template</Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
-            <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImportCSV}/>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportCSV}/>
             <Button icon={<Plus size={16}/>} onClick={()=>{setForm(blankForm());setEditingId(null);setShowForm(true)}}>Add Entry</Button>
           </div>
         }
@@ -951,16 +938,9 @@ export const BonusPage: React.FC = () => {
   const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const text = await file.text()
-    const lines = text.trim().split('\n')
-    if (lines.length < 2) { toast.error('Empty CSV'); return }
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
-    const records = lines.slice(1).map(line => {
-      const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
-      const obj: Record<string,string> = {}
-      headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
-      return obj
-    })
+    const { headers: hdrs, rows } = await parseFile(file)
+    if (rows.length === 0) { toast.error('Empty file'); return }
+    const records = rows.map(vals => { const obj: Record<string,string> = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
     const { data: allEmps } = await supabase.from('employees').select('id,emp_id')
     const empMap: Record<string,string> = {}
     for (const e of (allEmps??[])) if(e.emp_id) empMap[e.emp_id] = e.id
@@ -999,7 +979,7 @@ export const BonusPage: React.FC = () => {
           <div className="flex gap-2">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('bonus_template.csv',['emp_id','bonus_year','amount','bonus_type','paid_date','remarks'],[['BPS4001','2025','5000','festival','2025-10-15','']])}>Template</Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
-            <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImportCSV}/>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportCSV}/>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
             <Button icon={<Plus size={16}/>} onClick={()=>{setForm({employee_id:'',bonus_year:new Date().getFullYear().toString(),amount:'',bonus_type:'festival',paid_date:'',remarks:''});setEditingId(null);setShowForm(true)}}>Add Bonus</Button>
           </div>

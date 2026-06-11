@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
+import { parseFile } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
@@ -178,13 +179,10 @@ export const GRNEntry: React.FC = () => {
   const handleImport = async (file: File) => {
     setImporting(true)
     try {
-      const text = await file.text()
-      const lines = text.trim().split('\n')
-      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
-      const records = lines.slice(1).map(line => {
-        const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
+      const { headers: rawHeaders, rows } = await parseFile(file)
+      const records = rows.map(vals => {
         const obj: Record<string,string> = {}
-        headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
+        rawHeaders.forEach((h,i) => { obj[h] = vals[i] ?? '' })
         return obj
       })
       const { data: allFarms } = await supabase.from('farms').select('id,code')
@@ -231,8 +229,8 @@ export const GRNEntry: React.FC = () => {
         action={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTemplate}>Template</Button>
-            <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => importRef.current?.click()}>Import CSV</Button>
-            <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }}/>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => importRef.current?.click()}>Import</Button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }}/>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
             <Button icon={<Plus size={16}/>} onClick={openAdd}>Add GRN</Button>
           </div>

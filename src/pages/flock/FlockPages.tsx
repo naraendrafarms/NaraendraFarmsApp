@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import { inr, fmtDate } from '@/lib/utils'
+import { parseFile } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
@@ -1022,13 +1023,10 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const handleImportFeed = async (file: File) => {
     setImporting(true)
     try {
-      const text = await file.text()
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
-      const header = lines[0].split(',').map(h => h.trim().toLowerCase())
-      const rows = lines.slice(1).map(line => {
-        const vals = line.split(',')
+      const { headers: header, rows: rawRows } = await parseFile(file)
+      const rows = rawRows.map(vals => {
         const obj: any = {}
-        header.forEach((h, i) => { obj[h] = vals[i]?.trim() ?? '' })
+        header.forEach((h, i) => { obj[h] = vals[i] ?? '' })
         return {
           flock_id: flockId,
           feed_date:   obj.feed_date,
@@ -1038,7 +1036,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           female_cost: obj.female_cost !== '' ? Number(obj.female_cost) : null,
           male_cost:   obj.male_cost   !== '' ? Number(obj.male_cost)   : null,
         }
-      }).filter(r => r.feed_date)
+      }).filter((r: any) => r.feed_date)
       const { error } = await supabase.from('daily_feed').upsert(rows, { onConflict: 'flock_id,feed_date,feed_type' })
       if (error) throw error
       qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] })
@@ -1098,7 +1096,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           onClick={() => fileRef.current?.click()}>
           Import CSV
         </Button>
-        <input ref={fileRef} type="file" accept=".csv" className="hidden"
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) handleImportFeed(f) }} />
       </div>
 

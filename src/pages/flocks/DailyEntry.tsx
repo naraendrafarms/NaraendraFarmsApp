@@ -1,19 +1,23 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Divider,
   SectionHeader, Spinner, Badge
 } from '@/components/ui'
 import toast from 'react-hot-toast'
-import { Save, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { Save, ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
 }
+
+const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','total_eggs','he_eggs','je_eggs','te_eggs','be_eggs','le_eggs','trcull_female','trcull_male','mortality_female','mortality_male','closing_female','closing_male','lighting_hrs','age_weeks','remarks']
+const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',450,440,0,0,0,10,0,0,1,0,499,20,16,25,'']
 
 const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK']
 
@@ -22,6 +26,7 @@ export const DailyEntry: React.FC = () => {
   const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [selectedFlock, setSelectedFlock] = useState('')
   const [date, setDate] = useState(today())
+  const importRef = useRef<HTMLInputElement>(null)
 
   const { data: flocks } = useQuery({
     queryKey: ['active_flocks', farmId],
@@ -203,15 +208,67 @@ export const DailyEntry: React.FC = () => {
       .select('*').eq('flock_id', selectedFlock).order('record_date')
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`daily_${selectedFlockData?.flock_no}_records.csv`,
-      ['date','opening_f','opening_m','feed_f_kg','feed_type_f','feed_m_kg','feed_type_m','total_eggs','he_eggs','je_eggs','te_eggs','be_eggs','le_eggs','trcull_f','trcull_m','mortality_f','mortality_m','closing_f','closing_m','lighting_hrs','age_weeks','remarks'],
+      DAILY_HEADERS,
       data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.total_eggs,r.he_eggs,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.trcull_female,r.trcull_male,r.mortality_female,r.mortality_male,r.closing_female,r.closing_male,r.lighting_hrs,r.age_weeks,r.remarks])
     )
+  }
+
+  const handleTemplate = () => downloadXlsxTemplate('daily_entry_template.xlsx', DAILY_HEADERS, DAILY_EXAMPLE)
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    if (!selectedFlock) { toast.error('Select a flock first'); e.target.value = ''; return }
+    const { headers, rows } = await parseFile(file)
+    const col = (n: string) => { const i = headers.indexOf(n); return i >= 0 ? i : headers.indexOf(n.replace(/_/g,'')) }
+    const farmId = selectedFlockData?.laying_farm_id ?? selectedFlockData?.rearing_farm_id
+    let saved = 0, skipped = 0
+    for (const r of rows) {
+      const dateVal = r[col('date')]?.trim()
+      if (!dateVal) { skipped++; continue }
+      const payload: any = {
+        flock_id: selectedFlock, record_date: dateVal, farm_id: farmId,
+        opening_female:   parseInt(r[col('opening_female')] || r[col('openingfemale')] || '0') || 0,
+        opening_male:     parseInt(r[col('opening_male')]   || r[col('openingmale')]   || '0') || 0,
+        feed_female_kg:   parseFloat(r[col('feed_female_kg')] || r[col('feedfemalekg')] || '0') || 0,
+        feed_male_kg:     parseFloat(r[col('feed_male_kg')]   || r[col('feedmalekg')]   || '0') || 0,
+        feed_type_f:      r[col('feed_type_f')]  || r[col('feedtypef')]  || 'L1',
+        feed_type_m:      r[col('feed_type_m')]  || r[col('feedtypem')]  || 'MALE',
+        total_eggs:       parseInt(r[col('total_eggs')]       || r[col('totaleggs')]       || '0') || 0,
+        he_eggs:          parseInt(r[col('he_eggs')]          || r[col('heeggs')]          || '0') || 0,
+        je_eggs:          parseInt(r[col('je_eggs')]          || r[col('jeeggs')]          || '0') || 0,
+        te_eggs:          parseInt(r[col('te_eggs')]          || r[col('teeggs')]          || '0') || 0,
+        be_eggs:          parseInt(r[col('be_eggs')]          || r[col('beeggs')]          || '0') || 0,
+        le_eggs:          parseInt(r[col('le_eggs')]          || r[col('leeggs')]          || '0') || 0,
+        trcull_female:    parseInt(r[col('trcull_female')]    || r[col('trcullfemale')]    || '0') || 0,
+        trcull_male:      parseInt(r[col('trcull_male')]      || r[col('trcullmale')]      || '0') || 0,
+        mortality_female: parseInt(r[col('mortality_female')] || r[col('mortalityfemale')] || '0') || 0,
+        mortality_male:   parseInt(r[col('mortality_male')]   || r[col('mortalitymale')]   || '0') || 0,
+        closing_female:   parseInt(r[col('closing_female')]   || r[col('closingfemale')]   || '0') || 0,
+        closing_male:     parseInt(r[col('closing_male')]     || r[col('closingmale')]     || '0') || 0,
+        lighting_hrs:     parseFloat(r[col('lighting_hrs')]   || r[col('lightinghrs')]     || '') || null,
+        age_weeks:        parseFloat(r[col('age_weeks')]      || r[col('ageweeks')]        || '') || null,
+        remarks:          r[col('remarks')] || null,
+      }
+      const { error } = await supabase.from('daily_records').upsert(payload, { onConflict: 'flock_id,record_date' })
+      if (error) { skipped++; console.error(error) } else { saved++ }
+    }
+    qc.invalidateQueries({ queryKey: ['daily_record'] })
+    qc.invalidateQueries({ queryKey: ['flock_summary'] })
+    toast.success(`Imported ${saved} records${skipped ? `, skipped ${skipped}` : ''}`)
+    e.target.value = ''
   }
 
   return (
     <div className="space-y-5">
       <SectionHeader title="Daily Flock Entry" subtitle="Enter daily production and bird movement data"
-        action={<Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export Flock CSV</Button>}
+        action={
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTemplate}>Template</Button>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import Excel/CSV</Button>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
+          </div>
+        }
       />
 
       {/* Flock + Date selector */}

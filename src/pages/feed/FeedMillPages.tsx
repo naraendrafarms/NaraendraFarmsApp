@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
+import { parseFile } from '@/lib/parseFile'
 import {
   Card, Button, Input, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
@@ -153,13 +154,10 @@ const FormulasTab: React.FC = () => {
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return
-    const text = await file.text()
-    const lines = text.split('\n').filter(Boolean)
-    const headers = lines[0].split(',').map((h: string) => h.replace(/"/g,'').trim().toLowerCase())
+    const { headers, rows } = await parseFile(file)
     const col = (name: string) => headers.indexOf(name)
     let imported = 0
-    for (let i = 1; i < lines.length; i++) {
-      const vals = lines[i].split(',').map((v: string) => v.replace(/^"|"$/g,'').trim())
+    for (const vals of rows) {
       const fc = vals[col('formula_code')]?.trim()
       if (!fc) continue
       let { data: fRows } = await supabase.from('feed_formulas').select('id').eq('formula_code', fc).limit(1)
@@ -197,10 +195,10 @@ const FormulasTab: React.FC = () => {
       <SectionHeader title="Feed Formulas" action={
         <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant="outline" onClick={handleTemplate}><Download size={14}/> Template</Button>
-          <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}><Upload size={14}/> Import CSV</Button>
+          <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}><Upload size={14}/> Import</Button>
           <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export</Button>
           <Button size="sm" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={14}/> Add Formula</Button>
-          <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImport} />
+          <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
         </div>
       } />
 
@@ -770,13 +768,10 @@ const ExpensesTab: React.FC = () => {
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if(!file) return
-    const text = await file.text()
-    const lines = text.split('\n').filter(Boolean)
-    const headers = lines[0].split(',').map((h: string) => h.replace(/"/g,'').trim().toLowerCase())
+    const { headers, rows } = await parseFile(file)
     const col = (n:string) => headers.indexOf(n)
     let count = 0
-    for (let i = 1; i < lines.length; i++) {
-      const v = lines[i].split(',').map((x: string) => x.replace(/^"|"$/g,'').trim())
+    for (const v of rows) {
       const farmCode = v[col('farm_code')]?.trim()
       let farmId: string|null = null
       if (farmCode) {
@@ -807,10 +802,10 @@ const ExpensesTab: React.FC = () => {
       <SectionHeader title="Feed Mill Expenses" action={
         <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant="outline" onClick={handleTemplate}><Download size={14}/> Template</Button>
-          <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}><Upload size={14}/> Import CSV</Button>
+          <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}><Upload size={14}/> Import</Button>
           <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export</Button>
           <Button size="sm" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={14}/> Add Expense</Button>
-          <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImport} />
+          <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
         </div>
       } />
 
