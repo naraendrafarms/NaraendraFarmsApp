@@ -752,21 +752,23 @@ export const FeedTypesMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const [form, setForm] = useState({code:'',name:'',category:'layer',week_from:'',week_to:'',sex:'female',sort_order:'0'})
-  const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+  const [form, setForm] = useState({code:'',name:'',category:'layer',week_from:'',week_to:'',sex:'female',sort_order:'0',is_active:true})
+  const s=(k:string,v:any)=>setForm(f=>({...f,[k]:v}))
 
   const {data,isLoading}=useQuery({queryKey:['feed_types'],queryFn:async()=>{const{data}=await supabase.from('feed_types').select('*').order('sort_order');return data??[]}})
 
   const open=(row?:any)=>{
     setEditing(row??null)
-    setForm(row?{code:row.code,name:row.name,category:row.category,week_from:row.week_from?.toString()??'',week_to:row.week_to?.toString()??'',sex:row.sex,sort_order:row.sort_order?.toString()??'0'}:{code:'',name:'',category:'layer',week_from:'',week_to:'',sex:'female',sort_order:'0'})
+    setForm(row
+      ? {code:row.code,name:row.name,category:row.category,week_from:row.week_from?.toString()??'',week_to:row.week_to?.toString()??'',sex:row.sex,sort_order:row.sort_order?.toString()??'0',is_active:row.is_active??true}
+      : {code:'',name:'',category:'layer',week_from:'',week_to:'',sex:'female',sort_order:'0',is_active:true})
     setShowForm(true)
   }
 
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.code||!form.name)throw new Error('Code and name required')
-      const p={code:form.code.toUpperCase(),name:form.name,category:form.category,week_from:parseInt(form.week_from)||null,week_to:parseInt(form.week_to)||null,sex:form.sex,sort_order:parseInt(form.sort_order)||0}
+      const p={code:form.code.toUpperCase().trim(),name:form.name.trim(),category:form.category,week_from:parseInt(form.week_from)||null,week_to:parseInt(form.week_to)||null,sex:form.sex,sort_order:parseInt(form.sort_order)||0,is_active:form.is_active}
       if(editing){const{error}=await supabase.from('feed_types').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('feed_types').insert(p);if(error)throw error}
     },
@@ -774,38 +776,62 @@ export const FeedTypesMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const delMut=useMutation({
+    mutationFn:async(id:string)=>{const{error}=await supabase.from('feed_types').delete().eq('id',id);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['feed_types']})},
+    onError:(e:any)=>toast.error(e.message)
+  })
+
+  const toggleMut=useMutation({
+    mutationFn:async(row:any)=>{const{error}=await supabase.from('feed_types').update({is_active:!row.is_active}).eq('id',row.id);if(error)throw error},
+    onSuccess:()=>qc.invalidateQueries({queryKey:['feed_types']}),
+    onError:(e:any)=>toast.error(e.message)
+  })
+
   const catColors:Record<string,any>={starter:'yellow',grower:'green',developer:'blue',pre_breeder:'orange',layer:'brand',male:'gray'}
 
   return (
     <>
-      <MasterTable title="Feed Types" subtitle="Feed stages: BCM, BGM, L1, L2, L3..." loading={isLoading}
+      <MasterTable title="Feed Types" subtitle="Feed stage codes: BCM, BGM, L1, L2, L3... — editable" loading={isLoading}
         data={data??[]} onAdd={()=>open()} onEdit={open}
         columns={[
-          {label:'Code',key:'code',render:r=><span className="font-mono text-xs font-bold text-brand-700">{r.code}</span>},
+          {label:'Code',key:'code',render:r=><span className="font-mono text-sm font-bold text-brand-700">{r.code}</span>},
           {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
           {label:'Category',key:'category',render:r=><Badge color={catColors[r.category]??'gray'}>{r.category}</Badge>},
           {label:'Weeks',key:'weeks',render:r=>(r.week_from||r.week_to)?`Wk ${r.week_from??'?'}–${r.week_to??'?'}`:'—'},
           {label:'Sex',key:'sex'},
           {label:'Order',key:'sort_order',right:true},
-          {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
+          {label:'Status',key:'is_active',render:r=>(
+            <button onClick={()=>toggleMut.mutate(r)} className="focus:outline-none">
+              <Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>
+            </button>
+          )},
+          {label:'',key:'_del',render:r=>(
+            <button onClick={()=>{if(confirm(`Delete feed type "${r.code}"?`))delMut.mutate(r.id)}}
+              className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="Delete">
+              <Trash2 size={13}/>
+            </button>
+          )},
         ]}
       />
-      <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Feed Type':'Add Feed Type'} size="md"
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?`Edit Feed Type — ${editing.code}`:'Add Feed Type'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
           <FormRow>
-            <Input label="Code" required value={form.code} onChange={e=>s('code',e.target.value)} hint="e.g. L1, BCM, MALE"/>
-            <Input label="Full Name" required value={form.name} onChange={e=>s('name',e.target.value)} hint="e.g. Layer-1 Mash"/>
+            <Input label="Code *" required value={form.code} onChange={e=>s('code',e.target.value)} hint="e.g. L1, BCM, MALE (auto-uppercased)"/>
+            <Input label="Full Name *" required value={form.name} onChange={e=>s('name',e.target.value)} hint="e.g. Layer-1 Mash"/>
           </FormRow>
           <FormRow>
             <Select label="Category" options={['starter','grower','developer','pre_breeder','layer','male']} value={form.category} onChange={e=>s('category',e.target.value)}/>
             <Select label="Sex" options={['female','male','both']} value={form.sex} onChange={e=>s('sex',e.target.value)}/>
           </FormRow>
           <FormRow>
-            <Input label="Week From" type="number" value={form.week_from} onChange={e=>s('week_from',e.target.value)}/>
-            <Input label="Week To" type="number" value={form.week_to} onChange={e=>s('week_to',e.target.value)}/>
+            <Input label="Week From" type="number" value={form.week_from} onChange={e=>s('week_from',e.target.value)} hint="Age week start"/>
+            <Input label="Week To" type="number" value={form.week_to} onChange={e=>s('week_to',e.target.value)} hint="Age week end"/>
             <Input label="Sort Order" type="number" value={form.sort_order} onChange={e=>s('sort_order',e.target.value)}/>
           </FormRow>
+          <Select label="Status" options={[{value:'true',label:'Active'},{value:'false',label:'Inactive'}]}
+            value={String(form.is_active)} onChange={e=>s('is_active',e.target.value==='true')}/>
         </div>
       </Modal>
     </>

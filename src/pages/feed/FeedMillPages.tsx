@@ -83,10 +83,15 @@ const FormulasTab: React.FC = () => {
   const [fType, setFType] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
 
+  const { data: feedTypes = [] } = useQuery({
+    queryKey: ['feed_types'],
+    queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name,category').eq('is_active', true).order('sort_order'); return data ?? [] }
+  })
+
   const { data: formulas = [], isLoading } = useQuery({
     queryKey: ['feed_formulas'],
     queryFn: async () => {
-      const { data } = await supabase.from('feed_formulas').select('*').order('formula_code')
+      const { data } = await supabase.from('feed_formulas').select('*, feed_types(id,code,name)').order('formula_code')
       return data ?? []
     }
   })
@@ -282,6 +287,7 @@ const FormulasTab: React.FC = () => {
                     <span className="font-semibold text-gray-800">{f.formula_code}</span>
                     <span className="text-gray-600 text-sm">{f.formula_name}</span>
                     <Badge color="blue">{f.flock_type}</Badge>
+                    {f.feed_types && <Badge color="green">{(f.feed_types as any).code}</Badge>}
                     {f.age_week_from != null && <span className="text-xs text-gray-500">Week {f.age_week_from}–{f.age_week_to ?? '∞'}</span>}
                     <span className="text-xs text-gray-400">v{f.version} · {ings.length} ingredients</span>
                   </div>
@@ -337,7 +343,7 @@ const FormulasTab: React.FC = () => {
       )}
 
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }} title={editing ? 'Edit Formula' : 'Add Formula'} size="lg">
-        <FormulaForm initial={editing} existingIngs={editing ? ingredients[editing.id] : undefined} onSave={(d: any) => saveMut.mutate(d)} loading={saveMut.isPending} />
+        <FormulaForm initial={editing} existingIngs={editing ? ingredients[editing.id] : undefined} feedTypes={feedTypes} onSave={(d: any) => saveMut.mutate(d)} loading={saveMut.isPending} />
       </Modal>
       <Modal open={!!showAddIngredient} onClose={() => setShowAddIngredient(null)} title="Add Ingredient" size="md">
         <IngredientForm formulaId={showAddIngredient!} initial={null} onSave={(d: any) => saveIngMut.mutate(d)} loading={saveIngMut.isPending} />
@@ -351,8 +357,8 @@ const FormulasTab: React.FC = () => {
 
 const BLANK_ING = { ingredient_code: '', ingredient_name: '', percentage: '', kg_per_1000: '' }
 
-const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; onSave: (d: any) => void; loading: boolean }> = ({ initial, existingIngs, onSave, loading }) => {
-  const [form, setForm] = useState({ formula_code:'', formula_name:'', flock_type:'Breeder', age_week_from:'', age_week_to:'', version:'1', notes:'', is_active: true, ...initial })
+const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: any[]; onSave: (d: any) => void; loading: boolean }> = ({ initial, existingIngs, feedTypes = [], onSave, loading }) => {
+  const [form, setForm] = useState({ formula_code:'', formula_name:'', flock_type:'Breeder', age_week_from:'', age_week_to:'', version:'1', notes:'', is_active: true, ...initial, feed_type_id: initial?.feed_type_id ?? '' })
   const [ings, setIngs] = useState<typeof BLANK_ING[]>(
     existingIngs?.length ? existingIngs.map(i => ({ ingredient_code: i.ingredient_code||'', ingredient_name: i.ingredient_name, percentage: String(i.percentage), kg_per_1000: i.kg_per_1000 != null ? String(i.kg_per_1000) : '' }))
     : [{ ...BLANK_ING }]
@@ -369,6 +375,7 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; onSave: (d: an
       age_week_from: form.age_week_from !== '' ? Number(form.age_week_from) : null,
       age_week_to: form.age_week_to !== '' ? Number(form.age_week_to) : null,
       version: Number(form.version),
+      feed_type_id: form.feed_type_id || null,
       ingredients: ings,
     })
   }
@@ -390,6 +397,12 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; onSave: (d: an
         <Field label="Week From"><Input type="number" step="0.1" value={form.age_week_from} onChange={s('age_week_from')} /></Field>
         <Field label="Week To"><Input type="number" step="0.1" value={form.age_week_to} onChange={s('age_week_to')} /></Field>
       </div>
+      <Field label="Feed Type (Master Code)">
+        <Sel value={form.feed_type_id} onChange={s('feed_type_id')} placeholder="— Link to Feed Type Master —">
+          {feedTypes.map((ft: any) => <option key={ft.id} value={ft.id}>{ft.code} — {ft.name}</option>)}
+        </Sel>
+        <p className="text-xs text-gray-400 mt-0.5">Links this formula to a feed type code (BCM, L1, etc.) used in daily flock feeding</p>
+      </Field>
       <Field label="Notes"><Input value={form.notes||''} onChange={s('notes')} /></Field>
 
       {/* Inline ingredient entry */}
@@ -472,7 +485,7 @@ const ProductionTab: React.FC = () => {
   const [fFarm, setFFarm] = useState('')
 
   const { data: farms = [] } = useQuery({ queryKey:['farms'], queryFn: async () => { const {data} = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[] }})
-  const { data: formulas = [] } = useQuery({ queryKey:['feed_formulas'], queryFn: async () => { const {data} = await supabase.from('feed_formulas').select('id,formula_code,formula_name').eq('is_active',true).order('formula_code'); return data??[] }})
+  const { data: formulas = [] } = useQuery({ queryKey:['feed_formulas'], queryFn: async () => { const {data} = await supabase.from('feed_formulas').select('id,formula_code,formula_name,feed_types(code,name)').eq('is_active',true).order('formula_code'); return data??[] }})
   const { data: allIngredients = {} } = useQuery({
     queryKey:['feed_formula_ingredients'],
     queryFn: async () => {
@@ -576,7 +589,11 @@ const ProductionTab: React.FC = () => {
             {logs.map((l: any) => (
               <tr key={l.id} className="hover:bg-gray-50">
                 <Td>{fmtDate(l.production_date)}</Td>
-                <Td><span className="font-medium">{l.feed_formulas?.formula_code}</span><br/><span className="text-xs text-gray-500">{l.feed_formulas?.formula_name}</span></Td>
+                <Td>
+                  <span className="font-medium">{l.feed_formulas?.formula_code}</span>
+                  {l.feed_formulas?.feed_types && <span className="ml-1.5 text-xs font-semibold text-green-700 bg-green-50 px-1 py-0.5 rounded">{(l.feed_formulas.feed_types as any).code}</span>}
+                  <br/><span className="text-xs text-gray-500">{l.feed_formulas?.formula_name}</span>
+                </Td>
                 <Td>{l.farms?.code ?? l.farms?.name ?? '—'}</Td>
                 <Td className="font-semibold">{Number(l.quantity_kg).toLocaleString()}</Td>
                 <Td className="text-xs text-gray-500">{(l.feed_production_ingredients??[]).length} items</Td>
@@ -666,7 +683,7 @@ const ProductionForm: React.FC<{
       <div className="grid grid-cols-2 gap-3">
         <Field label="Formula">
           <Sel value={form.formula_id} onChange={e => handleFormulaChange(e.target.value)} placeholder="Select Formula">
-            {formulas.map((f:any) => <option key={f.id} value={f.id}>{f.formula_code} – {f.formula_name}</option>)}
+            {formulas.map((f:any) => <option key={f.id} value={f.id}>{f.formula_code}{(f.feed_types as any)?.code ? ` [${(f.feed_types as any).code}]` : ''} – {f.formula_name}</option>)}
           </Sel>
         </Field>
         <Field label="Quantity (Kg) *">

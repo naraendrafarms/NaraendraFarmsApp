@@ -51,6 +51,9 @@ jobs:
       - name: Run migration 035
         run: python3 scripts/run_sql.py supabase/migrations/035_reload_schema.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 037
+        run: python3 scripts/run_sql.py supabase/migrations/037_feedformula_feedtype_link.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Run migration 036
         run: python3 scripts/run_sql.py supabase/migrations/036_feed_stock_adjustments.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
