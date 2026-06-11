@@ -92,10 +92,14 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   signIn: async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) return error.message
-    if (data.user) await get().loadProfile(data.user.id)
-    return null
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) return error.message
+      if (data.user) await get().loadProfile(data.user.id).catch(() => {})
+      return null
+    } catch (e: any) {
+      return e?.message ?? 'Login failed'
+    }
   },
 
   signOut: async () => {

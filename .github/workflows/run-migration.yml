@@ -57,6 +57,11 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.SUPABASE_MGMT_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{"query":"NOTIFY pgrst, '\''reload schema'\''"}' && echo "Schema reloaded"
+      - name: Restart Supabase services (fixes GoTrue auth errors)
+        run: |
+          curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/services/restart" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_MGMT_TOKEN }}" \
+            -H "Content-Type: application/json" && echo "Services restarted"
       - name: Import NBF Excel PO data (all FY)
         run: python3 scripts/import_nbf_excel.py
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
