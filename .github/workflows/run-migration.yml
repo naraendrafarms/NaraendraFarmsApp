@@ -42,6 +42,9 @@ jobs:
       - name: Run migration 032
         run: python3 scripts/run_sql.py supabase/migrations/032_fix_admin_create_user.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 033
+        run: python3 scripts/run_sql.py supabase/migrations/033_fix_auth_user_insert.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Import NBF Excel PO data (all FY)
         run: python3 scripts/import_nbf_excel.py
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
