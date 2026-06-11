@@ -45,6 +45,7 @@ const NAV: NavItem[] = [
       { label: 'Feed Production', to: '/feed/production' },
       { label: 'Feed Transfer',   to: '/feed/transfer' },
       { label: 'Stock Status',    to: '/feed/stock' },
+      { label: 'Feed Mill',       to: '/feed/mill' },
     ]
   },
   {
