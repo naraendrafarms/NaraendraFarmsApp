@@ -30,6 +30,9 @@ jobs:
       - name: Run migration 028
         run: python3 scripts/run_sql.py supabase/migrations/028_feedmill.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 029
+        run: python3 scripts/run_sql.py supabase/migrations/029_formulas_vacc_schedule.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Import NBF Excel PO data (all FY)
         run: python3 scripts/import_nbf_excel.py
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }

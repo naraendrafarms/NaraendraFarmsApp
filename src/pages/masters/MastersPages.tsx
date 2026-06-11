@@ -824,3 +824,51 @@ export const FeedTypesMaster: React.FC = () => {
     </>
   )
 }
+
+// ══════════════════════════════════════════════════════════════════
+// VACCINATION SCHEDULE MASTER
+// ══════════════════════════════════════════════════════════════════
+export const VaccinationSchedulePage: React.FC = () => {
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['vaccination_schedule'],
+    queryFn: async () => {
+      const { data } = await supabase.from('vaccination_schedule').select('*').order('sno')
+      return data ?? []
+    }
+  })
+
+  function handleExport() {
+    exportCSV('vaccination_schedule.csv',
+      ['S.No','Age','Vaccine Name','Dose','Route','Product'],
+      rows.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose??'', r.route??'', r.product??'']))
+  }
+
+  const routeColor: Record<string,any> = { 'S/C':'blue','I/M':'red','I/O':'green','D/W':'yellow','N/D':'orange','W/W':'gray' }
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader title="Vaccination Schedule" subtitle="Narendra Breeder — Recommended Schedule (67 entries)" action={
+        <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export CSV</Button>
+      } />
+      {isLoading ? <Spinner /> : rows.length === 0 ? <EmptyState title="No schedule data. Run migration 029 first." /> : (
+        <Table>
+          <thead><tr>
+            <Th>S.No</Th><Th>Age</Th><Th>Vaccine / Treatment</Th><Th>Dose</Th><Th>Route</Th><Th>Product</Th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r: any) => (
+              <tr key={r.id} className="hover:bg-gray-50">
+                <Td className="text-gray-400 text-xs font-mono">{r.sno}</Td>
+                <Td><span className="font-semibold text-sm">{r.age_label}</span></Td>
+                <Td className="font-medium">{r.vaccine_name}</Td>
+                <Td className="text-sm text-gray-600">{r.dose}</Td>
+                <Td>{r.route ? <Badge color={routeColor[r.route] ?? 'gray'}>{r.route}</Badge> : null}</Td>
+                <Td className="text-sm text-gray-600">{r.product}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </div>
+  )
+}

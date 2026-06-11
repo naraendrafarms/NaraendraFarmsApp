@@ -18,7 +18,7 @@ import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
 import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage } from '@/pages/employees/EmployeePages'
 import {
   FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster,
-  ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster
+  ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster, VaccinationSchedulePage
 } from '@/pages/masters/MastersPages'
 import { ImportDaily, ImportElectricity, ImportSalary, ImportHE, ImportGRN } from '@/pages/import/ImportPages'
 import { HatchabilityPage } from '@/pages/hatchability/HatchabilityPage'
@@ -124,6 +124,7 @@ export const App: React.FC = () => {
             <Route path="masters/hatcheries" element={<HatcheriesMaster />} />
             <Route path="masters/medicines" element={<MedicinesMaster />} />
             <Route path="masters/meters" element={<MetersMaster />} />
+            <Route path="masters/vaccination" element={<VaccinationSchedulePage />} />
 
             {/* Reports */}
             <Route path="hatchability" element={<HatchabilityPage />} />

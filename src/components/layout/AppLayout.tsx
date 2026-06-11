@@ -78,6 +78,7 @@ const NAV: NavItem[] = [
       { label: 'Sheds',               to: '/masters/sheds' },
       { label: 'Feed Ingredients',    to: '/masters/ingredients' },
       { label: 'Feed Types',          to: '/masters/feed-types' },
+      { label: 'Vaccination Schedule',to: '/masters/vaccination' },
       { label: 'Parties',             to: '/masters/parties' },
       { label: 'Hatcheries',          to: '/masters/hatcheries' },
       { label: 'Medicines',           to: '/masters/medicines' },
