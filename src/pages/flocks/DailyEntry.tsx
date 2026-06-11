@@ -8,7 +8,12 @@ import {
   SectionHeader, Spinner, Badge
 } from '@/components/ui'
 import toast from 'react-hot-toast'
-import { Save, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Save, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+
+function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
+  const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
+}
 
 const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK']
 
@@ -192,9 +197,22 @@ export const DailyEntry: React.FC = () => {
   const hdPct = openF>0 ? (totalEggs/openF*100).toFixed(1)+'%' : '—'
   const hePct = totalEggs>0 ? (heEggs/totalEggs*100).toFixed(1)+'%' : '—'
 
+  const handleExport = async () => {
+    if (!selectedFlock) { toast.error('Select a flock first'); return }
+    const { data } = await supabase.from('daily_records')
+      .select('*').eq('flock_id', selectedFlock).order('record_date')
+    if (!data?.length) { toast.error('No records to export'); return }
+    exportCSV(`daily_${selectedFlockData?.flock_no}_records.csv`,
+      ['date','opening_f','opening_m','feed_f_kg','feed_type_f','feed_m_kg','feed_type_m','total_eggs','he_eggs','je_eggs','te_eggs','be_eggs','le_eggs','trcull_f','trcull_m','mortality_f','mortality_m','closing_f','closing_m','lighting_hrs','age_weeks','remarks'],
+      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.total_eggs,r.he_eggs,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.trcull_female,r.trcull_male,r.mortality_female,r.mortality_male,r.closing_female,r.closing_male,r.lighting_hrs,r.age_weeks,r.remarks])
+    )
+  }
+
   return (
     <div className="space-y-5">
-      <SectionHeader title="Daily Flock Entry" subtitle="Enter daily production and bird movement data" />
+      <SectionHeader title="Daily Flock Entry" subtitle="Enter daily production and bird movement data"
+        action={<Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export Flock CSV</Button>}
+      />
 
       {/* Flock + Date selector */}
       <Card>

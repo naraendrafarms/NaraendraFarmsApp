@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
@@ -6,14 +6,22 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 } from '@/components/ui'
-import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2 } from 'lucide-react'
+import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+// ── CSV helper ────────────────────────────────────────────────────
+function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
+  const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
+}
 
 // ── GRN ENTRY ────────────────────────────────────────────────────
 export const GRNEntry: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
+  const [importing, setImporting] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
 
   // Filters
   const [fFarm,    setFFarm]    = useState('')
@@ -153,11 +161,82 @@ export const GRNEntry: React.FC = () => {
   const totalVal = grns.reduce((s: number, g: any) => s + (g.total_amount ?? 0), 0)
   const hasFilter = fFarm || fParties.length > 0 || fItem || fFrom || fTo
 
+  const handleExport = () => {
+    exportCSV(`grn_export.csv`,
+      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','basic_amount','gst_pct','total_amount','vehicle_no','remarks'],
+      grns.map((g: any) => [g.grn_no, g.grn_date, g.farms?.code, g.parties?.name, g.invoice_no, g.invoice_date, g.feed_ingredients?.name??g.item_name, g.qty, g.unit, g.bags, g.price_per_unit, g.basic_amount, g.gst_pct, g.total_amount, g.vehicle_no, g.remarks])
+    )
+  }
+
+  const handleTemplate = () => {
+    exportCSV('grn_template.csv',
+      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','gst_pct','vehicle_no','remarks'],
+      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize',10000,'kg',200,22.5,5,'TN01AB1234','']]
+    )
+  }
+
+  const handleImport = async (file: File) => {
+    setImporting(true)
+    try {
+      const text = await file.text()
+      const lines = text.trim().split('\n')
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
+      const records = lines.slice(1).map(line => {
+        const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
+        const obj: Record<string,string> = {}
+        headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
+        return obj
+      })
+      const { data: allFarms } = await supabase.from('farms').select('id,code')
+      const { data: allParties } = await supabase.from('parties').select('id,name')
+      const { data: allIngr } = await supabase.from('feed_ingredients').select('id,name')
+      const farmMap: Record<string,string> = {}
+      const partyMap: Record<string,string> = {}
+      const ingrMap: Record<string,string> = {}
+      for (const f of (allFarms??[])) farmMap[f.code.toLowerCase()] = f.id
+      for (const p of (allParties??[])) partyMap[p.name.toLowerCase()] = p.id
+      for (const i of (allIngr??[])) ingrMap[i.name.toLowerCase()] = i.id
+      const toInsert = records.filter(r => r.grn_no && r.grn_date).map(r => ({
+        grn_no: r.grn_no,
+        grn_date: r.grn_date,
+        farm_id: farmMap[r.site_code?.toLowerCase()] || null,
+        party_id: partyMap[r.party_name?.toLowerCase()] || null,
+        invoice_no: r.invoice_no || null,
+        invoice_date: r.invoice_date || null,
+        ingredient_id: ingrMap[r.item_name?.toLowerCase()] || null,
+        item_name: r.item_name || null,
+        qty: parseFloat(r.qty) || null,
+        unit: r.unit || 'kg',
+        bags: parseInt(r.bags) || null,
+        price_per_unit: parseFloat(r.price_per_unit) || null,
+        basic_amount: parseFloat(r.qty) && parseFloat(r.price_per_unit) ? parseFloat(r.qty)*parseFloat(r.price_per_unit) : null,
+        gst_pct: parseFloat(r.gst_pct) || 0,
+        total_amount: parseFloat(r.qty) && parseFloat(r.price_per_unit) ? parseFloat(r.qty)*parseFloat(r.price_per_unit)*(1+(parseFloat(r.gst_pct)||0)/100) : null,
+        vehicle_no: r.vehicle_no || null,
+        remarks: r.remarks || null,
+      }))
+      if (!toInsert.length) { toast.error('No valid rows'); return }
+      const { error } = await supabase.from('grn').insert(toInsert)
+      if (error) throw error
+      toast.success(`Imported ${toInsert.length} GRN records`)
+      qc.invalidateQueries({ queryKey: ['grns'] })
+    } catch (e: any) { toast.error(e.message) }
+    finally { setImporting(false); if (importRef.current) importRef.current.value = '' }
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="GRN — Goods Received"
         subtitle={`${grns.length} of ${allGrns?.length ?? 0} records`}
-        action={<Button icon={<Plus size={16}/>} onClick={openAdd}>Add GRN</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTemplate}>Template</Button>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => importRef.current?.click()}>Import CSV</Button>
+            <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }}/>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+            <Button icon={<Plus size={16}/>} onClick={openAdd}>Add GRN</Button>
+          </div>
+        }
       />
 
       {/* Filters */}

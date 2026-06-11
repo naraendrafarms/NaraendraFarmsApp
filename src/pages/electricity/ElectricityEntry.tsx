@@ -6,8 +6,13 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, SectionHeader, Spinner, EmptyState
 } from '@/components/ui'
-import { Plus, Zap, Edit2 } from 'lucide-react'
+import { Plus, Zap, Edit2, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
+  const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
+}
 
 export const ElectricityEntry: React.FC = () => {
   const qc = useQueryClient()
@@ -106,12 +111,32 @@ export const ElectricityEntry: React.FC = () => {
   const totalThisMonth = bills?.filter((b:any) => b.bill_month?.slice(0,7) === filterMonth)
     .reduce((s:number,b:any) => s+b.amount, 0)
 
+  const handleExport = () => {
+    exportCSV('electricity_bills.csv',
+      ['meter_name','usc_no','site','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','paid_date','remarks'],
+      (bills??[]).map((b: any) => [b.electricity_meters?.meter_name, b.electricity_meters?.usc_no, b.electricity_meters?.farms?.name, b.bill_month?.slice(0,7), b.units_consumed, b.amount, b.acd_dc_due, b.deposit_amount, b.paid_date, b.remarks])
+    )
+  }
+
+  const handleTemplate = () => {
+    exportCSV('electricity_bills_template.csv',
+      ['meter_name','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','paid_date','remarks'],
+      [['Main Meter BPS','2025-06','1250','18500','0','0','2025-06-15','']]
+    )
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader
         title="Electricity Bills"
         subtitle="Enter and manage electricity bills for all meters"
-        action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Bill</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTemplate}>Template</Button>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+            <Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Bill</Button>
+          </div>
+        }
       />
 
       {/* Meter summary cards */}

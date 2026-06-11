@@ -1,12 +1,17 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
 } from '@/components/ui'
-import { Plus, Edit2, Settings, Trash2, Merge } from 'lucide-react'
+import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
+  const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
+}
 
 // ── SHARED BULK HELPERS ──────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
@@ -38,10 +43,16 @@ const MasterTable: React.FC<{
   onEdit: (row: any) => void
   onAdd: () => void
   loading: boolean
-}> = ({ title, subtitle, columns, data, onEdit, onAdd, loading }) => (
+  headerAction?: React.ReactNode
+}> = ({ title, subtitle, columns, data, onEdit, onAdd, loading, headerAction }) => (
   <div className="space-y-4">
     <SectionHeader title={title} subtitle={subtitle}
-      action={<Button icon={<Plus size={16}/>} onClick={onAdd}>Add {title.replace(/s$/,'')}</Button>}
+      action={
+        <div className="flex gap-2 items-center">
+          {headerAction}
+          <Button icon={<Plus size={16}/>} onClick={onAdd}>Add {title.replace(/s$/,'')}</Button>
+        </div>
+      }
     />
     {loading ? <Spinner/> : (
       <Card padding={false}>
@@ -211,6 +222,7 @@ export const PartiesMaster: React.FC = () => {
   const [filterName,   setFilterName]   = useState('')
   const [filterType,   setFilterType]   = useState('')
   const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:''})
+  const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
   const {data:allData,isLoading}=useQuery({queryKey:['parties'],queryFn:async()=>{const{data}=await supabase.from('parties').select('*').order('created_at',{ascending:false});return data??[]}})
@@ -284,11 +296,49 @@ export const PartiesMaster: React.FC = () => {
   const toggle=(id:string)=>setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
   const toggleAll=()=>setSel(s=>{const n=new Set(s);allSel?partyIds.forEach((id:string)=>n.delete(id)):partyIds.forEach((id:string)=>n.add(id));return n})
 
+  const handleExportParties = () => {
+    exportCSV('parties.csv',
+      ['name','type','category','contact','address','gstin'],
+      (allData??[]).map((r:any)=>[r.name,r.type,r.category,r.contact,r.address,r.gstin])
+    )
+  }
+
+  const handleImportParties = async (file: File) => {
+    const text = await file.text()
+    const lines = text.trim().split('\n')
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
+    const records = lines.slice(1).map(line => {
+      const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
+      const obj: Record<string,string> = {}
+      headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
+      return obj
+    })
+    const toUpsert = records.filter(r=>r.name).map(r=>({
+      name: r.name, type: r.type||'supplier',
+      category: r.category||null, contact: r.contact||null,
+      address: r.address||null, gstin: r.gstin||null,
+    }))
+    if (!toUpsert.length) { toast.error('No valid rows'); return }
+    const { error } = await supabase.from('parties').upsert(toUpsert, { onConflict: 'name,type', ignoreDuplicates: true })
+    if (error) { toast.error(error.message); return }
+    toast.success(`Imported ${toUpsert.length} parties`)
+    qc.invalidateQueries({ queryKey: ['parties'] })
+    if (importRef.current) importRef.current.value = ''
+  }
+
   return (
     <>
       <div className="space-y-4">
         <SectionHeader title="Parties" subtitle="Buyers and suppliers"
-          action={<Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Party</Button>} />
+          action={
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('parties_template.csv',['name','type','category','contact','address','gstin'],[['NBF Feeds Ltd','supplier','Feed','9876543210','Chennai','29ABCDE1234F1Z5']])}>Template</Button>
+              <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
+              <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportParties(f)}}/>
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportParties}>Export CSV</Button>
+              <Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Party</Button>
+            </div>
+          } />
         <div className="flex gap-3 flex-wrap">
           <Input label="" placeholder="Search by name…" value={filterName} onChange={e=>setFilterName(e.target.value)} className="w-52"/>
           <Select label="" placeholder="All Types" options={['buyer','supplier','both']} value={filterType} onChange={e=>setFilterType(e.target.value)} className="w-36"/>
@@ -394,6 +444,7 @@ export const MedicinesMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({name:'',type:'medicine',unit:'ml',manufacturer:'',rate:''})
+  const medImportRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
   const {data,isLoading}=useQuery({queryKey:['medicines'],queryFn:async()=>{const{data}=await supabase.from('medicines_master').select('*').order('name');return data??[]}})
@@ -417,10 +468,47 @@ export const MedicinesMaster: React.FC = () => {
 
   const typeColors:Record<string,any>={medicine:'blue',vaccine:'green',supplement:'yellow',disinfectant:'red',other:'gray'}
 
+  const handleExportMeds = () => {
+    exportCSV('medicines_master.csv',
+      ['name','type','unit','manufacturer','rate'],
+      (data??[]).map((r:any)=>[r.name,r.type,r.unit,r.manufacturer,r.rate])
+    )
+  }
+
+  const handleImportMeds = async (file: File) => {
+    const text = await file.text()
+    const lines = text.trim().split('\n')
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
+    const records = lines.slice(1).map(line => {
+      const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g,''))
+      const obj: Record<string,string> = {}
+      headers.forEach((h,i) => { obj[h] = vals[i] ?? '' })
+      return obj
+    })
+    const toUpsert = records.filter(r=>r.name).map(r=>({
+      name: r.name, type: r.type||'medicine', unit: r.unit||'ml',
+      manufacturer: r.manufacturer||null, rate: parseFloat(r.rate)||null,
+    }))
+    if (!toUpsert.length) { toast.error('No valid rows'); return }
+    const { error } = await supabase.from('medicines_master').upsert(toUpsert, { onConflict: 'name', ignoreDuplicates: true })
+    if (error) { toast.error(error.message); return }
+    toast.success(`Imported ${toUpsert.length} medicines`)
+    qc.invalidateQueries({ queryKey: ['medicines'] })
+    if (medImportRef.current) medImportRef.current.value = ''
+  }
+
   return (
     <>
       <MasterTable title="Medicines & Vaccines" subtitle="Medical and vaccine inventory" loading={isLoading}
         data={data??[]} onAdd={()=>open()} onEdit={open}
+        headerAction={
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('medicines_template.csv',['name','type','unit','manufacturer','rate'],[['Newcastle Vaccine','vaccine','dose','Zoetis','15']])}>Template</Button>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>medImportRef.current?.click()}>Import CSV</Button>
+            <input ref={medImportRef} type="file" accept=".csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportMeds(f)}}/>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportMeds}>Export CSV</Button>
+          </div>
+        }
         columns={[
           {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
           {label:'Type',key:'type',render:r=><Badge color={typeColors[r.type]??'gray'}>{r.type}</Badge>},

@@ -10,6 +10,12 @@ import {
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+// ── CSV helper ────────────────────────────────────────────────────
+function exportFlatCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
+  const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
+}
+
 // ── Bulk selection helpers ────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
   const ref = React.useRef<HTMLInputElement>(null)
@@ -871,11 +877,40 @@ export const MedicineEntry: React.FC = () => {
   const toggleUsage = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAllUsage = () => setSel(s => { const n = new Set(s); allUsageSel ? usageIds.forEach((id: string) => n.delete(id)) : usageIds.forEach((id: string) => n.add(id)); return n })
 
+  const handleExportMed = () => {
+    const rows = tab === 'daily' ? usage : monthly
+    if (!rows?.length) { toast.error('No data to export'); return }
+    if (tab === 'daily') {
+      exportFlatCSV(`medicine_usage.csv`,
+        ['flock_no','usage_date','medicine','qty','unit','rate','amount','remarks'],
+        (usage??[]).map((u:any)=>[u.flocks?.flock_no, u.usage_date, u.medicines_master?.name, u.quantity, u.unit, u.rate, u.amount, u.remarks])
+      )
+    } else {
+      exportFlatCSV(`medicine_monthly.csv`,
+        ['flock_no','month','total_amount','remarks'],
+        (monthly??[]).map((m:any)=>[m.flocks?.flock_no, m.month?.slice(0,7), m.total_amount, m.remarks])
+      )
+    }
+  }
+
+  const handleTemplateMed = () => {
+    exportFlatCSV('medicine_usage_template.csv',
+      ['flock_no','usage_date','medicine_name','quantity','unit','rate','remarks'],
+      [['101','2025-06-01','Newcastle Vaccine','50','dose','12','Regular vaccination']]
+    )
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Medicine & Vaccine"
         subtitle="Record medicine usage and monthly totals"
-        action={<Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add Entry</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTemplateMed}>Template</Button>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportMed}>Export CSV</Button>
+            <Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add Entry</Button>
+          </div>
+        }
       />
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
