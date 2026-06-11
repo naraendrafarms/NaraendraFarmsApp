@@ -40,11 +40,10 @@ const NAV: NavItem[] = [
   {
     label: 'Feed Mill', icon: <Factory size={18}/>,
     children: [
-      { label: 'Feed Dashboard',  to: '/feed' },
-      { label: 'GRN Entry',       to: '/feed/grn' },
-      { label: 'Feed Production', to: '/feed/production' },
-      { label: 'Feed Transfer',   to: '/feed/transfer' },
-      { label: 'Stock Status',    to: '/feed/stock' },
+      { label: 'Feed Dashboard',       to: '/feed' },
+      { label: 'GRN Entry',            to: '/feed/grn' },
+      { label: 'Feed Transfer',        to: '/feed/transfer' },
+      { label: 'Stock Status',         to: '/feed/stock' },
       { label: 'Formula & Production', to: '/feed/mill' },
     ]
   },
