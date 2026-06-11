@@ -6,7 +6,7 @@ import {
   Card, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 } from '@/components/ui'
-import { Plus, Edit2, Shield, UserCheck, UserX } from 'lucide-react'
+import { Plus, Edit2, Shield, UserCheck, UserX, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const ROLES: { value: Role; label: string; desc: string }[] = [
@@ -105,6 +105,18 @@ export const UserManagement: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  const deleteUser = async (u: any) => {
+    if (!confirm(`Delete user "${u.full_name}"? This cannot be undone.`)) return
+    const { error } = await supabase.rpc('admin_delete_user', { p_user_id: u.id })
+    if (error) {
+      // fallback: just delete from profiles if RPC doesn't exist
+      const { error: e2 } = await supabase.from('profiles').delete().eq('id', u.id)
+      if (e2) { toast.error(e2.message); return }
+    }
+    toast.success('User deleted')
+    qc.invalidateQueries({ queryKey: ['users_admin'] })
+  }
+
   const toggleActive = async (u: any) => {
     const { error } = await supabase.from('profiles').update({ is_active: !u.is_active }).eq('id', u.id)
     if (error) toast.error(error.message)
@@ -164,10 +176,15 @@ export const UserManagement: React.FC = () => {
                         <Edit2 size={13} />
                       </button>
                       {u.id !== myProfile?.id && (
-                        <button onClick={() => toggleActive(u)} className={`p-1.5 rounded transition-colors ${u.is_active ? 'hover:bg-red-50 text-gray-400 hover:text-red-500' : 'hover:bg-green-50 text-gray-400 hover:text-green-600'}`}
-                          title={u.is_active ? 'Deactivate' : 'Activate'}>
-                          {u.is_active ? <UserX size={13}/> : <UserCheck size={13}/>}
-                        </button>
+                        <>
+                          <button onClick={() => toggleActive(u)} className={`p-1.5 rounded transition-colors ${u.is_active ? 'hover:bg-red-50 text-gray-400 hover:text-red-500' : 'hover:bg-green-50 text-gray-400 hover:text-green-600'}`}
+                            title={u.is_active ? 'Deactivate' : 'Activate'}>
+                            {u.is_active ? <UserX size={13}/> : <UserCheck size={13}/>}
+                          </button>
+                          <button onClick={() => deleteUser(u)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors" title="Delete user">
+                            <Trash2 size={13}/>
+                          </button>
+                        </>
                       )}
                     </div>
                   </Td>
