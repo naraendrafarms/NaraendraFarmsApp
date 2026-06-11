@@ -69,6 +69,9 @@ const FormulasTab: React.FC = () => {
   const [expanded, setExpanded] = useState<string|null>(null)
   const [editIngredient, setEditIngredient] = useState<any>(null)
   const [showAddIngredient, setShowAddIngredient] = useState<string|null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [fSearch, setFSearch] = useState('')
+  const [fType, setFType] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
 
   const { data: formulas = [], isLoading } = useQuery({
@@ -90,17 +93,47 @@ const FormulasTab: React.FC = () => {
     }
   })
 
+  // filtered list
+  const filtered = formulas.filter((f: any) => {
+    const q = fSearch.toLowerCase()
+    const matchQ = !q || f.formula_code?.toLowerCase().includes(q) || f.formula_name?.toLowerCase().includes(q)
+    const matchT = !fType || f.flock_type === fType
+    return matchQ && matchT
+  })
+
+  const allChecked = filtered.length > 0 && filtered.every((f: any) => selected.has(f.id))
+  const toggleAll = () => {
+    if (allChecked) setSelected(new Set())
+    else setSelected(new Set(filtered.map((f: any) => f.id)))
+  }
+  const toggleOne = (id: string) => setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+
   const saveMut = useMutation({
     mutationFn: async (d: any) => {
-      if (d.id) {
-        const { error } = await supabase.from('feed_formulas').update(d).eq('id', d.id)
+      const { ingredients: ings, ...fData } = d
+      let fId = fData.id
+      if (fId) {
+        const { error } = await supabase.from('feed_formulas').update(fData).eq('id', fId)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('feed_formulas').insert(d)
+        const { data: ins, error } = await supabase.from('feed_formulas').insert(fData).select('id').single()
         if (error) throw error
+        fId = ins.id
+      }
+      // save ingredients if provided inline
+      if (ings) {
+        await supabase.from('feed_formula_ingredients').delete().eq('formula_id', fId)
+        const rows = ings.filter((i: any) => i.ingredient_name?.trim()).map((i: any, idx: number) => ({
+          formula_id: fId, ingredient_name: i.ingredient_name.trim(),
+          ingredient_code: i.ingredient_code || null,
+          percentage: Number(i.percentage) || 0,
+          kg_per_1000: i.kg_per_1000 !== '' ? Number(i.kg_per_1000) : null,
+          sort_order: idx + 1,
+        }))
+        if (rows.length) { const { error } = await supabase.from('feed_formula_ingredients').insert(rows); if (error) throw error }
       }
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); setShowForm(false); setEditing(null); toast.success('Saved') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setShowForm(false); setEditing(null); toast.success('Saved') }
   })
 
   const delMut = useMutation({
@@ -110,6 +143,13 @@ const FormulasTab: React.FC = () => {
     },
     onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); toast.success('Deleted') }
   })
+
+  const bulkDelete = async () => {
+    if (!confirm(`Delete ${selected.size} formula(s)? This cannot be undone.`)) return
+    for (const id of selected) await supabase.from('feed_formulas').delete().eq('id', id)
+    qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']})
+    setSelected(new Set()); toast.success(`Deleted ${selected.size} formula(s)`)
+  }
 
   const saveIngMut = useMutation({
     mutationFn: async (d: any) => {
@@ -164,8 +204,7 @@ const FormulasTab: React.FC = () => {
       let fId = fRows?.[0]?.id
       if (!fId) {
         const { data: ins } = await supabase.from('feed_formulas').insert({
-          formula_code: fc,
-          formula_name: vals[col('formula_name')] || fc,
+          formula_code: fc, formula_name: vals[col('formula_name')] || fc,
           flock_type: vals[col('flock_type')] || 'Breeder',
           age_week_from: vals[col('age_week_from')] ? Number(vals[col('age_week_from')]) : null,
           age_week_to: vals[col('age_week_to')] ? Number(vals[col('age_week_to')]) : null,
@@ -176,10 +215,8 @@ const FormulasTab: React.FC = () => {
       const ingName = vals[col('ingredient_name')]?.trim()
       if (!fId || !ingName) continue
       await supabase.from('feed_formula_ingredients').upsert({
-        formula_id: fId,
-        ingredient_code: vals[col('ingredient_code')] || null,
-        ingredient_name: ingName,
-        percentage: Number(vals[col('percentage')]) || 0,
+        formula_id: fId, ingredient_code: vals[col('ingredient_code')] || null,
+        ingredient_name: ingName, percentage: Number(vals[col('percentage')]) || 0,
         kg_per_1000: vals[col('kg_per_1000')] ? Number(vals[col('kg_per_1000')]) : null,
         sort_order: vals[col('sort_order')] ? Number(vals[col('sort_order')]) : 0,
       }, { onConflict: 'formula_id,ingredient_name', ignoreDuplicates: false })
@@ -197,20 +234,41 @@ const FormulasTab: React.FC = () => {
           <Button size="sm" variant="outline" onClick={handleTemplate}><Download size={14}/> Template</Button>
           <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}><Upload size={14}/> Import</Button>
           <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export</Button>
+          {selected.size > 0 && <Button size="sm" variant="outline" onClick={bulkDelete} className="text-red-600 border-red-300"><Trash2 size={14}/> Delete ({selected.size})</Button>}
           <Button size="sm" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={14}/> Add Formula</Button>
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
         </div>
       } />
 
-      {isLoading ? <Spinner /> : formulas.length === 0 ? <EmptyState title="No formulas yet" /> : (
+      {/* Filter bar */}
+      <Card>
+        <div className="flex flex-wrap gap-3 p-3 items-center">
+          <Input placeholder="Search code or name…" value={fSearch} onChange={e => setFSearch(e.target.value)} className="w-48 text-sm" />
+          <Sel value={fType} onChange={e => setFType(e.target.value)} className="w-36 text-sm" placeholder="All Types">
+            <option value="Breeder">Breeder</option>
+            <option value="Broiler">Broiler</option>
+            <option value="Layer">Layer</option>
+          </Sel>
+          {(fSearch || fType) && <Button size="sm" variant="ghost" onClick={() => { setFSearch(''); setFType('') }}>Clear</Button>}
+          <span className="text-xs text-gray-400 ml-auto">{filtered.length} formula(s)</span>
+        </div>
+      </Card>
+
+      {isLoading ? <Spinner /> : filtered.length === 0 ? <EmptyState title="No formulas found" /> : (
         <div className="space-y-3">
-          {formulas.map((f: any) => {
+          {/* Select all row */}
+          <div className="flex items-center gap-2 px-1">
+            <input type="checkbox" checked={allChecked} onChange={toggleAll} className="w-4 h-4 rounded accent-green-600 cursor-pointer" />
+            <span className="text-xs text-gray-500">Select all ({filtered.length})</span>
+          </div>
+          {filtered.map((f: any) => {
             const ings = ingredients[f.id] ?? []
             const isOpen = expanded === f.id
             return (
               <Card key={f.id}>
-                <div className="flex items-center justify-between px-4 py-3 cursor-pointer" onClick={() => setExpanded(isOpen ? null : f.id)}>
-                  <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center justify-between px-4 py-3">
+                  <div className="flex items-center gap-3 flex-wrap flex-1 cursor-pointer" onClick={() => setExpanded(isOpen ? null : f.id)}>
+                    <input type="checkbox" checked={selected.has(f.id)} onClick={e => e.stopPropagation()} onChange={() => toggleOne(f.id)} className="w-4 h-4 rounded accent-green-600 cursor-pointer" />
                     {isOpen ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
                     <span className="font-semibold text-gray-800">{f.formula_code}</span>
                     <span className="text-gray-600 text-sm">{f.formula_name}</span>
@@ -219,7 +277,7 @@ const FormulasTab: React.FC = () => {
                     <span className="text-xs text-gray-400">v{f.version} · {ings.length} ingredients</span>
                   </div>
                   <div className="flex gap-2" onClick={e => e.stopPropagation()}>
-                    <Button size="sm" variant="outline" onClick={() => setShowAddIngredient(f.id)}><Plus size={13}/></Button>
+                    <Button size="sm" variant="outline" title="Add ingredient" onClick={() => setShowAddIngredient(f.id)}><Plus size={13}/></Button>
                     <Button size="sm" variant="outline" onClick={() => { setEditing(f); setShowForm(true) }}><Edit2 size={13}/></Button>
                     <Button size="sm" variant="ghost" onClick={() => { if (confirm('Delete formula and all its ingredients?')) delMut.mutate(f.id) }}><Trash2 size={13} className="text-red-500"/></Button>
                   </div>
@@ -269,8 +327,8 @@ const FormulasTab: React.FC = () => {
         </div>
       )}
 
-      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }} title={editing ? 'Edit Formula' : 'Add Formula'} size="md">
-        <FormulaForm initial={editing} onSave={(d: any) => saveMut.mutate(d)} loading={saveMut.isPending} />
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }} title={editing ? 'Edit Formula' : 'Add Formula'} size="lg">
+        <FormulaForm initial={editing} existingIngs={editing ? ingredients[editing.id] : undefined} onSave={(d: any) => saveMut.mutate(d)} loading={saveMut.isPending} />
       </Modal>
       <Modal open={!!showAddIngredient} onClose={() => setShowAddIngredient(null)} title="Add Ingredient" size="md">
         <IngredientForm formulaId={showAddIngredient!} initial={null} onSave={(d: any) => saveIngMut.mutate(d)} loading={saveIngMut.isPending} />
@@ -282,15 +340,33 @@ const FormulasTab: React.FC = () => {
   )
 }
 
-const FormulaForm: React.FC<{ initial: any; onSave: (d: any) => void; loading: boolean }> = ({ initial, onSave, loading }) => {
+const BLANK_ING = { ingredient_code: '', ingredient_name: '', percentage: '', kg_per_1000: '' }
+
+const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; onSave: (d: any) => void; loading: boolean }> = ({ initial, existingIngs, onSave, loading }) => {
   const [form, setForm] = useState({ formula_code:'', formula_name:'', flock_type:'Breeder', age_week_from:'', age_week_to:'', version:'1', notes:'', is_active: true, ...initial })
+  const [ings, setIngs] = useState<typeof BLANK_ING[]>(
+    existingIngs?.length ? existingIngs.map(i => ({ ingredient_code: i.ingredient_code||'', ingredient_name: i.ingredient_name, percentage: String(i.percentage), kg_per_1000: i.kg_per_1000 != null ? String(i.kg_per_1000) : '' }))
+    : [{ ...BLANK_ING }]
+  )
   const s = (k: string) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement>) => setForm((f: any) => ({...f, [k]: e.target.value}))
+  const si = (idx: number, k: keyof typeof BLANK_ING) => (e: React.ChangeEvent<HTMLInputElement>) => setIngs(prev => prev.map((r, i) => i === idx ? {...r, [k]: e.target.value} : r))
+  const addRow = () => setIngs(prev => [...prev, { ...BLANK_ING }])
+  const removeRow = (idx: number) => setIngs(prev => prev.filter((_, i) => i !== idx))
+
   function submit(e: React.FormEvent) {
     e.preventDefault()
-    onSave({ ...form, age_week_from: form.age_week_from !== '' ? Number(form.age_week_from) : null, age_week_to: form.age_week_to !== '' ? Number(form.age_week_to) : null, version: Number(form.version) })
+    onSave({
+      ...form,
+      age_week_from: form.age_week_from !== '' ? Number(form.age_week_from) : null,
+      age_week_to: form.age_week_to !== '' ? Number(form.age_week_to) : null,
+      version: Number(form.version),
+      ingredients: ings,
+    })
   }
+  const totalPct = ings.reduce((s, i) => s + (Number(i.percentage) || 0), 0)
+
   return (
-    <form onSubmit={submit} className="space-y-3">
+    <form onSubmit={submit} className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Formula Code *"><Input value={form.formula_code} onChange={s('formula_code')} required /></Field>
         <Field label="Version"><Input type="number" value={form.version} onChange={s('version')} /></Field>
@@ -306,6 +382,42 @@ const FormulaForm: React.FC<{ initial: any; onSave: (d: any) => void; loading: b
         <Field label="Week To"><Input type="number" step="0.1" value={form.age_week_to} onChange={s('age_week_to')} /></Field>
       </div>
       <Field label="Notes"><Input value={form.notes||''} onChange={s('notes')} /></Field>
+
+      {/* Inline ingredient entry */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-semibold text-gray-700">Ingredients</p>
+          <span className="text-xs text-gray-500">Total %: <span className={totalPct > 100.05 ? 'text-red-600 font-bold' : 'text-green-700 font-semibold'}>{totalPct.toFixed(4)}</span></span>
+        </div>
+        <div className="border rounded overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-2 py-1.5 text-left w-12">#</th>
+                <th className="px-2 py-1.5 text-left w-16">Code</th>
+                <th className="px-2 py-1.5 text-left">Ingredient Name *</th>
+                <th className="px-2 py-1.5 text-right w-20">%</th>
+                <th className="px-2 py-1.5 text-right w-24">Kg/1000</th>
+                <th className="px-2 py-1.5 w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {ings.map((ing, idx) => (
+                <tr key={idx} className="border-t border-gray-100">
+                  <td className="px-2 py-1 text-gray-400">{idx+1}</td>
+                  <td className="px-2 py-1"><input className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs" value={ing.ingredient_code} onChange={si(idx,'ingredient_code')} placeholder="Code" /></td>
+                  <td className="px-2 py-1"><input className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs" value={ing.ingredient_name} onChange={si(idx,'ingredient_name')} placeholder="e.g. MAIZE" required={idx===0} /></td>
+                  <td className="px-2 py-1"><input type="number" step="0.0001" className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs text-right" value={ing.percentage} onChange={si(idx,'percentage')} placeholder="0" /></td>
+                  <td className="px-2 py-1"><input type="number" step="0.001" className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs text-right" value={ing.kg_per_1000} onChange={si(idx,'kg_per_1000')} placeholder="auto" /></td>
+                  <td className="px-2 py-1 text-center"><button type="button" onClick={() => removeRow(idx)} className="text-red-400 hover:text-red-600"><Trash2 size={11}/></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button type="button" onClick={addRow} className="mt-2 text-xs text-green-700 hover:text-green-900 font-medium flex items-center gap-1"><Plus size={12}/> Add row</button>
+      </div>
+
       <div className="flex justify-end gap-2 pt-2">
         <Button type="submit" loading={loading}>Save Formula</Button>
       </div>
