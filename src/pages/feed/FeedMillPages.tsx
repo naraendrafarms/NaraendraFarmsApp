@@ -420,7 +420,7 @@ const ProductionTab: React.FC = () => {
       <SectionHeader title="Production Log" action={
         <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export</Button>
-          <Button size="sm" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={14}/> Add Production</Button>
+          <Button size="sm" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={14}/> Add Daily Entry</Button>
         </div>
       } />
 
@@ -443,7 +443,7 @@ const ProductionTab: React.FC = () => {
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <StatCard title="Total Production" value={`${totalKg.toLocaleString()} Kg`} />
-        <StatCard title="Batches" value={String(logs.length)} />
+        <StatCard title="Daily Entries" value={String(logs.length)} />
       </div>
 
       {isLoading ? <Spinner /> : logs.length === 0 ? <EmptyState title="No production records" /> : (
@@ -472,7 +472,7 @@ const ProductionTab: React.FC = () => {
         </Table>
       )}
 
-      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }} title={editing ? 'Edit Production' : 'Add Production'} size="lg">
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }} title={editing ? 'Edit Daily Entry' : 'Add Daily Entry'} size="lg">
         <ProductionForm
           initial={editing}
           farms={farms}
