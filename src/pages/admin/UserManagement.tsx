@@ -188,14 +188,16 @@ export const UserManagement: React.FC = () => {
         </>}>
         <div className="space-y-4">
           <Input label="Full Name" required value={form.full_name} onChange={e => s('full_name', e.target.value)} hint="e.g. Ravi Kumar" />
-          {!editing && (
+          {editing ? (
+            <>
+              <Input label="Email" type="email" value={form.email} disabled className="bg-gray-50 text-gray-500 cursor-not-allowed" />
+              <Input label="New Password" type="password" value={form.password} onChange={e => s('password', e.target.value)} hint="Leave blank to keep current password" />
+            </>
+          ) : (
             <FormRow>
               <Input label="Email" required type="email" value={form.email} onChange={e => s('email', e.target.value)} />
               <Input label="Password" required type="password" value={form.password} onChange={e => s('password', e.target.value)} hint="Min 8 characters" />
             </FormRow>
-          )}
-          {editing && (
-            <Input label="New Password" type="password" value={form.password} onChange={e => s('password', e.target.value)} hint="Leave blank to keep current password" />
           )}
           <Select label="Role" required
             options={ROLES.map(r => ({ value: r.value, label: `${r.label} — ${r.desc}` }))}
