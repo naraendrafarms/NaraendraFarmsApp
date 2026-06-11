@@ -141,14 +141,20 @@ const POTab: React.FC = () => {
   const canEdit = can.editPurchase(profile?.role)
   const canDel  = can.delete(profile?.role)
   const [importOpen, setImportOpen] = useState(false)
-  const [fy, setFy]       = useState('2025-26')
-  const [typeF, setTypeF] = useState('')
+  const [fy, setFy]           = useState('2025-26')
+  const [typeF, setTypeF]     = useState('')
   const [statusF, setStatusF] = useState('')
+  const [payStatusF, setPayStatusF] = useState('')
   const [search, setSearch]   = useState('')
   const [open, setOpen]       = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm]       = useState<any>(EMPTY_PO)
   const [delId, setDelId]     = useState<string|null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkDelOpen, setBulkDelOpen] = useState(false)
+  const [bulkStatusOpen, setBulkStatusOpen] = useState(false)
+  const [bulkStatusVal, setBulkStatusVal] = useState('Received')
+  const [mergeOpen, setMergeOpen] = useState(false)
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptPO, setReceiptPO]     = useState<any>(null)
   const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', remarks: '' })
@@ -211,12 +217,38 @@ const POTab: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await supabase.from('purchase_orders').delete().in('id', ids)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setSelected(new Set()); setBulkDelOpen(false); toast.success('Deleted selected POs') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const bulkStatusMut = useMutation({
+    mutationFn: async ({ ids, status }: { ids: string[]; status: string }) => {
+      await supabase.from('purchase_orders').update({ material_status: status }).in('id', ids)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setSelected(new Set()); setBulkStatusOpen(false); toast.success('Status updated') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   const filtered = useMemo(() => orders.filter((o: any) => {
-    if (typeF   && o.material_type !== typeF) return false
-    if (statusF && o.material_status !== statusF) return false
+    if (typeF      && o.material_type !== typeF) return false
+    if (statusF    && o.material_status !== statusF) return false
+    if (payStatusF && o.payment_status !== payStatusF) return false
     if (search) { const q = search.toLowerCase(); if (!o.vendor_name?.toLowerCase().includes(q) && !o.po_no?.toLowerCase().includes(q) && !o.item_name?.toLowerCase().includes(q)) return false }
     return true
-  }), [orders, typeF, statusF, search])
+  }), [orders, typeF, statusF, payStatusF, search])
+
+  // checkbox helpers
+  const allChecked = filtered.length > 0 && filtered.every((o: any) => selected.has(o.id))
+  const someChecked = filtered.some((o: any) => selected.has(o.id))
+  const toggleAll = () => {
+    if (allChecked) setSelected(new Set())
+    else setSelected(new Set(filtered.map((o: any) => o.id)))
+  }
+  const toggleOne = (id: string) => setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
 
   const grandTotal = filtered.reduce((s: number, o: any) => s + Number(o.total_amount ?? 0), 0)
   const received   = filtered.filter((o: any) => o.material_status === 'Received').length
@@ -238,7 +270,8 @@ const POTab: React.FC = () => {
       <div className="flex gap-2 flex-wrap items-end">
         <Sel value={fy} onChange={(e:any)=>setFy(e.target.value)} options={FY_OPTIONS} />
         <Sel value={typeF} onChange={(e:any)=>setTypeF(e.target.value)} options={[{value:'',label:'All Types'},...MAT_TYPES.map(t=>({value:t,label:t}))]} />
-        <Sel value={statusF} onChange={(e:any)=>setStatusF(e.target.value)} options={[{value:'',label:'All Status'},...MAT_STATUS.map(s=>({value:s,label:s}))]} />
+        <Sel value={statusF} onChange={(e:any)=>setStatusF(e.target.value)} options={[{value:'',label:'All Mat.Status'},...MAT_STATUS.map(s=>({value:s,label:s}))]} />
+        <Sel value={payStatusF} onChange={(e:any)=>setPayStatusF(e.target.value)} options={[{value:'',label:'All Pay Status'},...PAY_STATUS.map(s=>({value:s,label:s}))]} />
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search vendor / PO / item..."
           className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-56" />
         <div className="ml-auto flex gap-2">
@@ -248,22 +281,36 @@ const POTab: React.FC = () => {
             {key:'gst_pct',label:'GST%'},{key:'total_amount',label:'Amount'},{key:'grn_no',label:'GRN No'},{key:'grn_date',label:'GRN Date'},{key:'material_status',label:'Status'}
           ])}>Export CSV</Button>
           {canEdit && <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={()=>setImportOpen(true)}>Import PO</Button>}
+          {canEdit && <Button size="sm" variant="outline" onClick={()=>setMergeOpen(true)}>Merge Vendors</Button>}
           {canEdit && <Button size="sm" onClick={openNew} icon={<Plus size={14}/>}>New PO</Button>}
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      {someChecked && (
+        <div className="flex items-center gap-3 bg-brand-50 border border-brand-200 rounded-lg px-4 py-2 text-sm">
+          <span className="font-medium text-brand-700">{selected.size} selected</span>
+          <Button size="sm" variant="outline" onClick={()=>setBulkStatusOpen(true)}>Mark Status</Button>
+          {canDel && <Button size="sm" variant="danger" onClick={()=>setBulkDelOpen(true)}>Delete Selected</Button>}
+          <button className="ml-auto text-gray-400 hover:text-gray-600 text-xs" onClick={()=>setSelected(new Set())}>Clear</button>
+        </div>
+      )}
+
       <POImportModal open={importOpen} onClose={()=>{ setImportOpen(false); qc.invalidateQueries({queryKey:['purchase_orders']}) }} />
 
       <Card padding={false}>
         <div className="overflow-x-auto">
           <Table>
             <thead><tr>
+              <Th><input type="checkbox" checked={allChecked} ref={el => { if (el) el.indeterminate = someChecked && !allChecked }} onChange={toggleAll} className="rounded" /></Th>
               <Th>PO No</Th><Th>Date</Th><Th>Vendor</Th><Th>Item</Th><Th>Type</Th>
               <Th right>Qty</Th><Th>Unit</Th><Th right>Rate</Th><Th right>GST%</Th>
               <Th right>Amount</Th><Th>GRN No</Th><Th>GRN Date</Th><Th>Status</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((o: any) => (
-                <tr key={o.id} className="hover:bg-gray-50 text-sm">
+                <tr key={o.id} className={`text-sm ${selected.has(o.id) ? 'bg-brand-50' : 'hover:bg-gray-50'}`}>
+                  <Td><input type="checkbox" checked={selected.has(o.id)} onChange={()=>toggleOne(o.id)} className="rounded" /></Td>
                   <Td className="font-mono text-xs font-semibold text-brand-700">{o.po_no}</Td>
                   <Td className="text-xs">{o.po_date ? fmtDate(o.po_date) : '—'}</Td>
                   <Td className="max-w-[160px] truncate font-medium">{o.vendor_name}</Td>
@@ -289,7 +336,7 @@ const POTab: React.FC = () => {
                   </Td>
                 </tr>
               ))}
-              {filtered.length === 0 && <tr><td colSpan={14} className="text-center py-8 text-gray-400 text-sm">No purchase orders found</td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={15} className="text-center py-8 text-gray-400 text-sm">No purchase orders found</td></tr>}
             </tbody>
           </Table>
         </div>
@@ -328,6 +375,21 @@ const POTab: React.FC = () => {
         <p className="text-sm text-gray-600">Delete this purchase order? This cannot be undone.</p>
       </Modal>
 
+      {/* Bulk Delete Modal */}
+      <Modal open={bulkDelOpen} onClose={() => setBulkDelOpen(false)} title={`Delete ${selected.size} Purchase Orders`}
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkDelOpen(false)}>Cancel</Button><Button variant="danger" onClick={() => bulkDelMut.mutate(Array.from(selected))} loading={bulkDelMut.isPending}>Delete All</Button></div>}>
+        <p className="text-sm text-gray-600">This will permanently delete <strong>{selected.size}</strong> purchase order rows. This cannot be undone.</p>
+      </Modal>
+
+      {/* Bulk Status Modal */}
+      <Modal open={bulkStatusOpen} onClose={() => setBulkStatusOpen(false)} title={`Update Status for ${selected.size} POs`}
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkStatusOpen(false)}>Cancel</Button><Button onClick={() => bulkStatusMut.mutate({ ids: Array.from(selected), status: bulkStatusVal })} loading={bulkStatusMut.isPending}>Apply</Button></div>}>
+        <Sel label="New Material Status" value={bulkStatusVal} onChange={(e:any)=>setBulkStatusVal(e.target.value)} options={MAT_STATUS.map(s=>({value:s,label:s}))} />
+      </Modal>
+
+      {/* Vendor Merge Modal */}
+      <VendorMergeModal open={mergeOpen} onClose={() => { setMergeOpen(false); qc.invalidateQueries({ queryKey: ['purchase_orders'] }) }} />
+
       {/* Stock Receipt Modal */}
       <Modal open={receiptOpen} onClose={() => setReceiptOpen(false)} title={`Record Stock Receipt — PO ${receiptPO?.po_no}`}
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setReceiptOpen(false)}>Cancel</Button><Button onClick={() => receiptMut.mutate()} loading={receiptMut.isPending}>Save Receipt</Button></div>}>
@@ -354,6 +416,60 @@ const POTab: React.FC = () => {
         )}
       </Modal>
     </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VENDOR MERGE MODAL
+// ══════════════════════════════════════════════════════════════════
+const VendorMergeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+  const qc = useQueryClient()
+  const [from, setFrom] = useState('')
+  const [to, setTo]     = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const { data: vendors=[] } = useQuery({
+    queryKey: ['parties_vendors'],
+    queryFn: async () => {
+      const { data } = await supabase.from('parties').select('id,name').eq('type', 'Vendor').order('name')
+      return data ?? []
+    },
+    enabled: open,
+  })
+
+  const doMerge = async () => {
+    if (!from || !to || from === to) { toast.error('Select two different vendors'); return }
+    setBusy(true)
+    try {
+      // update purchase_orders vendor_name to target
+      const target = vendors.find((v: any) => v.id === to)
+      if (!target) throw new Error('Target not found')
+      await supabase.from('purchase_orders').update({ vendor_name: target.name }).eq('vendor_name', vendors.find((v:any)=>v.id===from)?.name)
+      // delete source party
+      await supabase.from('parties').delete().eq('id', from)
+      qc.invalidateQueries({ queryKey: ['parties_vendors'] })
+      toast.success(`Merged into ${target.name}`)
+      setFrom(''); setTo('')
+    } catch (e: any) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Merge Duplicate Vendors"
+      footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={onClose}>Close</Button><Button onClick={doMerge} loading={busy}>Merge</Button></div>}>
+      <div className="space-y-4">
+        <p className="text-xs text-gray-500">Select the duplicate vendor (From) and the canonical vendor (To). All PO records from the duplicate will be re-assigned to the canonical vendor and the duplicate will be deleted.</p>
+        <Sel label="Merge FROM (duplicate — will be deleted)" value={from} onChange={(e:any)=>setFrom(e.target.value)}
+          options={[{value:'',label:'Select vendor...'}, ...vendors.map((v:any)=>({value:v.id,label:v.name}))]} />
+        <Sel label="Merge TO (keep this vendor)" value={to} onChange={(e:any)=>setTo(e.target.value)}
+          options={[{value:'',label:'Select vendor...'}, ...vendors.filter((v:any)=>v.id!==from).map((v:any)=>({value:v.id,label:v.name}))]} />
+        {from && to && from !== to && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+            ⚠ All purchase orders from <strong>{vendors.find((v:any)=>v.id===from)?.name}</strong> will be moved to <strong>{vendors.find((v:any)=>v.id===to)?.name}</strong>, then the duplicate vendor will be removed.
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }
 
