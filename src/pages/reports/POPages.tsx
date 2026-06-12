@@ -2409,21 +2409,26 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
     ?? fullText.match(/(\d{1,2}[-\/][A-Za-z]{3}[-\/]\d{2,4})/)
   const poDate = fmtISODate(dateMatch?.[1] ?? null)
 
-  // Vendor name: find company name with PVT LTD / LIMITED etc. (buyer NARAENDRA FARMS has none)
-  const vendorMatch = fullText.match(/([A-Z][A-Z0-9\s&\.\-]+(?:PVT\.?\s*LTD\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS))/i)
-  const vendor = vendorMatch ? vendorMatch[1].replace(/\s+/g,' ').trim() : 'Unknown'
+  // Vendor name: find all company names with PVT LTD/LIMITED/etc, exclude our own company (NARAENDRA)
+  const allCompanyMatches = [...fullText.matchAll(/([A-Z][A-Z0-9\s&\.\-]{2,50}(?:PVT\.?\s*LTD\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS))/gi)]
+  const vendor = allCompanyMatches
+    .map(m => m[1].replace(/\s+/g,' ').trim())
+    .find(v => !v.toUpperCase().includes('NARAENDRA')) ?? 'Unknown'
 
-  // Vendor GSTIN: two GSTINs in doc — buyer is NARAENDRA FARMS (36AAMCM7081Q1ZJ), seller is the other
+  // GSTINs: buyer is Naraendra Farms = 36ABJFM1393C1ZC; vendor is the other GSTIN
   const allGSTINs = [...fullText.matchAll(/\b(\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d])\b/g)].map(m => m[1])
-  const buyerGSTIN = '36AAMCM7081Q1ZJ'
-  const vendorGSTIN = allGSTINs.find(g => g !== buyerGSTIN) ?? null
+  const naraendraGSTIN = '36ABJFM1393C1ZC'
+  const vendorGSTIN = allGSTINs.find(g => g !== naraendraGSTIN) ?? null
 
-  // Vendor address: text between seller company name and first GSTIN
+  // Vendor address: text immediately after vendor company name up to next landmark
   let vendorAddress: string | null = null
   if (vendor !== 'Unknown') {
-    const afterVendor = fullText.slice(fullText.indexOf(vendor) + vendor.length)
-    const addrMatch = afterVendor.match(/^([^G]{10,120}?)(?:GSTIN|\d{2}[A-Z]{5})/i)
-    if (addrMatch) vendorAddress = addrMatch[1].replace(/\s+/g,' ').trim() || null
+    const idx = fullText.indexOf(vendor)
+    if (idx !== -1) {
+      const afterVendor = fullText.slice(idx + vendor.length)
+      const addrMatch = afterVendor.match(/^\s*(.{10,200}?)(?:\s{3,}|\bGSTIN\b|\bPurchase Order\b|\bCredit Limit\b)/i)
+      if (addrMatch) vendorAddress = addrMatch[1].replace(/\s+/g,' ').trim() || null
+    }
   }
 
   // Credit limit days
