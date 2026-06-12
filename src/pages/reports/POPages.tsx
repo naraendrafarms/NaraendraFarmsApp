@@ -2376,17 +2376,24 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
     'gi'
   )
 
-  type NumItem = { serial: number; qty: number; unit: string; rate: number; gst: number; total: number }
+  type NumItem = { serial: number; qtyPacks: number; packSize: number; qty: number; unit: string; rate: number; gst: number; total: number }
   const numericItems: NumItem[] = []
   let nm: RegExpExecArray | null
   while ((nm = numericRx.exec(fullText)) !== null) {
+    const qtyPacks = parseInt(nm[2].replace(/,/g,''))    // number of bags/packs
+    const packSize = parseFloat(nm[3])                    // kg/ltr per pack
+    const ratePerPack = parseFloat(nm[6].replace(/,/g,''))
+    // rate in PDF is per pack (bag); convert to per base UOM (Kg/Ltr)
+    const ratePerUnit = packSize > 1 ? ratePerPack / packSize : ratePerPack
     numericItems.push({
-      serial: parseInt(nm[1]),
-      qty:    parseFloat(nm[4].replace(/,/g,'')),  // ORDER column
-      unit:   nm[5],
-      rate:   parseFloat(nm[6].replace(/,/g,'')),
-      gst:    parseFloat(nm[8].replace('%','')),
-      total:  parseFloat(nm[9].replace(/,/g,'')),
+      serial:   parseInt(nm[1]),
+      qtyPacks,
+      packSize,
+      qty:      parseFloat(nm[4].replace(/,/g,'')),  // ORDER column = total Kg/Ltr
+      unit:     nm[5],
+      rate:     Math.round(ratePerUnit * 100) / 100,  // per Kg/Ltr
+      gst:      parseFloat(nm[8].replace('%','')),
+      total:    parseFloat(nm[9].replace(/,/g,'')),
     })
   }
 
@@ -2410,9 +2417,11 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
       fiscal_year:       fy,
       vendor_name:       vendor,
       item_name:         itemNames[i] ?? `Item ${item.serial}`,
-      quantity:          item.qty,
+      quantity:          item.qty,       // total Kg / Ltr
       unit:              item.unit,
-      rate:              item.rate,
+      qty_packs:         item.qtyPacks,  // number of bags/packs
+      pack_size:         item.packSize,  // Kg per bag
+      rate:              item.rate,      // rate per Kg / Ltr
       gst_pct:           item.gst,
       total_amount:      item.total,
       material_status:   'Pending',
