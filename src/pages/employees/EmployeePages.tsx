@@ -1676,18 +1676,34 @@ export const PayslipGeneratorPage: React.FC = () => {
   const [autoCalcESI, setAutoCalcESI] = useState(false)
   const [autoCalcPT, setAutoCalcPT] = useState(false)
   const [ready, setReady] = useState(false)
-  // Signature/footer toggles
-  const [sigEmp, setSigEmp] = useState(true)
-  const [sigHR, setSigHR] = useState(true)
-  const [sigAuth, setSigAuth] = useState(true)
-  const [showFooter, setShowFooter] = useState(true)
-  const [showUAN, setShowUAN] = useState(true)
-  const [showESI, setShowESI] = useState(true)
-  const [showEmpPF, setShowEmpPF] = useState(true)
-  const [showEmpESI, setShowEmpESI] = useState(true)
-  const [showPT, setShowPT] = useState(true)
-  const [showEmprPF, setShowEmprPF] = useState(true)
-  const [showEmprESI, setShowEmprESI] = useState(true)
+  // Print option toggles — persisted to localStorage so they survive navigation/reload
+  const LS_KEY = 'payslip_print_opts'
+  const loadOpts = () => {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) ?? '{}') } catch { return {} }
+  }
+  const saveOpt = (key: string, val: boolean) => {
+    try {
+      const cur = loadOpts()
+      localStorage.setItem(LS_KEY, JSON.stringify({ ...cur, [key]: val }))
+    } catch {}
+  }
+  const mkToggle = (key: string, def = true): [boolean, (v: boolean) => void] => {
+    const opts = loadOpts()
+    const [val, setVal] = useState<boolean>(key in opts ? opts[key] : def)
+    const set = (v: boolean) => { setVal(v); saveOpt(key, v) }
+    return [val, set]
+  }
+  const [sigEmp,    setSigEmp]    = mkToggle('sigEmp')
+  const [sigHR,     setSigHR]     = mkToggle('sigHR')
+  const [sigAuth,   setSigAuth]   = mkToggle('sigAuth')
+  const [showFooter,setShowFooter]= mkToggle('showFooter')
+  const [showUAN,   setShowUAN]   = mkToggle('showUAN')
+  const [showESI,   setShowESI]   = mkToggle('showESI')
+  const [showEmpPF, setShowEmpPF] = mkToggle('showEmpPF')
+  const [showEmpESI,setShowEmpESI]= mkToggle('showEmpESI')
+  const [showPT,    setShowPT]    = mkToggle('showPT')
+  const [showEmprPF,setShowEmprPF]= mkToggle('showEmprPF')
+  const [showEmprESI,setShowEmprESI]=mkToggle('showEmprESI')
   // Saved payslips
   const [selIds, setSelIds] = useState<Set<string>>(new Set())
   const [viewSlip, setViewSlip] = useState<any>(null)
