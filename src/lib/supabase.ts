@@ -15,7 +15,7 @@ export const supabase = createClient(
 export const supabaseAdmin = createClient(
   url || 'https://placeholder.supabase.co',
   serviceKey || key || 'placeholder-key',
-  { auth: { persistSession: false, autoRefreshToken: false } }
+  { auth: { persistSession: false, autoRefreshToken: false, storageKey: 'sb-admin-auth-token' } }
 )
 
 export const isConfigured = () => Boolean(url && key)
