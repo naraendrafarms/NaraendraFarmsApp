@@ -1555,8 +1555,10 @@ const PayslipView: React.FC<{
   pfEmployer:number; esiEmployer:number
   sigEmp:boolean; sigHR:boolean; sigAuth:boolean; showFooter:boolean
   showUAN:boolean; showESI:boolean
+  showEmpPF:boolean; showEmpESI:boolean; showPT:boolean
+  showEmprPF:boolean; showEmprESI:boolean
   n:(k:keyof typeof EMPTY_SLIP)=>number
-}> = ({cs,pName,pEmpId,pDesig,pDept,pAcct,pUAN,pESI,month,slip,gross,totalDed,netSalary,pfEmployer,esiEmployer,sigEmp,sigHR,sigAuth,showFooter,showUAN,showESI,n}) => {
+}> = ({cs,pName,pEmpId,pDesig,pDept,pAcct,pUAN,pESI,month,slip,gross,totalDed,netSalary,pfEmployer,esiEmployer,sigEmp,sigHR,sigAuth,showFooter,showUAN,showESI,showEmpPF,showEmpESI,showPT,showEmprPF,showEmprESI,n}) => {
   const monthLabel = (m:string) => new Date(m+'T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'})
   return (
     <div className="border-2 border-gray-800 p-6 bg-white max-w-3xl mx-auto text-sm font-sans">
@@ -1607,9 +1609,13 @@ const PayslipView: React.FC<{
               <th className="text-right py-1.5 px-2 font-bold text-gray-700 border border-gray-300">Amount (₹)</th>
             </tr></thead>
             <tbody>
-              {([n('pf_employee')?['PF (Emp 12%)',n('pf_employee')]:null,n('esi_employee')?['ESI (Emp 0.75%)',n('esi_employee')]:null,
-                n('pt')?['Professional Tax',n('pt')]:null,n('tds')?['TDS',n('tds')]:null,
-                n('advance')?['Advance',n('advance')]:null,n('hold')?['Hold',n('hold')]:null,
+              {([
+                showEmpPF&&n('pf_employee')?['PF (Emp 12%)',n('pf_employee')]:null,
+                showEmpESI&&n('esi_employee')?['ESI (Emp 0.75%)',n('esi_employee')]:null,
+                showPT&&n('pt')?['Professional Tax',n('pt')]:null,
+                n('tds')?['TDS',n('tds')]:null,
+                n('advance')?['Advance',n('advance')]:null,
+                n('hold')?['Hold',n('hold')]:null,
                 n('other_deduction')?['Other Deduction',n('other_deduction')]:null,
               ] as ([string,number]|null)[]).filter(Boolean).map(([l,v]:any)=>(
                 <tr key={l}><td className="py-1 px-2 border border-gray-200">{l}</td><td className="py-1 px-2 text-right border border-gray-200">{v.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
@@ -1620,18 +1626,18 @@ const PayslipView: React.FC<{
               </tr>
             </tbody>
           </table>
-          {(pfEmployer>0||esiEmployer>0)&&(
+          {(showEmprPF&&pfEmployer>0)||(showEmprESI&&esiEmployer>0) ? (
             <table className="w-full text-xs mt-2">
               <thead><tr className="bg-blue-50">
                 <th className="text-left py-1 px-2 font-semibold text-gray-600 border border-gray-200 text-[10px]">Employer Contribution</th>
                 <th className="text-right py-1 px-2 font-semibold text-gray-600 border border-gray-200 text-[10px]">Amount (₹)</th>
               </tr></thead>
               <tbody>
-                {pfEmployer>0&&<tr><td className="py-1 px-2 border border-gray-200 text-[10px]">PF (Employer 12%)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{pfEmployer.toLocaleString('en-IN')}</td></tr>}
-                {esiEmployer>0&&<tr><td className="py-1 px-2 border border-gray-200 text-[10px]">ESI (Employer 3.25%)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{esiEmployer.toLocaleString('en-IN')}</td></tr>}
+                {showEmprPF&&pfEmployer>0&&<tr><td className="py-1 px-2 border border-gray-200 text-[10px]">PF (Employer 12%)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{pfEmployer.toLocaleString('en-IN')}</td></tr>}
+                {showEmprESI&&esiEmployer>0&&<tr><td className="py-1 px-2 border border-gray-200 text-[10px]">ESI (Employer 3.25%)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{esiEmployer.toLocaleString('en-IN')}</td></tr>}
               </tbody>
             </table>
-          )}
+          ) : null}
         </div>
       </div>
       <div className="mt-4 bg-green-700 text-white flex items-center justify-between px-4 py-2 rounded">
@@ -1677,6 +1683,11 @@ export const PayslipGeneratorPage: React.FC = () => {
   const [showFooter, setShowFooter] = useState(true)
   const [showUAN, setShowUAN] = useState(true)
   const [showESI, setShowESI] = useState(true)
+  const [showEmpPF, setShowEmpPF] = useState(true)
+  const [showEmpESI, setShowEmpESI] = useState(true)
+  const [showPT, setShowPT] = useState(true)
+  const [showEmprPF, setShowEmprPF] = useState(true)
+  const [showEmprESI, setShowEmprESI] = useState(true)
   // Saved payslips
   const [selIds, setSelIds] = useState<Set<string>>(new Set())
   const [viewSlip, setViewSlip] = useState<any>(null)
@@ -1984,7 +1995,10 @@ export const PayslipGeneratorPage: React.FC = () => {
               month={viewSlip.month} slip={rowToSlip(viewSlip)}
               gross={viewSlip.gross_earnings??0} totalDed={viewSlip.total_deductions??0} netSalary={viewSlip.net_salary??0}
               pfEmployer={viewSlip.pf_employer??0} esiEmployer={viewSlip.esi_employer??0}
-              sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter} showUAN={showUAN} showESI={showESI}
+              sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter}
+              showUAN={showUAN} showESI={showESI}
+              showEmpPF={showEmpPF} showEmpESI={showEmpESI} showPT={showPT}
+              showEmprPF={showEmprPF} showEmprESI={showEmprESI}
               n={k=>parseFloat(rowToSlip(viewSlip)[k]||'0')}
             />
           </div>
@@ -2015,21 +2029,64 @@ export const PayslipGeneratorPage: React.FC = () => {
 
           {/* Signature/footer print options */}
           <Card className="no-print">
-            <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Print Options — show on payslip</p>
-            <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-              {([
-                ['UAN No', showUAN, setShowUAN],
-                ['ESI No', showESI, setShowESI],
-                ['Employee Signature', sigEmp, setSigEmp],
-                ['HR / Accounts', sigHR, setSigHR],
-                ['Authorised Signatory', sigAuth, setSigAuth],
-                ['"Computer-generated" footer', showFooter, setShowFooter],
-              ] as [string, boolean, React.Dispatch<React.SetStateAction<boolean>>][]).map(([lbl,val,set])=>(
-                <label key={lbl} className="flex items-center gap-2 cursor-pointer select-none">
-                  <input type="checkbox" checked={val} onChange={e=>set(e.target.checked)} className="rounded border-gray-300 text-brand-600"/>
-                  {lbl}
-                </label>
-              ))}
+            <p className="text-xs font-semibold text-gray-600 mb-3 uppercase tracking-wide">Print Options — show / hide on payslip</p>
+            <div className="space-y-3">
+              {/* Employee details */}
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Employee Details</p>
+                <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                  {([['UAN No',showUAN,setShowUAN],['ESI No',showESI,setShowESI]] as [string,boolean,React.Dispatch<React.SetStateAction<boolean>>][]).map(([lbl,val,set])=>(
+                    <label key={lbl} className="flex items-center gap-2 cursor-pointer select-none">
+                      <input type="checkbox" checked={val} onChange={e=>set(e.target.checked)} className="rounded border-gray-300 text-brand-600"/>{lbl}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {/* Employee deductions */}
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Employee Deductions</p>
+                <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                  {([
+                    ['PF (Employee 12%)',showEmpPF,setShowEmpPF],
+                    ['ESI (Employee 0.75%)',showEmpESI,setShowEmpESI],
+                    ['Professional Tax',showPT,setShowPT],
+                  ] as [string,boolean,React.Dispatch<React.SetStateAction<boolean>>][]).map(([lbl,val,set])=>(
+                    <label key={lbl} className="flex items-center gap-2 cursor-pointer select-none">
+                      <input type="checkbox" checked={val} onChange={e=>set(e.target.checked)} className="rounded border-gray-300 text-brand-600"/>{lbl}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {/* Employer contributions */}
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Employer Contributions</p>
+                <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                  {([
+                    ['PF (Employer 12%)',showEmprPF,setShowEmprPF],
+                    ['ESI (Employer 3.25%)',showEmprESI,setShowEmprESI],
+                  ] as [string,boolean,React.Dispatch<React.SetStateAction<boolean>>][]).map(([lbl,val,set])=>(
+                    <label key={lbl} className="flex items-center gap-2 cursor-pointer select-none">
+                      <input type="checkbox" checked={val} onChange={e=>set(e.target.checked)} className="rounded border-gray-300 text-brand-600"/>{lbl}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {/* Signatures & footer */}
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Signatures &amp; Footer</p>
+                <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                  {([
+                    ['Employee Signature',sigEmp,setSigEmp],
+                    ['HR / Accounts',sigHR,setSigHR],
+                    ['Authorised Signatory',sigAuth,setSigAuth],
+                    ['"Computer-generated" footer',showFooter,setShowFooter],
+                  ] as [string,boolean,React.Dispatch<React.SetStateAction<boolean>>][]).map(([lbl,val,set])=>(
+                    <label key={lbl} className="flex items-center gap-2 cursor-pointer select-none">
+                      <input type="checkbox" checked={val} onChange={e=>set(e.target.checked)} className="rounded border-gray-300 text-brand-600"/>{lbl}
+                    </label>
+                  ))}
+                </div>
+              </div>
             </div>
           </Card>
 
@@ -2141,7 +2198,10 @@ export const PayslipGeneratorPage: React.FC = () => {
                 pName={pName} pEmpId={pEmpId} pDesig={pDesig} pDept={pDept} pAcct={pAcct} pUAN={pUAN} pESI={pESI}
                 month={month} slip={slip} gross={gross} totalDed={totalDed} netSalary={netSalary}
                 pfEmployer={pfEmployer} esiEmployer={esiEmployer}
-                sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter} showUAN={showUAN} showESI={showESI} n={n}
+                sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter}
+                showUAN={showUAN} showESI={showESI}
+                showEmpPF={showEmpPF} showEmpESI={showEmpESI} showPT={showPT}
+                showEmprPF={showEmprPF} showEmprESI={showEmprESI} n={n}
               />
             </div>
           )}
