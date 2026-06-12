@@ -213,10 +213,73 @@ const POTab: React.FC = () => {
         remarks: receiptForm.remarks || null,
       })
       if (error) throw error
-      // auto-update PO status to Received
+
+      // Auto-update PO status to Received
       await supabase.from('purchase_orders').update({ material_status: 'Received', grn_date: receiptForm.receipt_date }).eq('id', receiptPO.id)
+
+      // Auto payment due date: pay_before_date = GRN date + credit_limit_days
+      if (receiptPO.credit_limit_days) {
+        const due = new Date(receiptForm.receipt_date + 'T00:00:00')
+        due.setDate(due.getDate() + receiptPO.credit_limit_days)
+        const payBeforeDate = due.toISOString().split('T')[0]
+        // Upsert pending_payment keyed on po_no + item_name
+        const { data: existing } = await supabase.from('pending_payments')
+          .select('id').eq('po_no', receiptPO.po_no).eq('vendor_name', receiptPO.vendor_name).limit(1)
+        if (existing && existing.length > 0) {
+          await supabase.from('pending_payments').update({ grn_date: receiptForm.receipt_date, pay_before_date: payBeforeDate })
+            .eq('id', existing[0].id)
+        } else {
+          await supabase.from('pending_payments').insert({
+            vendor_name:     receiptPO.vendor_name,
+            po_no:           receiptPO.po_no,
+            grn_date:        receiptForm.receipt_date,
+            invoice_amount:  receiptPO.total_amount ?? null,
+            payment_status:  'Pending',
+            credit_limit:    receiptPO.credit_limit_days,
+            pay_before_date: payBeforeDate,
+            payment_type:    receiptPO.material_type ?? null,
+          })
+        }
+      }
+
+      // Auto-add vendor to parties master if not already present
+      if (receiptPO.vendor_name) {
+        const { data: existingParty } = await supabase.from('parties')
+          .select('id').ilike('name', receiptPO.vendor_name.trim()).limit(1)
+        if (!existingParty || existingParty.length === 0) {
+          await supabase.from('parties').insert({
+            name:        receiptPO.vendor_name.trim(),
+            type:        'supplier',
+            category:    receiptPO.material_type ?? 'Feed Raw Material',
+            gstin:       receiptPO.vendor_gstin ?? null,
+            address:     receiptPO.vendor_address ?? null,
+            credit_days: receiptPO.credit_limit_days ?? 0,
+            is_active:   true,
+          })
+        }
+      }
+
+      // Auto-add item to feed_ingredients master if not already present
+      if (receiptPO.item_name) {
+        const { data: existingIngr } = await supabase.from('feed_ingredients')
+          .select('id').ilike('name', receiptPO.item_name.trim()).limit(1)
+        if (!existingIngr || existingIngr.length === 0) {
+          await supabase.from('feed_ingredients').insert({
+            name:      receiptPO.item_name.trim(),
+            unit:      receiptPO.unit ?? 'kg',
+            is_active: true,
+          })
+        }
+      }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setReceiptOpen(false); toast.success('Stock receipt recorded & PO marked Received') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['parties'] })
+      qc.invalidateQueries({ queryKey: ['feed_ingredients'] })
+      setReceiptOpen(false)
+      toast.success('Stock received — payment due date set, vendor & item added to masters if new')
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -2346,9 +2409,22 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
     ?? fullText.match(/(\d{1,2}[-\/][A-Za-z]{3}[-\/]\d{2,4})/)
   const poDate = fmtISODate(dateMatch?.[1] ?? null)
 
-  // Vendor: find company name with PVT LTD / LIMITED etc. (the buyer is NARAENDRA FARMS which has none)
+  // Vendor name: find company name with PVT LTD / LIMITED etc. (buyer NARAENDRA FARMS has none)
   const vendorMatch = fullText.match(/([A-Z][A-Z0-9\s&\.\-]+(?:PVT\.?\s*LTD\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS))/i)
   const vendor = vendorMatch ? vendorMatch[1].replace(/\s+/g,' ').trim() : 'Unknown'
+
+  // Vendor GSTIN: two GSTINs in doc — buyer is NARAENDRA FARMS (36AAMCM7081Q1ZJ), seller is the other
+  const allGSTINs = [...fullText.matchAll(/\b(\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d])\b/g)].map(m => m[1])
+  const buyerGSTIN = '36AAMCM7081Q1ZJ'
+  const vendorGSTIN = allGSTINs.find(g => g !== buyerGSTIN) ?? null
+
+  // Vendor address: text between seller company name and first GSTIN
+  let vendorAddress: string | null = null
+  if (vendor !== 'Unknown') {
+    const afterVendor = fullText.slice(fullText.indexOf(vendor) + vendor.length)
+    const addrMatch = afterVendor.match(/^([^G]{10,120}?)(?:GSTIN|\d{2}[A-Z]{5})/i)
+    if (addrMatch) vendorAddress = addrMatch[1].replace(/\s+/g,' ').trim() || null
+  }
 
   // Credit limit days
   const clMatch = fullText.match(/Credit\s+Limit[^\d]*(\d+)\s*Days/i)
@@ -2428,6 +2504,8 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
       credit_limit_days: creditDays,
       delivery_date:     deliveryDate,
       is_amendment:      isAmendment,
+      vendor_gstin:      vendorGSTIN,
+      vendor_address:    vendorAddress,
     })
   })
 
