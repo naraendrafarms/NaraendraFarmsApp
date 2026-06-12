@@ -2421,13 +2421,22 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
   const vendorGSTIN = allGSTINs.find(g => g !== naraendraGSTIN) ?? null
 
   // Vendor address: text immediately after vendor company name up to next landmark
+  // Vendor address: everything after vendor name up to "GSTIN Registration No"
+  // pdfjs interleaves columns, but vendor name appears mid-text and address follows immediately
   let vendorAddress: string | null = null
   if (vendor !== 'Unknown') {
     const idx = fullText.indexOf(vendor)
     if (idx !== -1) {
       const afterVendor = fullText.slice(idx + vendor.length)
-      const addrMatch = afterVendor.match(/^\s*(.{10,200}?)(?:\s{3,}|\bGSTIN\b|\bPurchase Order\b|\bCredit Limit\b)/i)
-      if (addrMatch) vendorAddress = addrMatch[1].replace(/\s+/g,' ').trim() || null
+      // Take everything up to GSTIN Registration No or Purchase Order No
+      const addrMatch = afterVendor.match(/^\s*([\s\S]{10,300}?)(?:GSTIN\s+Registration\s+No|Purchase\s+Order\s+No)/i)
+      if (addrMatch) {
+        vendorAddress = addrMatch[1]
+          .replace(/\n+/g,' ')
+          .replace(/\s{2,}/g,' ')
+          .replace(/Telangana,?\s*State\s+Code[^,]*,?\s*INDIA\.?/i,'')
+          .trim() || null
+      }
     }
   }
 
