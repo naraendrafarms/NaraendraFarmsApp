@@ -2333,7 +2333,6 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
     fullText += tc.items.map((it:any)=>it.str).join(' ') + '\n'
   }
 
-  // Log raw text to console for debugging PDF layout
   console.log('=== PDF RAW TEXT ===\n' + fullText)
 
   const isAmendment = /AMENDMENT/i.test(fullText)
@@ -2342,96 +2341,86 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
   const poMatch = fullText.match(/PO\s*\/\s*NBF\s*\/\s*[\d]+\s*\/\s*\d+/i)
   const poNo = poMatch ? poMatch[0].replace(/\s+/g,' ').trim() : ''
 
-  // Order date
-  const dateMatch = fullText.match(/Order\s+Date[^\d]*(\d{1,2}[\/\-][A-Za-z]{3}[\/\-]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i)
+  // Order date — appears as "12-Jun-26" near "Order Date" label or as standalone date
+  const dateMatch = fullText.match(/Order\s+Date[^\d]*(\d{1,2}[-\/][A-Za-z]{3}[-\/]\d{2,4})/i)
+    ?? fullText.match(/(\d{1,2}[-\/][A-Za-z]{3}[-\/]\d{2,4})/)
   const poDate = fmtISODate(dateMatch?.[1] ?? null)
 
-  // Vendor: "Seller :" block — grab CAPS line after it
-  const sellerMatch = fullText.match(/Seller\s*:([^G]+?)GSTIN/i)
-  const vendor = sellerMatch ? sellerMatch[1].replace(/\s+/g,' ').trim().split(/\s{2,}/)[0] : 'Unknown'
+  // Vendor: find company name with PVT LTD / LIMITED etc. (the buyer is NARAENDRA FARMS which has none)
+  const vendorMatch = fullText.match(/([A-Z][A-Z0-9\s&\.\-]+(?:PVT\.?\s*LTD\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS))/i)
+  const vendor = vendorMatch ? vendorMatch[1].replace(/\s+/g,' ').trim() : 'Unknown'
 
   // Credit limit days
   const clMatch = fullText.match(/Credit\s+Limit[^\d]*(\d+)\s*Days/i)
   const creditDays = clMatch ? parseInt(clMatch[1]) : null
 
-  // Delivery date
-  const dlvMatch = fullText.match(/Best\s+Delivery\s+By\s+[A-Za-z]*\s*(\d{1,2}[\/\-][A-Za-z]{3}[\/\-]\d{2,4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i)
+  // Delivery date — "Delivery Within  15-Jun-26"
+  const dlvMatch = fullText.match(/Delivery\s+(?:Within|By)[^\d]*(\d{1,2}[-\/][A-Za-z]{3}[-\/]\d{2,4}|\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i)
   const deliveryDate = fmtISODate(dlvMatch?.[1] ?? null)
 
-  // Buyer GSTIN
-  const buyerGST = fullText.match(/GSTIN[^\d]*(\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1})/)?.[1] ?? null
-
   const fy = fyFromDate(poDate)
-
-  // Items: parse lines with pattern: number | description | qty | pack | order | uom | rate | ...
-  // The text looks like: "1 100 50 5000 Kg 1822.46 182,245.5 18% 32,804.2 215,050"
-  // With item name on separate token: "ALKAKARB (Tata Chemicals)"
-  // Strategy: find numbered lines between header and total
   const records: any[] = []
 
-  // Tokenise text line by line
-  const lines = fullText.split(/\n+/).map(l=>l.trim()).filter(Boolean)
+  // ── Strategy ──────────────────────────────────────────────────────────────
+  // In this PDF layout pdfjs reads the numeric columns (left) separately from
+  // the description column (right).  Item names therefore appear in a block
+  // near "Description of Materials" while the numbers appear in one long run.
+  //
+  // Numeric item row format (all tokens on one line after joining with spaces):
+  //   <serial>  <qty_packs>  <pack_size>  <order_qty>  <UOM>  <rate>  <amount>  <gst%>  <gst_charge|-|0>  <net_amount>
+  // Example: "1   12   25   300   Kg   9750.00   117,000.0   0%   -   117,000"
 
-  // Find item lines: starts with a digit 1-9 followed by item name and numbers
-  // Pattern: serial_no, then description (text), then numbers
-  for (const line of lines) {
-    // Match: digit(s) CAPS_WORD ... numbers
-    const itemLineRx = /^([1-9])\s+(.+?)\s+([\d,]+)\s+(\d+)\s+([\d,]+)\s+(Kg|Ltr|Dose|KG|LTR|No|Nos|Pcs|Bag|Bags)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([\d.]+%?)\s+([\d,]+\.?\d*)\s+([\d,]+)/i
-    const m = line.match(itemLineRx)
-    if (m) {
-      const qty_packs = parseInt(m[3].replace(/,/g,''))
-      const packSize  = parseInt(m[4])
-      const orderQty  = parseInt(m[5].replace(/,/g,''))
-      const uom       = m[6]
-      const rate      = parseFloat(m[7].replace(/,/g,''))
-      const amount    = parseFloat(m[8].replace(/,/g,''))
-      const gstPct    = parseFloat(m[9].replace('%',''))
-      const netAmount = parseFloat(m[11].replace(/,/g,''))
+  const UOM_RX = '(?:Kg|KG|Ltr|LTR|Dose|No|Nos|Pcs|Bag|Bags|MT|Quintal|Quintle|Litre|Litres|Gm|GM)'
+  const numericRx = new RegExp(
+    `\\b([1-9]\\d?)\\s+([\\d,]+)\\s+(\\d+)\\s+([\\d,]+)\\s+(${UOM_RX})\\s+([\\d,.]+)\\s+([\\d,.]+)\\s+([\\d.]+%|0%)\\s+(?:-|[\\d,.]+)\\s+([\\d,]+)`,
+    'gi'
+  )
 
-      records.push({
-        po_no:           poNo,
-        po_date:         poDate,
-        fiscal_year:     fy,
-        vendor_name:     vendor,
-        item_name:       m[2].trim(),
-        quantity:        orderQty,
-        unit:            uom,
-        rate:            rate,
-        gst_pct:         gstPct,
-        total_amount:    netAmount,
-        material_status: 'Pending',
-        credit_limit_days: creditDays,
-        delivery_date:   deliveryDate,
-        is_amendment:    isAmendment,
-      })
-    }
+  type NumItem = { serial: number; qty: number; unit: string; rate: number; gst: number; total: number }
+  const numericItems: NumItem[] = []
+  let nm: RegExpExecArray | null
+  while ((nm = numericRx.exec(fullText)) !== null) {
+    numericItems.push({
+      serial: parseInt(nm[1]),
+      qty:    parseFloat(nm[4].replace(/,/g,'')),  // ORDER column
+      unit:   nm[5],
+      rate:   parseFloat(nm[6].replace(/,/g,'')),
+      gst:    parseFloat(nm[8].replace('%','')),
+      total:  parseFloat(nm[9].replace(/,/g,'')),
+    })
   }
 
-  // If regex didn't catch items, try simpler approach - find lines with serial numbers
-  if (records.length === 0) {
-    // Look for pattern: num + any text ending in digits near Total Amount
-    const itemSection = fullText.match(/Serial\s+No.+?Total\s+Amount/is)?.[0] ?? ''
-    const simpleRx = /([1-9])\s+([A-Z][A-Za-z\s\(\)]+?)\s+([\d,.]+)\s+([\d]+)\s+([\d,]+)\s+(\w+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d.]+%?)\s+([\d,.]+)\s+([\d,.]+)/g
-    let sm
-    while ((sm = simpleRx.exec(itemSection)) !== null) {
-      records.push({
-        po_no:           poNo,
-        po_date:         poDate,
-        fiscal_year:     fy,
-        vendor_name:     vendor,
-        item_name:       sm[2].trim(),
-        quantity:        parseFloat(sm[5].replace(/,/g,'')),
-        unit:            sm[6],
-        rate:            parseFloat(sm[7].replace(/,/g,'')),
-        gst_pct:         parseFloat(sm[9].replace('%','')),
-        total_amount:    parseFloat(sm[11].replace(/,/g,'')),
-        material_status: 'Pending',
-        credit_limit_days: creditDays,
-        delivery_date:   deliveryDate,
-        is_amendment:    isAmendment,
-      })
-    }
+  // Extract item names from description column block.
+  // In the raw text they appear between "Authorized Signatory" and "Description of Materials"
+  // (because pdfjs reads the right column after the left for that region).
+  let itemNames: string[] = []
+  const descBlock = fullText.match(/Authorized\s+Signatory\s+(.*?)\s+Description\s+of\s+Materials/is)?.[1] ?? ''
+  if (descBlock) {
+    itemNames = descBlock
+      .split(/\s{2,}|\n+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 2 && /^[A-Z(]/.test(s) && !/^previously/i.test(s))
   }
+
+  // Pair numeric data with names
+  numericItems.forEach((item, i) => {
+    records.push({
+      po_no:             poNo,
+      po_date:           poDate,
+      fiscal_year:       fy,
+      vendor_name:       vendor,
+      item_name:         itemNames[i] ?? `Item ${item.serial}`,
+      quantity:          item.qty,
+      unit:              item.unit,
+      rate:              item.rate,
+      gst_pct:           item.gst,
+      total_amount:      item.total,
+      material_status:   'Pending',
+      credit_limit_days: creditDays,
+      delivery_date:     deliveryDate,
+      is_amendment:      isAmendment,
+    })
+  })
 
   const summary = `PO: ${poNo} | Vendor: ${vendor} | Date: ${poDate} | Credit: ${creditDays} days | ${records.length} items${isAmendment?' | ⚠️ AMENDMENT':''}`
   return { records, isAmendment, poNo, summary }
