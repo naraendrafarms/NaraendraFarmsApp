@@ -132,7 +132,7 @@ const EditModal: React.FC<{
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 
-const TABS = ['Overview', 'Daily Records', 'Bird Transfers', 'HE Dispatch', 'Hatch Batches', 'Egg Conversions', 'Feed', 'Medicine', 'Bird Sales'] as const
+const TABS = ['Overview', 'Daily Records', 'Transfers', 'HE Dispatch', 'Hatch Batches', 'Egg Conversions', 'Egg Sales (NHE)', 'Feed', 'Medicine', 'Cull Sales'] as const
 type Tab = typeof TABS[number]
 
 // ── FLOCK DASHBOARD ───────────────────────────────────────────────────────────
@@ -296,13 +296,14 @@ export const FlockDetail: React.FC = () => {
 
       {activeTab === 'Overview'          && <OverviewTab flock={flock} />}
       {activeTab === 'Daily Records'     && <DailyRecordsTab flockId={flock.id} />}
-      {activeTab === 'Bird Transfers'    && <BirdTransfersTab flockId={flock.id} />}
+      {activeTab === 'Transfers'         && <BirdTransfersTab flockId={flock.id} />}
       {activeTab === 'HE Dispatch'       && <HEDispatchTab flockId={flock.id} />}
       {activeTab === 'Hatch Batches'     && <HatchBatchesTab flockId={flock.id} />}
       {activeTab === 'Egg Conversions'   && <EggConversionsTab flockId={flock.id} />}
+      {activeTab === 'Egg Sales (NHE)'   && <NHESalesTab flockId={flock.id} />}
       {activeTab === 'Feed'              && <FeedTab flockId={flock.id} />}
       {activeTab === 'Medicine'          && <MedicineTab flockId={flock.id} />}
-      {activeTab === 'Bird Sales'        && <BirdSalesTab flockId={flock.id} />}
+      {activeTab === 'Cull Sales'        && <CullSalesTab flockId={flock.id} />}
     </div>
   )
 }
@@ -725,6 +726,9 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm text-blue-700">
+        <Truck size={15}/> <span><strong>Internal movement only</strong> — no revenue. Birds moving between sheds or sites (e.g. Kethireddypalli → Agraharam).</span>
+      </div>
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
           <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
@@ -1414,9 +1418,94 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   )
 }
 
-// ── BIRD SALES TAB ────────────────────────────────────────────────────────────
+// ── NHE SALES TAB (egg sales — JE/TE/BE/LE/Gunny) ───────────────────────────
 
-const BIRD_SALES_FIELDS: FieldDef[] = [
+const NHE_EGG_TYPES = ['je_eggs', 'te_eggs', 'be_eggs', 'le_eggs', 'gunny_bags', 'maize_bags', 'plastic_bags']
+
+const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const [fFrom, setFFrom] = useState('')
+  const [fTo,   setFTo]   = useState('')
+  const [fType, setFType] = useState('')
+
+  const { data: sales, isLoading } = useQuery({
+    queryKey: ['flock_nhe_egg_sales', flockId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('nhe_sales')
+        .select('*')
+        .eq('flock_id', flockId)
+        .in('sale_type', NHE_EGG_TYPES)
+        .order('sale_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  const filtered = (sales ?? []).filter((r: any) => {
+    if (fFrom && r.sale_date < fFrom) return false
+    if (fTo   && r.sale_date > fTo)   return false
+    if (fType && r.sale_type !== fType) return false
+    return true
+  })
+
+  const totalAmount = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const typeOptions = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))].map(t => ({ value: t as string, label: t as string }))
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">
+        <Egg size={15}/> <span><strong>NHE / Non-Hatching Egg Sales</strong> — Jumbo, Table, Broken, Leached eggs and bag sales. These generate income.</span>
+      </div>
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <Select label="Type" placeholder="All Types" options={typeOptions} value={fType} onChange={e => setFType(e.target.value)} />
+          {(fFrom || fTo || fType) && <div className="flex items-end"><button onClick={() => { setFFrom(''); setFTo(''); setFType('') }} className="text-xs text-brand-600 hover:underline">Clear</button></div>}
+        </div>
+      </Card>
+      <div className="grid grid-cols-2 gap-4 max-w-sm">
+        <StatCard title="Total Revenue" value={inr(totalAmount)} icon={<ShoppingCart size={18}/>} color="text-green-600" />
+        <StatCard title="Records" value={filtered.length.toString()} icon={<ShoppingCart size={18}/>} color="text-blue-600" />
+      </div>
+      {isLoading ? <Spinner /> : (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Date</Th><Th>DC No</Th><Th>Type</Th>
+              <Th right>Qty</Th><Th>Unit</Th><Th right>Rate</Th><Th right>Amount</Th>
+            </tr></thead>
+            <tbody>
+              {filtered.map((r: any) => (
+                <tr key={r.id} className="hover:bg-gray-50">
+                  <Td className="text-xs">{fmtDate(r.sale_date)}</Td>
+                  <Td className="text-xs font-mono">{r.dc_no ?? '—'}</Td>
+                  <Td><Badge color="green">{r.sale_type ?? '—'}</Badge></Td>
+                  <Td right className="text-xs">{numFmt(r.quantity)}</Td>
+                  <Td className="text-xs text-gray-400">{r.unit ?? '—'}</Td>
+                  <Td right className="text-xs">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
+                  <Td right className="text-xs font-semibold text-green-700">{inr(r.amount)}</Td>
+                </tr>
+              ))}
+            </tbody>
+            {filtered.length > 0 && (
+              <tfoot><tr className="bg-gray-50 font-semibold">
+                <Td colSpan={6}>TOTAL ({filtered.length})</Td>
+                <Td right>{inr(totalAmount)}</Td>
+              </tr></tfoot>
+            )}
+          </Table>
+          {filtered.length === 0 && <EmptyState icon={<Egg size={32}/>} title="No NHE egg sales" />}
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ── CULL SALES TAB (bird sales — income generating) ──────────────────────────
+
+const CULL_TYPES = ['cull_birds', 'litter', 'gunny_bags', 'maize_bags', 'plastic_bags']
+
+const CULL_SALES_FIELDS: FieldDef[] = [
   { key: 'sale_date',  label: 'Date',        type: 'date' },
   { key: 'dc_no',      label: 'DC No',       type: 'text' },
   { key: 'sale_type',  label: 'Sale Type',   type: 'text' },
@@ -1426,7 +1515,7 @@ const BIRD_SALES_FIELDS: FieldDef[] = [
   { key: 'amount',     label: 'Amount (₹)', type: 'number', step: '0.01' },
 ]
 
-const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const qc = useQueryClient()
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
@@ -1437,12 +1526,13 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: sales, isLoading } = useQuery({
-    queryKey: ['flock_nhe_sales', flockId],
+    queryKey: ['flock_cull_sales', flockId],
     queryFn: async () => {
       const { data } = await supabase
         .from('nhe_sales')
         .select('*')
         .eq('flock_id', flockId)
+        .in('sale_type', CULL_TYPES)
         .order('sale_date', { ascending: false })
       return data ?? []
     }
@@ -1450,16 +1540,15 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const deleteMut = useMutation({
     mutationFn: async (id: string) => { await supabase.from('nhe_sales').delete().eq('id', id) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_nhe_sales', flockId] }); setDeleteRow(null) }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_cull_sales', flockId] }); setDeleteRow(null) }
   })
 
   const updateMut = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('nhe_sales').update(data).eq('id', id) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_nhe_sales', flockId] }); setEditRow(null) }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_cull_sales', flockId] }); setEditRow(null) }
   })
 
-  const saleTypes = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))]
-  const typeOptions = saleTypes.map(t => ({ value: t as string, label: t as string }))
+  const typeOptions = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))].map(t => ({ value: t as string, label: t as string }))
 
   const filtered = (sales ?? []).filter((r: any) => {
     if (fFrom && r.sale_date < fFrom) return false
@@ -1470,7 +1559,7 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const bulkDelMutSales = useMutation({
     mutationFn: async (ids: string[]) => { await supabase.from('nhe_sales').delete().in('id', ids) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_nhe_sales', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_cull_sales', flockId] }); setSel(new Set()); setBulkConfirm(false) }
   })
 
   const totalAmount = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
@@ -1482,6 +1571,9 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 text-sm text-orange-700">
+        <Bird size={15}/> <span><strong>Cull Bird Sales &amp; Litter</strong> — Income from selling culled birds, litter, and bags. Not transfers or egg sales.</span>
+      </div>
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
           <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
@@ -1496,7 +1588,7 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </Card>
 
       <div className="grid grid-cols-2 gap-4 max-w-sm">
-        <StatCard title="Total Amount" value={inr(totalAmount)} icon={<ShoppingCart size={18}/>} color="text-green-600" />
+        <StatCard title="Total Revenue" value={inr(totalAmount)} icon={<ShoppingCart size={18}/>} color="text-orange-600" />
         <StatCard title="Records" value={filtered.length.toString()} icon={<ShoppingCart size={18}/>} color="text-blue-600" />
       </div>
 
@@ -1517,38 +1609,38 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                   <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-red-50' : ''}`}>
                     <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
                     <Td className="text-xs">{fmtDate(r.sale_date)}</Td>
-                  <Td className="text-xs font-mono">{r.dc_no ?? '—'}</Td>
-                  <Td className="text-xs"><Badge color="gray">{r.sale_type ?? '—'}</Badge></Td>
-                  <Td right className="text-xs">{numFmt(r.quantity)}</Td>
-                  <Td className="text-xs text-gray-400">{r.unit ?? '—'}</Td>
-                  <Td right className="text-xs">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
-                  <Td right className="text-xs font-semibold">{inr(r.amount)}</Td>
-                  <Td>
-                    <div className="flex gap-1 justify-end">
-                      <button onClick={() => setEditRow(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
-                      <button onClick={() => setDeleteRow(r)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-            {filtered.length > 0 && (
-              <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={7}>TOTAL ({filtered.length})</Td>
-                <Td right>{inr(totalAmount)}</Td>
-                <Td></Td>
-              </tr></tfoot>
-            )}
-          </Table>
-          {filtered.length === 0 && <EmptyState icon={<ShoppingCart size={32}/>} title="No bird sales records" />}
+                    <Td className="text-xs font-mono">{r.dc_no ?? '—'}</Td>
+                    <Td><Badge color="yellow">{r.sale_type ?? '—'}</Badge></Td>
+                    <Td right className="text-xs">{numFmt(r.quantity)}</Td>
+                    <Td className="text-xs text-gray-400">{r.unit ?? '—'}</Td>
+                    <Td right className="text-xs">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
+                    <Td right className="text-xs font-semibold text-orange-700">{inr(r.amount)}</Td>
+                    <Td>
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={() => setEditRow(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                        <button onClick={() => setDeleteRow(r)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+              {filtered.length > 0 && (
+                <tfoot><tr className="bg-gray-50 font-semibold">
+                  <Td colSpan={7}>TOTAL ({filtered.length})</Td>
+                  <Td right>{inr(totalAmount)}</Td>
+                  <Td></Td>
+                </tr></tfoot>
+              )}
+            </Table>
+            {filtered.length === 0 && <EmptyState icon={<Bird size={32}/>} title="No cull bird / litter sales" />}
           </Card>
         </>
       )}
 
       {editRow && (
         <EditModal
-          title={`Edit Sale — ${fmtDate(editRow.sale_date)}`}
-          fields={BIRD_SALES_FIELDS}
+          title={`Edit Cull Sale — ${fmtDate(editRow.sale_date)}`}
+          fields={CULL_SALES_FIELDS}
           data={editRow}
           saving={updateMut.isPending}
           onClose={() => setEditRow(null)}
@@ -1572,7 +1664,7 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         />
       )}
       {bulkConfirm && (
-        <ConfirmDelete label={`Delete ${sel.size} bird sale records?`}
+        <ConfirmDelete label={`Delete ${sel.size} cull sale records?`}
           onConfirm={() => bulkDelMutSales.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
     </div>
