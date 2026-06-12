@@ -78,6 +78,21 @@ jobs:
       - name: Run migration 044
         run: python3 scripts/run_sql.py supabase/migrations/044_he_dispatch_invoice_prodrange.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 045
+        run: python3 scripts/run_sql.py supabase/migrations/045_daily_records_egg_grades.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 046
+        run: python3 scripts/run_sql.py supabase/migrations/046_he_dispatch_lines.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 047
+        run: python3 scripts/run_sql.py supabase/migrations/047_egg_conversions.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 048
+        run: python3 scripts/run_sql.py supabase/migrations/048_hatch_batches.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 049
+        run: python3 scripts/run_sql.py supabase/migrations/049_egg_opening_stock.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Reload PostgREST schema cache
         run: |
           curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" \

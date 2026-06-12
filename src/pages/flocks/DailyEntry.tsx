@@ -16,8 +16,8 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
 }
 
-const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','total_eggs','he_eggs','je_eggs','te_eggs','be_eggs','le_eggs','trcull_female','trcull_male','mortality_female','mortality_male','closing_female','closing_male','lighting_hrs','age_weeks','remarks']
-const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',450,440,0,0,0,10,0,0,1,0,499,20,16,25,'']
+const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','total_eggs','he_eggs','he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs','wastage_eggs','trcull_female','trcull_male','mortality_female','mortality_male','closing_female','closing_male','lighting_hrs','age_weeks','remarks']
+const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',450,440,400,30,10,0,0,5,5,0,0,0,1,0,499,20,16,25,'']
 
 const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK']
 
@@ -79,7 +79,8 @@ export const DailyEntry: React.FC = () => {
     opening_female: '', opening_male: '',
     feed_female_kg: '', feed_male_kg: '',
     feed_type_f: 'L1', feed_type_m: 'MALE',
-    total_eggs: '', he_eggs: '', je_eggs: '0', te_eggs: '0', be_eggs: '0', le_eggs: '0',
+    total_eggs: '', he_eggs: '', he_grade_a: '', he_grade_b: '', he_grade_c: '',
+    je_eggs: '0', te_eggs: '0', be_eggs: '0', le_eggs: '0', wastage_eggs: '0',
     trcull_female: '0', trcull_male: '0',
     mortality_female: '0', mortality_male: '0',
     closing_female: '', closing_male: '',
@@ -99,10 +100,14 @@ export const DailyEntry: React.FC = () => {
         feed_type_m:    existing.feed_type_m ?? 'MALE',
         total_eggs:     existing.total_eggs?.toString() ?? '',
         he_eggs:        existing.he_eggs?.toString() ?? '',
+        he_grade_a:     existing.he_grade_a?.toString() ?? '',
+        he_grade_b:     existing.he_grade_b?.toString() ?? '',
+        he_grade_c:     existing.he_grade_c?.toString() ?? '',
         je_eggs:        existing.je_eggs?.toString() ?? '0',
         te_eggs:        existing.te_eggs?.toString() ?? '0',
         be_eggs:        existing.be_eggs?.toString() ?? '0',
         le_eggs:        existing.le_eggs?.toString() ?? '0',
+        wastage_eggs:   existing.wastage_eggs?.toString() ?? '0',
         trcull_female:  existing.trcull_female?.toString() ?? '0',
         trcull_male:    existing.trcull_male?.toString() ?? '0',
         mortality_female: existing.mortality_female?.toString() ?? '0',
@@ -156,10 +161,14 @@ export const DailyEntry: React.FC = () => {
         feed_type_m:      form.feed_type_m,
         total_eggs:       parseInt(form.total_eggs) || 0,
         he_eggs:          parseInt(form.he_eggs) || 0,
+        he_grade_a:       parseInt(form.he_grade_a) || null,
+        he_grade_b:       parseInt(form.he_grade_b) || null,
+        he_grade_c:       parseInt(form.he_grade_c) || null,
         je_eggs:          parseInt(form.je_eggs) || 0,
         te_eggs:          parseInt(form.te_eggs) || 0,
         be_eggs:          parseInt(form.be_eggs) || 0,
         le_eggs:          parseInt(form.le_eggs) || 0,
+        wastage_eggs:     parseInt(form.wastage_eggs) || null,
         trcull_female:    parseInt(form.trcull_female) || 0,
         trcull_male:      parseInt(form.trcull_male) || 0,
         mortality_female: parseInt(form.mortality_female) || 0,
@@ -209,7 +218,7 @@ export const DailyEntry: React.FC = () => {
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`daily_${selectedFlockData?.flock_no}_records.csv`,
       DAILY_HEADERS,
-      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.total_eggs,r.he_eggs,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.trcull_female,r.trcull_male,r.mortality_female,r.mortality_male,r.closing_female,r.closing_male,r.lighting_hrs,r.age_weeks,r.remarks])
+      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.total_eggs,r.he_eggs,r.he_grade_a,r.he_grade_b,r.he_grade_c,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.wastage_eggs,r.trcull_female,r.trcull_male,r.mortality_female,r.mortality_male,r.closing_female,r.closing_male,r.lighting_hrs,r.age_weeks,r.remarks])
     )
   }
 
@@ -235,10 +244,14 @@ export const DailyEntry: React.FC = () => {
         feed_type_m:      r[col('feed_type_m')]  || r[col('feedtypem')]  || 'MALE',
         total_eggs:       parseInt(r[col('total_eggs')]       || r[col('totaleggs')]       || '0') || 0,
         he_eggs:          parseInt(r[col('he_eggs')]          || r[col('heeggs')]          || '0') || 0,
+        he_grade_a:       parseInt(r[col('he_grade_a')]       || r[col('hegradea')]        || '0') || null,
+        he_grade_b:       parseInt(r[col('he_grade_b')]       || r[col('hegradeb')]        || '0') || null,
+        he_grade_c:       parseInt(r[col('he_grade_c')]       || r[col('hegradec')]        || '0') || null,
         je_eggs:          parseInt(r[col('je_eggs')]          || r[col('jeeggs')]          || '0') || 0,
         te_eggs:          parseInt(r[col('te_eggs')]          || r[col('teeggs')]          || '0') || 0,
         be_eggs:          parseInt(r[col('be_eggs')]          || r[col('beeggs')]          || '0') || 0,
         le_eggs:          parseInt(r[col('le_eggs')]          || r[col('leeggs')]          || '0') || 0,
+        wastage_eggs:     parseInt(r[col('wastage_eggs')]     || r[col('wastageeggs')]     || '0') || null,
         trcull_female:    parseInt(r[col('trcull_female')]    || r[col('trcullfemale')]    || '0') || 0,
         trcull_male:      parseInt(r[col('trcull_male')]      || r[col('trcullmale')]      || '0') || 0,
         mortality_female: parseInt(r[col('mortality_female')] || r[col('mortalityfemale')] || '0') || 0,
@@ -360,23 +373,41 @@ export const DailyEntry: React.FC = () => {
                 </div>
               }
             />
-            <FormRow cols={3}>
+            <FormRow cols={2}>
               <Input label="Total Eggs" type="number" required
                 value={form.total_eggs} onChange={e => set('total_eggs', e.target.value)} />
-              <Input label="HE (Hatching Eggs)" type="number"
-                value={form.he_eggs} onChange={e => set('he_eggs', e.target.value)} />
-              <Input label="Jumbo Eggs (JE)" type="number"
-                value={form.je_eggs} onChange={e => set('je_eggs', e.target.value)} />
+              <Input label="HE Total (all grades)" type="number"
+                value={form.he_eggs} onChange={e => set('he_eggs', e.target.value)}
+                hint="Combined HE — fill grades below" />
             </FormRow>
+            <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-100">
+              <p className="text-xs font-semibold text-green-700 mb-2 uppercase tracking-wide">HE Grade Breakdown</p>
+              <FormRow cols={3}>
+                <Input label="Grade A" type="number"
+                  value={form.he_grade_a} onChange={e => set('he_grade_a', e.target.value)} />
+                <Input label="Grade B" type="number"
+                  value={form.he_grade_b} onChange={e => set('he_grade_b', e.target.value)} />
+                <Input label="Grade C" type="number"
+                  value={form.he_grade_c} onChange={e => set('he_grade_c', e.target.value)} />
+              </FormRow>
+            </div>
             <div className="mt-3">
               <FormRow cols={3}>
+                <Input label="Jumbo Eggs (JE)" type="number"
+                  value={form.je_eggs} onChange={e => set('je_eggs', e.target.value)} />
                 <Input label="Table Eggs (TE)" type="number"
                   value={form.te_eggs} onChange={e => set('te_eggs', e.target.value)} />
                 <Input label="Broken Eggs (BE)" type="number"
                   value={form.be_eggs} onChange={e => set('be_eggs', e.target.value)} />
-                <Input label="Litter Eggs (LE)" type="number"
-                  value={form.le_eggs} onChange={e => set('le_eggs', e.target.value)} />
               </FormRow>
+              <div className="mt-3">
+                <FormRow cols={3}>
+                  <Input label="Leached Eggs (LE)" type="number"
+                    value={form.le_eggs} onChange={e => set('le_eggs', e.target.value)} />
+                  <Input label="Wastage" type="number"
+                    value={form.wastage_eggs} onChange={e => set('wastage_eggs', e.target.value)} />
+                </FormRow>
+              </div>
             </div>
           </Card>
 

@@ -31,10 +31,12 @@ const NAV: NavItem[] = [
     children: [
       { label: 'All Flocks',     to: '/flocks' },
       { label: 'Add New Flock',  to: '/flocks/new' },
-      { label: 'Daily Entry',    to: '/flocks/daily' },
-      { label: 'HE Dispatch',    to: '/flocks/he-dispatch' },
-      { label: 'NHE Sales',      to: '/flocks/nhe-sales' },
-      { label: 'Medicine Entry', to: '/flocks/medicine' },
+      { label: 'Daily Entry',       to: '/flocks/daily' },
+      { label: 'HE Dispatch',       to: '/flocks/he-dispatch' },
+      { label: 'NHE Sales',         to: '/flocks/nhe-sales' },
+      { label: 'Egg Conversions',   to: '/flocks/egg-conversions' },
+      { label: 'Hatch Batches',     to: '/flocks/hatch-batches' },
+      { label: 'Medicine Entry',    to: '/flocks/medicine' },
     ]
   },
   {
@@ -88,7 +90,7 @@ const NAV: NavItem[] = [
   {
     label: 'Reports', icon: <BarChart2 size={18}/>,
     children: [
-      { label: 'Hatchability',       to: '/hatchability' },
+      { label: 'Hatchability (Legacy)', to: '/hatchability' },
       { label: 'Flock P&L',         to: '/reports/pl' },
       { label: 'Production Report',  to: '/reports/production' },
       { label: 'Feed Cost Report',   to: '/reports/feed' },

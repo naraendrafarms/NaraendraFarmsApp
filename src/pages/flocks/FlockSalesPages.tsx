@@ -542,6 +542,7 @@ const NHE_TYPES = [
   { value: 'bird_sex_error', label: 'Bird Sales — Sex Error' },
   { value: 'gas',            label: 'Gas Cylinders (income)' },
   { value: 'manure',         label: 'Manure / Litter' },
+  { value: 'gunny_bags',     label: 'Gunny / Maize / Plastic Bags' },
   { value: 'other',          label: 'Other Income' },
 ]
 const BIRD_SALE_TYPES = ['bird_cull','bird_lame','bird_weak','bird_sex_error']

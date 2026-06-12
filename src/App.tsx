@@ -11,6 +11,8 @@ import { FlockList } from '@/pages/flocks/FlockList'
 import { FlockDetail } from '@/pages/flocks/FlockDetail'
 import { DailyEntry } from '@/pages/flocks/DailyEntry'
 import { HEDispatch, NHESales, MedicineEntry } from '@/pages/flocks/FlockSalesPages'
+import { EggConversions } from '@/pages/flocks/EggConversions'
+import { HatchBatches } from '@/pages/flocks/HatchBatches'
 import { FeedDashboard, GRNEntry, FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
 import { StockPage } from '@/pages/feed/StockPage'
 import { FeedMillPage } from '@/pages/feed/FeedMillPages'
@@ -90,6 +92,8 @@ export const App: React.FC = () => {
             <Route path="flocks/daily" element={<DailyEntry />} />
             <Route path="flocks/he-dispatch" element={<HEDispatch />} />
             <Route path="flocks/nhe-sales" element={<NHESales />} />
+            <Route path="flocks/egg-conversions" element={<EggConversions />} />
+            <Route path="flocks/hatch-batches" element={<HatchBatches />} />
             <Route path="flocks/medicine" element={<MedicineEntry />} />
 
             {/* Feed Mill */}
