@@ -7,7 +7,7 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 } from '@/components/ui'
-import { Plus, Package, Edit2, Egg, Trash2, Upload, Download } from 'lucide-react'
+import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 
@@ -59,6 +59,8 @@ export const HEDispatch: React.FC = () => {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [noInvoiceOnly, setNoInvoiceOnly] = useState(false)
+  const [tab, setTab] = useState<'dispatch'|'stock'>('dispatch')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: flocks } = useQuery({
@@ -105,8 +107,8 @@ export const HEDispatch: React.FC = () => {
   })
 
   const [form, setForm] = useState({
-    flock_id: '', dispatch_date: today(), prod_date: today(),
-    dc_no: '', party_id: '', hatchery_id: '',
+    flock_id: '', dispatch_date: today(), prod_date: today(), prod_date_to: '',
+    dc_no: '', invoice_no: '', party_id: '', hatchery_id: '',
     grade_a: '0', grade_b: '0', total_dispatched: '',
     free_eggs: '0', rate: '', amount: '',
     setting_date: '', hatch_date: '', chicks_sold: '', remarks: ''
@@ -122,7 +124,9 @@ export const HEDispatch: React.FC = () => {
       setEditing(row)
       setForm({
         flock_id: row.flock_id, dispatch_date: row.dispatch_date, prod_date: row.prod_date ?? '',
-        dc_no: row.dc_no?.toString() ?? '', party_id: row.party_id ?? '', hatchery_id: row.hatchery_id ?? '',
+        prod_date_to: row.prod_date_to ?? '',
+        dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
+        party_id: row.party_id ?? '', hatchery_id: row.hatchery_id ?? '',
         grade_a: row.grade_a?.toString() ?? '0', grade_b: row.grade_b?.toString() ?? '0',
         total_dispatched: row.total_dispatched?.toString() ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
@@ -132,8 +136,8 @@ export const HEDispatch: React.FC = () => {
       })
     } else {
       setEditing(null)
-      setForm({ flock_id: flockFilter, dispatch_date: today(), prod_date: today(),
-        dc_no: '', party_id: '', hatchery_id: '', grade_a: '0', grade_b: '0',
+      setForm({ flock_id: flockFilter, dispatch_date: today(), prod_date: today(), prod_date_to: '',
+        dc_no: '', invoice_no: '', party_id: '', hatchery_id: '', grade_a: '0', grade_b: '0',
         total_dispatched: '', free_eggs: '0', rate: '', amount: '',
         setting_date: '', hatch_date: '', chicks_sold: '', remarks: '' })
     }
@@ -152,7 +156,8 @@ export const HEDispatch: React.FC = () => {
       const inv = (parseInt(form.total_dispatched)||0) - (parseInt(form.free_eggs)||0)
       const payload = {
         flock_id: form.flock_id, dispatch_date: form.dispatch_date,
-        prod_date: form.prod_date || null, dc_no: parseInt(form.dc_no) || null,
+        prod_date: form.prod_date || null, prod_date_to: form.prod_date_to || null,
+        dc_no: parseInt(form.dc_no) || null, invoice_no: form.invoice_no || null,
         party_id: form.party_id || null, hatchery_id: form.hatchery_id || null,
         grade_a: parseInt(form.grade_a) || 0, grade_b: parseInt(form.grade_b) || 0,
         total_dispatched: parseInt(form.total_dispatched),
@@ -169,9 +174,49 @@ export const HEDispatch: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
-  const totalDisp = dispatches?.reduce((s: number, d: any) => s + d.total_dispatched, 0) ?? 0
-  const totalAmt  = dispatches?.reduce((s: number, d: any) => s + (d.amount ?? 0), 0) ?? 0
-  const totalFree = dispatches?.reduce((s: number, d: any) => s + (d.free_eggs ?? 0), 0) ?? 0
+  const filtered = (dispatches ?? []).filter((d: any) => !noInvoiceOnly || !d.invoice_no)
+  const totalDisp = filtered.reduce((s: number, d: any) => s + d.total_dispatched, 0)
+  const totalAmt  = filtered.reduce((s: number, d: any) => s + (d.amount ?? 0), 0)
+  const totalFree = filtered.reduce((s: number, d: any) => s + (d.free_eggs ?? 0), 0)
+  const noInvoiceCount = (dispatches ?? []).filter((d: any) => !d.invoice_no).length
+
+  // Stock register: daily production vs dispatches per flock
+  const { data: stockData } = useQuery({
+    queryKey: ['he_stock_register', flockFilter],
+    queryFn: async () => {
+      let dq = supabase.from('daily_records').select('record_date,flock_id,he_eggs,flocks(flock_no)')
+        .order('record_date', { ascending: false })
+      let hq = supabase.from('he_dispatch').select('dispatch_date,flock_id,total_dispatched,flocks(flock_no)')
+        .order('dispatch_date', { ascending: false })
+      if (flockFilter) { dq = dq.eq('flock_id', flockFilter); hq = hq.eq('flock_id', flockFilter) }
+      const [{ data: prod }, { data: disp }] = await Promise.all([dq, hq])
+      // Build daily stock per flock
+      const map = new Map<string, { date: string; flock: string; produced: number; dispatched: number }>()
+      for (const r of (prod ?? [])) {
+        if (!r.he_eggs) continue
+        const key = `${r.record_date}__${r.flock_id}`
+        const existing = map.get(key) ?? { date: r.record_date, flock: `F-${(r.flocks as any)?.flock_no}`, produced: 0, dispatched: 0 }
+        existing.produced += r.he_eggs ?? 0
+        map.set(key, existing)
+      }
+      for (const r of (disp ?? [])) {
+        const key = `${r.dispatch_date}__${r.flock_id}`
+        const existing = map.get(key) ?? { date: r.dispatch_date, flock: `F-${(r.flocks as any)?.flock_no}`, produced: 0, dispatched: 0 }
+        existing.dispatched += r.total_dispatched ?? 0
+        map.set(key, existing)
+      }
+      // Sort by date desc
+      const rows = [...map.values()].sort((a, b) => b.date.localeCompare(a.date))
+      // Compute running balance (oldest first, then reverse)
+      const asc = [...rows].reverse()
+      let balance = 0
+      const withBalance = asc.map(r => {
+        balance += r.produced - r.dispatched
+        return { ...r, closing: balance }
+      }).reverse()
+      return withBalance
+    }
+  })
 
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
@@ -249,6 +294,14 @@ export const HEDispatch: React.FC = () => {
     }
   }
 
+  // prod date display helper
+  const prodDateLabel = (d: any) => {
+    if (!d.prod_date) return '—'
+    if (d.prod_date_to && d.prod_date_to !== d.prod_date)
+      return `${fmtDate(d.prod_date)} – ${fmtDate(d.prod_date_to)}`
+    return fmtDate(d.prod_date)
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="HE Dispatch & Sales"
@@ -256,10 +309,21 @@ export const HEDispatch: React.FC = () => {
         action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Dispatch</Button>}
       />
 
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-gray-200">
+        {(['dispatch','stock'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab===t?'border-brand-600 text-brand-600':'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            {t === 'dispatch' ? 'Dispatches' : 'Daily Stock Register'}
+          </button>
+        ))}
+      </div>
+
       {/* Filter row */}
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        {tab === 'dispatch' && <>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           From
           <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
@@ -270,7 +334,15 @@ export const HEDispatch: React.FC = () => {
           <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
-        {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>}
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input type="checkbox" checked={noInvoiceOnly} onChange={e => setNoInvoiceOnly(e.target.checked)}
+            className="rounded border-gray-300 text-orange-500"/>
+          <span className="text-orange-600 font-medium">
+            No Invoice only {noInvoiceCount > 0 && <span className="bg-orange-100 text-orange-700 text-xs px-1.5 rounded-full">{noInvoiceCount}</span>}
+          </span>
+        </label>
+        </>}
+        {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setNoInvoiceOnly(false) }}>Clear</Button>}
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>
             Download Template
@@ -304,24 +376,29 @@ export const HEDispatch: React.FC = () => {
 
       <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
 
-      {isLoading ? <Spinner /> : (
+      {tab === 'dispatch' && (isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
               <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Dispatch Date</Th><Th>Prod Date</Th>
-              <Th right>DC No</Th><Th>Party</Th><Th>Hatchery</Th>
-              <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice</Th>
+              <Th right>DC No</Th><Th>Invoice No</Th><Th>Party</Th><Th>Hatchery</Th>
+              <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice Qty</Th>
               <Th right>Rate</Th><Th right>Amount</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {dispatches?.map((d: any) => (
-                <tr key={d.id} className={`hover:bg-gray-50 ${sel.has(d.id) ? 'bg-red-50' : ''}`}>
+              {filtered.map((d: any) => (
+                <tr key={d.id} className={`hover:bg-gray-50 ${sel.has(d.id) ? 'bg-red-50' : !d.invoice_no ? 'bg-orange-50' : ''}`}>
                   <Td><CB checked={sel.has(d.id)} onChange={() => toggle(d.id)}/></Td>
                   <Td><Badge color="green">F-{d.flocks?.flock_no}</Badge></Td>
                   <Td className="text-xs">{fmtDate(d.dispatch_date)}</Td>
-                  <Td className="text-xs text-gray-400">{fmtDate(d.prod_date)}</Td>
+                  <Td className="text-xs text-gray-500">{prodDateLabel(d)}</Td>
                   <Td right className="text-xs">{d.dc_no ?? '—'}</Td>
+                  <Td className="text-xs">
+                    {d.invoice_no
+                      ? <span className="font-medium text-blue-700">{d.invoice_no}</span>
+                      : <span className="flex items-center gap-1 text-orange-500"><AlertCircle size={11}/>Pending</span>}
+                  </Td>
                   <Td className="text-xs max-w-[120px] truncate">{d.parties?.name ?? '—'}</Td>
                   <Td className="text-xs text-gray-400 max-w-[100px] truncate">{d.hatcheries?.name ?? '—'}</Td>
                   <Td right className="font-medium">{d.total_dispatched?.toLocaleString('en-IN')}</Td>
@@ -338,9 +415,9 @@ export const HEDispatch: React.FC = () => {
                 </tr>
               ))}
             </tbody>
-            {dispatches && dispatches.length > 0 && (
+            {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50">
-                <Td colSpan={7}><strong>TOTAL ({dispatches.length} records)</strong></Td>
+                <Td colSpan={8}><strong>TOTAL ({filtered.length} records)</strong></Td>
                 <Td right><strong>{totalDisp.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{totalFree.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{(totalDisp - totalFree).toLocaleString('en-IN')}</strong></Td>
@@ -350,11 +427,46 @@ export const HEDispatch: React.FC = () => {
               </tr></tfoot>
             )}
           </Table>
-          {dispatches?.length === 0 && (
-            <EmptyState icon={<Egg size={32}/>} title="No dispatches yet"
-              action={<Button onClick={() => openForm()} icon={<Plus size={16}/>}>Add Dispatch</Button>}
+          {filtered.length === 0 && (
+            <EmptyState icon={<Egg size={32}/>} title={noInvoiceOnly ? 'All dispatches have invoice numbers' : 'No dispatches yet'}
+              action={!noInvoiceOnly ? <Button onClick={() => openForm()} icon={<Plus size={16}/>}>Add Dispatch</Button> : undefined}
             />
           )}
+        </Card>
+      ))}
+
+      {/* Daily Stock Register tab */}
+      {tab === 'stock' && (
+        <Card padding={false}>
+          <div className="px-4 py-3 border-b border-gray-100 bg-blue-50 text-sm text-blue-700">
+            Stock = cumulative HE production (daily records) minus dispatches. Updates automatically when entries are saved.
+          </div>
+          <Table>
+            <thead><tr>
+              <Th>Date</Th><Th>Flock</Th>
+              <Th right>Produced</Th><Th right>Dispatched</Th>
+              <Th right>Daily ±</Th><Th right>Closing Stock</Th>
+            </tr></thead>
+            <tbody>
+              {(stockData ?? []).map((r: any, i: number) => (
+                <tr key={i} className={`hover:bg-gray-50 ${r.closing < 0 ? 'bg-red-50' : ''}`}>
+                  <Td className="text-sm">{fmtDate(r.date)}</Td>
+                  <Td><Badge color="green">{r.flock}</Badge></Td>
+                  <Td right className="text-sm text-green-700">{r.produced > 0 ? `+${r.produced.toLocaleString('en-IN')}` : '—'}</Td>
+                  <Td right className="text-sm text-red-600">{r.dispatched > 0 ? `-${r.dispatched.toLocaleString('en-IN')}` : '—'}</Td>
+                  <Td right className={`text-sm font-medium ${r.produced - r.dispatched >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {(r.produced - r.dispatched) >= 0 ? '+' : ''}{(r.produced - r.dispatched).toLocaleString('en-IN')}
+                  </Td>
+                  <Td right className={`font-semibold ${r.closing < 0 ? 'text-red-700' : 'text-gray-800'}`}>
+                    {r.closing.toLocaleString('en-IN')}
+                  </Td>
+                </tr>
+              ))}
+              {(stockData ?? []).length === 0 && (
+                <tr><Td colSpan={6} className="text-center text-gray-400 py-8">No data — add daily records and dispatches first</Td></tr>
+              )}
+            </tbody>
+          </Table>
         </Card>
       )}
 
@@ -377,7 +489,11 @@ export const HEDispatch: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Dispatch Date" required type="date" value={form.dispatch_date} onChange={e => s('dispatch_date', e.target.value)} />
-            <Input label="Production Date" type="date" value={form.prod_date} onChange={e => s('prod_date', e.target.value)} />
+            <Input label="Invoice No" placeholder="e.g. INV-2026-001" value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="Production Date (From)" type="date" value={form.prod_date} onChange={e => s('prod_date', e.target.value)} />
+            <Input label="Production Date (To)" type="date" value={form.prod_date_to} onChange={e => s('prod_date_to', e.target.value)} hint="Leave blank if single date" />
           </FormRow>
           <FormRow>
             <Select label="Party / Hatchery" placeholder="— Select —" options={partyOptions}
