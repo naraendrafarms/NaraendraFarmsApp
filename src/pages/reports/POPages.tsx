@@ -14,7 +14,8 @@ import {
 import {
   ShoppingCart, Clock, CheckCircle, AlertCircle, Plus, Pencil, Trash2,
   Building2, Landmark, CreditCard, TrendingUp, TrendingDown, AlertTriangle,
-  Download, PackageCheck, User, BarChart3, Lock, Upload, LineChart
+  Download, PackageCheck, User, BarChart3, Lock, Upload, LineChart,
+  ChevronDown, ChevronUp
 } from 'lucide-react'
 import {
   LineChart as ReLineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -155,6 +156,8 @@ const POTab: React.FC = () => {
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false)
   const [bulkStatusVal, setBulkStatusVal] = useState('Received')
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<'flat'|'grouped'>('grouped')
+  const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set())
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptPO, setReceiptPO]     = useState<any>(null)
   const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', remarks: '' })
@@ -253,6 +256,20 @@ const POTab: React.FC = () => {
   const grandTotal = filtered.reduce((s: number, o: any) => s + Number(o.total_amount ?? 0), 0)
   const received   = filtered.filter((o: any) => o.material_status === 'Received').length
 
+  const groupedByPO = useMemo(() => {
+    const m: Record<string, any[]> = {}
+    filtered.forEach((o: any) => {
+      const key = o.po_no || o.id
+      if (!m[key]) m[key] = []
+      m[key].push(o)
+    })
+    return Object.entries(m).sort(([,a],[,b]) => {
+      const da = a[0]?.po_date || ''
+      const db = b[0]?.po_date || ''
+      return db.localeCompare(da)
+    })
+  }, [filtered])
+
   const openNew  = () => { setEditing(null); setForm({...EMPTY_PO, fiscal_year: fy}); setOpen(true) }
   const openEdit = (r: any) => { setEditing(r); setForm({...r, po_date:r.po_date??'', grn_date:r.grn_date??''}); setOpen(true) }
 
@@ -274,7 +291,11 @@ const POTab: React.FC = () => {
         <Sel value={payStatusF} onChange={(e:any)=>setPayStatusF(e.target.value)} options={[{value:'',label:'All Pay Status'},...PAY_STATUS.map(s=>({value:s,label:s}))]} />
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search vendor / PO / item..."
           className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-56" />
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex gap-2 items-center">
+          <div className="flex border border-gray-300 rounded-md overflow-hidden">
+            <button onClick={() => setViewMode('flat')} className={`px-3 py-1.5 text-xs font-medium ${viewMode==='flat' ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>Flat List</button>
+            <button onClick={() => setViewMode('grouped')} className={`px-3 py-1.5 text-xs font-medium ${viewMode==='grouped' ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>By PO</button>
+          </div>
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV(`purchase_orders_${fy}.csv`, filtered, [
             {key:'po_no',label:'PO No'},{key:'po_date',label:'Date'},{key:'vendor_name',label:'Vendor'},{key:'item_name',label:'Item'},
             {key:'material_type',label:'Type'},{key:'quantity',label:'Qty'},{key:'unit',label:'Unit'},{key:'rate',label:'Rate'},
@@ -298,6 +319,7 @@ const POTab: React.FC = () => {
 
       <POImportModal open={importOpen} onClose={()=>{ setImportOpen(false); qc.invalidateQueries({queryKey:['purchase_orders']}) }} />
 
+      {viewMode === 'flat' ? (
       <Card padding={false}>
         <div className="overflow-x-auto">
           <Table>
@@ -341,6 +363,83 @@ const POTab: React.FC = () => {
           </Table>
         </div>
       </Card>
+      ) : (
+      <div className="space-y-3">
+        {groupedByPO.length === 0 && <EmptyState title="No purchase orders found" />}
+        {groupedByPO.map(([poKey, items]) => {
+          const first = items[0]
+          const isExpanded = expandedPOs.has(poKey)
+          const groupTotal = items.reduce((s: number, o: any) => s + Number(o.total_amount ?? 0), 0)
+          const allItemsSelected = items.every((o: any) => selected.has(o.id))
+          const toggleGroup = () => {
+            const newSel = new Set(selected)
+            if (allItemsSelected) items.forEach((o: any) => newSel.delete(o.id))
+            else items.forEach((o: any) => newSel.add(o.id))
+            setSelected(newSel)
+          }
+          const worstStatus = items.some((o: any) => o.material_status === 'Pending') ? 'Pending' : 'Received'
+          return (
+            <Card key={poKey} padding={false}>
+              {/* Group header row */}
+              <div className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100"
+                onClick={() => setExpandedPOs(prev => { const s = new Set(prev); s.has(poKey) ? s.delete(poKey) : s.add(poKey); return s })}>
+                <input type="checkbox" checked={allItemsSelected} onChange={e => { e.stopPropagation(); toggleGroup() }} className="rounded" onClick={e => e.stopPropagation()} />
+                <span className="font-mono text-sm font-bold text-brand-700 min-w-[100px]">{first.po_no || '(No PO)'}</span>
+                <span className="text-xs text-gray-500">{first.po_date ? fmtDate(first.po_date) : '—'}</span>
+                <span className="font-medium text-sm text-gray-800 flex-1 truncate">{first.vendor_name}</span>
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+                <span className="font-semibold text-sm text-gray-900">{inr(groupTotal)}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[worstStatus] ?? 'bg-gray-100 text-gray-500'}`}>{worstStatus}</span>
+                <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                  {canEdit && <button onClick={() => openEdit(first)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit PO"><Pencil size={13}/></button>}
+                  {canEdit && <button onClick={() => { setEditing(null); setForm({...EMPTY_PO, fiscal_year: fy, po_no: first.po_no, vendor_name: first.vendor_name}); setOpen(true) }} className="p-1 text-green-500 hover:text-green-700" title="Add item to PO"><Plus size={13}/></button>}
+                </div>
+                {isExpanded ? <ChevronUp size={16} className="text-gray-400 shrink-0"/> : <ChevronDown size={16} className="text-gray-400 shrink-0"/>}
+              </div>
+              {/* Expanded line items */}
+              {isExpanded && (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <thead><tr>
+                      <Th></Th>
+                      <Th>Item</Th><Th>Type</Th><Th right>Qty</Th><Th>Unit</Th>
+                      <Th right>Rate</Th><Th right>GST%</Th><Th right>Amount</Th>
+                      <Th>GRN No</Th><Th>Status</Th><Th></Th>
+                    </tr></thead>
+                    <tbody>
+                      {items.map((o: any) => (
+                        <tr key={o.id} className={`text-sm ${selected.has(o.id) ? 'bg-brand-50' : 'hover:bg-gray-50'}`}>
+                          <Td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} className="rounded" /></Td>
+                          <Td className="text-xs max-w-[160px] truncate">{o.item_name ?? '—'}</Td>
+                          <Td><span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{o.material_type ?? '—'}</span></Td>
+                          <Td right className="text-xs">{o.quantity != null ? Number(o.quantity).toLocaleString('en-IN') : '—'}</Td>
+                          <Td className="text-xs text-gray-500">{o.unit ?? '—'}</Td>
+                          <Td right className="text-xs">{o.rate ? inr(o.rate) : '—'}</Td>
+                          <Td right className="text-xs">{o.gst_pct != null ? `${o.gst_pct}%` : '—'}</Td>
+                          <Td right className="font-semibold">{o.total_amount ? inr(o.total_amount) : '—'}</Td>
+                          <Td className="text-xs text-gray-500">{o.grn_no ?? '—'}</Td>
+                          <Td><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[o.material_status] ?? 'bg-gray-100 text-gray-500'}`}>{o.material_status ?? '—'}</span></Td>
+                          <Td>
+                            <div className="flex gap-1">
+                              {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
+                              {canEdit && o.material_status !== 'Received' && (
+                                <button onClick={() => { setReceiptPO(o); setReceiptForm((fv: any) => ({...fv, unit: o.unit||'', qty_received: o.quantity||''})); setReceiptOpen(true) }}
+                                  className="p-1 text-green-500 hover:text-green-700" title="Record Stock Receipt"><PackageCheck size={13}/></button>
+                              )}
+                              {canDel && <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600" title="Delete"><Trash2 size={13}/></button>}
+                            </div>
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              )}
+            </Card>
+          )
+        })}
+      </div>
+      )}
 
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? 'Edit Purchase Order' : 'New Purchase Order'} size="lg"
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
@@ -482,6 +581,7 @@ const EMPTY_PAY = {
   paid_date:'', credit_limit:'', pay_before_date:'', account_type:'Online',
   bank_account_id:'', utr_no:'', cheque_no:'', transaction_ref:'',
   po_raised_by:'', payment_approved_by:'', remarks:'',
+  tds_pct: '0', tds_amount: '0', net_payable: '',
 }
 
 const PaymentsTab: React.FC = () => {
@@ -498,7 +598,59 @@ const PaymentsTab: React.FC = () => {
   const [editing, setEditing]   = useState<any>(null)
   const [form, setForm]         = useState<any>(EMPTY_PAY)
   const [delId, setDelId]       = useState<string|null>(null)
+  const [payMergeOpen, setPayMergeOpen] = useState(false)
+  const importPayRef = useRef<HTMLInputElement>(null)
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
+
+  const handlePayImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer)
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const raw: any[][] = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''})
+      if (raw.length < 2) { toast.error('No data rows found'); return }
+      const headers = (raw[0] as string[]).map(h => String(h).trim().toLowerCase().replace(/\s+/g,'_'))
+      const col = (name: string) => headers.indexOf(name)
+      const rows = raw.slice(1).filter(r => r.some((c:any) => c !== ''))
+      const inserts = rows.map(r => ({
+        vendor_name: r[col('vendor_name')] || null,
+        invoice_no: r[col('invoice_no')] || null,
+        invoice_date: r[col('invoice_date')] || null,
+        invoice_amount: r[col('invoice_amount')] ? Number(r[col('invoice_amount')]) : null,
+        tds_pct: r[col('tds_pct')] ? Number(r[col('tds_pct')]) : 0,
+        tds_amount: r[col('tds_amount')] ? Number(r[col('tds_amount')]) : 0,
+        net_payable: r[col('net_payable')] ? Number(r[col('net_payable')]) : null,
+        payment_type: r[col('payment_type')] || null,
+        payment_status: r[col('payment_status')] || 'Pending',
+        pay_before_date: r[col('pay_before_date')] || null,
+        account_type: r[col('account_type')] || null,
+        utr_no: r[col('utr_no')] || null,
+        cheque_no: r[col('cheque_no')] || null,
+        remarks: r[col('remarks')] || null,
+        po_no: r[col('po_no')] || null,
+        grn_no: r[col('grn_no')] || null,
+      }))
+      const { error } = await supabase.from('pending_payments').insert(inserts)
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      toast.success(`Imported ${inserts.length} payment records`)
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      e.target.value = ''
+    }
+  }
+
+  const downloadPayTemplate = () => {
+    const headers = ['vendor_name','invoice_no','invoice_date','invoice_amount','tds_pct','tds_amount','net_payable','payment_type','payment_status','pay_before_date','account_type','utr_no','cheque_no','remarks','po_no','grn_no']
+    const example = ['Vendor ABC','INV-001','2025-06-01','100000','2','2000','98000','Feed Raw Material','Pending','2025-06-30','Online','','','','PO-001','GRN-001']
+    const ws = XLSX.utils.aoa_to_sheet([headers, example])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Payments')
+    XLSX.writeFile(wb, 'payments_import_template.xlsx')
+  }
 
   const { data: payments=[], isLoading } = useQuery({
     queryKey: ['pending_payments'],
@@ -557,6 +709,9 @@ const PaymentsTab: React.FC = () => {
         transaction_ref: form.transaction_ref || null,
         po_raised_by: form.po_raised_by || null, payment_approved_by: form.payment_approved_by || null,
         remarks: form.remarks || null,
+        tds_pct: form.tds_pct ? Number(form.tds_pct) : 0,
+        tds_amount: form.tds_amount ? Number(form.tds_amount) : 0,
+        net_payable: form.net_payable ? Number(form.net_payable) : null,
       }
       if (editing) await supabase.from('pending_payments').update(payload).eq('id', editing.id)
       else await supabase.from('pending_payments').insert(payload)
@@ -669,9 +824,14 @@ const PaymentsTab: React.FC = () => {
         {(statusF||typeF||monthF||alertF||search) && <button onClick={()=>{setStatusF('');setTypeF('');setMonthF('');setAlertF('');setSearch('')}} className="text-xs text-brand-600 hover:underline">Clear all</button>}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm text-gray-500">{filtered.length} records · {inr(filteredTotal)}</span>
+          <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={downloadPayTemplate}>Template</Button>
+          <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={() => importPayRef.current?.click()}>Import</Button>
+          <input ref={importPayRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handlePayImport} />
+          {canEdit && <Button size="sm" variant="outline" onClick={() => setPayMergeOpen(true)}>Merge Vendors</Button>}
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV('payments.csv', filtered, [
             {key:'vendor_name',label:'Vendor'},{key:'invoice_no',label:'Invoice No'},{key:'invoice_date',label:'Invoice Date'},
-            {key:'invoice_amount',label:'Amount'},{key:'payment_type',label:'Type'},{key:'pay_before_date',label:'Pay Before'},
+            {key:'invoice_amount',label:'Amount'},{key:'tds_pct',label:'TDS%'},{key:'tds_amount',label:'TDS Amt'},{key:'net_payable',label:'Net Payable'},
+            {key:'payment_type',label:'Type'},{key:'pay_before_date',label:'Pay Before'},
             {key:'po_no',label:'PO No'},{key:'grn_no',label:'GRN No'},{key:'account_type',label:'Account Type'},
             {key:'utr_no',label:'UTR No'},{key:'cheque_no',label:'Cheque No'},{key:'payment_status',label:'Status'},{key:'paid_date',label:'Paid Date'},{key:'remarks',label:'Remarks'}
           ])}>Export</Button>
@@ -684,7 +844,7 @@ const PaymentsTab: React.FC = () => {
           <Table>
             <thead><tr>
               <Th>Vendor</Th><Th>Invoice No</Th><Th>Invoice Date</Th>
-              <Th right>Amount</Th><Th>Type</Th><Th>Pay Before</Th>
+              <Th right>Amount</Th><Th right>TDS%</Th><Th right>Net Payable</Th><Th>Type</Th><Th>Pay Before</Th>
               <Th>Days Left</Th><Th>PO No</Th><Th>GRN No</Th>
               <Th>Account</Th><Th>UTR/Cheque</Th>
               <Th>Status</Th><Th>Paid Date</Th><Th></Th>
@@ -699,6 +859,8 @@ const PaymentsTab: React.FC = () => {
                     <Td className="text-xs text-gray-500">{p.invoice_no ?? '—'}</Td>
                     <Td className="text-xs">{p.invoice_date ? fmtDate(p.invoice_date) : '—'}</Td>
                     <Td right className="font-semibold">{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
+                    <Td className="text-xs">{p.tds_pct > 0 ? `${p.tds_pct}%` : '—'}</Td>
+                    <Td right className="text-xs font-semibold text-green-700">{p.net_payable ? inr(p.net_payable) : (p.tds_pct > 0 ? inr(Number(p.invoice_amount||0) - Number(p.tds_amount||0)) : '—')}</Td>
                     <Td><span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{p.payment_type ?? '—'}</span></Td>
                     <Td className="text-xs">{p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}</Td>
                     <Td className="text-center text-xs">
@@ -719,7 +881,7 @@ const PaymentsTab: React.FC = () => {
                   </tr>
                 )
               })}
-              {filtered.length===0 && <tr><td colSpan={14} className="text-center py-8 text-gray-400 text-sm">No payment records found</td></tr>}
+              {filtered.length===0 && <tr><td colSpan={16} className="text-center py-8 text-gray-400 text-sm">No payment records found</td></tr>}
             </tbody>
           </Table>
         </div>
@@ -749,8 +911,34 @@ const PaymentsTab: React.FC = () => {
             <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={f('invoice_date')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Invoice Amount (₹)" type="number" value={form.invoice_amount} onChange={f('invoice_amount')} />
+            <Input label="Invoice Amount (₹)" type="number" value={form.invoice_amount} onChange={(e:any) => {
+              const amt = Number(e.target.value) || 0
+              const pct = Number(form.tds_pct) || 0
+              if (pct > 0) {
+                const tds = +(amt * pct / 100).toFixed(2)
+                setForm((p:any) => ({...p, invoice_amount: e.target.value, tds_amount: String(tds), net_payable: String(+(amt - tds).toFixed(2))}))
+              } else {
+                setForm((p:any) => ({...p, invoice_amount: e.target.value}))
+              }
+            }} />
             <Sel label="Payment Type" value={form.payment_type} onChange={f('payment_type')} options={[{value:'',label:'Select type'},...MAT_TYPES.map(t=>({value:t,label:t}))]} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <Sel label="TDS %" value={form.tds_pct} onChange={(e:any) => {
+              const pct = Number(e.target.value)
+              const amt = Number(form.invoice_amount) || 0
+              const tds = +(amt * pct / 100).toFixed(2)
+              setForm((p:any) => ({...p, tds_pct: e.target.value, tds_amount: String(tds), net_payable: String(+(amt - tds).toFixed(2))}))
+            }} options={[
+              {value:'0',label:'No TDS (0%)'},
+              {value:'1',label:'1% TDS'},
+              {value:'2',label:'2% TDS (Contractor)'},
+              {value:'5',label:'5% TDS'},
+              {value:'10',label:'10% TDS (Professional)'},
+              {value:'0.1',label:'0.1% TDS (Goods purchase)'},
+            ]} />
+            <Input label="TDS Amount (₹)" type="number" value={form.tds_amount} onChange={f('tds_amount')} />
+            <Input label="Net Payable (₹)" type="number" value={form.net_payable} onChange={f('net_payable')} />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <Input label="Credit Limit (days)" type="number" value={form.credit_limit} onChange={f('credit_limit')} />
@@ -794,6 +982,8 @@ const PaymentsTab: React.FC = () => {
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelId(null)}>Cancel</Button><Button variant="danger" onClick={() => delId && delMut.mutate(delId)} loading={delMut.isPending}>Delete</Button></div>}>
         <p className="text-sm text-gray-600">Delete this payment record? This cannot be undone.</p>
       </Modal>
+
+      <VendorMergeModal open={payMergeOpen} onClose={() => { setPayMergeOpen(false); qc.invalidateQueries({ queryKey: ['pending_payments'] }) }} />
     </div>
   )
 }
