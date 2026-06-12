@@ -33,6 +33,7 @@ import { AdminCentre } from '@/pages/admin/AdminCentre'
 import { FlockDashboard, FlockDetail as NewFlockDetail } from '@/pages/flock/FlockPages'
 import { FlockComparison } from '@/pages/flock/FlockComparison'
 import { ShedPerformancePage } from '@/pages/flock/ShedPerformance'
+import { FarmExpensesPage } from '@/pages/expenses/FarmExpenses'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -158,6 +159,7 @@ export const App: React.FC = () => {
             <Route path="flock" element={<FlockDashboard />} />
             <Route path="flock/compare" element={<FlockComparison />} />
             <Route path="flock/shed-performance" element={<ShedPerformancePage />} />
+            <Route path="expenses" element={<FarmExpensesPage />} />
             <Route path="flock/:flockNo" element={<NewFlockDetail />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

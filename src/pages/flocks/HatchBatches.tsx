@@ -57,7 +57,7 @@ export const HatchBatches: React.FC = () => {
     hatchery_name: '', setting_date: today(), eggs_set: '', broken_transit: '0',
     fertile_eggs: '', hatched_chicks: '', culled_chicks: '0',
     unhatched: '', blasters: '0', rejects: '0',
-    chicks_sold: '', hatch_date: '', remarks: ''
+    chicks_sold: '', chick_rate: '', hatch_date: '', remarks: ''
   }
   const [form, setForm] = useState(emptyForm)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
@@ -80,6 +80,7 @@ export const HatchBatches: React.FC = () => {
         blasters: row.blasters?.toString() ?? '0',
         rejects: row.rejects?.toString() ?? '0',
         chicks_sold: row.chicks_sold?.toString() ?? '',
+        chick_rate: row.chick_rate?.toString() ?? '',
         hatch_date: row.hatch_date ?? '',
         remarks: row.remarks ?? ''
       })
@@ -121,6 +122,8 @@ export const HatchBatches: React.FC = () => {
         blasters: parseInt(form.blasters) || 0,
         rejects: parseInt(form.rejects) || 0,
         chicks_sold: parseInt(form.chicks_sold) || null,
+        chick_rate: parseFloat(form.chick_rate) || null,
+        chick_amount: (parseInt(form.chicks_sold) || 0) * (parseFloat(form.chick_rate) || 0) || null,
         hatch_date: form.hatch_date || null,
         fertility_pct: fertilityPct,
         hatchability_pct: hatchPct,
@@ -307,6 +310,11 @@ export const HatchBatches: React.FC = () => {
           <FormRow>
             <Input label="Chicks Sold" type="number" value={form.chicks_sold}
               onChange={e => s('chicks_sold', e.target.value)} />
+            <Input label="Chick Rate (₹/chick)" type="number" step="0.01" value={form.chick_rate}
+              onChange={e => s('chick_rate', e.target.value)}
+              hint={form.chicks_sold && form.chick_rate ? `Revenue: ₹${(parseInt(form.chicks_sold)||0)*(parseFloat(form.chick_rate)||0)}` : ''} />
+          </FormRow>
+          <FormRow>
             <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
           </FormRow>
           {(form.eggs_set && form.fertile_eggs) && (

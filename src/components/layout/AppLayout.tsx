@@ -91,8 +91,8 @@ const NAV: NavItem[] = [
   {
     label: 'Reports', icon: <BarChart2 size={18}/>,
     children: [
+      { label: 'Flock P&L (Full)',    to: '/reports/pl' },
       { label: 'Hatchability (Legacy)', to: '/hatchability' },
-      { label: 'Flock P&L',         to: '/reports/pl' },
       { label: 'Production Report',  to: '/reports/production' },
       { label: 'Feed Cost Report',   to: '/reports/feed' },
       { label: 'Salary Report',      to: '/reports/salary' },
@@ -104,6 +104,7 @@ const NAV: NavItem[] = [
     label: 'Purchase & Payments', icon: <ShoppingCart size={18}/>,
     children: [
       { label: 'Purchase & Payments', to: '/purchase-orders' },
+      { label: 'Farm Expenses',        to: '/expenses' },
     ]
   },
   {

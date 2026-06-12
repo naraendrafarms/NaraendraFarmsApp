@@ -148,114 +148,171 @@ export const ProductionReport: React.FC = () => {
 export const PLReport: React.FC = () => {
   const [flockId, setFlockId] = useState('')
 
-  const { data: flocks } = useQuery({ queryKey:['flocks_all'], queryFn:async()=>{const{data}=await supabase.from('flocks').select('id,flock_no,chick_cost,placement_date,close_date,status').order('flock_no');return data??[]} })
+  const { data: flocks } = useQuery({ queryKey:['flocks_all'], queryFn:async()=>{const{data}=await supabase.from('flocks').select('id,flock_no,chick_cost,placement_date,close_date,status,laying_farm_id,rearing_farm_id').order('flock_no');return data??[]} })
 
-  const { data: heRevenue } = useQuery({
-    queryKey: ['pl_he', flockId], enabled: !!flockId,
-    queryFn: async () => {
-      const { data } = await supabase.from('he_dispatch').select('amount,total_dispatched,free_eggs').eq('flock_id', flockId)
-      return data ?? []
-    }
-  })
-
-  const { data: nheRevenue } = useQuery({
-    queryKey: ['pl_nhe', flockId], enabled: !!flockId,
-    queryFn: async () => {
-      const { data } = await supabase.from('nhe_sales').select('amount,sale_type').eq('flock_id', flockId)
-      return data ?? []
-    }
-  })
-
-  const { data: medicineMonthly } = useQuery({
-    queryKey: ['pl_med', flockId], enabled: !!flockId,
-    queryFn: async () => {
-      const { data } = await supabase.from('medicine_monthly').select('total_amount').eq('flock_id', flockId)
-      return data ?? []
-    }
-  })
-
+  const enabled = !!flockId
   const flock = flocks?.find((f: any) => f.id === flockId)
-  const totalHERev = heRevenue?.reduce((s: number, r: any) => s + (r.amount ?? 0), 0) ?? 0
-  const totalNHERev = nheRevenue?.reduce((s: number, r: any) => s + (r.amount ?? 0), 0) ?? 0
-  const totalRevenue = totalHERev + totalNHERev
+  const farmId = flock?.laying_farm_id ?? flock?.rearing_farm_id
+
+  // ── REVENUE ──────────────────────────────────────────────────────
+  const { data: heRevenue } = useQuery({
+    queryKey: ['pl_he', flockId], enabled,
+    queryFn: async () => { const { data } = await supabase.from('he_dispatch').select('amount,total_dispatched,free_eggs').eq('flock_id', flockId); return data ?? [] }
+  })
+  const { data: nheRevenue } = useQuery({
+    queryKey: ['pl_nhe', flockId], enabled,
+    queryFn: async () => { const { data } = await supabase.from('nhe_sales').select('amount,sale_type').eq('flock_id', flockId); return data ?? [] }
+  })
+  const { data: hatchRevenue } = useQuery({
+    queryKey: ['pl_hatch', flockId], enabled,
+    queryFn: async () => { const { data } = await supabase.from('hatch_batches').select('chicks_sold,chick_rate,chick_amount').eq('flock_id', flockId); return data ?? [] }
+  })
+
+  // ── COSTS ─────────────────────────────────────────────────────────
+  const { data: medicineUsage } = useQuery({
+    queryKey: ['pl_med_usage', flockId], enabled,
+    queryFn: async () => { const { data } = await supabase.from('medicine_usage').select('quantity,rate,amount').eq('flock_id', flockId); return data ?? [] }
+  })
+  // Feed: daily_feed consumed by flock × latest GRN rate
+  const { data: dailyFeed } = useQuery({
+    queryKey: ['pl_feed', flockId], enabled,
+    queryFn: async () => { const { data } = await supabase.from('daily_feed').select('female_kg,male_kg,female_cost,male_cost,feed_type').eq('flock_id', flockId); return data ?? [] }
+  })
+  const { data: grnRates } = useQuery({
+    queryKey: ['grn_rates_pl'],
+    queryFn: async () => {
+      const { data } = await supabase.from('grn').select('item_name,price_per_unit,grn_date').order('grn_date', { ascending: false })
+      const map: Record<string, number> = {}
+      for (const g of (data ?? [])) { const k = (g.item_name ?? '').trim().toLowerCase(); if (k && !(k in map)) map[k] = g.price_per_unit }
+      return map
+    }
+  })
+  // Electricity: bills for flock's farm
+  const { data: elecBills } = useQuery({
+    queryKey: ['pl_elec', farmId], enabled: !!farmId,
+    queryFn: async () => { const { data } = await supabase.from('electricity_bills').select('amount').eq('farm_id', farmId); return data ?? [] }
+  })
+  // Salary: abstracts for flock's farm
+  const { data: salaryAbstracts } = useQuery({
+    queryKey: ['pl_salary', farmId], enabled: !!farmId,
+    queryFn: async () => { const { data } = await supabase.from('salary_abstract').select('net_salary').eq('farm_id', farmId); return data ?? [] }
+  })
+  // Farm expenses: linked to this flock or its farm
+  const { data: farmExpenses } = useQuery({
+    queryKey: ['pl_farm_exp', flockId, farmId], enabled,
+    queryFn: async () => {
+      const { data } = await supabase.from('farm_expenses').select('amount,category')
+        .or(`flock_id.eq.${flockId}${farmId ? `,farm_id.eq.${farmId}` : ''}`)
+      return data ?? []
+    }
+  })
+
+  // ── COMPUTATIONS ─────────────────────────────────────────────────
+  const totalHERev      = (heRevenue ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const totalNHERev     = (nheRevenue ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const totalChickRev   = (hatchRevenue ?? []).reduce((s: number, r: any) => s + (r.chick_amount ?? (r.chicks_sold ?? 0) * (r.chick_rate ?? 0)), 0)
+  const totalRevenue    = totalHERev + totalNHERev + totalChickRev
+
   const chickCost = flock?.chick_cost ?? 0
-  const medicineCost = medicineMonthly?.reduce((s: number, r: any) => s + (r.total_amount ?? 0), 0) ?? 0
-  const totalCost = chickCost + medicineCost
-  const grossProfit = totalRevenue - totalCost
-  const totalHEEggs = heRevenue?.reduce((s: number, r: any) => s + (r.total_dispatched ?? 0), 0) ?? 0
+  const medCost   = (medicineUsage ?? []).reduce((s: number, r: any) => s + (r.amount ?? ((r.quantity ?? 0) * (r.rate ?? 0))), 0)
 
-  const nheByType = nheRevenue?.reduce((acc: any, r: any) => {
-    acc[r.sale_type] = (acc[r.sale_type] ?? 0) + (r.amount ?? 0)
-    return acc
-  }, {})
+  const getFeedRate = (ft: string) => { if (!grnRates || !ft) return 0; const k = ft.trim().toLowerCase(); if (grnRates[k] !== undefined) return grnRates[k]; const found = Object.keys(grnRates).find(x => x.includes(k) || k.includes(x)); return found ? grnRates[found] : 0 }
+  const feedCost = (dailyFeed ?? []).reduce((s: number, r: any) => {
+    const stored = (r.female_cost ?? 0) + (r.male_cost ?? 0)
+    if (stored > 0) return s + stored
+    const rate = getFeedRate(r.feed_type ?? '')
+    return s + ((r.female_kg ?? 0) + (r.male_kg ?? 0)) * rate
+  }, 0)
 
-  const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
+  const elecCost   = (elecBills ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const salaryCost = (salaryAbstracts ?? []).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0)
+
+  const expByCategory: Record<string, number> = {}
+  ;(farmExpenses ?? []).forEach((e: any) => { expByCategory[e.category] = (expByCategory[e.category] ?? 0) + (e.amount ?? 0) })
+  const totalFarmExp = Object.values(expByCategory).reduce((s, v) => s + v, 0)
+
+  const totalCost   = chickCost + medCost + feedCost + elecCost + salaryCost + totalFarmExp
+  const netProfit   = totalRevenue - totalCost
+  const totalHEEggs = (heRevenue ?? []).reduce((s: number, r: any) => s + (r.total_dispatched ?? 0), 0)
+
+  const nheByType = (nheRevenue ?? []).reduce((acc: any, r: any) => { acc[r.sale_type] = (acc[r.sale_type] ?? 0) + (r.amount ?? 0); return acc }, {})
+  const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no} (${f.status})` }))
+
+  const CostRow: React.FC<{ label: string; value: number; sub?: string }> = ({ label, value, sub }) => (
+    <div className="flex justify-between text-sm">
+      <span className={value === 0 ? 'text-gray-400' : ''}>{label}{sub && <span className="text-xs text-gray-400 ml-1">{sub}</span>}</span>
+      <span className={value === 0 ? 'text-gray-300' : 'font-semibold text-red-600'}>{value > 0 ? inr(value) : '—'}</span>
+    </div>
+  )
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Flock P&L Report" subtitle="Revenue vs cost summary per flock"/>
+      <SectionHeader title="Flock P&L Report" subtitle="Complete revenue vs cost — all cost centres included"/>
       <div className="flex gap-3">
-        <Select label="" placeholder="— Select Flock —" options={flockOptions} value={flockId} onChange={e=>setFlockId(e.target.value)} className="w-48"/>
+        <Select label="" placeholder="— Select Flock —" options={flockOptions} value={flockId} onChange={e=>setFlockId(e.target.value)} className="w-56"/>
       </div>
       {!flockId && <Card><p className="text-gray-400 text-sm text-center py-8">Select a flock to view P&L</p></Card>}
       {flockId && flock && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card>
-            <h3 className="font-semibold text-green-700 mb-4">Revenue</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span>HE Dispatch ({totalHEEggs.toLocaleString('en-IN')} eggs)</span>
-                <span className="font-semibold text-green-700">{inr(totalHERev)}</span>
-              </div>
-              {nheByType && Object.entries(nheByType).map(([type, amt]: any) => (
-                <div key={type} className="flex justify-between text-sm text-gray-600">
-                  <span className="capitalize">{type.replace(/_/g, ' ')}</span>
-                  <span>{inr(amt)}</span>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* REVENUE */}
+            <Card>
+              <h3 className="font-semibold text-green-700 mb-4 flex items-center gap-2">Revenue</h3>
+              <div className="space-y-2.5">
+                <div className="flex justify-between text-sm"><span>HE Dispatch <span className="text-xs text-gray-400">({totalHEEggs.toLocaleString('en-IN')} eggs)</span></span><span className="font-semibold text-green-700">{inr(totalHERev)}</span></div>
+                {Object.entries(nheByType).map(([type, amt]: any) => (
+                  <div key={type} className="flex justify-between text-sm text-gray-600 pl-2">
+                    <span className="capitalize">{type.replace(/_/g,' ')}</span>
+                    <span>{inr(amt)}</span>
+                  </div>
+                ))}
+                {totalChickRev > 0 && <div className="flex justify-between text-sm"><span>Chick Sales (Hatchery)</span><span className="font-semibold text-green-700">{inr(totalChickRev)}</span></div>}
+                <div className="border-t pt-2 flex justify-between font-bold text-green-700">
+                  <span>Total Revenue</span><span>{inr(totalRevenue)}</span>
                 </div>
-              ))}
-              <div className="border-t pt-2 flex justify-between font-bold">
-                <span>Total Revenue</span>
-                <span className="text-green-700">{inr(totalRevenue)}</span>
               </div>
-            </div>
-          </Card>
+            </Card>
+
+            {/* COSTS */}
+            <Card>
+              <h3 className="font-semibold text-red-700 mb-4">Costs</h3>
+              <div className="space-y-2.5">
+                <CostRow label="Chick Cost" value={chickCost} />
+                <CostRow label="Feed Cost" value={feedCost} sub={feedCost === 0 ? '(no feed records)' : ''} />
+                <CostRow label="Medicine / Vaccine" value={medCost} />
+                <CostRow label="Electricity" value={elecCost} sub={elecCost === 0 ? '(farm-level)' : '(farm-level)'} />
+                <CostRow label="Salary" value={salaryCost} sub="(farm-level)" />
+                {Object.entries(expByCategory).map(([cat, amt]: any) => (
+                  <CostRow key={cat} label={cat.charAt(0).toUpperCase()+cat.slice(1)} value={amt} />
+                ))}
+                {totalFarmExp === 0 && <div className="flex justify-between text-sm text-gray-400"><span>Maintenance / Other Expenses</span><span>— <span className="text-xs">(enter in Farm Expenses)</span></span></div>}
+                <div className="border-t pt-2 flex justify-between font-bold text-red-700">
+                  <span>Total Cost</span><span>{inr(totalCost)}</span>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* NET P&L */}
           <Card>
-            <h3 className="font-semibold text-red-700 mb-4">Costs</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span>Chick Cost</span>
-                <span className="font-semibold text-red-600">{inr(chickCost)}</span>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-sm text-gray-500">Net Profit / Loss — Flock {flock.flock_no}</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {flock.placement_date ? `Placed: ${fmtDate(flock.placement_date)}` : ''}
+                  {flock.close_date ? ` · Closed: ${fmtDate(flock.close_date)}` : ' · Active'}
+                  {elecCost > 0 || salaryCost > 0 ? ' · Note: electricity & salary shown at farm level, not per-flock allocated' : ''}
+                </p>
               </div>
-              <div className="flex justify-between text-sm">
-                <span>Medicine Cost</span>
-                <span className="font-semibold text-red-600">{inr(medicineCost)}</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Feed Cost</span>
-                <span>— (enter via GRN)</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Electricity</span>
-                <span>— (enter via allocation)</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-400">
-                <span>Salary</span>
-                <span>— (enter via salary abstract)</span>
-              </div>
-              <div className="border-t pt-2 flex justify-between font-bold">
-                <span>Total Cost (partial)</span>
-                <span className="text-red-700">{inr(totalCost)}</span>
+              <div className={`text-3xl font-bold ${netProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {inr(netProfit)}
               </div>
             </div>
-          </Card>
-          <Card className="md:col-span-2">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-gray-800">Gross Profit (partial)</h3>
-              <div className={`text-2xl font-bold ${grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {inr(grossProfit)}
-              </div>
+            <div className="mt-4 grid grid-cols-3 gap-4 text-sm border-t pt-4">
+              <div><p className="text-gray-500 text-xs">Total Revenue</p><p className="font-semibold text-green-700">{inr(totalRevenue)}</p></div>
+              <div><p className="text-gray-500 text-xs">Total Cost</p><p className="font-semibold text-red-600">{inr(totalCost)}</p></div>
+              <div><p className="text-gray-500 text-xs">Margin</p><p className={`font-semibold ${netProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>{totalRevenue > 0 ? (netProfit/totalRevenue*100).toFixed(1)+'%' : '—'}</p></div>
             </div>
-            <p className="text-xs text-gray-400 mt-2">* Feed, electricity and salary costs not yet allocated to this flock.</p>
           </Card>
         </div>
       )}
