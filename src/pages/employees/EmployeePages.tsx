@@ -1509,3 +1509,485 @@ export const AttendanceRegisterPage: React.FC = () => {
     </div>
   )
 }
+
+// ── PAYSLIP GENERATOR ────────────────────────────────────────────
+const PT_SLABS = [
+  { upTo: 15000, pt: 0 },
+  { upTo: 20000, pt: 150 },
+  { upTo: Infinity, pt: 200 },
+]
+function calcPT(gross: number) {
+  for (const s of PT_SLABS) if (gross <= s.upTo) return s.pt
+  return 200
+}
+
+const EMPTY_CS = {
+  company_name: 'Naraendra Farms', address_line1: '', address_line2: '',
+  city: '', state: 'Andhra Pradesh', pincode: '', phone: '', email: '',
+  pan_no: '', pf_reg_no: '', esi_reg_no: '', pt_reg_no: '', logo_url: ''
+}
+
+const EMPTY_SLIP = {
+  days_worked: '', basic_salary: '', hra: '', da: '', ta: '',
+  special_allowance: '', other_allowance: '', ot_bonus: '', arrears: '',
+  pf_employee: '', esi_employee: '', pt: '', tds: '',
+  advance: '', hold: '', other_deduction: '', remarks: ''
+}
+
+export const PayslipGeneratorPage: React.FC = () => {
+  const qc = useQueryClient()
+  const [empId, setEmpId] = useState('')
+  const [month, setMonth] = useState(() => {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1)
+    return d.toISOString().slice(0, 10)
+  })
+  const [slip, setSlip] = useState<typeof EMPTY_SLIP>({ ...EMPTY_SLIP })
+  const [cs, setCs] = useState<typeof EMPTY_CS>({ ...EMPTY_CS })
+  const [csId, setCsId] = useState<string | null>(null)
+  const [csEditing, setCsEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [autoCalcPF, setAutoCalcPF] = useState(true)
+  const [autoCalcESI, setAutoCalcESI] = useState(true)
+  const [autoCalcPT, setAutoCalcPT] = useState(true)
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms'], queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name').eq('is_active', true).order('name')
+      return data ?? []
+    }
+  })
+  const { data: employees } = useQuery({
+    queryKey: ['employees_all'], queryFn: async () => {
+      const { data } = await supabase.from('employees').select('id,emp_id,name,designation,farm_id,base_salary,esi_applicable,pf_applicable,pt_applicable,bank_name,account_no,ifsc,uan_no,farms(name)').eq('is_active', true).order('name')
+      return data ?? []
+    }
+  })
+
+  // Load company settings once
+  useQuery({
+    queryKey: ['company_settings'],
+    queryFn: async () => {
+      const { data } = await supabase.from('company_settings').select('*').limit(1).single()
+      if (data) { setCs({ ...EMPTY_CS, ...data }); setCsId(data.id) }
+      return data
+    }
+  })
+
+  const emp = (employees ?? []).find((e: any) => e.id === empId)
+
+  // Load salary_monthly when emp + month change
+  useQuery({
+    queryKey: ['payslip_load', empId, month],
+    enabled: !!empId && !!month,
+    queryFn: async () => {
+      const { data } = await supabase.from('salary_monthly')
+        .select('*').eq('employee_id', empId).eq('month', month).maybeSingle()
+      if (data) {
+        const base = parseFloat(emp?.base_salary ?? '0')
+        const basic = parseFloat(data.earned_salary ?? data.basic_salary ?? base) || base
+        const hra = parseFloat(data.hra ?? '0') || Math.round(basic * 0.2)
+        const gross = basic + hra
+        const pfAmt = (emp as any)?.pf_applicable ? Math.round(basic * 0.12) : 0
+        const esiAmt = (emp as any)?.esi_applicable ? Math.round(gross * 0.0075) : 0
+        const ptAmt = (emp as any)?.pt_applicable ? calcPT(gross) : 0
+        setAutoCalcPF(!!(emp as any)?.pf_applicable)
+        setAutoCalcESI(!!(emp as any)?.esi_applicable)
+        setAutoCalcPT(!!(emp as any)?.pt_applicable)
+        setSlip({
+          days_worked: data.days_worked?.toString() ?? '',
+          basic_salary: basic.toString(),
+          hra: hra.toString(),
+          da: '0', ta: '0', special_allowance: '0', other_allowance: '0',
+          ot_bonus: (data.ot_bonus ?? 0).toString(),
+          arrears: (data.arrears ?? 0).toString(),
+          pf_employee: pfAmt.toString(),
+          esi_employee: esiAmt.toString(),
+          pt: ptAmt.toString(),
+          tds: (data.tds ?? 0).toString(),
+          advance: (data.advance ?? 0).toString(),
+          hold: (data.hold ?? 0).toString(),
+          other_deduction: '0',
+          remarks: data.remarks ?? ''
+        })
+      } else if (emp) {
+        const base = parseFloat((emp as any).base_salary ?? '0')
+        const hra = Math.round(base * 0.2)
+        const gross = base + hra
+        setSlip({
+          ...EMPTY_SLIP,
+          basic_salary: base.toString(), hra: hra.toString(),
+          pf_employee: (emp as any).pf_applicable ? Math.round(base * 0.12).toString() : '0',
+          esi_employee: (emp as any).esi_applicable ? Math.round(gross * 0.0075).toString() : '0',
+          pt: (emp as any).pt_applicable ? calcPT(gross).toString() : '0',
+        })
+        setAutoCalcPF(!!(emp as any).pf_applicable)
+        setAutoCalcESI(!!(emp as any).esi_applicable)
+        setAutoCalcPT(!!(emp as any).pt_applicable)
+      }
+      return data
+    }
+  })
+
+  const n = (k: keyof typeof EMPTY_SLIP) => parseFloat(slip[k] || '0')
+
+  const gross = n('basic_salary') + n('hra') + n('da') + n('ta') + n('special_allowance') + n('other_allowance') + n('ot_bonus') + n('arrears')
+
+  // Auto recalculate
+  React.useEffect(() => {
+    if (!autoCalcPF && !autoCalcESI && !autoCalcPT) return
+    setSlip(s => ({
+      ...s,
+      pf_employee: autoCalcPF ? Math.round(n('basic_salary') * 0.12).toString() : s.pf_employee,
+      esi_employee: autoCalcESI ? Math.round(gross * 0.0075).toString() : s.esi_employee,
+      pt: autoCalcPT ? calcPT(gross).toString() : s.pt,
+    }))
+  }, [gross, n('basic_salary'), autoCalcPF, autoCalcESI, autoCalcPT])
+
+  const totalDed = n('pf_employee') + n('esi_employee') + n('pt') + n('tds') + n('advance') + n('hold') + n('other_deduction')
+  const netSalary = gross - totalDed
+  const pfEmployer = autoCalcPF ? Math.round(n('basic_salary') * 0.12) : 0
+  const esiEmployer = autoCalcESI ? Math.round(gross * 0.0325) : 0
+
+  const s = (k: keyof typeof EMPTY_SLIP) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setSlip(prev => ({ ...prev, [k]: e.target.value }))
+
+  const saveSettings = async () => {
+    setSaving(true)
+    if (csId) {
+      await supabase.from('company_settings').update({ ...cs, updated_at: new Date().toISOString() }).eq('id', csId)
+    } else {
+      const { data } = await supabase.from('company_settings').insert(cs).select().single()
+      if (data) setCsId(data.id)
+    }
+    qc.invalidateQueries({ queryKey: ['company_settings'] })
+    setCsEditing(false)
+    setSaving(false)
+    toast.success('Company settings saved')
+  }
+
+  const savePayslip = async () => {
+    if (!empId || !month) { toast.error('Select employee and month'); return }
+    setSaving(true)
+    const payload = {
+      employee_id: empId, month,
+      days_worked: n('days_worked') || null,
+      basic_salary: n('basic_salary'), hra: n('hra'), da: n('da'), ta: n('ta'),
+      special_allowance: n('special_allowance'), other_allowance: n('other_allowance'),
+      ot_bonus: n('ot_bonus'), arrears: n('arrears'),
+      gross_earnings: gross,
+      pf_employee: n('pf_employee'), esi_employee: n('esi_employee'),
+      pt: n('pt'), tds: n('tds'), advance: n('advance'), hold: n('hold'),
+      other_deduction: n('other_deduction'), total_deductions: totalDed,
+      net_salary: netSalary, pf_employer: pfEmployer, esi_employer: esiEmployer,
+      remarks: slip.remarks, generated_at: new Date().toISOString()
+    }
+    const { error } = await supabase.from('payslips').upsert(payload, { onConflict: 'employee_id,month' })
+    setSaving(false)
+    if (error) { toast.error(error.message); return }
+    toast.success('Payslip saved')
+  }
+
+  const handlePrint = () => window.print()
+
+  const farmMap = Object.fromEntries((farms ?? []).map((f: any) => [f.id, f.name]))
+  const empOptions = (employees ?? []).map((e: any) => ({ value: e.id, label: `${e.name}${e.emp_id ? ` (${e.emp_id})` : ''} — ${farmMap[e.farm_id] ?? ''}` }))
+
+  const monthLabel = (m: string) => {
+    const d = new Date(m + 'T00:00:00')
+    return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+  }
+
+  return (
+    <div className="space-y-5">
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          #payslip-print, #payslip-print * { visibility: visible !important; }
+          #payslip-print { position: fixed; left: 0; top: 0; width: 100%; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+
+      <SectionHeader title="Payslip Generator"
+        subtitle="Generate and print monthly payslips for employees"
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setCsEditing(true)}>Company Settings</Button>
+            {empId && <Button variant="outline" size="sm" icon={<FileText size={14}/>} onClick={savePayslip} loading={saving}>Save Payslip</Button>}
+            {empId && <Button size="sm" onClick={handlePrint}>Print / PDF</Button>}
+          </div>
+        }
+      />
+
+      {/* Company Settings Modal */}
+      <Modal open={csEditing} title="Company Settings" onClose={() => setCsEditing(false)} size="lg">
+        <div className="space-y-3 p-1">
+          {([
+            ['company_name','Company Name'],['address_line1','Address Line 1'],['address_line2','Address Line 2'],
+          ] as [keyof typeof EMPTY_CS, string][]).map(([k,lbl])=>(
+            <div key={k}><label className="text-xs font-medium text-gray-600 block mb-1">{lbl}</label><Input value={cs[k]} onChange={e=>setCs(p=>({...p,[k]:e.target.value}))}/></div>
+          ))}
+          <div className="grid grid-cols-3 gap-3">
+            {(['city','state','pincode'] as (keyof typeof EMPTY_CS)[]).map((k,i)=>(
+              <div key={k}><label className="text-xs font-medium text-gray-600 block mb-1">{['City','State','Pincode'][i]}</label><Input value={cs[k]} onChange={e=>setCs(p=>({...p,[k]:e.target.value}))}/></div>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {(['phone','email','pan_no','pf_reg_no','esi_reg_no','pt_reg_no'] as (keyof typeof EMPTY_CS)[]).map((k,i)=>(
+              <div key={k}><label className="text-xs font-medium text-gray-600 block mb-1">{['Phone','Email','PAN No','PF Reg No','ESI Reg No','PT Reg No'][i]}</label><Input value={cs[k]} onChange={e=>setCs(p=>({...p,[k]:e.target.value}))}/></div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setCsEditing(false)}>Cancel</Button>
+            <Button onClick={saveSettings} loading={saving}>Save Settings</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Employee + Month selector */}
+      <Card className="no-print">
+        <div className="flex gap-4 flex-wrap items-end">
+          <div className="flex-1 min-w-48">
+            <Select label="Employee" options={empOptions} value={empId} onChange={e => setEmpId(e.target.value)} placeholder="Select Employee" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Month</label>
+            <input type="month" value={month.slice(0, 7)}
+              onChange={e => setMonth(e.target.value + '-01')}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          {emp && (
+            <div className="text-sm text-gray-500 space-y-0.5">
+              <div><span className="font-medium">{(emp as any).designation}</span></div>
+              <div>Base: <span className="font-semibold text-gray-700">{inr((emp as any).base_salary)}</span></div>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Earnings/Deductions form — no-print */}
+      {emp && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 no-print">
+          <Card>
+            <h3 className="font-semibold text-gray-700 mb-3 text-sm">Earnings</h3>
+            <div className="space-y-2">
+              {([
+                ['basic_salary', 'Basic Salary'],
+                ['hra', 'HRA'],
+                ['da', 'DA (Dearness Allowance)'],
+                ['ta', 'TA (Travel Allowance)'],
+                ['special_allowance', 'Special Allowance'],
+                ['other_allowance', 'Other Allowance'],
+                ['ot_bonus', 'OT / Bonus'],
+                ['arrears', 'Arrears'],
+              ] as [keyof typeof EMPTY_SLIP, string][]).map(([k, lbl]) => (
+                <div key={k} className="flex items-center gap-3">
+                  <label className="text-sm text-gray-600 w-48 shrink-0">{lbl}</label>
+                  <input type="number" min={0} value={slip[k]}
+                    onChange={s(k)}
+                    className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-32 text-right focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                </div>
+              ))}
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-gray-600 w-48 shrink-0">Days Worked</label>
+                <input type="number" min={0} max={31} value={slip.days_worked}
+                  onChange={s('days_worked')}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-32 text-right focus:outline-none focus:ring-1 focus:ring-brand-500" />
+              </div>
+              <div className="flex items-center gap-3 pt-2 border-t border-gray-200">
+                <span className="text-sm font-bold text-gray-700 w-48 shrink-0">Gross Earnings</span>
+                <span className="text-sm font-bold text-green-700 w-32 text-right">{inr(gross)}</span>
+              </div>
+            </div>
+          </Card>
+
+          <Card>
+            <h3 className="font-semibold text-gray-700 mb-3 text-sm">Deductions</h3>
+            <div className="space-y-2">
+              {([
+                ['pf_employee', `PF (Employee 12%)`, autoCalcPF, setAutoCalcPF],
+                ['esi_employee', `ESI (Employee 0.75%)`, autoCalcESI, setAutoCalcESI],
+                ['pt', `Professional Tax`, autoCalcPT, setAutoCalcPT],
+              ] as [keyof typeof EMPTY_SLIP, string, boolean, React.Dispatch<React.SetStateAction<boolean>>][]).map(([k, lbl, auto, setAuto]) => (
+                <div key={k} className="flex items-center gap-3">
+                  <label className="text-sm text-gray-600 w-48 shrink-0">{lbl}</label>
+                  <input type="number" min={0} value={slip[k]} disabled={auto}
+                    onChange={s(k)}
+                    className={`border rounded-lg px-3 py-1.5 text-sm w-32 text-right focus:outline-none focus:ring-1 focus:ring-brand-500 ${auto ? 'bg-gray-50 text-gray-500' : 'border-gray-300'}`} />
+                  <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
+                    <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} className="rounded" />
+                    Auto
+                  </label>
+                </div>
+              ))}
+              {([
+                ['tds', 'TDS'],
+                ['advance', 'Advance'],
+                ['hold', 'Hold'],
+                ['other_deduction', 'Other Deduction'],
+              ] as [keyof typeof EMPTY_SLIP, string][]).map(([k, lbl]) => (
+                <div key={k} className="flex items-center gap-3">
+                  <label className="text-sm text-gray-600 w-48 shrink-0">{lbl}</label>
+                  <input type="number" min={0} value={slip[k]}
+                    onChange={s(k)}
+                    className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-32 text-right focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                </div>
+              ))}
+              <div className="flex items-center gap-3 pt-2 border-t border-gray-200">
+                <span className="text-sm font-bold text-gray-700 w-48 shrink-0">Total Deductions</span>
+                <span className="text-sm font-bold text-red-600 w-32 text-right">{inr(totalDed)}</span>
+              </div>
+              <div className="flex items-center gap-3 bg-green-50 rounded-lg px-3 py-2 border border-green-200">
+                <span className="text-sm font-bold text-green-800 w-48 shrink-0">Net Salary</span>
+                <span className="text-lg font-bold text-green-700 w-32 text-right">{inr(netSalary)}</span>
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="text-xs font-medium text-gray-600 block mb-1">Remarks</label>
+              <textarea value={slip.remarks} onChange={s('remarks')} rows={2}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Printable Payslip */}
+      {emp && (
+        <div id="payslip-print">
+          <div className="border-2 border-gray-800 p-6 bg-white max-w-3xl mx-auto text-sm font-sans">
+            {/* Header */}
+            <div className="text-center border-b-2 border-gray-800 pb-4 mb-4">
+              <h1 className="text-xl font-bold text-gray-900">{cs.company_name}</h1>
+              {(cs.address_line1 || cs.address_line2) && (
+                <p className="text-xs text-gray-600">{[cs.address_line1, cs.address_line2, cs.city, cs.state, cs.pincode].filter(Boolean).join(', ')}</p>
+              )}
+              {(cs.phone || cs.email) && <p className="text-xs text-gray-500">{[cs.phone && `Ph: ${cs.phone}`, cs.email && `Email: ${cs.email}`].filter(Boolean).join(' | ')}</p>}
+              <h2 className="text-base font-bold mt-2 text-gray-800">SALARY SLIP — {monthLabel(month).toUpperCase()}</h2>
+            </div>
+
+            {/* Employee Details */}
+            <div className="grid grid-cols-2 gap-x-8 gap-y-1 border-b border-gray-300 pb-3 mb-4 text-xs">
+              <div><span className="text-gray-500 w-28 inline-block">Employee Name:</span> <span className="font-semibold">{(emp as any).name}</span></div>
+              <div><span className="text-gray-500 w-28 inline-block">Employee ID:</span> <span className="font-semibold">{(emp as any).emp_id || '—'}</span></div>
+              <div><span className="text-gray-500 w-28 inline-block">Designation:</span> <span className="font-semibold">{(emp as any).designation || '—'}</span></div>
+              <div><span className="text-gray-500 w-28 inline-block">Department/Site:</span> <span className="font-semibold">{farmMap[(emp as any).farm_id] || '—'}</span></div>
+              <div><span className="text-gray-500 w-28 inline-block">Days Worked:</span> <span className="font-semibold">{slip.days_worked || '—'}</span></div>
+              <div><span className="text-gray-500 w-28 inline-block">Bank Account:</span> <span className="font-semibold">{(emp as any).account_no || '—'}</span></div>
+              {(emp as any).uan_no && <div><span className="text-gray-500 w-28 inline-block">UAN No:</span> <span className="font-semibold">{(emp as any).uan_no}</span></div>}
+              {cs.pf_reg_no && <div><span className="text-gray-500 w-28 inline-block">PF Reg No:</span> <span className="font-semibold">{cs.pf_reg_no}</span></div>}
+            </div>
+
+            {/* Earnings / Deductions table */}
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="text-left py-1.5 px-2 font-bold text-gray-700 border border-gray-300">Earnings</th>
+                      <th className="text-right py-1.5 px-2 font-bold text-gray-700 border border-gray-300">Amount (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      ['Basic Salary', n('basic_salary')],
+                      ['HRA', n('hra')],
+                      n('da') ? ['DA', n('da')] : null,
+                      n('ta') ? ['TA', n('ta')] : null,
+                      n('special_allowance') ? ['Special Allowance', n('special_allowance')] : null,
+                      n('other_allowance') ? ['Other Allowance', n('other_allowance')] : null,
+                      n('ot_bonus') ? ['OT / Bonus', n('ot_bonus')] : null,
+                      n('arrears') ? ['Arrears', n('arrears')] : null,
+                    ].filter(Boolean).map(([lbl, val]: any) => (
+                      <tr key={lbl} className="border-b border-gray-200">
+                        <td className="py-1 px-2 border border-gray-200">{lbl}</td>
+                        <td className="py-1 px-2 text-right border border-gray-200">{val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-green-50 font-bold">
+                      <td className="py-1.5 px-2 border border-gray-300">Gross Earnings</td>
+                      <td className="py-1.5 px-2 text-right border border-gray-300">{gross.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="text-left py-1.5 px-2 font-bold text-gray-700 border border-gray-300">Deductions</th>
+                      <th className="text-right py-1.5 px-2 font-bold text-gray-700 border border-gray-300">Amount (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      n('pf_employee') ? [`PF (Emp 12%)`, n('pf_employee')] : null,
+                      n('esi_employee') ? [`ESI (Emp 0.75%)`, n('esi_employee')] : null,
+                      n('pt') ? ['Professional Tax', n('pt')] : null,
+                      n('tds') ? ['TDS', n('tds')] : null,
+                      n('advance') ? ['Advance', n('advance')] : null,
+                      n('hold') ? ['Hold', n('hold')] : null,
+                      n('other_deduction') ? ['Other Deduction', n('other_deduction')] : null,
+                    ].filter(Boolean).map(([lbl, val]: any) => (
+                      <tr key={lbl} className="border-b border-gray-200">
+                        <td className="py-1 px-2 border border-gray-200">{lbl}</td>
+                        <td className="py-1 px-2 text-right border border-gray-200">{val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-red-50 font-bold">
+                      <td className="py-1.5 px-2 border border-gray-300">Total Deductions</td>
+                      <td className="py-1.5 px-2 text-right border border-gray-300">{totalDed.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {/* Employer contributions */}
+                {(pfEmployer > 0 || esiEmployer > 0) && (
+                  <table className="w-full text-xs mt-2">
+                    <thead>
+                      <tr className="bg-blue-50">
+                        <th className="text-left py-1 px-2 font-semibold text-gray-600 border border-gray-200 text-[10px]">Employer Contribution</th>
+                        <th className="text-right py-1 px-2 font-semibold text-gray-600 border border-gray-200 text-[10px]">Amount (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pfEmployer > 0 && <tr><td className="py-1 px-2 border border-gray-200 text-[10px]">PF (Employer 12%)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{pfEmployer.toLocaleString('en-IN')}</td></tr>}
+                      {esiEmployer > 0 && <tr><td className="py-1 px-2 border border-gray-200 text-[10px]">ESI (Employer 3.25%)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{esiEmployer.toLocaleString('en-IN')}</td></tr>}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            {/* Net Salary bar */}
+            <div className="mt-4 bg-green-700 text-white flex items-center justify-between px-4 py-2 rounded">
+              <span className="font-bold text-sm">NET SALARY PAYABLE</span>
+              <span className="text-xl font-bold">₹ {netSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+            </div>
+
+            {slip.remarks && (
+              <div className="mt-3 text-xs text-gray-600"><span className="font-semibold">Remarks:</span> {slip.remarks}</div>
+            )}
+
+            {/* Footer signatures */}
+            <div className="mt-8 grid grid-cols-3 text-xs text-gray-500 text-center">
+              <div>
+                <div className="border-t border-gray-400 pt-1 mt-6">Employee Signature</div>
+              </div>
+              <div>
+                <div className="border-t border-gray-400 pt-1 mt-6">HR / Accounts</div>
+              </div>
+              <div>
+                <div className="border-t border-gray-400 pt-1 mt-6">Authorised Signatory</div>
+              </div>
+            </div>
+            <p className="text-center text-[9px] text-gray-400 mt-4">This is a computer-generated payslip. No signature required.</p>
+          </div>
+        </div>
+      )}
+
+      {!emp && (
+        <EmptyState icon={<FileText size={36}/>} title="Select an Employee" subtitle="Choose an employee and month above to generate payslip" />
+      )}
+    </div>
+  )
+}

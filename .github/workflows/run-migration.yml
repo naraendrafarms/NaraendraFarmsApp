@@ -60,6 +60,9 @@ jobs:
       - name: Run migration 036
         run: python3 scripts/run_sql.py supabase/migrations/036_feed_stock_adjustments.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 039
+        run: python3 scripts/run_sql.py supabase/migrations/039_company_settings_payslip.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Reload PostgREST schema cache
         run: |
           curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" \

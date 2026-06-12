@@ -67,6 +67,7 @@ const NAV: NavItem[] = [
       { label: 'ESI / PF Report', to: '/employees/esi-pf' },
       { label: 'Payroll Summary', to: '/employees/payroll-summary' },
       { label: 'Attendance Register', to: '/employees/attendance' },
+      { label: 'Payslip Generator',   to: '/employees/payslip' },
     ]
   },
   {
