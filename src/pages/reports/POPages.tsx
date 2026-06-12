@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import * as pdfjsLib from 'pdfjs-dist'
-// @ts-ignore
-if (typeof window !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url).href
+// Use CDN worker to avoid Vite bundling issues with dynamic import in production
+if (typeof window !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs`
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
