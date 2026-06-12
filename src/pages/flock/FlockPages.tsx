@@ -12,7 +12,7 @@ import {
 import {
   Bird, Egg, TrendingUp, ArrowLeft, ChevronLeft, ChevronRight,
   Package, Truck, FlaskConical, ShoppingCart, Pencil, Trash2, X, Check,
-  Upload, Download
+  Upload, Download, Plus
 } from 'lucide-react'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ const EditModal: React.FC<{
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 
-const TABS = ['Overview', 'Daily Records', 'Transfers', 'HE Dispatch', 'Hatch Batches', 'Egg Conversions', 'Egg Sales (NHE)', 'Feed', 'Medicine', 'Cull Sales'] as const
+const TABS = ['Overview', 'Daily Records', 'Shed Allocation', 'Transfers', 'HE Dispatch', 'Hatch Batches', 'Egg Conversions', 'Egg Sales (NHE)', 'Feed', 'Medicine', 'Cull Sales'] as const
 type Tab = typeof TABS[number]
 
 // ── FLOCK DASHBOARD ───────────────────────────────────────────────────────────
@@ -296,6 +296,7 @@ export const FlockDetail: React.FC = () => {
 
       {activeTab === 'Overview'          && <OverviewTab flock={flock} />}
       {activeTab === 'Daily Records'     && <DailyRecordsTab flockId={flock.id} />}
+      {activeTab === 'Shed Allocation'   && <ShedAllocationTab flock={flock} />}
       {activeTab === 'Transfers'         && <BirdTransfersTab flockId={flock.id} />}
       {activeTab === 'HE Dispatch'       && <HEDispatchTab flockId={flock.id} />}
       {activeTab === 'Hatch Batches'     && <HatchBatchesTab flockId={flock.id} />}
@@ -475,7 +476,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       while (true) {
         const { data } = await supabase
           .from('daily_records')
-          .select('id,record_date,farm_id,age_weeks,opening_female,opening_male,mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct,farms(name,code)')
+          .select('id,record_date,farm_id,shed_id,age_weeks,opening_female,opening_male,mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct,farms(name,code),sheds(shed_no,shed_name)')
           .eq('flock_id', flockId)
           .order('record_date', { ascending: false })
           .range(from, from + CHUNK - 1)
@@ -556,7 +557,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             <Table>
               <thead><tr>
                 <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
-                <Th>Date</Th><Th>Site</Th>
+                <Th>Date</Th><Th>Site</Th><Th>Shed</Th>
                 <Th right>Open F</Th><Th right>Open M</Th>
                 <Th right>Feed F kg</Th><Th right>Feed M kg</Th>
                 <Th right>Eggs</Th><Th right>HD%</Th>
@@ -573,6 +574,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                     <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
                     <Td className="text-xs font-medium">{fmtDate(r.record_date)}</Td>
                     <Td className="text-xs">{r.farms?.code ?? '—'}</Td>
+                    <Td className="text-xs text-purple-700">{(r.sheds as any)?.shed_no ?? <span className="text-gray-300">—</span>}</Td>
                     <Td right className="text-xs">{numFmt(r.opening_female)}</Td>
                     <Td right className="text-xs">{numFmt(r.opening_male)}</Td>
                     <Td right className="text-xs">{r.feed_female_kg != null ? (r.feed_female_kg as number).toFixed(1) : '—'}</Td>
@@ -1666,6 +1668,181 @@ const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       {bulkConfirm && (
         <ConfirmDelete label={`Delete ${sel.size} cull sale records?`}
           onConfirm={() => bulkDelMutSales.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+      )}
+    </div>
+  )
+}
+
+// ── SHED ALLOCATION TAB ───────────────────────────────────────────────────────
+
+const ShedAllocationTab: React.FC<{ flock: any }> = ({ flock }) => {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ shed_id: '', allocated_date: '', female_count: '', male_count: '', notes: '' })
+  const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
+  })
+
+  const [filterFarm, setFilterFarm] = useState('')
+
+  const { data: sheds } = useQuery({
+    queryKey: ['all_sheds'],
+    queryFn: async () => {
+      const { data } = await supabase.from('sheds').select('id,shed_no,shed_name,shed_type,farm_id,farms(name,code)').eq('is_active', true).order('shed_no')
+      return data ?? []
+    }
+  })
+
+  const { data: allocations, isLoading } = useQuery({
+    queryKey: ['shed_allocations', flock.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shed_allocations')
+        .select('*, sheds(shed_no,shed_name,shed_type,farms(name,code))')
+        .eq('flock_id', flock.id)
+        .order('allocated_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  const shedOptions = (sheds ?? [])
+    .filter((s: any) => !filterFarm || s.farm_id === filterFarm)
+    .map((s: any) => ({ value: s.id, label: `${(s.farms as any)?.code ?? '?'} · ${s.shed_no}${s.shed_name ? ' — '+s.shed_name : ''} (${s.shed_type})` }))
+
+  const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!form.shed_id || !form.allocated_date) throw new Error('Shed and date required')
+      const shed = (sheds ?? []).find((s: any) => s.id === form.shed_id)
+      const { error } = await supabase.from('shed_allocations').insert({
+        flock_id: flock.id,
+        shed_id: form.shed_id,
+        farm_id: shed?.farm_id ?? null,
+        allocated_date: form.allocated_date,
+        female_count: parseInt(form.female_count) || 0,
+        male_count: parseInt(form.male_count) || 0,
+        notes: form.notes || null,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Shed allocation recorded')
+      qc.invalidateQueries({ queryKey: ['shed_allocations', flock.id] })
+      setShowForm(false)
+      setForm({ shed_id: '', allocated_date: '', female_count: '', male_count: '', notes: '' })
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => { await supabase.from('shed_allocations').delete().eq('id', id) },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['shed_allocations', flock.id] })
+  })
+
+  // Compute current bird distribution across sheds (latest allocation per shed)
+  const latestByShed: Record<string, any> = {}
+  ;(allocations ?? []).forEach((a: any) => {
+    const key = a.shed_id
+    if (!latestByShed[key] || a.allocated_date > latestByShed[key].allocated_date) latestByShed[key] = a
+  })
+  const currentSheds = Object.values(latestByShed).filter((a: any) => (a.female_count + a.male_count) > 0)
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-4 py-2 text-sm text-purple-700">
+        <Bird size={15}/> <span><strong>Shed Allocation</strong> — Record which shed this flock's birds are placed in after transfer. One flock can split across multiple sheds at a site.</span>
+      </div>
+
+      {/* Current shed distribution */}
+      {currentSheds.length > 0 && (
+        <Card>
+          <p className="text-sm font-semibold text-gray-700 mb-3">Current Bird Distribution</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {currentSheds.map((a: any) => {
+              const sh = a.sheds as any
+              return (
+                <div key={a.shed_id} className="border border-purple-100 bg-purple-50 rounded-lg p-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-semibold text-sm text-purple-800">{sh?.farms?.code ?? '?'} · Shed {sh?.shed_no}</p>
+                      {sh?.shed_name && <p className="text-xs text-purple-600">{sh.shed_name}</p>}
+                      <p className="text-xs text-gray-500 mt-0.5">{sh?.shed_type}</p>
+                    </div>
+                    <Badge color="green">{numFmt(a.female_count + a.male_count)} birds</Badge>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">{numFmt(a.female_count)}F + {numFmt(a.male_count)}M · as of {fmtDate(a.allocated_date)}</p>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      <div className="flex justify-between items-center">
+        <p className="text-sm text-gray-500">{(allocations ?? []).length} allocation events</p>
+        <Button icon={<Plus size={15}/>} onClick={() => setShowForm(true)}>Record Allocation</Button>
+      </div>
+
+      {showForm && (
+        <Card>
+          <p className="font-semibold text-sm text-gray-700 mb-3">New Shed Allocation</p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Select label="Filter by Site" placeholder="All Sites" options={farmOptions}
+                value={filterFarm} onChange={e => { setFilterFarm(e.target.value); s('shed_id', '') }} />
+              <Input label="Date" required type="date" value={form.allocated_date} onChange={e => s('allocated_date', e.target.value)} />
+            </div>
+            <Select label="Shed" required placeholder="— Select shed —" options={shedOptions}
+              value={form.shed_id} onChange={e => s('shed_id', e.target.value)} />
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Female Count" type="number" value={form.female_count} onChange={e => s('female_count', e.target.value)} />
+              <Input label="Male Count" type="number" value={form.male_count} onChange={e => s('male_count', e.target.value)} />
+            </div>
+            <Input label="Notes" placeholder="e.g. Transferred from Kethireddypalli Shed 3"
+              value={form.notes} onChange={e => s('notes', e.target.value)} />
+            <div className="flex gap-2 justify-end">
+              <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+              <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {isLoading ? <Spinner /> : (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Date</Th><Th>Site</Th><Th>Shed</Th><Th>Type</Th>
+              <Th right>Female</Th><Th right>Male</Th><Th right>Total</Th>
+              <Th>Notes</Th><Th></Th>
+            </tr></thead>
+            <tbody>
+              {(allocations ?? []).map((a: any) => {
+                const sh = a.sheds as any
+                return (
+                  <tr key={a.id} className="hover:bg-gray-50">
+                    <Td className="text-xs">{fmtDate(a.allocated_date)}</Td>
+                    <Td className="text-xs font-medium">{sh?.farms?.code ?? '—'}</Td>
+                    <Td className="text-xs"><span className="font-mono">{sh?.shed_no}</span>{sh?.shed_name ? ` — ${sh.shed_name}` : ''}</Td>
+                    <Td><Badge color="gray">{sh?.shed_type ?? '—'}</Badge></Td>
+                    <Td right className="text-xs">{numFmt(a.female_count)}</Td>
+                    <Td right className="text-xs">{numFmt(a.male_count)}</Td>
+                    <Td right className="text-xs font-semibold">{numFmt(a.female_count + a.male_count)}</Td>
+                    <Td className="text-xs text-gray-400">{a.notes ?? '—'}</Td>
+                    <Td>
+                      <button onClick={() => delMut.mutate(a.id)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </Td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </Table>
+          {(allocations ?? []).length === 0 && <EmptyState icon={<Bird size={32}/>} title="No shed allocations recorded" />}
+        </Card>
       )}
     </div>
   )

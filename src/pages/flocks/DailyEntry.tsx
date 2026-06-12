@@ -25,6 +25,7 @@ export const DailyEntry: React.FC = () => {
   const qc = useQueryClient()
   const { applyFlockFarmFilter, farmId } = useFarmScope()
   const [selectedFlock, setSelectedFlock] = useState('')
+  const [selectedShed, setSelectedShed] = useState('')
   const [date, setDate] = useState(today())
   const importRef = useRef<HTMLInputElement>(null)
 
@@ -42,16 +43,36 @@ export const DailyEntry: React.FC = () => {
     }
   })
 
+  // Load sheds for the flock's current farm
+  const { data: sheds } = useQuery({
+    queryKey: ['sheds_for_flock', selectedFlock],
+    queryFn: async () => {
+      const flock = flocks?.find((f: any) => f.id === selectedFlock)
+      const farmId = flock?.laying_farm_id ?? flock?.rearing_farm_id
+      if (!farmId) return []
+      const { data } = await supabase
+        .from('sheds')
+        .select('id,shed_no,shed_name,shed_type')
+        .eq('farm_id', farmId)
+        .eq('is_active', true)
+        .order('shed_no')
+      return data ?? []
+    },
+    enabled: !!selectedFlock && !!flocks
+  })
+
   const { data: existing, isLoading: loadingExisting } = useQuery({
-    queryKey: ['daily_record', selectedFlock, date],
+    queryKey: ['daily_record', selectedFlock, date, selectedShed],
     queryFn: async () => {
       if (!selectedFlock || !date) return null
-      const { data } = await supabase
+      let q = supabase
         .from('daily_records')
         .select('*')
         .eq('flock_id', selectedFlock)
         .eq('record_date', date)
-        .single()
+      if (selectedShed) q = q.eq('shed_id', selectedShed)
+      else q = q.is('shed_id', null)
+      const { data } = await q.single()
       return data
     },
     enabled: !!selectedFlock && !!date
@@ -153,6 +174,7 @@ export const DailyEntry: React.FC = () => {
         flock_id:         selectedFlock,
         record_date:      date,
         farm_id:          selectedFlockData?.laying_farm_id ?? selectedFlockData?.rearing_farm_id,
+        shed_id:          selectedShed || null,
         opening_female:   parseInt(form.opening_female) || 0,
         opening_male:     parseInt(form.opening_male) || 0,
         feed_female_kg:   parseFloat(form.feed_female_kg) || 0,
@@ -183,7 +205,7 @@ export const DailyEntry: React.FC = () => {
         const { error } = await supabase.from('daily_records').update(payload).eq('id', existing.id)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('daily_records').insert(payload)
+        const { error } = await supabase.from('daily_records').insert({ ...payload })
         if (error) throw error
       }
     },
@@ -284,13 +306,19 @@ export const DailyEntry: React.FC = () => {
         }
       />
 
-      {/* Flock + Date selector */}
+      {/* Flock + Shed + Date selector */}
       <Card>
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-48">
             <Select label="Select Flock" required placeholder="— Choose flock —"
               options={(flocks??[]).map((f:any)=>({ value:f.id, label:`Flock ${f.flock_no} — ${f.status}` }))}
-              value={selectedFlock} onChange={e => setSelectedFlock(e.target.value)}
+              value={selectedFlock} onChange={e => { setSelectedFlock(e.target.value); setSelectedShed('') }}
+            />
+          </div>
+          <div className="w-52">
+            <Select label="Shed (optional)" placeholder="— All / No shed —"
+              options={(sheds??[]).map((s:any)=>({ value:s.id, label:`${s.shed_no}${s.shed_name ? ' — '+s.shed_name : ''} (${s.shed_type})` }))}
+              value={selectedShed} onChange={e => setSelectedShed(e.target.value)}
             />
           </div>
           <div className="flex items-end gap-2">
@@ -302,6 +330,7 @@ export const DailyEntry: React.FC = () => {
               <ChevronRight size={16}/>
             </button>
           </div>
+          {selectedShed && (() => { const s = (sheds??[]).find((x:any)=>x.id===selectedShed); return s ? <Badge color="green">Shed: {s.shed_no}{s.shed_name ? ' — '+s.shed_name : ''}</Badge> : null })()}
           {existing && <Badge color="blue">Editing existing record</Badge>}
           {prevRecord && !existing && (
             <span className="text-xs text-gray-400">Opening pre-filled from previous day ({prevRecord.record_date})</span>
