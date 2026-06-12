@@ -1557,8 +1557,9 @@ const PayslipView: React.FC<{
   showUAN:boolean; showESI:boolean
   showEmpPF:boolean; showEmpESI:boolean; showPT:boolean
   showEmprPF:boolean; showEmprESI:boolean
+  showPFRegNo:boolean; showESIRegNo:boolean
   n:(k:keyof typeof EMPTY_SLIP)=>number
-}> = ({cs,pName,pEmpId,pDesig,pDept,pAcct,pUAN,pESI,month,slip,gross,totalDed,netSalary,pfEmployer,esiEmployer,sigEmp,sigHR,sigAuth,showFooter,showUAN,showESI,showEmpPF,showEmpESI,showPT,showEmprPF,showEmprESI,n}) => {
+}> = ({cs,pName,pEmpId,pDesig,pDept,pAcct,pUAN,pESI,month,slip,gross,totalDed,netSalary,pfEmployer,esiEmployer,sigEmp,sigHR,sigAuth,showFooter,showUAN,showESI,showEmpPF,showEmpESI,showPT,showEmprPF,showEmprESI,showPFRegNo,showESIRegNo,n}) => {
   const monthLabel = (m:string) => new Date(m+'T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'})
   return (
     <div className="border-2 border-gray-800 p-6 bg-white max-w-3xl mx-auto text-sm font-sans">
@@ -1577,8 +1578,8 @@ const PayslipView: React.FC<{
         <div><span className="text-gray-500 w-28 inline-block">Bank Account:</span><span className="font-semibold"> {pAcct||'—'}</span></div>
         {showUAN&&pUAN&&<div><span className="text-gray-500 w-28 inline-block">UAN No:</span><span className="font-semibold"> {pUAN}</span></div>}
         {showESI&&pESI&&<div><span className="text-gray-500 w-28 inline-block">ESI No:</span><span className="font-semibold"> {pESI}</span></div>}
-        {cs.pf_reg_no&&<div><span className="text-gray-500 w-28 inline-block">PF Reg No:</span><span className="font-semibold"> {cs.pf_reg_no}</span></div>}
-        {cs.esi_reg_no&&<div><span className="text-gray-500 w-28 inline-block">ESI Reg No:</span><span className="font-semibold"> {cs.esi_reg_no}</span></div>}
+        {showPFRegNo&&cs.pf_reg_no&&<div><span className="text-gray-500 w-28 inline-block">PF Reg No:</span><span className="font-semibold"> {cs.pf_reg_no}</span></div>}
+        {showESIRegNo&&cs.esi_reg_no&&<div><span className="text-gray-500 w-28 inline-block">ESI Reg No:</span><span className="font-semibold"> {cs.esi_reg_no}</span></div>}
       </div>
       <div className="grid grid-cols-2 gap-6">
         <div>
@@ -1704,6 +1705,8 @@ export const PayslipGeneratorPage: React.FC = () => {
   const [showPT,    setShowPT]    = mkToggle('showPT')
   const [showEmprPF,setShowEmprPF]= mkToggle('showEmprPF')
   const [showEmprESI,setShowEmprESI]=mkToggle('showEmprESI')
+  const [showPFRegNo,setShowPFRegNo]=mkToggle('showPFRegNo')
+  const [showESIRegNo,setShowESIRegNo]=mkToggle('showESIRegNo')
   // Saved payslips
   const [selIds, setSelIds] = useState<Set<string>>(new Set())
   const [viewSlip, setViewSlip] = useState<any>(null)
@@ -2015,6 +2018,7 @@ export const PayslipGeneratorPage: React.FC = () => {
               showUAN={showUAN} showESI={showESI}
               showEmpPF={showEmpPF} showEmpESI={showEmpESI} showPT={showPT}
               showEmprPF={showEmprPF} showEmprESI={showEmprESI}
+              showPFRegNo={showPFRegNo} showESIRegNo={showESIRegNo}
               n={k=>parseFloat(rowToSlip(viewSlip)[k]||'0')}
             />
           </div>
@@ -2051,7 +2055,7 @@ export const PayslipGeneratorPage: React.FC = () => {
               <div>
                 <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Employee Details</p>
                 <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-                  {([['UAN No',showUAN,setShowUAN],['ESI No',showESI,setShowESI]] as [string,boolean,React.Dispatch<React.SetStateAction<boolean>>][]).map(([lbl,val,set])=>(
+                  {([['UAN No',showUAN,setShowUAN],['ESI No',showESI,setShowESI],['PF Reg No',showPFRegNo,setShowPFRegNo],['ESI Reg No',showESIRegNo,setShowESIRegNo]] as [string,boolean,React.Dispatch<React.SetStateAction<boolean>>][]).map(([lbl,val,set])=>(
                     <label key={lbl} className="flex items-center gap-2 cursor-pointer select-none">
                       <input type="checkbox" checked={val} onChange={e=>set(e.target.checked)} className="rounded border-gray-300 text-brand-600"/>{lbl}
                     </label>
@@ -2217,7 +2221,8 @@ export const PayslipGeneratorPage: React.FC = () => {
                 sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter}
                 showUAN={showUAN} showESI={showESI}
                 showEmpPF={showEmpPF} showEmpESI={showEmpESI} showPT={showPT}
-                showEmprPF={showEmprPF} showEmprESI={showEmprESI} n={n}
+                showEmprPF={showEmprPF} showEmprESI={showEmprESI}
+                showPFRegNo={showPFRegNo} showESIRegNo={showESIRegNo} n={n}
               />
             </div>
           )}
