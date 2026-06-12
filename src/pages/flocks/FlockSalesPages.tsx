@@ -347,6 +347,21 @@ export const HEDispatch: React.FC = () => {
     }
   }
 
+  const handleExportHE = () => {
+    const rows = filtered ?? []
+    const headers = 'Flock,Dispatch Date,Prod Date,DC No,Invoice No,Gr A,Gr B,Gr C,Total,Free,Invoice Eggs,Rate,Amount,Party,Remarks'
+    const lines = rows.map((r: any) => [
+      r.flocks?.flock_no ?? '', r.dispatch_date, prodDateLabel(r),
+      r.dc_no ?? '', r.invoice_no ?? '',
+      r.grade_a ?? 0, r.grade_b ?? 0, r.grade_c ?? 0,
+      r.total_dispatched ?? 0, r.free_eggs ?? 0, r.invoice_eggs ?? 0,
+      r.rate ?? '', r.amount ?? '', r.parties?.name ?? '', r.remarks ?? ''
+    ].join(','))
+    const blob = new Blob([headers + '\n' + lines.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+    a.download = `he_dispatch_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+  }
+
   // prod date display helper
   const prodDateLabel = (d: any) => {
     if (!d.prod_date) return '—'
@@ -397,9 +412,8 @@ export const HEDispatch: React.FC = () => {
         </>}
         {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setNoInvoiceOnly(false) }}>Clear</Button>}
         <div className="ml-auto flex gap-2">
-          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>
-            Download Template
-          </Button>
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Template</Button>
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportHE}>Export CSV</Button>
           <Button variant="outline" size="sm" icon={<Upload size={14}/>}
             loading={importing}
             onClick={() => fileInputRef.current?.click()}>
@@ -668,7 +682,9 @@ const NHE_TYPES = [
   { value: 'bird_sex_error', label: 'Bird Sales — Sex Error' },
   { value: 'gas',            label: 'Gas Cylinders (income)' },
   { value: 'manure',         label: 'Manure / Litter' },
-  { value: 'gunny_bags',     label: 'Gunny / Maize / Plastic Bags' },
+  { value: 'gunny_bags',     label: 'Gunny Bags' },
+  { value: 'maize_bags',     label: 'Maize Bags' },
+  { value: 'plastic_bags',   label: 'Plastic Bags' },
   { value: 'other',          label: 'Other Income' },
 ]
 const BIRD_SALE_TYPES = ['bird_cull','bird_lame','bird_weak','bird_sex_error']
@@ -789,6 +805,20 @@ export const NHESales: React.FC = () => {
     a.download = 'nhe_bird_sales_template.csv'; a.click()
   }
 
+  const handleExport = () => {
+    const rows = filtered ?? []
+    const headers = 'Flock,Date,Type,Party,DC No,Qty,Unit,Rate,Amount,Remarks'
+    const lines = rows.map((r: any) => [
+      r.flocks?.flock_no ?? '', r.sale_date,
+      NHE_TYPES.find(t => t.value === r.sale_type)?.label ?? r.sale_type,
+      r.parties?.name ?? '', r.dc_no ?? '',
+      r.quantity ?? '', r.unit ?? '', r.rate ?? '', r.amount ?? '', r.remarks ?? ''
+    ].join(','))
+    const blob = new Blob([headers + '\n' + lines.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+    a.download = `nhe_sales_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+  }
+
   // Import CSV
   const handleImport = async (file: File) => {
     setImporting(true)
@@ -882,6 +912,7 @@ export const NHESales: React.FC = () => {
         {(hasFilter||typeFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setTypeFilter('') }}>Clear</Button>}
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Template</Button>
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
           <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => fileRef.current?.click()}>Import</Button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
         </div>

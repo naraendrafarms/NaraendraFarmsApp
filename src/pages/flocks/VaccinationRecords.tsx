@@ -1,0 +1,298 @@
+import React, { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase'
+import { fmtDate, today } from '@/lib/utils'
+import {
+  Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
+  SectionHeader, Spinner, EmptyState
+} from '@/components/ui'
+import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle } from 'lucide-react'
+import toast from 'react-hot-toast'
+
+const ROUTES = ['drinking_water', 'eye_drop', 'injection', 'spray']
+const ROUTE_LABELS: Record<string, string> = {
+  drinking_water: 'Drinking Water', eye_drop: 'Eye Drop',
+  injection: 'Injection', spray: 'Spray'
+}
+
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
+
+const empty = () => ({
+  flock_id: '', shed_id: '', farm_id: '',
+  vaccine_date: today(), vaccine_name: '', dose_no: '1',
+  route: '', quantity: '', unit: '', cost: '',
+  next_due_date: '', administered_by: '', remarks: ''
+})
+
+export const VaccinationRecordsPage: React.FC = () => {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState<any | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(empty())
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [filterFlock, setFilterFlock] = useState('')
+  const [filterFrom, setFilterFrom] = useState('')
+  const [filterTo, setFilterTo] = useState('')
+
+  const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const { data: flocks } = useQuery({
+    queryKey: ['flocks_all'],
+    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no,status').order('flock_no'); return data ?? [] }
+  })
+  const { data: sheds } = useQuery({
+    queryKey: ['sheds_all'],
+    queryFn: async () => { const { data } = await supabase.from('sheds').select('id,shed_no,shed_name,farm_id').order('shed_no'); return data ?? [] }
+  })
+  const { data: farms } = useQuery({
+    queryKey: ['farms_all'],
+    queryFn: async () => { const { data } = await supabase.from('farms').select('id,name').order('name'); return data ?? [] }
+  })
+  const { data: schedule } = useQuery({
+    queryKey: ['vaccination_schedule'],
+    queryFn: async () => { const { data } = await supabase.from('vaccination_schedule').select('*').order('week_no'); return data ?? [] }
+  })
+
+  const { data: records, isLoading } = useQuery({
+    queryKey: ['vaccination_records', filterFlock, filterFrom, filterTo],
+    queryFn: async () => {
+      let q = supabase.from('vaccination_records')
+        .select('*, flocks(flock_no), sheds(shed_no,shed_name), farms(name)')
+        .order('vaccine_date', { ascending: false })
+      if (filterFlock) q = q.eq('flock_id', filterFlock)
+      if (filterFrom)  q = q.gte('vaccine_date', filterFrom)
+      if (filterTo)    q = q.lte('vaccine_date', filterTo)
+      const { data } = await q
+      return data ?? []
+    }
+  })
+
+  // Upcoming due alerts: next_due_date within 7 days
+  const today_str = today()
+  const sevenDaysLater = new Date(); sevenDaysLater.setDate(sevenDaysLater.getDate() + 7)
+  const sevenStr = sevenDaysLater.toISOString().slice(0, 10)
+  const due = (records ?? []).filter((r: any) => r.next_due_date && r.next_due_date >= today_str && r.next_due_date <= sevenStr)
+  const overdue = (records ?? []).filter((r: any) => r.next_due_date && r.next_due_date < today_str)
+
+  const openForm = (row?: any) => {
+    if (row) {
+      setEditing(row)
+      setForm({
+        flock_id: row.flock_id ?? '', shed_id: row.shed_id ?? '', farm_id: row.farm_id ?? '',
+        vaccine_date: row.vaccine_date ?? today(), vaccine_name: row.vaccine_name ?? '',
+        dose_no: row.dose_no?.toString() ?? '1', route: row.route ?? '',
+        quantity: row.quantity?.toString() ?? '', unit: row.unit ?? '',
+        cost: row.cost?.toString() ?? '', next_due_date: row.next_due_date ?? '',
+        administered_by: row.administered_by ?? '', remarks: row.remarks ?? ''
+      })
+    } else {
+      setEditing(null); setForm(empty())
+    }
+    setShowForm(true)
+  }
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!form.flock_id || !form.vaccine_date || !form.vaccine_name) throw new Error('Flock, date and vaccine name required')
+      const payload = {
+        flock_id: form.flock_id, shed_id: form.shed_id || null, farm_id: form.farm_id || null,
+        vaccine_date: form.vaccine_date, vaccine_name: form.vaccine_name.trim(),
+        dose_no: parseInt(form.dose_no) || 1, route: form.route || null,
+        quantity: parseFloat(form.quantity) || null, unit: form.unit || null,
+        cost: parseFloat(form.cost) || null, next_due_date: form.next_due_date || null,
+        administered_by: form.administered_by || null, remarks: form.remarks || null
+      }
+      if (editing) {
+        const { error } = await supabase.from('vaccination_records').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('vaccination_records').insert(payload)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      toast.success(editing ? 'Updated' : 'Vaccination recorded')
+      qc.invalidateQueries({ queryKey: ['vaccination_records'] })
+      setShowForm(false); setEditing(null)
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (const id of ids) await supabase.from('vaccination_records').delete().eq('id', id)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_records'] }); toast.success('Deleted'); setSel(new Set()) }
+  })
+
+  const rows = records ?? []
+  const allSel = rows.length > 0 && sel.size === rows.length
+  const someSel = sel.size > 0 && sel.size < rows.length
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(rows.map((r: any) => r.id)))
+
+  const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no} (${f.status})` }))
+  const shedOptions = (sheds ?? []).filter((sh: any) => !form.farm_id || sh.farm_id === form.farm_id)
+    .map((sh: any) => ({ value: sh.id, label: `Shed ${sh.shed_no}${sh.shed_name ? ' – ' + sh.shed_name : ''}` }))
+  const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Vaccination Records"
+        subtitle="Track vaccines administered to each flock with due date alerts"
+        action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Record</Button>}
+      />
+
+      {/* Due / Overdue alerts */}
+      {overdue.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800 flex gap-2">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0"/>
+          <span><strong>{overdue.length} overdue vaccination{overdue.length > 1 ? 's' : ''}</strong> — {overdue.map((r: any) => `F-${r.flocks?.flock_no}: ${r.vaccine_name} (due ${fmtDate(r.next_due_date)})`).join('; ')}</span>
+        </div>
+      )}
+      {due.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 flex gap-2">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0"/>
+          <span><strong>{due.length} upcoming</strong> within 7 days — {due.map((r: any) => `F-${r.flocks?.flock_no}: ${r.vaccine_name} (${fmtDate(r.next_due_date)})`).join('; ')}</span>
+        </div>
+      )}
+      {overdue.length === 0 && due.length === 0 && rows.length > 0 && (
+        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800 flex gap-2">
+          <CheckCircle size={16} className="mt-0.5 shrink-0"/> All vaccinations up to date
+        </div>
+      )}
+
+      {/* Filters */}
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Select label="Flock" placeholder="All Flocks" options={flockOptions} value={filterFlock} onChange={e => setFilterFlock(e.target.value)} />
+          <Input label="From Date" type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
+          <Input label="To Date" type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} />
+          <div className="flex items-end">
+            <Button variant="secondary" onClick={() => { setFilterFlock(''); setFilterFrom(''); setFilterTo('') }}>Clear</Button>
+          </div>
+        </div>
+      </Card>
+
+      {showForm && (
+        <Card>
+          <p className="font-semibold text-gray-700 mb-4">{editing ? 'Edit' : 'New'} Vaccination Record</p>
+          <div className="space-y-4">
+            <FormRow>
+              <Select label="Flock" required placeholder="— Select Flock —" options={flockOptions} value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+              <Input label="Vaccine Date" required type="date" value={form.vaccine_date} onChange={e => s('vaccine_date', e.target.value)} />
+            </FormRow>
+            <FormRow>
+              <Select label="Site" placeholder="— All Sites —" options={farmOptions} value={form.farm_id} onChange={e => { s('farm_id', e.target.value); s('shed_id', '') }} />
+              <Select label="Shed (optional)" placeholder="— All Sheds —" options={shedOptions} value={form.shed_id} onChange={e => s('shed_id', e.target.value)} />
+            </FormRow>
+            <FormRow>
+              <Input label="Vaccine Name" required value={form.vaccine_name} onChange={e => s('vaccine_name', e.target.value)} placeholder="e.g. Marek's, ND LaSota…" />
+              <Input label="Dose No." type="number" value={form.dose_no} onChange={e => s('dose_no', e.target.value)} />
+            </FormRow>
+            <FormRow>
+              <Select label="Route" placeholder="— Select Route —" options={ROUTES.map(r => ({ value: r, label: ROUTE_LABELS[r] }))} value={form.route} onChange={e => s('route', e.target.value)} />
+              <Input label="Quantity" type="number" value={form.quantity} onChange={e => s('quantity', e.target.value)} />
+              <Input label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} placeholder="ml, doses…" />
+            </FormRow>
+            <FormRow>
+              <Input label="Cost (₹)" type="number" value={form.cost} onChange={e => s('cost', e.target.value)} />
+              <Input label="Next Due Date" type="date" value={form.next_due_date} onChange={e => s('next_due_date', e.target.value)} />
+              <Input label="Administered By" value={form.administered_by} onChange={e => s('administered_by', e.target.value)} />
+            </FormRow>
+            <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
+            <div className="flex gap-2 justify-end">
+              <Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
+              <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Bulk bar */}
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-red-700">{sel.size} selected</span>
+          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+          <div className="ml-auto">
+            <Button size="sm" variant="danger" loading={delMut.isPending}
+              onClick={() => { if (confirm(`Delete ${sel.size} record(s)?`)) delMut.mutate([...sel]) }}>
+              Delete Selected
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isLoading ? <Spinner /> : (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th><CB checked={allSel} indeterminate={someSel} onChange={toggleAll} /></Th>
+              <Th>Flock</Th><Th>Date</Th><Th>Vaccine</Th><Th>Dose</Th>
+              <Th>Route</Th><Th>Shed / Site</Th><Th right>Cost</Th>
+              <Th>Next Due</Th><Th>By</Th><Th></Th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r: any) => {
+                const isDue = r.next_due_date && r.next_due_date >= today_str && r.next_due_date <= sevenStr
+                const isOverdue = r.next_due_date && r.next_due_date < today_str
+                return (
+                  <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-blue-50' : ''}`}>
+                    <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></Td>
+                    <Td><Badge color="green">F-{r.flocks?.flock_no}</Badge></Td>
+                    <Td className="text-xs">{fmtDate(r.vaccine_date)}</Td>
+                    <Td className="text-sm font-medium">{r.vaccine_name}</Td>
+                    <Td className="text-xs">#{r.dose_no}</Td>
+                    <Td className="text-xs">{r.route ? ROUTE_LABELS[r.route] ?? r.route : '—'}</Td>
+                    <Td className="text-xs">{r.sheds ? `Shed ${r.sheds.shed_no}` : r.farms?.name ?? '—'}</Td>
+                    <Td right className="text-xs">{r.cost ? `₹${r.cost.toLocaleString('en-IN')}` : '—'}</Td>
+                    <Td className="text-xs">
+                      {r.next_due_date
+                        ? <span className={`font-medium ${isOverdue ? 'text-red-600' : isDue ? 'text-amber-600' : 'text-gray-700'}`}>{fmtDate(r.next_due_date)}</span>
+                        : '—'}
+                    </Td>
+                    <Td className="text-xs text-gray-500">{r.administered_by ?? '—'}</Td>
+                    <Td>
+                      <div className="flex gap-1">
+                        <button onClick={() => openForm(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                        <button onClick={() => { if (confirm('Delete this record?')) delMut.mutate([r.id]) }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                      </div>
+                    </Td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </Table>
+          {rows.length === 0 && <EmptyState title="No vaccination records" action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Record</Button>} />}
+        </Card>
+      )}
+
+      {/* Vaccination Schedule reference */}
+      {(schedule ?? []).length > 0 && (
+        <Card>
+          <p className="font-semibold text-gray-700 mb-3 text-sm">Vaccination Schedule Reference</p>
+          <Table>
+            <thead><tr>
+              <Th>Week</Th><Th>Vaccine</Th><Th>Route</Th><Th>Dose</Th><Th>Notes</Th>
+            </tr></thead>
+            <tbody>
+              {(schedule ?? []).map((s: any) => (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <Td className="text-xs font-semibold">Wk {s.week_no}</Td>
+                  <Td className="text-sm">{s.vaccine_name}</Td>
+                  <Td className="text-xs">{s.route ? ROUTE_LABELS[s.route] ?? s.route : '—'}</Td>
+                  <Td className="text-xs">#{s.dose_no ?? 1}</Td>
+                  <Td className="text-xs text-gray-500">{s.notes ?? '—'}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card>
+      )}
+    </div>
+  )
+}

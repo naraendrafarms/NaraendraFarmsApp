@@ -34,6 +34,8 @@ import { FlockDashboard, FlockDetail as NewFlockDetail } from '@/pages/flock/Flo
 import { FlockComparison } from '@/pages/flock/FlockComparison'
 import { ShedPerformancePage } from '@/pages/flock/ShedPerformance'
 import { FarmExpensesPage } from '@/pages/expenses/FarmExpenses'
+import { EggOpeningStockPage } from '@/pages/flocks/EggOpeningStock'
+import { VaccinationRecordsPage } from '@/pages/flocks/VaccinationRecords'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -97,6 +99,8 @@ export const App: React.FC = () => {
             <Route path="flocks/egg-conversions" element={<EggConversions />} />
             <Route path="flocks/hatch-batches" element={<HatchBatches />} />
             <Route path="flocks/medicine" element={<MedicineEntry />} />
+            <Route path="flocks/opening-stock" element={<EggOpeningStockPage />} />
+            <Route path="flocks/vaccination" element={<VaccinationRecordsPage />} />
 
             {/* Feed Mill */}
             <Route path="feed" element={<FeedDashboard />} />

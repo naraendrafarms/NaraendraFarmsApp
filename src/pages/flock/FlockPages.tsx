@@ -140,6 +140,9 @@ type Tab = typeof TABS[number]
 export const FlockDashboard: React.FC = () => {
   const navigate = useNavigate()
 
+  const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+  const sevenStr = sevenDaysAgo.toISOString().slice(0, 10)
+
   const { data: flocks, isLoading } = useQuery({
     queryKey: ['flock_dashboard'],
     queryFn: async () => {
@@ -150,6 +153,64 @@ export const FlockDashboard: React.FC = () => {
       return data ?? []
     }
   })
+
+  // Live stats: last 7 days daily records per flock
+  const { data: liveStats } = useQuery({
+    queryKey: ['flock_dashboard_live', sevenStr],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('daily_records')
+        .select('flock_id,record_date,female_count,total_eggs,he_grade_a,he_grade_b,he_grade_c,mortality_female,mortality_male')
+        .gte('record_date', sevenStr)
+      return data ?? []
+    },
+    enabled: !!flocks && flocks.length > 0
+  })
+
+  // Current bird counts from shed_allocations (latest per flock+shed)
+  const { data: allocations } = useQuery({
+    queryKey: ['shed_alloc_latest'],
+    queryFn: async () => {
+      const { data } = await supabase.from('shed_allocations').select('flock_id,female_count,male_count,allocated_date').order('allocated_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  // Aggregate live stats by flock
+  const statsByFlock = React.useMemo(() => {
+    const map: Record<string, { hdPct: number | null; totalHE: number; days: number }> = {}
+    if (!liveStats) return map
+    const grouped: Record<string, any[]> = {}
+    for (const r of liveStats) {
+      if (!grouped[r.flock_id]) grouped[r.flock_id] = []
+      grouped[r.flock_id].push(r)
+    }
+    for (const [fid, rows] of Object.entries(grouped)) {
+      let hdSum = 0, hdCount = 0, totalHE = 0
+      for (const r of rows) {
+        const fc = r.female_count ?? 0
+        const he = (r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0)
+        if (fc > 0) { hdSum += he / fc; hdCount++ }
+        totalHE += he
+      }
+      map[fid] = { hdPct: hdCount > 0 ? hdSum / hdCount : null, totalHE, days: rows.length }
+    }
+    return map
+  }, [liveStats])
+
+  // Current birds: latest allocation per flock (sum all sheds)
+  const currentBirds = React.useMemo(() => {
+    const map: Record<string, { f: number; m: number }> = {}
+    if (!allocations) return map
+    const seen: Record<string, Set<string>> = {}
+    for (const a of allocations) {
+      if (!map[a.flock_id]) { map[a.flock_id] = { f: 0, m: 0 }; seen[a.flock_id] = new Set() }
+      // use latest per flock (already sorted desc) — sum all sheds but take only first row per flock for simplicity
+      map[a.flock_id].f += a.female_count ?? 0
+      map[a.flock_id].m += a.male_count ?? 0
+    }
+    return map
+  }, [allocations])
 
   if (isLoading) return <Spinner />
 
@@ -170,6 +231,9 @@ export const FlockDashboard: React.FC = () => {
           const totalPlacedF = f.total_placed_f ?? (paidF + freeF)
           const totalPlacedM = f.total_placed_m ?? (paidM + freeM)
           const total = totalPlacedF + totalPlacedM
+          const live = statsByFlock[f.id]
+          const birds = currentBirds[f.id]
+          const hdColor = live?.hdPct == null ? '' : live.hdPct >= 0.80 ? 'text-green-600' : live.hdPct >= 0.65 ? 'text-amber-600' : 'text-red-600'
 
           return (
             <div
@@ -191,12 +255,32 @@ export const FlockDashboard: React.FC = () => {
                   <span className="font-medium">{fmtDate(f.placement_date)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Total Placed</span>
+                  <span className="text-gray-500">Placed</span>
                   <span className="font-medium" title={`Paid: ${paidF}F + ${paidM}M · Free: ${freeF}F + ${freeM}M`}>
                     {numFmt(totalPlacedF)}F + {numFmt(totalPlacedM)}M
                     <span className="text-xs text-gray-400 ml-1">({numFmt(total)})</span>
                   </span>
                 </div>
+                {birds && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Current Birds</span>
+                    <span className="font-medium">{numFmt(birds.f)}F + {numFmt(birds.m)}M</span>
+                  </div>
+                )}
+                {live && f.status === 'laying' && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">7-day avg HD%</span>
+                      <span className={`font-bold ${hdColor}`}>
+                        {live.hdPct != null ? pctFmt(live.hdPct) : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">7-day HE eggs</span>
+                      <span className="font-medium">{numFmt(live.totalHE)}</span>
+                    </div>
+                  </>
+                )}
                 {f.chick_cost != null && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Chick Cost</span>
