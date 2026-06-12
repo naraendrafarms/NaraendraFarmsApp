@@ -2333,6 +2333,9 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
     fullText += tc.items.map((it:any)=>it.str).join(' ') + '\n'
   }
 
+  // Log raw text to console for debugging PDF layout
+  console.log('=== PDF RAW TEXT ===\n' + fullText)
+
   const isAmendment = /AMENDMENT/i.test(fullText)
 
   // PO number: PO / NBF / DDMMYY / NNN
