@@ -132,7 +132,7 @@ const EditModal: React.FC<{
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 
-const TABS = ['Overview', 'Daily Records', 'Bird Transfers', 'HE Dispatch', 'Feed', 'Medicine', 'Bird Sales'] as const
+const TABS = ['Overview', 'Daily Records', 'Bird Transfers', 'HE Dispatch', 'Hatch Batches', 'Egg Conversions', 'Feed', 'Medicine', 'Bird Sales'] as const
 type Tab = typeof TABS[number]
 
 // ── FLOCK DASHBOARD ───────────────────────────────────────────────────────────
@@ -294,13 +294,15 @@ export const FlockDetail: React.FC = () => {
         </nav>
       </div>
 
-      {activeTab === 'Overview'       && <OverviewTab flock={flock} />}
-      {activeTab === 'Daily Records'  && <DailyRecordsTab flockId={flock.id} />}
-      {activeTab === 'Bird Transfers' && <BirdTransfersTab flockId={flock.id} />}
-      {activeTab === 'HE Dispatch'    && <HEDispatchTab flockId={flock.id} />}
-      {activeTab === 'Feed'           && <FeedTab flockId={flock.id} />}
-      {activeTab === 'Medicine'       && <MedicineTab flockId={flock.id} />}
-      {activeTab === 'Bird Sales'     && <BirdSalesTab flockId={flock.id} />}
+      {activeTab === 'Overview'          && <OverviewTab flock={flock} />}
+      {activeTab === 'Daily Records'     && <DailyRecordsTab flockId={flock.id} />}
+      {activeTab === 'Bird Transfers'    && <BirdTransfersTab flockId={flock.id} />}
+      {activeTab === 'HE Dispatch'       && <HEDispatchTab flockId={flock.id} />}
+      {activeTab === 'Hatch Batches'     && <HatchBatchesTab flockId={flock.id} />}
+      {activeTab === 'Egg Conversions'   && <EggConversionsTab flockId={flock.id} />}
+      {activeTab === 'Feed'              && <FeedTab flockId={flock.id} />}
+      {activeTab === 'Medicine'          && <MedicineTab flockId={flock.id} />}
+      {activeTab === 'Bird Sales'        && <BirdSalesTab flockId={flock.id} />}
     </div>
   )
 }
@@ -313,7 +315,7 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
     queryFn: async () => {
       const { data } = await supabase
         .from('daily_records')
-        .select('record_date,closing_female,closing_male,mortality_female,mortality_male,total_eggs,he_eggs,hd_pct,he_pct')
+        .select('record_date,closing_female,closing_male,mortality_female,mortality_male,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct')
         .eq('flock_id', flock.id)
         .order('record_date', { ascending: false })
       return data ?? []
@@ -339,8 +341,12 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
   const currentBirds = (latestRow?.closing_female ?? 0) + (latestRow?.closing_male ?? 0)
   const totalMortF = daily.reduce((s: number, r: any) => s + (r.mortality_female ?? 0), 0)
   const totalMortM = daily.reduce((s: number, r: any) => s + (r.mortality_male ?? 0), 0)
-  const totalEggs = daily.reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0)
-  const totalHE   = daily.reduce((s: number, r: any) => s + (r.he_eggs ?? 0), 0)
+  const totalEggs   = daily.reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0)
+  const totalHE     = daily.reduce((s: number, r: any) => s + (r.he_eggs ?? 0), 0)
+  const totalGradeA = daily.reduce((s: number, r: any) => s + (r.he_grade_a ?? 0), 0)
+  const totalGradeB = daily.reduce((s: number, r: any) => s + (r.he_grade_b ?? 0), 0)
+  const totalGradeC = daily.reduce((s: number, r: any) => s + (r.he_grade_c ?? 0), 0)
+  const totalWaste  = daily.reduce((s: number, r: any) => s + (r.wastage_eggs ?? 0), 0)
   const totalHEDisp = (heDispatch ?? []).reduce((s: number, r: any) => s + (r.total_dispatched ?? 0), 0)
 
   const hdRows = daily.filter((r: any) => r.hd_pct != null && (r.total_eggs ?? 0) > 0)
@@ -348,12 +354,16 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
   const heRows = daily.filter((r: any) => r.he_pct != null && (r.total_eggs ?? 0) > 0)
   const avgHE  = heRows.length ? heRows.reduce((s: number, r: any) => s + r.he_pct, 0) / heRows.length : null
 
-  const monthly: Record<string, { eggs: number; heEggs: number; mort: number; birdDays: number; days: number }> = {}
+  const monthly: Record<string, { eggs: number; heEggs: number; gradeA: number; gradeB: number; gradeC: number; waste: number; mort: number; birdDays: number; days: number }> = {}
   daily.forEach((r: any) => {
     const month = (r.record_date as string)?.slice(0, 7) ?? ''
-    if (!monthly[month]) monthly[month] = { eggs: 0, heEggs: 0, mort: 0, birdDays: 0, days: 0 }
+    if (!monthly[month]) monthly[month] = { eggs: 0, heEggs: 0, gradeA: 0, gradeB: 0, gradeC: 0, waste: 0, mort: 0, birdDays: 0, days: 0 }
     monthly[month].eggs     += r.total_eggs ?? 0
     monthly[month].heEggs   += r.he_eggs ?? 0
+    monthly[month].gradeA   += r.he_grade_a ?? 0
+    monthly[month].gradeB   += r.he_grade_b ?? 0
+    monthly[month].gradeC   += r.he_grade_c ?? 0
+    monthly[month].waste    += r.wastage_eggs ?? 0
     monthly[month].mort     += (r.mortality_female ?? 0) + (r.mortality_male ?? 0)
     monthly[month].birdDays += (r.closing_female ?? 0) + (r.closing_male ?? 0)
     monthly[month].days     += 1
@@ -373,6 +383,14 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
         <StatCard title="Avg Lay %" value={avgHD != null ? pctFmt(avgHD) : '—'} icon={<TrendingUp size={18}/>} color="text-orange-600" />
         <StatCard title="Avg HE %" value={avgHE != null ? pctFmt(avgHE) : '—'} icon={<TrendingUp size={18}/>} color="text-teal-600" />
       </div>
+      {(totalGradeA + totalGradeB + totalGradeC) > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title="Grade A (HE)" value={numFmt(totalGradeA)} icon={<Egg size={18}/>} color="text-emerald-600" />
+          <StatCard title="Grade B (HE)" value={numFmt(totalGradeB)} icon={<Egg size={18}/>} color="text-yellow-600" />
+          <StatCard title="Grade C (HE)" value={numFmt(totalGradeC)} icon={<Egg size={18}/>} color="text-orange-600" />
+          <StatCard title="Total Wastage" value={numFmt(totalWaste)} icon={<Egg size={18}/>} color="text-red-500" />
+        </div>
+      )}
 
       {Object.keys(monthly).length > 0 && (
         <Card padding={false}>
@@ -382,7 +400,8 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
           <Table>
             <thead><tr>
               <Th>Month</Th><Th right>Avg Birds</Th><Th right>Total Eggs</Th>
-              <Th right>HE Eggs</Th><Th right>Mortality</Th>
+              <Th right>HE Eggs</Th><Th right>Gr A</Th><Th right>Gr B</Th><Th right>Gr C</Th>
+              <Th right>Wastage</Th><Th right>Mortality</Th>
             </tr></thead>
             <tbody>
               {Object.entries(monthly).sort(([a], [b]) => a.localeCompare(b)).map(([month, d]) => (
@@ -390,7 +409,11 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
                   <Td className="font-medium text-xs">{month}</Td>
                   <Td right className="text-xs">{numFmt(d.days ? Math.round(d.birdDays / d.days) : 0)}</Td>
                   <Td right className="text-xs">{numFmt(d.eggs)}</Td>
-                  <Td right className="text-xs">{numFmt(d.heEggs)}</Td>
+                  <Td right className="text-xs font-semibold text-green-700">{numFmt(d.heEggs)}</Td>
+                  <Td right className="text-xs text-emerald-600">{d.gradeA ? numFmt(d.gradeA) : '—'}</Td>
+                  <Td right className="text-xs text-yellow-600">{d.gradeB ? numFmt(d.gradeB) : '—'}</Td>
+                  <Td right className="text-xs text-orange-600">{d.gradeC ? numFmt(d.gradeC) : '—'}</Td>
+                  <Td right className="text-xs text-red-500">{d.waste ? numFmt(d.waste) : '—'}</Td>
                   <Td right className="text-xs">{numFmt(d.mort)}</Td>
                 </tr>
               ))}
@@ -416,7 +439,11 @@ const DAILY_FIELDS: FieldDef[] = [
   { key: 'feed_female_kg',   label: 'Feed F (kg)',     type: 'number', step: '0.1' },
   { key: 'feed_male_kg',     label: 'Feed M (kg)',     type: 'number', step: '0.1' },
   { key: 'total_eggs',       label: 'Total Eggs',      type: 'number' },
-  { key: 'he_eggs',          label: 'HE Eggs',         type: 'number' },
+  { key: 'he_eggs',          label: 'HE Eggs (Total)', type: 'number' },
+  { key: 'he_grade_a',       label: 'HE Grade A',      type: 'number' },
+  { key: 'he_grade_b',       label: 'HE Grade B',      type: 'number' },
+  { key: 'he_grade_c',       label: 'HE Grade C',      type: 'number' },
+  { key: 'wastage_eggs',     label: 'Wastage Eggs',    type: 'number' },
 ]
 
 const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
@@ -447,7 +474,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       while (true) {
         const { data } = await supabase
           .from('daily_records')
-          .select('*, farms(name,code)')
+          .select('id,record_date,farm_id,age_weeks,opening_female,opening_male,mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct,farms(name,code)')
           .eq('flock_id', flockId)
           .order('record_date', { ascending: false })
           .range(from, from + CHUNK - 1)
@@ -532,7 +559,8 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                 <Th right>Open F</Th><Th right>Open M</Th>
                 <Th right>Feed F kg</Th><Th right>Feed M kg</Th>
                 <Th right>Eggs</Th><Th right>HD%</Th>
-                <Th right>HE</Th><Th right>HE%</Th>
+                <Th right>HE</Th><Th right>Gr A</Th><Th right>Gr B</Th><Th right>Gr C</Th><Th right>HE%</Th>
+                <Th right>Wastage</Th>
                 <Th right>Mort F</Th><Th right>Mort M</Th>
                 <Th right>Close F</Th><Th right>Close M</Th>
                 <Th right>Age/Wk</Th>
@@ -550,8 +578,12 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                     <Td right className="text-xs">{r.feed_male_kg != null ? (r.feed_male_kg as number).toFixed(1) : '—'}</Td>
                     <Td right className="text-xs font-semibold">{numFmt(r.total_eggs)}</Td>
                     <Td right className="text-xs">{r.hd_pct != null ? pctFmt(r.hd_pct) : '—'}</Td>
-                    <Td right className="text-xs">{numFmt(r.he_eggs)}</Td>
+                    <Td right className="text-xs font-semibold text-green-700">{numFmt(r.he_eggs)}</Td>
+                    <Td right className="text-xs text-emerald-600">{r.he_grade_a != null ? numFmt(r.he_grade_a) : '—'}</Td>
+                    <Td right className="text-xs text-yellow-600">{r.he_grade_b != null ? numFmt(r.he_grade_b) : '—'}</Td>
+                    <Td right className="text-xs text-orange-600">{r.he_grade_c != null ? numFmt(r.he_grade_c) : '—'}</Td>
                     <Td right className="text-xs">{r.he_pct != null ? pctFmt(r.he_pct) : '—'}</Td>
+                    <Td right className="text-xs text-red-400">{r.wastage_eggs != null ? numFmt(r.wastage_eggs) : '—'}</Td>
                     <Td right className="text-xs text-red-600">{numFmt(r.mortality_female)}</Td>
                     <Td right className="text-xs text-red-600">{numFmt(r.mortality_male)}</Td>
                     <Td right className="text-xs">{numFmt(r.closing_female)}</Td>
@@ -604,8 +636,12 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             closing_male:   Number(form.closing_male)   || 0,
             feed_female_kg: form.feed_female_kg !== '' ? Number(form.feed_female_kg) : null,
             feed_male_kg:   form.feed_male_kg   !== '' ? Number(form.feed_male_kg)   : null,
-            total_eggs: Number(form.total_eggs) || 0,
-            he_eggs:    Number(form.he_eggs)    || 0,
+            total_eggs:  Number(form.total_eggs)  || 0,
+            he_eggs:     Number(form.he_eggs)     || 0,
+            he_grade_a:  form.he_grade_a  !== '' ? Number(form.he_grade_a)  : null,
+            he_grade_b:  form.he_grade_b  !== '' ? Number(form.he_grade_b)  : null,
+            he_grade_c:  form.he_grade_c  !== '' ? Number(form.he_grade_c)  : null,
+            wastage_eggs: form.wastage_eggs !== '' ? Number(form.wastage_eggs) : null,
           }})}
         />
       )}
@@ -784,9 +820,11 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
 const HE_DISPATCH_FIELDS: FieldDef[] = [
   { key: 'dispatch_date',    label: 'Date',        type: 'date' },
+  { key: 'invoice_no',       label: 'Invoice No',  type: 'text' },
   { key: 'dc_no',            label: 'DC No',       type: 'text' },
   { key: 'grade_a',          label: 'Grade A',     type: 'number' },
   { key: 'grade_b',          label: 'Grade B',     type: 'number' },
+  { key: 'grade_c',          label: 'Grade C',     type: 'number' },
   { key: 'total_dispatched', label: 'Total',       type: 'number' },
   { key: 'rate',             label: 'Rate (₹)',    type: 'number', step: '0.01' },
   { key: 'amount',           label: 'Amount (₹)', type: 'number', step: '0.01' },
@@ -869,8 +907,8 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             <Table>
               <thead><tr>
                 <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
-                <Th>Date</Th><Th>DC No</Th><Th>Party</Th>
-                <Th right>Grade A</Th><Th right>Grade B</Th>
+                <Th>Date</Th><Th>Invoice</Th><Th>DC No</Th><Th>Party</Th>
+                <Th right>Gr A</Th><Th right>Gr B</Th><Th right>Gr C</Th>
                 <Th right>Total</Th><Th right>Rate</Th><Th right>Amount</Th>
                 <Th></Th>
               </tr></thead>
@@ -879,10 +917,12 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                   <tr key={d.id} className={`hover:bg-gray-50 ${sel.has(d.id) ? 'bg-red-50' : ''}`}>
                     <Td><CB checked={sel.has(d.id)} onChange={() => toggle(d.id)}/></Td>
                     <Td className="text-xs">{fmtDate(d.dispatch_date)}</Td>
+                  <Td className="text-xs font-mono text-brand-700">{d.invoice_no ?? '—'}</Td>
                   <Td className="text-xs font-mono">{d.dc_no ?? '—'}</Td>
                   <Td className="text-xs">{d.parties?.name ?? '—'}</Td>
-                  <Td right className="text-xs">{numFmt(d.grade_a)}</Td>
-                  <Td right className="text-xs">{numFmt(d.grade_b)}</Td>
+                  <Td right className="text-xs text-emerald-600">{numFmt(d.grade_a)}</Td>
+                  <Td right className="text-xs text-yellow-600">{numFmt(d.grade_b)}</Td>
+                  <Td right className="text-xs text-orange-600">{numFmt(d.grade_c)}</Td>
                   <Td right className="text-xs font-semibold">{numFmt(d.total_dispatched)}</Td>
                   <Td right className="text-xs">{d.rate != null ? `₹${d.rate}` : '—'}</Td>
                   <Td right className="text-xs font-semibold">{inr(d.amount)}</Td>
@@ -897,7 +937,7 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             </tbody>
             {dispatches.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={6}>TOTAL ({dispatches.length})</Td>
+                <Td colSpan={8}>TOTAL ({dispatches.length})</Td>
                 <Td right>{numFmt(totalDisp)}</Td>
                 <Td right>—</Td>
                 <Td right>{inr(totalAmount)}</Td>
@@ -919,9 +959,11 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           onClose={() => setEditRow(null)}
           onSave={form => updateMut.mutate({ id: editRow.id, data: {
             dispatch_date:    form.dispatch_date,
+            invoice_no:       form.invoice_no || null,
             dc_no:            form.dc_no || null,
             grade_a:          Number(form.grade_a)          || 0,
             grade_b:          Number(form.grade_b)          || 0,
+            grade_c:          Number(form.grade_c)          || 0,
             total_dispatched: Number(form.total_dispatched) || 0,
             rate:             form.rate   !== '' ? Number(form.rate)   : null,
             amount:           form.amount !== '' ? Number(form.amount) : null,
@@ -1533,6 +1575,120 @@ const BirdSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         <ConfirmDelete label={`Delete ${sel.size} bird sale records?`}
           onConfirm={() => bulkDelMutSales.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
+    </div>
+  )
+}
+
+// ── HATCH BATCHES TAB (per-flock view) ────────────────────────────────────────
+
+const HatchBatchesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const { data: batches, isLoading } = useQuery({
+    queryKey: ['flock_hatch_batches', flockId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('hatch_batches')
+        .select('*')
+        .eq('flock_id', flockId)
+        .order('setting_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  if (isLoading) return <Spinner />
+
+  const total = batches?.length ?? 0
+  const totalSet = (batches ?? []).reduce((s: number, r: any) => s + (r.eggs_set ?? 0), 0)
+  const totalHatched = (batches ?? []).reduce((s: number, r: any) => s + (r.hatched_chicks ?? 0), 0)
+  const avgHatch = batches?.filter((r: any) => r.hatchability_pct != null).length
+    ? (batches!.filter((r: any) => r.hatchability_pct != null)
+        .reduce((s: number, r: any) => s + r.hatchability_pct, 0) /
+       batches!.filter((r: any) => r.hatchability_pct != null).length)
+    : null
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard title="Batches" value={total.toString()} icon={<Egg size={18}/>} color="text-blue-600" />
+        <StatCard title="Eggs Set" value={numFmt(totalSet)} icon={<Egg size={18}/>} color="text-green-600" />
+        <StatCard title="Chicks Hatched" value={numFmt(totalHatched)} icon={<Bird size={18}/>} color="text-brand-600" />
+        <StatCard title="Avg Hatchability" value={avgHatch != null ? `${avgHatch.toFixed(1)}%` : '—'} icon={<TrendingUp size={18}/>} color="text-purple-600" />
+      </div>
+      <Card padding={false}>
+        <Table>
+          <thead><tr>
+            <Th>Invoice</Th><Th>Hatchery</Th><Th>Setting Date</Th><Th>Hatch Date</Th>
+            <Th right>Eggs Set</Th><Th right>Hatched</Th>
+            <Th right>Fertility%</Th><Th right>Hatchability%</Th>
+          </tr></thead>
+          <tbody>
+            {(batches ?? []).map((b: any) => (
+              <tr key={b.id} className="hover:bg-gray-50">
+                <Td className="text-xs font-mono text-brand-700">{b.invoice_no ?? '—'}</Td>
+                <Td className="text-xs">{b.hatchery_name ?? '—'}</Td>
+                <Td className="text-xs">{fmtDate(b.setting_date)}</Td>
+                <Td className="text-xs">{b.hatch_date ? fmtDate(b.hatch_date) : <span className="text-yellow-600">Pending</span>}</Td>
+                <Td right className="text-xs">{numFmt(b.eggs_set)}</Td>
+                <Td right className="text-xs font-semibold text-green-700">{b.hatched_chicks != null ? numFmt(b.hatched_chicks) : <span className="text-gray-400">—</span>}</Td>
+                <Td right className="text-xs">{b.fertility_pct != null ? `${b.fertility_pct}%` : '—'}</Td>
+                <Td right className="text-xs font-semibold">{b.hatchability_pct != null ? `${b.hatchability_pct}%` : '—'}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+        {(batches ?? []).length === 0 && <EmptyState icon={<Egg size={32}/>} title="No hatch batches yet" />}
+      </Card>
+    </div>
+  )
+}
+
+// ── EGG CONVERSIONS TAB (per-flock view) ─────────────────────────────────────
+
+const EGG_TYPE_LABELS: Record<string, string> = {
+  he_grade_a: 'HE Gr A', he_grade_b: 'HE Gr B', he_grade_c: 'HE Gr C',
+  je_eggs: 'JE', te_eggs: 'TE', be_eggs: 'BE', le_eggs: 'LE',
+}
+
+const EggConversionsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const { data: conversions, isLoading } = useQuery({
+    queryKey: ['flock_egg_conversions', flockId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('egg_conversions')
+        .select('*')
+        .eq('flock_id', flockId)
+        .order('conversion_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  if (isLoading) return <Spinner />
+
+  const tl = (v: string) => EGG_TYPE_LABELS[v] ?? v
+
+  return (
+    <div className="space-y-4">
+      <Card padding={false}>
+        <Table>
+          <thead><tr>
+            <Th>Date</Th><Th>From</Th><Th right>From Qty</Th>
+            <Th></Th><Th>To</Th><Th right>To Qty</Th><Th>Reason</Th>
+          </tr></thead>
+          <tbody>
+            {(conversions ?? []).map((c: any) => (
+              <tr key={c.id} className="hover:bg-gray-50">
+                <Td className="text-xs">{fmtDate(c.conversion_date)}</Td>
+                <Td><span className="px-2 py-0.5 bg-red-50 text-red-700 rounded text-xs">{tl(c.from_type)}</span></Td>
+                <Td right className="text-xs text-red-600 font-medium">{numFmt(c.from_qty)}</Td>
+                <Td className="text-xs text-gray-400">→</Td>
+                <Td><span className="px-2 py-0.5 bg-green-50 text-green-700 rounded text-xs">{tl(c.to_type)}</span></Td>
+                <Td right className="text-xs text-green-600 font-medium">{numFmt(c.to_qty)}</Td>
+                <Td className="text-xs text-gray-400">{c.reason ?? '—'}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+        {(conversions ?? []).length === 0 && <EmptyState icon={<Egg size={32}/>} title="No egg conversions" />}
+      </Card>
     </div>
   )
 }
