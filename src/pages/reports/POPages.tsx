@@ -2390,13 +2390,24 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
   const buf = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise
   let fullText = ''
+  let sellerText = ''  // right column only (vendor side)
+
   for (let p=1; p<=pdf.numPages; p++) {
     const page = await pdf.getPage(p)
+    const vp = page.getViewport({ scale: 1 })
+    const midX = vp.width / 2
     const tc = await page.getTextContent()
-    fullText += tc.items.map((it:any)=>it.str).join(' ') + '\n'
+    // Full text for item/PO parsing
+    fullText += tc.items.map((it:any) => it.str).join(' ') + '\n'
+    // Right-column text for seller details (x > midpoint of page)
+    sellerText += tc.items
+      .filter((it:any) => it.transform && it.transform[4] > midX)
+      .map((it:any) => it.str)
+      .join(' ') + '\n'
   }
 
   console.log('=== PDF RAW TEXT ===\n' + fullText)
+  console.log('=== SELLER COLUMN TEXT ===\n' + sellerText)
 
   const isAmendment = /AMENDMENT/i.test(fullText)
 
@@ -2409,32 +2420,28 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
     ?? fullText.match(/(\d{1,2}[-\/][A-Za-z]{3}[-\/]\d{2,4})/)
   const poDate = fmtISODate(dateMatch?.[1] ?? null)
 
-  // Vendor name: find all company names with PVT LTD/LIMITED/etc, exclude our own company (NARAENDRA)
-  const allCompanyMatches = [...fullText.matchAll(/([A-Z][A-Z0-9\s&\.\-]{2,50}(?:PVT\.?\s*LTD\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS))/gi)]
-  const vendor = allCompanyMatches
-    .map(m => m[1].replace(/\s+/g,' ').trim())
-    .find(v => !v.toUpperCase().includes('NARAENDRA')) ?? 'Unknown'
+  // Use seller (right) column text to avoid mixing with buyer address
+  // Vendor name: first company with PVT LTD/etc in the seller column
+  const vendorNameMatch = sellerText.match(/([A-Z][A-Z0-9\s&\.\-]{2,50}(?:PVT\.?\s*LTD\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS))/i)
+  const vendor = vendorNameMatch ? vendorNameMatch[1].replace(/\s+/g,' ').trim() : 'Unknown'
 
-  // GSTINs: buyer is Naraendra Farms = 36ABJFM1393C1ZC; vendor is the other GSTIN
-  const allGSTINs = [...fullText.matchAll(/\b(\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d])\b/g)].map(m => m[1])
-  const naraendraGSTIN = '36ABJFM1393C1ZC'
-  const vendorGSTIN = allGSTINs.find(g => g !== naraendraGSTIN) ?? null
+  // Vendor GSTIN: first GSTIN found in the seller column
+  const vendorGSTINMatch = sellerText.match(/\b(\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d])\b/)
+  const vendorGSTIN = vendorGSTINMatch?.[1] ?? null
 
-  // Vendor address: text immediately after vendor company name up to next landmark
-  // Vendor address: everything after vendor name up to "GSTIN Registration No"
-  // pdfjs interleaves columns, but vendor name appears mid-text and address follows immediately
+  // Vendor address: seller column text between company name and GSTIN number
   let vendorAddress: string | null = null
   if (vendor !== 'Unknown') {
-    const idx = fullText.indexOf(vendor)
+    const idx = sellerText.indexOf(vendor)
     if (idx !== -1) {
-      const afterVendor = fullText.slice(idx + vendor.length)
-      // Take everything up to GSTIN Registration No or Purchase Order No
-      const addrMatch = afterVendor.match(/^\s*([\s\S]{10,300}?)(?:GSTIN\s+Registration\s+No|Purchase\s+Order\s+No)/i)
+      const afterVendor = sellerText.slice(idx + vendor.length)
+      const addrMatch = afterVendor.match(/^\s*([\s\S]{5,300}?)(?:\bGSTIN\b|\d{2}[A-Z]{5}\d{4})/i)
       if (addrMatch) {
         vendorAddress = addrMatch[1]
-          .replace(/\n+/g,' ')
-          .replace(/\s{2,}/g,' ')
-          .replace(/Telangana,?\s*State\s+Code[^,]*,?\s*INDIA\.?/i,'')
+          .replace(/\n+/g, ' ')
+          .replace(/\s{2,}/g, ' ')
+          .replace(/Telangana,?\s*State\s+Code[^,]*,?\s*INDIA\.?/gi, '')
+          .replace(/\bSeller\s*:/gi, '')
           .trim() || null
       }
     }
