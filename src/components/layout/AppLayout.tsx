@@ -22,8 +22,9 @@ const NAV: NavItem[] = [
   {
     label: 'Flock Management', icon: <Bird size={18}/>,
     children: [
-      { label: 'All Flocks',     to: '/flock' },
-      { label: 'Compare Flocks', to: '/flock/compare' },
+      { label: 'All Flocks',            to: '/flock' },
+      { label: 'Compare Flocks',        to: '/flock/compare' },
+      { label: 'Shed / Site Performance', to: '/flock/shed-performance' },
     ]
   },
   {
