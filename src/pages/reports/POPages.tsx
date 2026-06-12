@@ -259,7 +259,7 @@ const POTab: React.FC = () => {
   const groupedByPO = useMemo(() => {
     const m: Record<string, any[]> = {}
     filtered.forEach((o: any) => {
-      const key = o.po_no || o.id
+      const key = o.po_no?.trim() || o.id
       if (!m[key]) m[key] = []
       m[key].push(o)
     })

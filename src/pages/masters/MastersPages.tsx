@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { fmtDate } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
@@ -437,7 +438,7 @@ export const MedicinesMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const [form, setForm] = useState({name:'',type:'medicine',unit:'ml',manufacturer:'',rate:''})
+  const [form, setForm] = useState({name:'',type:'medicine',unit:'ml',manufacturer:'',rate:'',batch_no:'',expiry_date:''})
   const medImportRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
@@ -445,14 +446,14 @@ export const MedicinesMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
-    setForm(row?{name:row.name,type:row.type,unit:row.unit,manufacturer:row.manufacturer??'',rate:row.rate?.toString()??''}:{name:'',type:'medicine',unit:'ml',manufacturer:'',rate:''})
+    setForm(row?{name:row.name,type:row.type,unit:row.unit,manufacturer:row.manufacturer??'',rate:row.rate?.toString()??'',batch_no:row.batch_no??'',expiry_date:row.expiry_date??''}:{name:'',type:'medicine',unit:'ml',manufacturer:'',rate:'',batch_no:'',expiry_date:''})
     setShowForm(true)
   }
 
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.name)throw new Error('Name required')
-      const p={name:form.name,type:form.type,unit:form.unit,manufacturer:form.manufacturer||null,rate:parseFloat(form.rate)||null}
+      const p={name:form.name,type:form.type,unit:form.unit,manufacturer:form.manufacturer||null,rate:parseFloat(form.rate)||null,batch_no:form.batch_no||null,expiry_date:form.expiry_date||null}
       if(editing){const{error}=await supabase.from('medicines_master').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('medicines_master').insert(p);if(error)throw error}
     },
@@ -501,7 +502,9 @@ export const MedicinesMaster: React.FC = () => {
           {label:'Type',key:'type',render:r=><Badge color={typeColors[r.type]??'gray'}>{r.type}</Badge>},
           {label:'Unit',key:'unit'},
           {label:'Manufacturer',key:'manufacturer'},
-          {label:'Rate',key:'rate',right:true,render:r=>r.rate?`Rs ${r.rate}`:'—'},
+          {label:'Batch No',key:'batch_no',render:r=>r.batch_no??'—'},
+          {label:'Expiry Date',key:'expiry_date',render:r=>r.expiry_date?fmtDate(r.expiry_date):'—'},
+          {label:'Rate (Rs)',key:'rate',right:true,render:r=>r.rate?`₹${Number(r.rate).toLocaleString('en-IN')}`:'—'},
           {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
         ]}
       />
@@ -515,7 +518,11 @@ export const MedicinesMaster: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Manufacturer" value={form.manufacturer} onChange={e=>s('manufacturer',e.target.value)} />
-            <Input label="Rate per Unit (Rs)" type="number" step="0.01" value={form.rate} onChange={e=>s('rate',e.target.value)} />
+            <Input label="Rate per Unit (₹)" type="number" step="0.01" value={form.rate} onChange={e=>s('rate',e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="Batch No" value={form.batch_no} onChange={e=>s('batch_no',e.target.value)} hint="e.g. BT2024001" />
+            <Input label="Expiry Date" type="date" value={form.expiry_date} onChange={e=>s('expiry_date',e.target.value)} />
           </FormRow>
         </div>
       </Modal>
