@@ -106,40 +106,55 @@ export const HEDispatch: React.FC = () => {
     }
   })
 
+  // Dispatch lines: one row per production date with grade split
+  type DispLine = { prod_date: string; grade_a: string; grade_b: string; grade_c: string; rate: string }
+  const emptyLine = (): DispLine => ({ prod_date: today(), grade_a: '', grade_b: '', grade_c: '', rate: '' })
+  const [lines, setLines] = useState<DispLine[]>([emptyLine()])
+  const setLine = (i: number, k: keyof DispLine, v: string) =>
+    setLines(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l))
+  const addLine = () => setLines(ls => [...ls, emptyLine()])
+  const removeLine = (i: number) => setLines(ls => ls.filter((_, idx) => idx !== i))
+
   const [form, setForm] = useState({
-    flock_id: '', dispatch_date: today(), prod_date: today(), prod_date_to: '',
+    flock_id: '', dispatch_date: today(),
     dc_no: '', invoice_no: '', party_id: '', hatchery_id: '',
-    grade_a: '0', grade_b: '0', total_dispatched: '',
-    free_eggs: '0', rate: '', amount: '',
-    setting_date: '', hatch_date: '', chicks_sold: '', remarks: ''
+    free_eggs: '0', rate: '', amount: '', remarks: ''
   })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
-  // Auto-compute amount = invoice_eggs × rate
-  const invoiceEggs = (parseInt(form.total_dispatched)||0) - (parseInt(form.free_eggs)||0)
+  // Totals from lines
+  const lineTotal = (f: keyof DispLine) => lines.reduce((sum, l) => sum + (parseInt((l as any)[f]) || 0), 0)
+  const totalFromLines = lineTotal('grade_a') + lineTotal('grade_b') + lineTotal('grade_c')
+  const invoiceEggs = totalFromLines - (parseInt(form.free_eggs)||0)
   const autoAmount = invoiceEggs * (parseFloat(form.rate)||0)
 
   const openForm = (row?: any) => {
     if (row) {
       setEditing(row)
       setForm({
-        flock_id: row.flock_id, dispatch_date: row.dispatch_date, prod_date: row.prod_date ?? '',
-        prod_date_to: row.prod_date_to ?? '',
+        flock_id: row.flock_id, dispatch_date: row.dispatch_date,
         dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
         party_id: row.party_id ?? '', hatchery_id: row.hatchery_id ?? '',
-        grade_a: row.grade_a?.toString() ?? '0', grade_b: row.grade_b?.toString() ?? '0',
-        total_dispatched: row.total_dispatched?.toString() ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
-        amount: row.amount?.toString() ?? '', setting_date: row.setting_date ?? '',
-        hatch_date: row.hatch_date ?? '', chicks_sold: row.chicks_sold?.toString() ?? '',
-        remarks: row.remarks ?? ''
+        amount: row.amount?.toString() ?? '', remarks: row.remarks ?? ''
       })
+      // Load existing lines for this dispatch
+      supabase.from('he_dispatch_lines').select('*').eq('dispatch_id', row.id).order('prod_date')
+        .then(({ data }) => {
+          if (data && data.length > 0)
+            setLines(data.map((l: any) => ({
+              prod_date: l.prod_date, grade_a: l.grade_a?.toString() ?? '',
+              grade_b: l.grade_b?.toString() ?? '', grade_c: l.grade_c?.toString() ?? '',
+              rate: l.rate?.toString() ?? ''
+            })))
+          else
+            setLines([{ prod_date: row.prod_date ?? today(), grade_a: row.grade_a?.toString() ?? '', grade_b: row.grade_b?.toString() ?? '', grade_c: '0', rate: row.rate?.toString() ?? '' }])
+        })
     } else {
       setEditing(null)
-      setForm({ flock_id: flockFilter, dispatch_date: today(), prod_date: today(), prod_date_to: '',
-        dc_no: '', invoice_no: '', party_id: '', hatchery_id: '', grade_a: '0', grade_b: '0',
-        total_dispatched: '', free_eggs: '0', rate: '', amount: '',
-        setting_date: '', hatch_date: '', chicks_sold: '', remarks: '' })
+      setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
+        party_id: '', hatchery_id: '', free_eggs: '0', rate: '', amount: '', remarks: '' })
+      setLines([emptyLine()])
     }
     setShowForm(true)
   }
@@ -151,24 +166,54 @@ export const HEDispatch: React.FC = () => {
 
   const mut = useMutation({
     mutationFn: async () => {
-      if (!form.flock_id || !form.dispatch_date || !form.total_dispatched)
-        throw new Error('Flock, date and dispatch qty required')
-      const inv = (parseInt(form.total_dispatched)||0) - (parseInt(form.free_eggs)||0)
+      if (!form.flock_id || !form.dispatch_date) throw new Error('Flock and dispatch date required')
+      if (lines.length === 0 || totalFromLines === 0) throw new Error('Add at least one production line with qty')
+      const gradeA = lineTotal('grade_a'), gradeB = lineTotal('grade_b'), gradeC = lineTotal('grade_c')
+      // first/last prod dates from lines
+      const sortedDates = lines.map(l => l.prod_date).filter(Boolean).sort()
+      const prodDateFrom = sortedDates[0] || null
+      const prodDateTo = sortedDates.length > 1 ? sortedDates[sortedDates.length - 1] : null
+      const inv = totalFromLines - (parseInt(form.free_eggs)||0)
       const payload = {
         flock_id: form.flock_id, dispatch_date: form.dispatch_date,
-        prod_date: form.prod_date || null, prod_date_to: form.prod_date_to || null,
+        prod_date: prodDateFrom, prod_date_to: prodDateTo,
         dc_no: parseInt(form.dc_no) || null, invoice_no: form.invoice_no || null,
         party_id: form.party_id || null, hatchery_id: form.hatchery_id || null,
-        grade_a: parseInt(form.grade_a) || 0, grade_b: parseInt(form.grade_b) || 0,
-        total_dispatched: parseInt(form.total_dispatched),
+        grade_a: gradeA, grade_b: gradeB,
+        total_dispatched: totalFromLines,
         free_eggs: parseInt(form.free_eggs) || 0,
         invoice_eggs: inv, rate: parseFloat(form.rate) || null,
         amount: parseFloat(form.amount) || autoAmount || null,
-        setting_date: form.setting_date || null, hatch_date: form.hatch_date || null,
-        chicks_sold: parseInt(form.chicks_sold) || null, remarks: form.remarks || null
+        remarks: form.remarks || null
       }
-      if (editing) { const { error } = await supabase.from('he_dispatch').update(payload).eq('id', editing.id); if (error) throw error }
-      else { const { error } = await supabase.from('he_dispatch').insert(payload); if (error) throw error }
+      let dispatchId: string
+      if (editing) {
+        const { error } = await supabase.from('he_dispatch').update(payload).eq('id', editing.id)
+        if (error) throw error
+        dispatchId = editing.id
+        // Delete old lines and re-insert
+        await supabase.from('he_dispatch_lines').delete().eq('dispatch_id', dispatchId)
+      } else {
+        const { data, error } = await supabase.from('he_dispatch').insert(payload).select('id').single()
+        if (error) throw error
+        dispatchId = data.id
+      }
+      // Insert lines
+      const linePayload = lines
+        .filter(l => l.prod_date && (parseInt(l.grade_a)||0) + (parseInt(l.grade_b)||0) + (parseInt(l.grade_c)||0) > 0)
+        .map(l => ({
+          dispatch_id: dispatchId,
+          flock_id: form.flock_id,
+          prod_date: l.prod_date,
+          grade_a: parseInt(l.grade_a) || 0,
+          grade_b: parseInt(l.grade_b) || 0,
+          grade_c: parseInt(l.grade_c) || 0,
+          rate: parseFloat(l.rate) || parseFloat(form.rate) || null
+        }))
+      if (linePayload.length > 0) {
+        const { error } = await supabase.from('he_dispatch_lines').insert(linePayload)
+        if (error) throw error
+      }
     },
     onSuccess: () => { toast.success('Saved!'); qc.invalidateQueries({ queryKey: ['he_dispatch'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
@@ -180,41 +225,49 @@ export const HEDispatch: React.FC = () => {
   const totalFree = filtered.reduce((s: number, d: any) => s + (d.free_eggs ?? 0), 0)
   const noInvoiceCount = (dispatches ?? []).filter((d: any) => !d.invoice_no).length
 
-  // Stock register: daily production vs dispatches per flock
+  // Stock register: grade-split production vs dispatch lines per flock
   const { data: stockData } = useQuery({
     queryKey: ['he_stock_register', flockFilter],
     queryFn: async () => {
-      let dq = supabase.from('daily_records').select('record_date,flock_id,he_eggs,flocks(flock_no)')
+      let dq = supabase.from('daily_records')
+        .select('record_date,flock_id,he_eggs,he_grade_a,he_grade_b,he_grade_c,be_eggs,le_eggs,wastage_eggs,flocks(flock_no)')
         .order('record_date', { ascending: false })
-      let hq = supabase.from('he_dispatch').select('dispatch_date,flock_id,total_dispatched,flocks(flock_no)')
-        .order('dispatch_date', { ascending: false })
-      if (flockFilter) { dq = dq.eq('flock_id', flockFilter); hq = hq.eq('flock_id', flockFilter) }
-      const [{ data: prod }, { data: disp }] = await Promise.all([dq, hq])
-      // Build daily stock per flock
-      const map = new Map<string, { date: string; flock: string; produced: number; dispatched: number }>()
+      let lq = supabase.from('he_dispatch_lines')
+        .select('prod_date,flock_id,grade_a,grade_b,grade_c,he_dispatch(dispatch_date,invoice_no)')
+        .order('prod_date', { ascending: false })
+      if (flockFilter) { dq = dq.eq('flock_id', flockFilter); lq = lq.eq('flock_id', flockFilter) }
+      const [{ data: prod }, { data: dispLines }] = await Promise.all([dq, lq])
+      type StockRow = { date: string; flock: string; prod_a: number; prod_b: number; prod_c: number; disp_a: number; disp_b: number; disp_c: number; broken: number; leached: number; wastage: number }
+      const map = new Map<string, StockRow>()
       for (const r of (prod ?? [])) {
-        if (!r.he_eggs) continue
         const key = `${r.record_date}__${r.flock_id}`
-        const existing = map.get(key) ?? { date: r.record_date, flock: `F-${(r.flocks as any)?.flock_no}`, produced: 0, dispatched: 0 }
-        existing.produced += r.he_eggs ?? 0
-        map.set(key, existing)
+        const ex = map.get(key) ?? { date: r.record_date, flock: `F-${(r.flocks as any)?.flock_no}`, prod_a:0,prod_b:0,prod_c:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
+        ex.prod_a += r.he_grade_a ?? r.he_eggs ?? 0
+        ex.prod_b += r.he_grade_b ?? 0
+        ex.prod_c += r.he_grade_c ?? 0
+        ex.broken += r.be_eggs ?? 0
+        ex.leached += r.le_eggs ?? 0
+        ex.wastage += r.wastage_eggs ?? 0
+        map.set(key, ex)
       }
-      for (const r of (disp ?? [])) {
-        const key = `${r.dispatch_date}__${r.flock_id}`
-        const existing = map.get(key) ?? { date: r.dispatch_date, flock: `F-${(r.flocks as any)?.flock_no}`, produced: 0, dispatched: 0 }
-        existing.dispatched += r.total_dispatched ?? 0
-        map.set(key, existing)
+      for (const l of (dispLines ?? [])) {
+        const key = `${l.prod_date}__${l.flock_id}`
+        const ex = map.get(key) ?? { date: l.prod_date, flock: `F-${l.flock_id?.slice(0,4)}`, prod_a:0,prod_b:0,prod_c:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
+        ex.disp_a += l.grade_a ?? 0
+        ex.disp_b += l.grade_b ?? 0
+        ex.disp_c += l.grade_c ?? 0
+        map.set(key, ex)
       }
-      // Sort by date desc
-      const rows = [...map.values()].sort((a, b) => b.date.localeCompare(a.date))
-      // Compute running balance (oldest first, then reverse)
+      const rows = [...map.values()].sort((a,b) => b.date.localeCompare(a.date))
       const asc = [...rows].reverse()
-      let balance = 0
-      const withBalance = asc.map(r => {
-        balance += r.produced - r.dispatched
-        return { ...r, closing: balance }
+      let balA=0, balB=0, balC=0
+      const withBal = asc.map(r => {
+        balA += r.prod_a - r.disp_a
+        balB += r.prod_b - r.disp_b
+        balC += r.prod_c - r.disp_c
+        return { ...r, bal_a: balA, bal_b: balB, bal_c: balC, bal_total: balA+balB+balC }
       }).reverse()
-      return withBalance
+      return withBal
     }
   })
 
@@ -439,31 +492,46 @@ export const HEDispatch: React.FC = () => {
       {tab === 'stock' && (
         <Card padding={false}>
           <div className="px-4 py-3 border-b border-gray-100 bg-blue-50 text-sm text-blue-700">
-            Stock = cumulative HE production (daily records) minus dispatches. Updates automatically when entries are saved.
+            Stock = production (daily records by grade) minus dispatch lines. Broken/Leached/Wastage shown but not deducted from dispatch stock.
           </div>
           <Table>
-            <thead><tr>
-              <Th>Date</Th><Th>Flock</Th>
-              <Th right>Produced</Th><Th right>Dispatched</Th>
-              <Th right>Daily ±</Th><Th right>Closing Stock</Th>
-            </tr></thead>
+            <thead>
+              <tr>
+                <Th>Date</Th><Th>Flock</Th>
+                <Th right className="text-green-700">Prod A</Th>
+                <Th right className="text-blue-700">Prod B</Th>
+                <Th right className="text-orange-700">Prod C</Th>
+                <Th right className="text-red-500">Disp A</Th>
+                <Th right className="text-red-500">Disp B</Th>
+                <Th right className="text-red-500">Disp C</Th>
+                <Th right>Broken</Th><Th right>Leached</Th>
+                <Th right className="text-green-700">Bal A</Th>
+                <Th right className="text-blue-700">Bal B</Th>
+                <Th right className="text-orange-700">Bal C</Th>
+                <Th right className="text-gray-800">Total Stock</Th>
+              </tr>
+            </thead>
             <tbody>
               {(stockData ?? []).map((r: any, i: number) => (
-                <tr key={i} className={`hover:bg-gray-50 ${r.closing < 0 ? 'bg-red-50' : ''}`}>
-                  <Td className="text-sm">{fmtDate(r.date)}</Td>
+                <tr key={i} className={`hover:bg-gray-50 text-xs ${r.bal_total < 0 ? 'bg-red-50' : ''}`}>
+                  <Td className="text-xs">{fmtDate(r.date)}</Td>
                   <Td><Badge color="green">{r.flock}</Badge></Td>
-                  <Td right className="text-sm text-green-700">{r.produced > 0 ? `+${r.produced.toLocaleString('en-IN')}` : '—'}</Td>
-                  <Td right className="text-sm text-red-600">{r.dispatched > 0 ? `-${r.dispatched.toLocaleString('en-IN')}` : '—'}</Td>
-                  <Td right className={`text-sm font-medium ${r.produced - r.dispatched >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {(r.produced - r.dispatched) >= 0 ? '+' : ''}{(r.produced - r.dispatched).toLocaleString('en-IN')}
-                  </Td>
-                  <Td right className={`font-semibold ${r.closing < 0 ? 'text-red-700' : 'text-gray-800'}`}>
-                    {r.closing.toLocaleString('en-IN')}
-                  </Td>
+                  <Td right className="text-green-700">{r.prod_a > 0 ? r.prod_a.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-blue-700">{r.prod_b > 0 ? r.prod_b.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-orange-700">{r.prod_c > 0 ? r.prod_c.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-red-500">{r.disp_a > 0 ? `-${r.disp_a.toLocaleString('en-IN')}` : '—'}</Td>
+                  <Td right className="text-red-500">{r.disp_b > 0 ? `-${r.disp_b.toLocaleString('en-IN')}` : '—'}</Td>
+                  <Td right className="text-red-500">{r.disp_c > 0 ? `-${r.disp_c.toLocaleString('en-IN')}` : '—'}</Td>
+                  <Td right className="text-gray-500">{r.broken > 0 ? r.broken.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-gray-500">{r.leached > 0 ? r.leached.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className={`font-medium ${r.bal_a < 0 ? 'text-red-600' : 'text-green-700'}`}>{r.bal_a.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-medium ${r.bal_b < 0 ? 'text-red-600' : 'text-blue-700'}`}>{r.bal_b.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-medium ${r.bal_c < 0 ? 'text-red-600' : 'text-orange-700'}`}>{r.bal_c.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-semibold text-sm ${r.bal_total < 0 ? 'text-red-700' : 'text-gray-900'}`}>{r.bal_total.toLocaleString('en-IN')}</Td>
                 </tr>
               ))}
               {(stockData ?? []).length === 0 && (
-                <tr><Td colSpan={6} className="text-center text-gray-400 py-8">No data — add daily records and dispatches first</Td></tr>
+                <tr><Td colSpan={14} className="text-center text-gray-400 py-8">No data — add daily records with grade breakdown and dispatches first</Td></tr>
               )}
             </tbody>
           </Table>
@@ -476,54 +544,112 @@ export const HEDispatch: React.FC = () => {
       )}
 
       <Modal open={showForm} onClose={() => setShowForm(false)}
-        title={editing ? 'Edit HE Dispatch' : 'New HE Dispatch'} size="lg"
+        title={editing ? 'Edit HE Dispatch' : 'New HE Dispatch'} size="xl"
         footer={
           <><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>
         }>
         <div className="space-y-4">
+          {/* Header */}
           <FormRow>
-            <Select label="Flock" required placeholder="— Select —" options={flockOptions}
+            <Select label="Flock *" required placeholder="— Select —" options={flockOptions}
               value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+            <Input label="Dispatch Date *" required type="date" value={form.dispatch_date}
+              onChange={e => s('dispatch_date', e.target.value)} />
+          </FormRow>
+          <FormRow>
             <Input label="DC No" type="number" value={form.dc_no} onChange={e => s('dc_no', e.target.value)} />
+            <Input label="Invoice No" placeholder="e.g. INV-2026-001" value={form.invoice_no}
+              onChange={e => s('invoice_no', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Input label="Dispatch Date" required type="date" value={form.dispatch_date} onChange={e => s('dispatch_date', e.target.value)} />
-            <Input label="Invoice No" placeholder="e.g. INV-2026-001" value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
-          </FormRow>
-          <FormRow>
-            <Input label="Production Date (From)" type="date" value={form.prod_date} onChange={e => s('prod_date', e.target.value)} />
-            <Input label="Production Date (To)" type="date" value={form.prod_date_to} onChange={e => s('prod_date_to', e.target.value)} hint="Leave blank if single date" />
-          </FormRow>
-          <FormRow>
-            <Select label="Party / Hatchery" placeholder="— Select —" options={partyOptions}
+            <Select label="Party" placeholder="— Select —" options={partyOptions}
               value={form.party_id} onChange={e => s('party_id', e.target.value)} />
             <Select label="Hatchery" placeholder="— Select —" options={hatchOptions}
               value={form.hatchery_id} onChange={e => s('hatchery_id', e.target.value)} />
           </FormRow>
-          <Divider label="Egg Counts" />
-          <FormRow cols={4}>
-            <Input label="Grade A" type="number" value={form.grade_a} onChange={e => s('grade_a', e.target.value)} />
-            <Input label="Grade B" type="number" value={form.grade_b} onChange={e => s('grade_b', e.target.value)} />
-            <Input label="Total Dispatched" required type="number" value={form.total_dispatched} onChange={e => s('total_dispatched', e.target.value)} />
-            <Input label="Free Eggs (2%)" type="number" value={form.free_eggs} onChange={e => s('free_eggs', e.target.value)} />
-          </FormRow>
-          <div className="bg-blue-50 rounded-lg px-4 py-2 text-sm text-blue-700">
-            Invoice Eggs: <strong>{invoiceEggs.toLocaleString('en-IN')}</strong>
-            {form.rate && <span className="ml-4">Auto Amount: <strong>{inr(autoAmount)}</strong></span>}
+
+          {/* Production Lines */}
+          <Divider label="Production Date Lines (one row per production date)" />
+          <div className="rounded-lg border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Prod Date</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-green-700">Grade A</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-blue-700">Grade B</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-orange-700">Grade C</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Total</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Rate/egg</th>
+                  <th className="px-2 py-2 w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((l, i) => {
+                  const rowTotal = (parseInt(l.grade_a)||0)+(parseInt(l.grade_b)||0)+(parseInt(l.grade_c)||0)
+                  return (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-2 py-1.5">
+                        <input type="date" value={l.prod_date} onChange={e => setLine(i,'prod_date',e.target.value)}
+                          className="border border-gray-300 rounded px-2 py-1 text-xs w-36"/>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input type="number" value={l.grade_a} placeholder="0" onChange={e => setLine(i,'grade_a',e.target.value)}
+                          className="border border-gray-300 rounded px-2 py-1 text-xs w-20 text-right"/>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input type="number" value={l.grade_b} placeholder="0" onChange={e => setLine(i,'grade_b',e.target.value)}
+                          className="border border-gray-300 rounded px-2 py-1 text-xs w-20 text-right"/>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input type="number" value={l.grade_c} placeholder="0" onChange={e => setLine(i,'grade_c',e.target.value)}
+                          className="border border-gray-300 rounded px-2 py-1 text-xs w-20 text-right"/>
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-medium text-xs text-gray-700">{rowTotal > 0 ? rowTotal.toLocaleString('en-IN') : '—'}</td>
+                      <td className="px-2 py-1.5">
+                        <input type="number" value={l.rate} placeholder={form.rate||'0'} onChange={e => setLine(i,'rate',e.target.value)}
+                          className="border border-gray-300 rounded px-2 py-1 text-xs w-24 text-right"/>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        {lines.length > 1 && (
+                          <button onClick={() => removeLine(i)} className="text-red-400 hover:text-red-600 text-xs px-1">✕</button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {/* Totals row */}
+                <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold text-xs">
+                  <td className="px-3 py-2 text-gray-600">TOTAL ({lines.length} date{lines.length>1?'s':''})</td>
+                  <td className="px-3 py-2 text-right text-green-700">{lineTotal('grade_a').toLocaleString('en-IN')}</td>
+                  <td className="px-3 py-2 text-right text-blue-700">{lineTotal('grade_b').toLocaleString('en-IN')}</td>
+                  <td className="px-3 py-2 text-right text-orange-700">{lineTotal('grade_c').toLocaleString('en-IN')}</td>
+                  <td className="px-3 py-2 text-right text-gray-800">{totalFromLines.toLocaleString('en-IN')}</td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="px-3 py-2 border-t border-gray-100">
+              <button onClick={addLine} className="text-xs text-brand-600 hover:text-brand-700 font-medium">+ Add production date</button>
+            </div>
           </div>
-          <FormRow>
-            <Input label="Rate (Rs/egg)" type="number" step="0.0001" value={form.rate} onChange={e => s('rate', e.target.value)} />
+
+          {/* Invoice summary */}
+          <FormRow cols={3}>
+            <Input label="Free Eggs (2%)" type="number" value={form.free_eggs}
+              onChange={e => s('free_eggs', e.target.value)} />
+            <Input label="Default Rate (Rs/egg)" type="number" step="0.0001" value={form.rate}
+              onChange={e => s('rate', e.target.value)} hint="Used for lines without individual rate" />
             <Input label="Amount (Rs)" type="number" step="0.01" value={form.amount}
               onChange={e => s('amount', e.target.value)}
               hint={autoAmount > 0 ? `Auto: ${inr(autoAmount)}` : undefined} />
           </FormRow>
-          <Divider label="Setting & Hatch (optional)" />
-          <FormRow cols={3}>
-            <Input label="Setting Date" type="date" value={form.setting_date} onChange={e => s('setting_date', e.target.value)} />
-            <Input label="Hatch Date" type="date" value={form.hatch_date} onChange={e => s('hatch_date', e.target.value)} />
-            <Input label="Chicks Sold" type="number" value={form.chicks_sold} onChange={e => s('chicks_sold', e.target.value)} />
-          </FormRow>
+          <div className="bg-blue-50 rounded-lg px-4 py-2 text-sm text-blue-700 flex gap-6 flex-wrap">
+            <span>Total Dispatched: <strong>{totalFromLines.toLocaleString('en-IN')}</strong></span>
+            <span>Free: <strong>{parseInt(form.free_eggs)||0}</strong></span>
+            <span>Invoice Eggs: <strong>{invoiceEggs.toLocaleString('en-IN')}</strong></span>
+            {autoAmount > 0 && <span>Auto Amount: <strong>{inr(autoAmount)}</strong></span>}
+          </div>
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
         </div>
       </Modal>
