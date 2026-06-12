@@ -1534,7 +1534,7 @@ const EMPTY_SLIP = {
 }
 const EMPTY_MANUAL_EMP = {
   name: '', emp_id: '', designation: '', department: '',
-  bank_name: '', account_no: '', uan_no: ''
+  bank_name: '', account_no: '', uan_no: '', esi_no: ''
 }
 
 const FldNum: React.FC<{label:string; val:string; onChange:(v:string)=>void; disabled?:boolean}> = ({label,val,onChange,disabled}) => (
@@ -1549,13 +1549,14 @@ const FldNum: React.FC<{label:string; val:string; onChange:(v:string)=>void; dis
 // Renders a printable payslip — used both in generator preview and saved-slip modal
 const PayslipView: React.FC<{
   cs: typeof EMPTY_CS
-  pName:string; pEmpId:string; pDesig:string; pDept:string; pAcct:string; pUAN:string
+  pName:string; pEmpId:string; pDesig:string; pDept:string; pAcct:string; pUAN:string; pESI:string
   month:string; slip:typeof EMPTY_SLIP
   gross:number; totalDed:number; netSalary:number
   pfEmployer:number; esiEmployer:number
   sigEmp:boolean; sigHR:boolean; sigAuth:boolean; showFooter:boolean
+  showUAN:boolean; showESI:boolean
   n:(k:keyof typeof EMPTY_SLIP)=>number
-}> = ({cs,pName,pEmpId,pDesig,pDept,pAcct,pUAN,month,slip,gross,totalDed,netSalary,pfEmployer,esiEmployer,sigEmp,sigHR,sigAuth,showFooter,n}) => {
+}> = ({cs,pName,pEmpId,pDesig,pDept,pAcct,pUAN,pESI,month,slip,gross,totalDed,netSalary,pfEmployer,esiEmployer,sigEmp,sigHR,sigAuth,showFooter,showUAN,showESI,n}) => {
   const monthLabel = (m:string) => new Date(m+'T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'})
   return (
     <div className="border-2 border-gray-800 p-6 bg-white max-w-3xl mx-auto text-sm font-sans">
@@ -1572,8 +1573,10 @@ const PayslipView: React.FC<{
         <div><span className="text-gray-500 w-28 inline-block">Department/Site:</span><span className="font-semibold"> {pDept||'—'}</span></div>
         <div><span className="text-gray-500 w-28 inline-block">Days Worked:</span><span className="font-semibold"> {slip.days_worked||'—'}</span></div>
         <div><span className="text-gray-500 w-28 inline-block">Bank Account:</span><span className="font-semibold"> {pAcct||'—'}</span></div>
-        {pUAN&&<div><span className="text-gray-500 w-28 inline-block">UAN No:</span><span className="font-semibold"> {pUAN}</span></div>}
+        {showUAN&&pUAN&&<div><span className="text-gray-500 w-28 inline-block">UAN No:</span><span className="font-semibold"> {pUAN}</span></div>}
+        {showESI&&pESI&&<div><span className="text-gray-500 w-28 inline-block">ESI No:</span><span className="font-semibold"> {pESI}</span></div>}
         {cs.pf_reg_no&&<div><span className="text-gray-500 w-28 inline-block">PF Reg No:</span><span className="font-semibold"> {cs.pf_reg_no}</span></div>}
+        {cs.esi_reg_no&&<div><span className="text-gray-500 w-28 inline-block">ESI Reg No:</span><span className="font-semibold"> {cs.esi_reg_no}</span></div>}
       </div>
       <div className="grid grid-cols-2 gap-6">
         <div>
@@ -1672,6 +1675,8 @@ export const PayslipGeneratorPage: React.FC = () => {
   const [sigHR, setSigHR] = useState(true)
   const [sigAuth, setSigAuth] = useState(true)
   const [showFooter, setShowFooter] = useState(true)
+  const [showUAN, setShowUAN] = useState(true)
+  const [showESI, setShowESI] = useState(true)
   // Saved payslips
   const [selIds, setSelIds] = useState<Set<string>>(new Set())
   const [viewSlip, setViewSlip] = useState<any>(null)
@@ -1687,7 +1692,7 @@ export const PayslipGeneratorPage: React.FC = () => {
   const { data: employees } = useQuery({
     queryKey: ['employees_all'], queryFn: async () => {
       const { data } = await supabase.from('employees')
-        .select('id,emp_id,name,designation,farm_id,base_salary,esi_applicable,pf_applicable,pt_applicable,bank_name,account_no,ifsc,uan_no,farms(name)')
+        .select('id,emp_id,name,designation,farm_id,base_salary,esi_applicable,pf_applicable,pt_applicable,bank_name,account_no,ifsc,uan_no,esi_no,farms(name)')
         .eq('is_active', true).order('name')
       return data ?? []
     }
@@ -1786,6 +1791,7 @@ export const PayslipGeneratorPage: React.FC = () => {
   const pDept  = manualMode ? manualEmp.department : farmMap[(emp as any)?.farm_id] ?? ''
   const pAcct  = manualMode ? manualEmp.account_no : (emp as any)?.account_no ?? ''
   const pUAN   = manualMode ? manualEmp.uan_no : (emp as any)?.uan_no ?? ''
+  const pESI   = manualMode ? manualEmp.esi_no : (emp as any)?.esi_no ?? ''
   const showSlip = ready && (manualMode ? !!pName : !!emp)
 
   const buildPayload = () => ({
@@ -1798,6 +1804,7 @@ export const PayslipGeneratorPage: React.FC = () => {
     emp_bank_name: manualMode ? manualEmp.bank_name : (emp as any)?.bank_name ?? null,
     emp_account_no: pAcct || null,
     emp_uan_no: pUAN || null,
+    emp_esi_no: pESI || null,
     days_worked: n('days_worked') || null,
     basic_salary: n('basic_salary'), hra: n('hra'), da: n('da'), ta: n('ta'),
     special_allowance: n('special_allowance'), other_allowance: n('other_allowance'),
@@ -1857,7 +1864,7 @@ export const PayslipGeneratorPage: React.FC = () => {
       name: row.emp_name ?? '', emp_id: row.emp_id_manual ?? '',
       designation: row.emp_designation ?? '', department: row.emp_department ?? '',
       bank_name: row.emp_bank_name ?? '', account_no: row.emp_account_no ?? '',
-      uan_no: row.emp_uan_no ?? ''
+      uan_no: row.emp_uan_no ?? '', esi_no: row.emp_esi_no ?? ''
     })
     setMonth(row.month)
     setSlip({
@@ -1973,11 +1980,11 @@ export const PayslipGeneratorPage: React.FC = () => {
           <div className="overflow-auto max-h-[80vh]">
             <PayslipView cs={cs}
               pName={viewSlip.emp_name??''} pEmpId={viewSlip.emp_id_manual??''} pDesig={viewSlip.emp_designation??''}
-              pDept={viewSlip.emp_department??''} pAcct={viewSlip.emp_account_no??''} pUAN={viewSlip.emp_uan_no??''}
+              pDept={viewSlip.emp_department??''} pAcct={viewSlip.emp_account_no??''} pUAN={viewSlip.emp_uan_no??''} pESI={viewSlip.emp_esi_no??''}
               month={viewSlip.month} slip={rowToSlip(viewSlip)}
               gross={viewSlip.gross_earnings??0} totalDed={viewSlip.total_deductions??0} netSalary={viewSlip.net_salary??0}
               pfEmployer={viewSlip.pf_employer??0} esiEmployer={viewSlip.esi_employer??0}
-              sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter}
+              sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter} showUAN={showUAN} showESI={showESI}
               n={k=>parseFloat(rowToSlip(viewSlip)[k]||'0')}
             />
           </div>
@@ -2011,6 +2018,8 @@ export const PayslipGeneratorPage: React.FC = () => {
             <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Print Options — show on payslip</p>
             <div className="flex flex-wrap gap-4 text-sm text-gray-600">
               {([
+                ['UAN No', showUAN, setShowUAN],
+                ['ESI No', showESI, setShowESI],
                 ['Employee Signature', sigEmp, setSigEmp],
                 ['HR / Accounts', sigHR, setSigHR],
                 ['Authorised Signatory', sigAuth, setSigAuth],
@@ -2049,7 +2058,7 @@ export const PayslipGeneratorPage: React.FC = () => {
                   {([
                     ['name','Employee Name *'],['emp_id','Employee ID'],['designation','Designation'],
                     ['department','Department / Site'],['bank_name','Bank Name'],['account_no','Account No'],
-                    ['uan_no','UAN No'],
+                    ['uan_no','UAN No'],['esi_no','ESI No'],
                   ] as [keyof typeof EMPTY_MANUAL_EMP, string][]).map(([k,lbl])=>(
                     <div key={k}>
                       <label className="text-xs font-medium text-gray-600 block mb-1">{lbl}</label>
@@ -2129,10 +2138,10 @@ export const PayslipGeneratorPage: React.FC = () => {
           {showSlip && (
             <div id="payslip-print">
               <PayslipView cs={cs}
-                pName={pName} pEmpId={pEmpId} pDesig={pDesig} pDept={pDept} pAcct={pAcct} pUAN={pUAN}
+                pName={pName} pEmpId={pEmpId} pDesig={pDesig} pDept={pDept} pAcct={pAcct} pUAN={pUAN} pESI={pESI}
                 month={month} slip={slip} gross={gross} totalDed={totalDed} netSalary={netSalary}
                 pfEmployer={pfEmployer} esiEmployer={esiEmployer}
-                sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter} n={n}
+                sigEmp={sigEmp} sigHR={sigHR} sigAuth={sigAuth} showFooter={showFooter} showUAN={showUAN} showESI={showESI} n={n}
               />
             </div>
           )}
