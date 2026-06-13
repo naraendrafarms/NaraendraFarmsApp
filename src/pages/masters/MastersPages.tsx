@@ -90,21 +90,21 @@ export const FarmsMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const [form, setForm] = useState({code:'',name:'',site_type:'laying',address:'',taluka:'',elec_usc_1:'',contact:''})
+  const [form, setForm] = useState({code:'',name:'',site_type:'laying',address:'',taluka:'',elec_usc_1:'',elec_usc_2:'',contact:''})
   const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
 
   const {data,isLoading} = useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('*').order('name'); return data??[]}})
 
   const open = (row?:any) => {
     setEditing(row??null)
-    setForm(row?{code:row.code,name:row.name,site_type:row.site_type,address:row.address??'',taluka:row.taluka??'',elec_usc_1:row.elec_usc_1??'',contact:row.contact??''}:{code:'',name:'',site_type:'laying',address:'',taluka:'',elec_usc_1:'',contact:''})
+    setForm(row?{code:row.code,name:row.name,site_type:row.site_type,address:row.address??'',taluka:row.taluka??'',elec_usc_1:row.elec_usc_1??'',elec_usc_2:row.elec_usc_2??'',contact:row.contact??''}:{code:'',name:'',site_type:'laying',address:'',taluka:'',elec_usc_1:'',elec_usc_2:'',contact:''})
     setShowForm(true)
   }
 
   const mut = useMutation({
     mutationFn: async () => {
       if(!form.code||!form.name) throw new Error('Code and name required')
-      const p={code:form.code.toUpperCase(),name:form.name,site_type:form.site_type,address:form.address||null,taluka:form.taluka||null,elec_usc_1:form.elec_usc_1||null,contact:form.contact||null}
+      const p={code:form.code.toUpperCase(),name:form.name,site_type:form.site_type,address:form.address||null,taluka:form.taluka||null,elec_usc_1:form.elec_usc_1||null,elec_usc_2:form.elec_usc_2||null,contact:form.contact||null}
       if(editing){const{error}=await supabase.from('farms').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('farms').insert(p);if(error)throw error}
     },
@@ -121,7 +121,8 @@ export const FarmsMaster: React.FC = () => {
           {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
           {label:'Type',key:'site_type',render:r=><Badge color={r.site_type==='laying'?'green':r.site_type==='rearing'?'yellow':'blue'}>{r.site_type}</Badge>},
           {label:'Taluka',key:'taluka'},
-          {label:'Elec USC',key:'elec_usc_1',render:r=><span className="text-xs text-gray-400">{r.elec_usc_1??'—'}</span>},
+          {label:'Meter 1 (USC)',key:'elec_usc_1',render:r=><span className="text-xs text-gray-500">{r.elec_usc_1??'—'}</span>},
+          {label:'Meter 2 (USC)',key:'elec_usc_2',render:r=><span className="text-xs text-gray-500">{r.elec_usc_2??'—'}</span>},
           {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
         ]}
       />
@@ -137,10 +138,13 @@ export const FarmsMaster: React.FC = () => {
             <Input label="Taluka" value={form.taluka} onChange={e=>s('taluka',e.target.value)} />
           </FormRow>
           <FormRow>
-            <Input label="Electricity USC No" value={form.elec_usc_1} onChange={e=>s('elec_usc_1',e.target.value)} hint="Primary meter USC" />
-            <Input label="Contact" value={form.contact} onChange={e=>s('contact',e.target.value)} />
+            <Input label="Elec USC No — Meter 1" value={form.elec_usc_1} onChange={e=>s('elec_usc_1',e.target.value)} hint="Primary meter USC" />
+            <Input label="Elec USC No — Meter 2" value={form.elec_usc_2} onChange={e=>s('elec_usc_2',e.target.value)} hint="Second meter USC (if any)" />
           </FormRow>
-          <Input label="Address" value={form.address} onChange={e=>s('address',e.target.value)} />
+          <FormRow>
+            <Input label="Contact" value={form.contact} onChange={e=>s('contact',e.target.value)} />
+            <Input label="Address" value={form.address} onChange={e=>s('address',e.target.value)} />
+          </FormRow>
         </div>
       </Modal>
     </>
