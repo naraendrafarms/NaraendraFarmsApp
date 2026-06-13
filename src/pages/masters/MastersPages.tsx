@@ -6,7 +6,7 @@ import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
 } from '@/components/ui'
-import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload } from 'lucide-react'
+import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 
@@ -46,7 +46,12 @@ const MasterTable: React.FC<{
   onAdd: () => void
   loading: boolean
   headerAction?: React.ReactNode
-}> = ({ title, subtitle, columns, data, onEdit, onAdd, loading, headerAction }) => (
+  sel?: Set<string>
+  onToggle?: (id: string) => void
+  onToggleAll?: () => void
+  allSel?: boolean
+  someSel?: boolean
+}> = ({ title, subtitle, columns, data, onEdit, onAdd, loading, headerAction, sel, onToggle, onToggleAll, allSel, someSel }) => (
   <div className="space-y-4">
     <SectionHeader title={title} subtitle={subtitle}
       action={
@@ -60,11 +65,17 @@ const MasterTable: React.FC<{
       <Card padding={false}>
         <Table>
           <thead><tr>
+            {sel && (
+              <Th><CB checked={!!allSel} indeterminate={someSel && !allSel} onChange={onToggleAll??(() => {})}/></Th>
+            )}
             {columns.map(c => <Th key={c.key} right={c.right}>{c.label}</Th>)}
             <Th></Th>
           </tr></thead>
           <tbody>{data.map((row,i) => (
-            <tr key={row.id??i} className="hover:bg-gray-50">
+            <tr key={row.id??i} className={`hover:bg-gray-50 ${sel?.has(row.id) ? 'bg-blue-50' : ''}`}>
+              {sel && (
+                <Td><CB checked={sel.has(row.id)} onChange={() => onToggle?.(row.id)}/></Td>
+              )}
               {columns.map(c => (
                 <Td key={c.key} right={c.right}>
                   {c.render ? c.render(row) : row[c.key] ?? '—'}
@@ -157,6 +168,11 @@ export const IngredientsMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({code:'',name:'',short_name:'',category:'grain',unit:'kg',protein_pct:'',moisture_pct:''})
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [mergeKeepId, setMergeKeepId] = useState('')
+  const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
   const {data,isLoading}=useQuery({queryKey:['ingredients'],queryFn:async()=>{const{data}=await supabase.from('feed_ingredients').select('*').order('code');return data??[]}})
@@ -178,21 +194,151 @@ export const IngredientsMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const bulkDelMut=useMutation({
+    mutationFn:async(ids:string[])=>{const{error}=await supabase.from('feed_ingredients').delete().in('id',ids);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['ingredients']});setSel(new Set());setBulkConfirm(false)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Some ingredients could not be deleted — they have linked records')
+      else toast.error(e.message)
+      setBulkConfirm(false)
+    }
+  })
+
+  const mergeMut=useMutation({
+    mutationFn:async({keepId,dropIds}:{keepId:string;dropIds:string[]})=>{
+      for(const oldId of dropIds){
+        // Remap formula composition and GRN lines to the kept ingredient
+        await supabase.from('feed_formula_ingredients').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
+        await supabase.from('grn_items').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
+        const{error}=await supabase.from('feed_ingredients').delete().eq('id',oldId)
+        if(error)throw error
+      }
+    },
+    onSuccess:()=>{toast.success('Merged successfully');qc.invalidateQueries({queryKey:['ingredients']});setSel(new Set());setMergeOpen(false)},
+    onError:(e:any)=>toast.error(e.message)
+  })
+
+  const rows = data??[]
+  const ids = rows.map((r:any)=>r.id)
+  const allSel = ids.length>0 && ids.every((id:string)=>sel.has(id))
+  const someSel = ids.some((id:string)=>sel.has(id))
+  const toggle=(id:string)=>setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
+  const toggleAll=()=>setSel(s=>{const n=new Set(s);allSel?ids.forEach((id:string)=>n.delete(id)):ids.forEach((id:string)=>n.add(id));return n})
+
+  const handleExport=()=>exportCSV('feed_ingredients.csv',
+    ['code','name','short_name','category','unit','protein_pct','moisture_pct'],
+    rows.map((r:any)=>[r.code,r.name,r.short_name,r.category,r.unit,r.protein_pct,r.moisture_pct])
+  )
+
+  const handleImport=async(file:File)=>{
+    const{headers:hdrs,rows:fileRows}=await parseFile(file)
+    const records=fileRows.map(vals=>{const obj:Record<string,string>={};hdrs.forEach((h,i)=>{obj[h]=vals[i]??''});return obj})
+    const toUpsert=records.filter(r=>r.code&&r.name).map(r=>({
+      code:r.code.toUpperCase(),name:r.name,short_name:r.short_name||null,
+      category:r.category||'grain',unit:r.unit||'kg',
+      protein_pct:parseFloat(r.protein_pct)||null,moisture_pct:parseFloat(r.moisture_pct)||null,
+    }))
+    if(!toUpsert.length){toast.error('No valid rows');return}
+    const{error}=await supabase.from('feed_ingredients').upsert(toUpsert,{onConflict:'code',ignoreDuplicates:true})
+    if(error){toast.error(error.message);return}
+    toast.success(`Imported ${toUpsert.length} ingredients`)
+    qc.invalidateQueries({queryKey:['ingredients']})
+    if(importRef.current)importRef.current.value=''
+  }
+
   return (
     <>
-      <MasterTable title="Feed Ingredients" subtitle="Raw materials for feed production" loading={isLoading}
-        data={data??[]} onAdd={()=>open()} onEdit={open}
-        columns={[
-          {label:'Code',key:'code',render:r=><span className="font-mono text-xs font-bold text-brand-700">{r.code}</span>},
-          {label:'Name',key:'name'},
-          {label:'Short Name',key:'short_name'},
-          {label:'Category',key:'category',render:r=><Badge color="blue">{r.category}</Badge>},
-          {label:'Unit',key:'unit'},
-          {label:'Protein%',key:'protein_pct',right:true},
-          {label:'Moisture%',key:'moisture_pct',right:true},
-          {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
-        ]}
-      />
+      <div className="space-y-4">
+        {/* Blue info banner for Feed Mill linkage */}
+        <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+          <Info size={16} className="text-blue-500 mt-0.5 shrink-0"/>
+          <p className="text-sm text-blue-800">
+            <strong>Feed Ingredients</strong> are used in Feed Formulas (formula composition) and GRN (purchase records).
+            Changes here affect ingredient lookups in <strong>Feed Mill → Formula &amp; Production</strong> and <strong>GRN Entry</strong>.
+          </p>
+        </div>
+        <SectionHeader title="Feed Ingredients" subtitle="Raw materials for feed production"
+          action={
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('ingredients_template.csv',['code','name','short_name','category','unit','protein_pct','moisture_pct'],[['MAIZE','Maize Grain','Maize','grain','kg','9.0','14.0']])}>Template</Button>
+              <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
+              <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImport(f)}}/>
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+              <Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Ingredient</Button>
+            </div>
+          }
+        />
+        <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
+          onMerge={()=>{const first=[...sel][0];setMergeKeepId(first);setMergeOpen(true)}}/>
+        {isLoading?<Spinner/>:(
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel&&!allSel} onChange={toggleAll}/></Th>
+                <Th>Code</Th><Th>Name</Th><Th>Short Name</Th><Th>Category</Th><Th>Unit</Th>
+                <Th right>Protein%</Th><Th right>Moisture%</Th><Th>Status</Th><Th></Th>
+              </tr></thead>
+              <tbody>{rows.map((r:any)=>(
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-blue-50':''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
+                  <Td><span className="font-mono text-xs font-bold text-brand-700">{r.code}</span></Td>
+                  <Td>{r.name}</Td>
+                  <Td>{r.short_name??'—'}</Td>
+                  <Td><Badge color="blue">{r.category}</Badge></Td>
+                  <Td>{r.unit}</Td>
+                  <Td right>{r.protein_pct??'—'}</Td>
+                  <Td right>{r.moisture_pct??'—'}</Td>
+                  <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
+                  <Td><button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                </tr>
+              ))}</tbody>
+            </Table>
+            {rows.length===0&&<EmptyState icon={<Settings size={32}/>} title="No ingredients yet" action={<Button onClick={()=>open()} icon={<Plus size={16}/>}>Add</Button>}/>}
+          </Card>
+        )}
+      </div>
+
+      {/* Bulk delete confirm */}
+      {bulkConfirm&&(
+        <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Ingredients" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} ingredients</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{sel.size} selected ingredients</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Ingredients used in Feed Formulas or GRN cannot be deleted.</p>
+        </Modal>
+      )}
+
+      {/* Merge modal */}
+      {mergeOpen&&(
+        <Modal open onClose={()=>setMergeOpen(false)} title="Merge Duplicate Ingredients" size="md"
+          footer={<>
+            <Button variant="secondary" onClick={()=>setMergeOpen(false)}>Cancel</Button>
+            <Button loading={mergeMut.isPending} onClick={()=>mergeMut.mutate({keepId:mergeKeepId,dropIds:[...sel].filter(id=>id!==mergeKeepId)})}>
+              Merge — Keep Selected
+            </Button>
+          </>}>
+          <p className="text-sm text-gray-600 mb-4">Select which record to <strong>keep</strong>. All Formula and GRN links will be remapped to the kept record, then duplicates are deleted.</p>
+          <div className="space-y-2">
+            {[...sel].map(id=>{
+              const row=rows.find((r:any)=>r.id===id)
+              if(!row)return null
+              return(
+                <label key={id} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${mergeKeepId===id?'border-brand-500 bg-brand-50':'border-gray-200 hover:border-gray-300'}`}>
+                  <input type="radio" name="mergeKeep" value={id} checked={mergeKeepId===id} onChange={()=>setMergeKeepId(id)} className="mt-0.5 text-brand-600"/>
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">{row.name} <span className="font-mono text-xs text-brand-600">({row.code})</span></p>
+                    <p className="text-xs text-gray-500">{row.category} • {row.unit}{row.protein_pct?` • Protein: ${row.protein_pct}%`:''}</p>
+                    {mergeKeepId===id&&<span className="text-xs text-brand-600 font-medium">← Keep this one</span>}
+                    {mergeKeepId!==id&&<span className="text-xs text-red-500">Will be deleted after remapping</span>}
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+        </Modal>
+      )}
+
+      {/* Add/Edit modal */}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Ingredient':'Add Ingredient'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
@@ -355,7 +501,7 @@ export const PartiesMaster: React.FC = () => {
                 <Th>GSTIN</Th><Th>Status</Th><Th></Th>
               </tr></thead>
               <tbody>{data.map((r:any)=>(
-                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-red-50':''}`}>
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-blue-50':''}`}>
                   <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
                   <Td><span className="font-medium">{r.name}</span></Td>
                   <Td><Badge color={r.type==='buyer'?'green':r.type==='supplier'?'blue':'orange'}>{r.type}</Badge></Td>
@@ -443,6 +589,10 @@ export const MedicinesMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({name:'',type:'medicine',unit:'ml',manufacturer:'',rate:'',batch_no:'',expiry_date:''})
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [mergeKeepId, setMergeKeepId] = useState('')
   const medImportRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
@@ -465,21 +615,52 @@ export const MedicinesMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const bulkDelMut=useMutation({
+    mutationFn:async(ids:string[])=>{const{error}=await supabase.from('medicines_master').delete().in('id',ids);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['medicines']});setSel(new Set());setBulkConfirm(false)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Some medicines could not be deleted — they have linked usage records')
+      else toast.error(e.message)
+      setBulkConfirm(false)
+    }
+  })
+
+  const mergeMut=useMutation({
+    mutationFn:async({keepId,dropIds}:{keepId:string;dropIds:string[]})=>{
+      // Delete duplicates (no FK remap — medicine_usage links are complex)
+      for(const oldId of dropIds){
+        const{error}=await supabase.from('medicines_master').delete().eq('id',oldId)
+        if(error)throw error
+      }
+    },
+    onSuccess:()=>{toast.success('Merged — duplicates deleted');qc.invalidateQueries({queryKey:['medicines']});setSel(new Set());setMergeOpen(false)},
+    onError:(e:any)=>toast.error(e.message)
+  })
+
+  const rows=data??[]
+  const ids=rows.map((r:any)=>r.id)
+  const allSel=ids.length>0&&ids.every((id:string)=>sel.has(id))
+  const someSel=ids.some((id:string)=>sel.has(id))
+  const toggle=(id:string)=>setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
+  const toggleAll=()=>setSel(s=>{const n=new Set(s);allSel?ids.forEach((id:string)=>n.delete(id)):ids.forEach((id:string)=>n.add(id));return n})
+
   const typeColors:Record<string,any>={medicine:'blue',vaccine:'green',supplement:'yellow',disinfectant:'red',other:'gray'}
 
   const handleExportMeds = () => {
     exportCSV('medicines_master.csv',
-      ['name','type','unit','manufacturer','rate'],
-      (data??[]).map((r:any)=>[r.name,r.type,r.unit,r.manufacturer,r.rate])
+      ['name','type','unit','manufacturer','rate','batch_no','expiry_date'],
+      rows.map((r:any)=>[r.name,r.type,r.unit,r.manufacturer,r.rate,r.batch_no,r.expiry_date])
     )
   }
 
   const handleImportMeds = async (file: File) => {
-    const { headers: hdrs, rows } = await parseFile(file)
-    const records = rows.map(vals => { const obj: Record<string,string> = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
+    const { headers: hdrs, rows: fileRows } = await parseFile(file)
+    const records = fileRows.map(vals => { const obj: Record<string,string> = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
     const toUpsert = records.filter(r=>r.name).map(r=>({
       name: r.name, type: r.type||'medicine', unit: r.unit||'ml',
       manufacturer: r.manufacturer||null, rate: parseFloat(r.rate)||null,
+      batch_no: r.batch_no||null, expiry_date: r.expiry_date||null,
     }))
     if (!toUpsert.length) { toast.error('No valid rows'); return }
     const { error } = await supabase.from('medicines_master').upsert(toUpsert, { onConflict: 'name', ignoreDuplicates: true })
@@ -491,27 +672,86 @@ export const MedicinesMaster: React.FC = () => {
 
   return (
     <>
-      <MasterTable title="Medicines & Vaccines" subtitle="Medical and vaccine inventory" loading={isLoading}
-        data={data??[]} onAdd={()=>open()} onEdit={open}
-        headerAction={
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('medicines_template.csv',['name','type','unit','manufacturer','rate'],[['Newcastle Vaccine','vaccine','dose','Zoetis','15']])}>Template</Button>
-            <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>medImportRef.current?.click()}>Import</Button>
-            <input ref={medImportRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportMeds(f)}}/>
-            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportMeds}>Export CSV</Button>
+      <div className="space-y-4">
+        <SectionHeader title="Medicines & Vaccines" subtitle="Medical and vaccine inventory"
+          action={
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('medicines_template.csv',['name','type','unit','manufacturer','rate','batch_no','expiry_date'],[['Newcastle Vaccine','vaccine','dose','Zoetis','15','BT2024001','2025-12-31']])}>Template</Button>
+              <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>medImportRef.current?.click()}>Import</Button>
+              <input ref={medImportRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportMeds(f)}}/>
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportMeds}>Export CSV</Button>
+              <Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Medicine</Button>
+            </div>
+          }
+        />
+        <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
+          onMerge={()=>{const first=[...sel][0];setMergeKeepId(first);setMergeOpen(true)}}/>
+        {isLoading?<Spinner/>:(
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel&&!allSel} onChange={toggleAll}/></Th>
+                <Th>Name</Th><Th>Type</Th><Th>Unit</Th><Th>Manufacturer</Th>
+                <Th>Batch No</Th><Th>Expiry Date</Th><Th right>Rate (Rs)</Th><Th>Status</Th><Th></Th>
+              </tr></thead>
+              <tbody>{rows.map((r:any)=>(
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-blue-50':''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
+                  <Td><span className="font-medium">{r.name}</span></Td>
+                  <Td><Badge color={typeColors[r.type]??'gray'}>{r.type}</Badge></Td>
+                  <Td>{r.unit}</Td>
+                  <Td>{r.manufacturer??'—'}</Td>
+                  <Td>{r.batch_no??'—'}</Td>
+                  <Td>{r.expiry_date?fmtDate(r.expiry_date):'—'}</Td>
+                  <Td right>{r.rate?`₹${Number(r.rate).toLocaleString('en-IN')}`:'—'}</Td>
+                  <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
+                  <Td><button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                </tr>
+              ))}</tbody>
+            </Table>
+            {rows.length===0&&<EmptyState icon={<Settings size={32}/>} title="No medicines yet" action={<Button onClick={()=>open()} icon={<Plus size={16}/>}>Add</Button>}/>}
+          </Card>
+        )}
+      </div>
+
+      {bulkConfirm&&(
+        <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Medicines" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} medicines</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{sel.size} selected medicines</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Medicines with linked usage records cannot be deleted.</p>
+        </Modal>
+      )}
+
+      {mergeOpen&&(
+        <Modal open onClose={()=>setMergeOpen(false)} title="Merge Duplicate Medicines" size="md"
+          footer={<>
+            <Button variant="secondary" onClick={()=>setMergeOpen(false)}>Cancel</Button>
+            <Button loading={mergeMut.isPending} onClick={()=>mergeMut.mutate({keepId:mergeKeepId,dropIds:[...sel].filter(id=>id!==mergeKeepId)})}>
+              Merge — Keep Selected
+            </Button>
+          </>}>
+          <p className="text-sm text-gray-600 mb-3">Select which record to <strong>keep</strong>. Duplicate records will be deleted.</p>
+          <p className="text-xs text-amber-600 bg-amber-50 rounded px-3 py-2 mb-4">Note: existing medicine usage records linked to duplicates will not be remapped. Only use this for records with no usage history.</p>
+          <div className="space-y-2">
+            {[...sel].map(id=>{
+              const row=rows.find((r:any)=>r.id===id)
+              if(!row)return null
+              return(
+                <label key={id} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${mergeKeepId===id?'border-brand-500 bg-brand-50':'border-gray-200 hover:border-gray-300'}`}>
+                  <input type="radio" name="mergeKeep" value={id} checked={mergeKeepId===id} onChange={()=>setMergeKeepId(id)} className="mt-0.5 text-brand-600"/>
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">{row.name}</p>
+                    <p className="text-xs text-gray-500">{row.type} • {row.unit}{row.manufacturer?` • ${row.manufacturer}`:''}</p>
+                    {mergeKeepId===id&&<span className="text-xs text-brand-600 font-medium">← Keep this one</span>}
+                    {mergeKeepId!==id&&<span className="text-xs text-red-500">Will be deleted</span>}
+                  </div>
+                </label>
+              )
+            })}
           </div>
-        }
-        columns={[
-          {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
-          {label:'Type',key:'type',render:r=><Badge color={typeColors[r.type]??'gray'}>{r.type}</Badge>},
-          {label:'Unit',key:'unit'},
-          {label:'Manufacturer',key:'manufacturer'},
-          {label:'Batch No',key:'batch_no',render:r=>r.batch_no??'—'},
-          {label:'Expiry Date',key:'expiry_date',render:r=>r.expiry_date?fmtDate(r.expiry_date):'—'},
-          {label:'Rate (Rs)',key:'rate',right:true,render:r=>r.rate?`₹${Number(r.rate).toLocaleString('en-IN')}`:'—'},
-          {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
-        ]}
-      />
+        </Modal>
+      )}
+
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Medicine':'Add Medicine'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
@@ -533,6 +773,7 @@ export const MedicinesMaster: React.FC = () => {
     </>
   )
 }
+
 export const ShedsMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
@@ -649,6 +890,11 @@ export const HatcheriesMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({name:'',type:'Hitech',location:'',city:'',contact:''})
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [mergeKeepId, setMergeKeepId] = useState('')
+  const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
   const {data,isLoading}=useQuery({queryKey:['hatcheries'],queryFn:async()=>{const{data}=await supabase.from('hatcheries').select('*').order('name');return data??[]}})
@@ -670,19 +916,135 @@ export const HatcheriesMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const bulkDelMut=useMutation({
+    mutationFn:async(ids:string[])=>{const{error}=await supabase.from('hatcheries').delete().in('id',ids);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['hatcheries']});setSel(new Set());setBulkConfirm(false)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Some hatcheries could not be deleted — they have linked dispatch records')
+      else toast.error(e.message)
+      setBulkConfirm(false)
+    }
+  })
+
+  const mergeMut=useMutation({
+    mutationFn:async({keepId,dropIds}:{keepId:string;dropIds:string[]})=>{
+      for(const oldId of dropIds){
+        // Remap he_dispatch records to kept hatchery
+        await supabase.from('he_dispatch').update({hatchery_id:keepId}).eq('hatchery_id',oldId)
+        const{error}=await supabase.from('hatcheries').delete().eq('id',oldId)
+        if(error)throw error
+      }
+    },
+    onSuccess:()=>{toast.success('Merged successfully');qc.invalidateQueries({queryKey:['hatcheries']});setSel(new Set());setMergeOpen(false)},
+    onError:(e:any)=>toast.error(e.message)
+  })
+
+  const rows=data??[]
+  const ids=rows.map((r:any)=>r.id)
+  const allSel=ids.length>0&&ids.every((id:string)=>sel.has(id))
+  const someSel=ids.some((id:string)=>sel.has(id))
+  const toggle=(id:string)=>setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
+  const toggleAll=()=>setSel(s=>{const n=new Set(s);allSel?ids.forEach((id:string)=>n.delete(id)):ids.forEach((id:string)=>n.add(id));return n})
+
+  const handleExport=()=>exportCSV('hatcheries.csv',
+    ['name','type','location','city','contact'],
+    rows.map((r:any)=>[r.name,r.type,r.location,r.city,r.contact])
+  )
+
+  const handleImport=async(file:File)=>{
+    const{headers:hdrs,rows:fileRows}=await parseFile(file)
+    const records=fileRows.map(vals=>{const obj:Record<string,string>={};hdrs.forEach((h,i)=>{obj[h]=vals[i]??''});return obj})
+    const toUpsert=records.filter(r=>r.name).map(r=>({
+      name:r.name,type:r.type||'Hitech',
+      location:r.location||null,city:r.city||null,contact:r.contact||null,
+    }))
+    if(!toUpsert.length){toast.error('No valid rows');return}
+    const{error}=await supabase.from('hatcheries').upsert(toUpsert,{onConflict:'name',ignoreDuplicates:true})
+    if(error){toast.error(error.message);return}
+    toast.success(`Imported ${toUpsert.length} hatcheries`)
+    qc.invalidateQueries({queryKey:['hatcheries']})
+    if(importRef.current)importRef.current.value=''
+  }
+
   return (
     <>
-      <MasterTable title="Hatcheries" subtitle="Hatchery buyers for HE dispatch" loading={isLoading}
-        data={data??[]} onAdd={()=>open()} onEdit={open}
-        columns={[
-          {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
-          {label:'Type',key:'type',render:r=><Badge color={r.type==='Hitech'?'green':r.type==='VHL'?'blue':'gray'}>{r.type}</Badge>},
-          {label:'Location',key:'location'},
-          {label:'City',key:'city'},
-          {label:'Contact',key:'contact'},
-          {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
-        ]}
-      />
+      <div className="space-y-4">
+        <SectionHeader title="Hatcheries" subtitle="Hatchery buyers for HE dispatch"
+          action={
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('hatcheries_template.csv',['name','type','location','city','contact'],[['Hitech Hatchery Pune','Hitech','Pune Industrial Area','Pune','9876543210']])}>Template</Button>
+              <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
+              <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImport(f)}}/>
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+              <Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Hatchery</Button>
+            </div>
+          }
+        />
+        <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
+          onMerge={()=>{const first=[...sel][0];setMergeKeepId(first);setMergeOpen(true)}}/>
+        {isLoading?<Spinner/>:(
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel&&!allSel} onChange={toggleAll}/></Th>
+                <Th>Name</Th><Th>Type</Th><Th>Location</Th><Th>City</Th><Th>Contact</Th><Th>Status</Th><Th></Th>
+              </tr></thead>
+              <tbody>{rows.map((r:any)=>(
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-blue-50':''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
+                  <Td><span className="font-medium">{r.name}</span></Td>
+                  <Td><Badge color={r.type==='Hitech'?'green':r.type==='VHL'?'blue':'gray'}>{r.type}</Badge></Td>
+                  <Td>{r.location??'—'}</Td>
+                  <Td>{r.city??'—'}</Td>
+                  <Td>{r.contact??'—'}</Td>
+                  <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
+                  <Td><button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                </tr>
+              ))}</tbody>
+            </Table>
+            {rows.length===0&&<EmptyState icon={<Settings size={32}/>} title="No hatcheries yet" action={<Button onClick={()=>open()} icon={<Plus size={16}/>}>Add</Button>}/>}
+          </Card>
+        )}
+      </div>
+
+      {bulkConfirm&&(
+        <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Hatcheries" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} hatcheries</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{sel.size} selected hatcheries</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Hatcheries with linked HE dispatch records cannot be deleted.</p>
+        </Modal>
+      )}
+
+      {mergeOpen&&(
+        <Modal open onClose={()=>setMergeOpen(false)} title="Merge Duplicate Hatcheries" size="md"
+          footer={<>
+            <Button variant="secondary" onClick={()=>setMergeOpen(false)}>Cancel</Button>
+            <Button loading={mergeMut.isPending} onClick={()=>mergeMut.mutate({keepId:mergeKeepId,dropIds:[...sel].filter(id=>id!==mergeKeepId)})}>
+              Merge — Keep Selected
+            </Button>
+          </>}>
+          <p className="text-sm text-gray-600 mb-4">Select which record to <strong>keep</strong>. All HE dispatch records will be remapped to the kept hatchery, then duplicates are deleted.</p>
+          <div className="space-y-2">
+            {[...sel].map(id=>{
+              const row=rows.find((r:any)=>r.id===id)
+              if(!row)return null
+              return(
+                <label key={id} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${mergeKeepId===id?'border-brand-500 bg-brand-50':'border-gray-200 hover:border-gray-300'}`}>
+                  <input type="radio" name="mergeKeep" value={id} checked={mergeKeepId===id} onChange={()=>setMergeKeepId(id)} className="mt-0.5 text-brand-600"/>
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">{row.name}</p>
+                    <p className="text-xs text-gray-500">{row.type}{row.city?` • ${row.city}`:''}{row.contact?` • ${row.contact}`:''}</p>
+                    {mergeKeepId===id&&<span className="text-xs text-brand-600 font-medium">← Keep this one</span>}
+                    {mergeKeepId!==id&&<span className="text-xs text-red-500">Will be deleted after remapping</span>}
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+        </Modal>
+      )}
+
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Hatchery':'Add Hatchery'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
@@ -707,6 +1069,8 @@ export const MetersMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({farm_id:'',usc_no:'',service_no:'',meter_name:''})
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
@@ -729,20 +1093,75 @@ export const MetersMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const bulkDelMut=useMutation({
+    mutationFn:async(ids:string[])=>{const{error}=await supabase.from('electricity_meters').delete().in('id',ids);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['meters']});setSel(new Set());setBulkConfirm(false)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Some meters could not be deleted — they have linked electricity readings')
+      else toast.error(e.message)
+      setBulkConfirm(false)
+    }
+  })
+
+  const rows=data??[]
+  const ids=rows.map((r:any)=>r.id)
+  const allSel=ids.length>0&&ids.every((id:string)=>sel.has(id))
+  const someSel=ids.some((id:string)=>sel.has(id))
+  const toggle=(id:string)=>setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
+  const toggleAll=()=>setSel(s=>{const n=new Set(s);allSel?ids.forEach((id:string)=>n.delete(id)):ids.forEach((id:string)=>n.add(id));return n})
+
+  const handleExport=()=>exportCSV('electricity_meters.csv',
+    ['meter_name','farm_code','usc_no','service_no'],
+    rows.map((r:any)=>[r.meter_name,r.farms?.code,r.usc_no,r.service_no])
+  )
+
   const farmOptions=farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
 
   return (
     <>
-      <MasterTable title="Electricity Meters" subtitle="Meter USC codes per site" loading={isLoading}
-        data={data??[]} onAdd={()=>open()} onEdit={open}
-        columns={[
-          {label:'Meter Name',key:'meter_name',render:r=><span className="font-medium">{r.meter_name}</span>},
-          {label:'Farm',key:'farm',render:r=><span className="text-xs font-mono text-brand-700">{r.farms?.code}</span>},
-          {label:'USC No',key:'usc_no',render:r=><span className="font-mono text-sm">{r.usc_no}</span>},
-          {label:'Service No',key:'service_no',render:r=><span className="text-xs text-gray-400">{r.service_no??'—'}</span>},
-          {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
-        ]}
-      />
+      <div className="space-y-4">
+        <SectionHeader title="Electricity Meters" subtitle="Meter USC codes per site"
+          action={
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+              <Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Meter</Button>
+            </div>
+          }
+        />
+        <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}/>
+        {isLoading?<Spinner/>:(
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel&&!allSel} onChange={toggleAll}/></Th>
+                <Th>Meter Name</Th><Th>Farm</Th><Th>USC No</Th><Th>Service No</Th><Th>Status</Th><Th></Th>
+              </tr></thead>
+              <tbody>{rows.map((r:any)=>(
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-blue-50':''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
+                  <Td><span className="font-medium">{r.meter_name}</span></Td>
+                  <Td><span className="text-xs font-mono text-brand-700">{r.farms?.code}</span></Td>
+                  <Td><span className="font-mono text-sm">{r.usc_no}</span></Td>
+                  <Td><span className="text-xs text-gray-400">{r.service_no??'—'}</span></Td>
+                  <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
+                  <Td><button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                </tr>
+              ))}</tbody>
+            </Table>
+            {rows.length===0&&<EmptyState icon={<Settings size={32}/>} title="No meters yet" action={<Button onClick={()=>open()} icon={<Plus size={16}/>}>Add</Button>}/>}
+          </Card>
+        )}
+      </div>
+
+      {bulkConfirm&&(
+        <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Meters" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} meters</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{sel.size} selected meters</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Meters with linked electricity readings cannot be deleted.</p>
+        </Modal>
+      )}
+
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Meter':'Add Meter'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
@@ -764,6 +1183,9 @@ export const FeedTypesMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({code:'',name:'',category:'layer',week_from:'',week_to:'',sex:'female',sort_order:'0',is_active:true})
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:any)=>setForm(f=>({...f,[k]:v}))
 
   const {data,isLoading}=useQuery({queryKey:['feed_types'],queryFn:async()=>{const{data}=await supabase.from('feed_types').select('*').order('sort_order');return data??[]}})
@@ -793,38 +1215,116 @@ export const FeedTypesMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const bulkDelMut=useMutation({
+    mutationFn:async(ids:string[])=>{const{error}=await supabase.from('feed_types').delete().in('id',ids);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['feed_types']});setSel(new Set());setBulkConfirm(false)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Some feed types could not be deleted — they have linked records')
+      else toast.error(e.message)
+      setBulkConfirm(false)
+    }
+  })
+
   const toggleMut=useMutation({
     mutationFn:async(row:any)=>{const{error}=await supabase.from('feed_types').update({is_active:!row.is_active}).eq('id',row.id);if(error)throw error},
     onSuccess:()=>qc.invalidateQueries({queryKey:['feed_types']}),
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const rows=data??[]
+  const ids=rows.map((r:any)=>r.id)
+  const allSel=ids.length>0&&ids.every((id:string)=>sel.has(id))
+  const someSel=ids.some((id:string)=>sel.has(id))
+  const toggle=(id:string)=>setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
+  const toggleAll=()=>setSel(s=>{const n=new Set(s);allSel?ids.forEach((id:string)=>n.delete(id)):ids.forEach((id:string)=>n.add(id));return n})
+
   const catColors:Record<string,any>={starter:'yellow',grower:'green',developer:'blue',pre_breeder:'orange',layer:'brand',male:'gray'}
+
+  const handleExport=()=>exportCSV('feed_types.csv',
+    ['code','name','category','week_from','week_to','sex','sort_order'],
+    rows.map((r:any)=>[r.code,r.name,r.category,r.week_from,r.week_to,r.sex,r.sort_order])
+  )
+
+  const handleImport=async(file:File)=>{
+    const{headers:hdrs,rows:fileRows}=await parseFile(file)
+    const records=fileRows.map(vals=>{const obj:Record<string,string>={};hdrs.forEach((h,i)=>{obj[h]=vals[i]??''});return obj})
+    const toUpsert=records.filter(r=>r.code&&r.name).map(r=>({
+      code:r.code.toUpperCase().trim(),name:r.name.trim(),
+      category:r.category||'layer',
+      week_from:parseInt(r.week_from)||null,week_to:parseInt(r.week_to)||null,
+      sex:r.sex||'female',sort_order:parseInt(r.sort_order)||0,
+    }))
+    if(!toUpsert.length){toast.error('No valid rows');return}
+    const{error}=await supabase.from('feed_types').upsert(toUpsert,{onConflict:'code',ignoreDuplicates:true})
+    if(error){toast.error(error.message);return}
+    toast.success(`Imported ${toUpsert.length} feed types`)
+    qc.invalidateQueries({queryKey:['feed_types']})
+    if(importRef.current)importRef.current.value=''
+  }
 
   return (
     <>
-      <MasterTable title="Feed Types" subtitle="Feed stage codes: BCM, BGM, L1, L2, L3... — editable" loading={isLoading}
-        data={data??[]} onAdd={()=>open()} onEdit={open}
-        columns={[
-          {label:'Code',key:'code',render:r=><span className="font-mono text-sm font-bold text-brand-700">{r.code}</span>},
-          {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
-          {label:'Category',key:'category',render:r=><Badge color={catColors[r.category]??'gray'}>{r.category}</Badge>},
-          {label:'Weeks',key:'weeks',render:r=>(r.week_from||r.week_to)?`Wk ${r.week_from??'?'}–${r.week_to??'?'}`:'—'},
-          {label:'Sex',key:'sex'},
-          {label:'Order',key:'sort_order',right:true},
-          {label:'Status',key:'is_active',render:r=>(
-            <button onClick={()=>toggleMut.mutate(r)} className="focus:outline-none">
-              <Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>
-            </button>
-          )},
-          {label:'',key:'_del',render:r=>(
-            <button onClick={()=>{if(confirm(`Delete feed type "${r.code}"?`))delMut.mutate(r.id)}}
-              className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="Delete">
-              <Trash2 size={13}/>
-            </button>
-          )},
-        ]}
-      />
+      <div className="space-y-4">
+        <SectionHeader title="Feed Types" subtitle="Feed stage codes: BCM, BGM, L1, L2, L3... — editable"
+          action={
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('feed_types_template.csv',['code','name','category','week_from','week_to','sex','sort_order'],[['L1','Layer-1 Mash','layer','18','28','female','10']])}>Template</Button>
+              <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
+              <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImport(f)}}/>
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+              <Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Feed Type</Button>
+            </div>
+          }
+        />
+        <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}/>
+        {isLoading?<Spinner/>:(
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allSel} indeterminate={someSel&&!allSel} onChange={toggleAll}/></Th>
+                <Th>Code</Th><Th>Name</Th><Th>Category</Th><Th>Weeks</Th><Th>Sex</Th>
+                <Th right>Order</Th><Th>Status</Th><Th></Th>
+              </tr></thead>
+              <tbody>{rows.map((r:any)=>(
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-blue-50':''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
+                  <Td><span className="font-mono text-sm font-bold text-brand-700">{r.code}</span></Td>
+                  <Td><span className="font-medium">{r.name}</span></Td>
+                  <Td><Badge color={catColors[r.category]??'gray'}>{r.category}</Badge></Td>
+                  <Td>{(r.week_from||r.week_to)?`Wk ${r.week_from??'?'}–${r.week_to??'?'}`:'—'}</Td>
+                  <Td>{r.sex}</Td>
+                  <Td right>{r.sort_order}</Td>
+                  <Td>
+                    <button onClick={()=>toggleMut.mutate(r)} className="focus:outline-none">
+                      <Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>
+                    </button>
+                  </Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                      <button onClick={()=>{if(confirm(`Delete feed type "${r.code}"?`))delMut.mutate(r.id)}}
+                        className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="Delete">
+                        <Trash2 size={13}/>
+                      </button>
+                    </div>
+                  </Td>
+                </tr>
+              ))}</tbody>
+            </Table>
+            {rows.length===0&&<EmptyState icon={<Settings size={32}/>} title="No feed types yet" action={<Button onClick={()=>open()} icon={<Plus size={16}/>}>Add</Button>}/>}
+          </Card>
+        )}
+      </div>
+
+      {bulkConfirm&&(
+        <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Feed Types" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} feed types</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{sel.size} selected feed types</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Feed types with linked production or formula records cannot be deleted.</p>
+        </Modal>
+      )}
+
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?`Edit Feed Type — ${editing.code}`:'Add Feed Type'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
@@ -861,10 +1361,18 @@ export const VaccinationSchedulePage: React.FC = () => {
     }
   })
 
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const ids = rows.map((r: any) => r.id)
+  const allSel = ids.length > 0 && ids.every((id: string) => sel.has(id))
+  const someSel = ids.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? ids.forEach((id: string) => n.delete(id)) : ids.forEach((id: string) => n.add(id)); return n })
+
   function handleExport() {
+    const toExport = sel.size > 0 ? rows.filter((r: any) => sel.has(r.id)) : rows
     exportCSV('vaccination_schedule.csv',
       ['S.No','Age','Vaccine Name','Dose','Route','Product'],
-      rows.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose??'', r.route??'', r.product??'']))
+      toExport.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose??'', r.route??'', r.product??'']))
   }
 
   const routeColor: Record<string,any> = { 'S/C':'blue','I/M':'red','I/O':'green','D/W':'yellow','N/D':'orange','W/W':'gray' }
@@ -872,26 +1380,38 @@ export const VaccinationSchedulePage: React.FC = () => {
   return (
     <div className="space-y-4">
       <SectionHeader title="Vaccination Schedule" subtitle="Narendra Breeder — Recommended Schedule (67 entries)" action={
-        <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export CSV</Button>
+        <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={handleExport}>
+          {sel.size > 0 ? `Export ${sel.size} selected` : 'Export CSV'}
+        </Button>
       } />
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-blue-700">{sel.size} selected</span>
+          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+        </div>
+      )}
       {isLoading ? <Spinner /> : rows.length === 0 ? <EmptyState title="No schedule data. Run migration 029 first." /> : (
-        <Table>
-          <thead><tr>
-            <Th>S.No</Th><Th>Age</Th><Th>Vaccine / Treatment</Th><Th>Dose</Th><Th>Route</Th><Th>Product</Th>
-          </tr></thead>
-          <tbody>
-            {rows.map((r: any) => (
-              <tr key={r.id} className="hover:bg-gray-50">
-                <Td className="text-gray-400 text-xs font-mono">{r.sno}</Td>
-                <Td><span className="font-semibold text-sm">{r.age_label}</span></Td>
-                <Td className="font-medium">{r.vaccine_name}</Td>
-                <Td className="text-sm text-gray-600">{r.dose}</Td>
-                <Td>{r.route ? <Badge color={routeColor[r.route] ?? 'gray'}>{r.route}</Badge> : null}</Td>
-                <Td className="text-sm text-gray-600">{r.product}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
+              <Th>S.No</Th><Th>Age</Th><Th>Vaccine / Treatment</Th><Th>Dose</Th><Th>Route</Th><Th>Product</Th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r: any) => (
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-blue-50' : ''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
+                  <Td className="text-gray-400 text-xs font-mono">{r.sno}</Td>
+                  <Td><span className="font-semibold text-sm">{r.age_label}</span></Td>
+                  <Td className="font-medium">{r.vaccine_name}</Td>
+                  <Td className="text-sm text-gray-600">{r.dose}</Td>
+                  <Td>{r.route ? <Badge color={routeColor[r.route] ?? 'gray'}>{r.route}</Badge> : null}</Td>
+                  <Td className="text-sm text-gray-600">{r.product}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card>
       )}
     </div>
   )
