@@ -382,8 +382,27 @@ const SalaryAllocation: React.FC = () => {
 }
 
 // ── MAIN ADMIN CENTRE ────────────────────────────────────────────
+const TAB_PARAM_MAP: Record<string, Tab> = {
+  overview: 'overview',
+  flocks: 'flocks',
+  electricity: 'elec',
+  elec: 'elec',
+  salary: 'salary',
+  users: 'users',
+}
+
 export const AdminCentre: React.FC = () => {
-  const [tab, setTab] = useState<Tab>('overview')
+  const [searchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const initialTab: Tab = (tabParam && TAB_PARAM_MAP[tabParam]) ? TAB_PARAM_MAP[tabParam] : 'overview'
+  const [tab, setTab] = useState<Tab>(initialTab)
+
+  // Sync tab when URL param changes
+  React.useEffect(() => {
+    const p = searchParams.get('tab')
+    if (p && TAB_PARAM_MAP[p]) setTab(TAB_PARAM_MAP[p])
+    else setTab('overview')
+  }, [searchParams])
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id:'overview', label:'Setup Overview',       icon:<CheckCircle size={15}/> },
