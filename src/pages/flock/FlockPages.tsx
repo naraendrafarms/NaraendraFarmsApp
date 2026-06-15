@@ -160,8 +160,20 @@ export const FlockDashboard: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from('daily_records')
-        .select('flock_id,record_date,female_count,total_eggs,he_grade_a,he_grade_b,he_grade_c,mortality_female,mortality_male')
+        .select('flock_id,record_date,female_count,opening_female,total_eggs,he_grade_a,he_grade_b,he_grade_c,mortality_female,mortality_male,feed_female_kg,feed_male_kg')
         .gte('record_date', sevenStr)
+      return data ?? []
+    },
+    enabled: !!flocks && flocks.length > 0
+  })
+
+  // FCR data: all-time feed and egg production per flock
+  const { data: fcrStats } = useQuery({
+    queryKey: ['flock_fcr_stats'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('daily_records')
+        .select('flock_id,feed_female_kg,feed_male_kg,he_eggs,je_eggs,te_eggs,be_eggs')
       return data ?? []
     },
     enabled: !!flocks && flocks.length > 0
@@ -188,15 +200,35 @@ export const FlockDashboard: React.FC = () => {
     for (const [fid, rows] of Object.entries(grouped)) {
       let hdSum = 0, hdCount = 0, totalHE = 0
       for (const r of rows) {
-        const fc = r.female_count ?? 0
+        const fc = r.opening_female ?? r.female_count ?? 0
         const he = (r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0)
-        if (fc > 0) { hdSum += he / fc; hdCount++ }
+        if (fc > 0) { hdSum += (r.total_eggs ?? he) / fc; hdCount++ }
         totalHE += he
       }
       map[fid] = { hdPct: hdCount > 0 ? hdSum / hdCount : null, totalHE, days: rows.length }
     }
     return map
   }, [liveStats])
+
+  // FCR per flock
+  const fcrByFlock = React.useMemo(() => {
+    const map: Record<string, number | null> = {}
+    if (!fcrStats) return map
+    const grouped: Record<string, any[]> = {}
+    for (const r of fcrStats) {
+      if (!grouped[r.flock_id]) grouped[r.flock_id] = []
+      grouped[r.flock_id].push(r)
+    }
+    for (const [fid, rows] of Object.entries(grouped)) {
+      let totalFeed = 0, totalEggs = 0
+      for (const r of rows) {
+        totalFeed += (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0)
+        totalEggs += (r.he_eggs ?? 0) + (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0)
+      }
+      map[fid] = totalFeed > 0 && totalEggs > 0 ? totalFeed / totalEggs : null
+    }
+    return map
+  }, [fcrStats])
 
   // Current birds: latest allocation per flock (sum all sheds)
   const currentBirds = React.useMemo(() => {
@@ -212,11 +244,53 @@ export const FlockDashboard: React.FC = () => {
     return map
   }, [allocations])
 
+  // Summary stats
+  const summaryStats = React.useMemo(() => {
+    if (!flocks) return null
+    const activeFlocks = flocks.filter((f: any) => f.status !== 'closed')
+    const totalLiveBirds = activeFlocks.reduce((sum: number, f: any) => {
+      const birds = currentBirds[f.id]
+      return sum + (birds ? birds.f + birds.m : 0)
+    }, 0)
+    // Avg HD% last 7 days across laying flocks
+    const layingFlocks = activeFlocks.filter((f: any) => f.status === 'laying')
+    const hdValues = layingFlocks.map((f: any) => statsByFlock[f.id]?.hdPct).filter((v): v is number => v != null)
+    const avgHD = hdValues.length > 0 ? hdValues.reduce((a, b) => a + b, 0) / hdValues.length : null
+    // Best performing flock
+    let bestFlock: any = null; let bestHD = -1
+    for (const f of layingFlocks) {
+      const hd = statsByFlock[f.id]?.hdPct
+      if (hd != null && hd > bestHD) { bestHD = hd; bestFlock = f }
+    }
+    return { activeCount: activeFlocks.length, totalLiveBirds, avgHD, bestFlock, bestHD }
+  }, [flocks, currentBirds, statsByFlock])
+
   if (isLoading) return <Spinner />
 
   return (
     <div className="space-y-5">
       <SectionHeader title="Flock Management" subtitle={`${flocks?.length ?? 0} flocks`} />
+
+      {/* Company Summary Stats */}
+      {summaryStats && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatCard title="Active Flocks" value={summaryStats.activeCount.toString()} icon={<Bird size={18}/>} color="text-brand-600" />
+          <StatCard title="Total Live Birds" value={numFmt(summaryStats.totalLiveBirds)} icon={<Bird size={18}/>} color="text-green-600" />
+          <StatCard
+            title="Avg HD% (7d)"
+            value={summaryStats.avgHD != null ? pctFmt(summaryStats.avgHD) : '—'}
+            icon={<Egg size={18}/>}
+            color={summaryStats.avgHD != null ? (summaryStats.avgHD >= 0.80 ? 'text-green-600' : summaryStats.avgHD >= 0.65 ? 'text-amber-600' : 'text-red-600') : 'text-gray-400'}
+          />
+          <StatCard
+            title="Best Flock (7d HD%)"
+            value={summaryStats.bestFlock ? `Flock ${summaryStats.bestFlock.flock_no}` : '—'}
+            subtitle={summaryStats.bestFlock ? pctFmt(summaryStats.bestHD) : undefined}
+            icon={<TrendingUp size={18}/>}
+            color="text-blue-600"
+          />
+        </div>
+      )}
 
       {(!flocks || flocks.length === 0) && (
         <EmptyState icon={<Bird size={32} />} title="No flocks found" />
@@ -234,6 +308,8 @@ export const FlockDashboard: React.FC = () => {
           const live = statsByFlock[f.id]
           const birds = currentBirds[f.id]
           const hdColor = live?.hdPct == null ? '' : live.hdPct >= 0.80 ? 'text-green-600' : live.hdPct >= 0.65 ? 'text-amber-600' : 'text-red-600'
+          const fcr = fcrByFlock[f.id]
+          const costPerBird = f.chick_rate != null ? f.chick_rate : null
 
           return (
             <div
