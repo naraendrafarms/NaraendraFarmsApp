@@ -226,6 +226,22 @@ export const DailyEntry: React.FC = () => {
     setDate(d.toISOString().split('T')[0])
   }
 
+  // Recent 14 days records for selected flock (all sheds)
+  const fourteenDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate()-14); return d.toISOString().split('T')[0] })()
+  const { data: recentRecords } = useQuery({
+    queryKey: ['recent_records', selectedFlock, fourteenDaysAgo],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('daily_records')
+        .select('*,sheds(shed_no,shed_name)')
+        .eq('flock_id', selectedFlock)
+        .gte('record_date', fourteenDaysAgo)
+        .order('record_date', { ascending: false })
+      return data ?? []
+    },
+    enabled: !!selectedFlock
+  })
+
   // Computed metrics
   const openF = parseInt(form.opening_female)||0
   const totalEggs = parseInt(form.total_eggs)||0
