@@ -477,6 +477,58 @@ export const DailyEntry: React.FC = () => {
               {existing ? 'Update Record' : 'Save Record'}
             </Button>
           </div>
+
+          {/* Recent Records Table */}
+          {recentRecords && recentRecords.length > 0 && (
+            <Card>
+              <div className="flex items-center justify-between mb-3">
+                <p className="font-semibold text-gray-800 text-sm">Recent Records (Last 14 Days)</p>
+                <span className="text-xs text-gray-400">{recentRecords.length} record{recentRecords.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      {['Date','Shed','♀ Deaths','♂ Deaths','HE (A+B+C)','NHE (JE+TE+BE)','Feed kg','HD%',''].map((h,i) => (
+                        <th key={i} className="py-2 px-2 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentRecords.map((r: any) => {
+                      const he = (r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0)
+                      const nhe = (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0)
+                      const openF = r.opening_female ?? 0
+                      const hdPct = openF > 0 ? (r.total_eggs ?? 0) / openF * 100 : null
+                      const hdColor = hdPct == null ? 'text-gray-400' : hdPct >= 80 ? 'text-green-600 font-bold' : hdPct >= 65 ? 'text-amber-600 font-bold' : 'text-red-600 font-bold'
+                      const shedLabel = r.sheds ? `${r.sheds.shed_no}${r.sheds.shed_name ? ' '+r.sheds.shed_name : ''}` : '—'
+                      const totalFeed = ((r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0)).toFixed(1)
+                      return (
+                        <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                          <td className="py-1.5 px-2 font-medium whitespace-nowrap">{r.record_date}</td>
+                          <td className="py-1.5 px-2 text-gray-500">{shedLabel}</td>
+                          <td className="py-1.5 px-2 text-center">{r.mortality_female ?? 0}</td>
+                          <td className="py-1.5 px-2 text-center">{r.mortality_male ?? 0}</td>
+                          <td className="py-1.5 px-2 text-center">{he > 0 ? he.toLocaleString('en-IN') : '—'}</td>
+                          <td className="py-1.5 px-2 text-center">{nhe > 0 ? nhe.toLocaleString('en-IN') : '—'}</td>
+                          <td className="py-1.5 px-2 text-center">{parseFloat(totalFeed) > 0 ? totalFeed : '—'}</td>
+                          <td className={`py-1.5 px-2 text-center ${hdColor}`}>{hdPct != null ? hdPct.toFixed(1)+'%' : '—'}</td>
+                          <td className="py-1.5 px-2">
+                            <button
+                              className="text-brand-600 hover:text-brand-800 text-xs font-medium whitespace-nowrap"
+                              onClick={() => { setDate(r.record_date); setSelectedShed(r.shed_id ?? '') }}
+                            >
+                              ✏ Edit
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
         </>
       )}
     </div>
