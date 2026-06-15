@@ -278,7 +278,7 @@ export const FlockDetail: React.FC = () => {
         <StatCard title="Alive ♀" value={(lastRecord?.closing_female ?? flock.total_placed_f)?.toLocaleString('en-IN')}
           subtitle={'Mortality: '+totalMortF.toLocaleString('en-IN')} icon={<Bird size={18}/>} color="text-green-600" />
         <StatCard title="HE Revenue" value={inr(heRevenue)}
-          subtitle="Tally confirmed" icon={<DollarSign size={18}/>} color="text-green-700" />
+          subtitle="From HE Dispatch records" icon={<DollarSign size={18}/>} color="text-green-700" />
         <StatCard title="Total Revenue" value={inr(totalRevenue)}
           subtitle="HE + NHE all sources" icon={<TrendingUp size={18}/>} color="text-green-700" />
       </div>
@@ -551,7 +551,7 @@ export const FlockDetail: React.FC = () => {
               <table className="w-full text-sm">
                 <tbody>
                   <tr className="border-b border-gray-50">
-                    <td className="py-2 text-gray-500">HE Revenue (Tally)</td>
+                    <td className="py-2 text-gray-500">HE Revenue</td>
                     <td className="py-2 text-right font-semibold text-green-700">{inr(heRevenue)}</td>
                   </tr>
                   {/* NHE by type */}

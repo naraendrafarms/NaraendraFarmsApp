@@ -7,7 +7,7 @@ import {
   Card, CardHeader, Button, Modal, Input, Select, FormRow, Divider,
   Table, Th, Td, Badge, Spinner, SectionHeader, EmptyState
 } from '@/components/ui'
-import { Plus, Bird, Eye } from 'lucide-react'
+import { Plus, Bird, Eye, Trash2, CheckSquare } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Link } from 'react-router-dom'
 import type { Flock } from '@/types'
@@ -147,6 +147,9 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
 export const FlockList: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [filter, setFilter] = useState<'all'|'rearing'|'laying'|'closed'>('all')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [delTarget, setDelTarget] = useState<string|null>(null)
   const qc = useQueryClient()
   const { applyFarmFilter, farmId } = useFarmScope()
 
@@ -164,6 +167,57 @@ export const FlockList: React.FC = () => {
   })
 
   const filtered = flocks?.filter(f => filter === 'all' ? true : f.status === filter) ?? []
+
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('flocks').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success(`${sel.size} flock(s) deleted`)
+      setSel(new Set())
+      setBulkConfirm(false)
+      qc.invalidateQueries({ queryKey: ['flocks'] })
+      qc.invalidateQueries({ queryKey: ['flock_summary'] })
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const singleDelMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('flocks').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Flock deleted')
+      setDelTarget(null)
+      qc.invalidateQueries({ queryKey: ['flocks'] })
+      qc.invalidateQueries({ queryKey: ['flock_summary'] })
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const allFilteredIds = filtered.map((f: any) => f.id)
+  const allSelected = allFilteredIds.length > 0 && allFilteredIds.every((id: string) => sel.has(id))
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSel(new Set())
+    } else {
+      setSel(new Set(allFilteredIds))
+    }
+  }
+
+  const toggleOne = (id: string) => {
+    setSel(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const delTargetFlock = flocks?.find((f: any) => f.id === delTarget)
 
   return (
     <div className="space-y-5">
@@ -191,11 +245,30 @@ export const FlockList: React.FC = () => {
         ))}
       </div>
 
+      {/* Bulk action bar */}
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
+          <CheckSquare size={16} className="text-red-600 shrink-0" />
+          <span className="text-sm font-medium text-red-700">{sel.size} flock{sel.size > 1 ? 's' : ''} selected</span>
+          <button onClick={() => setSel(new Set())}
+            className="text-xs text-red-500 hover:text-red-700 underline">Clear</button>
+          <div className="flex-1" />
+          <button onClick={() => setBulkConfirm(true)}
+            className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors">
+            <Trash2 size={14}/> Delete {sel.size} flock{sel.size > 1 ? 's' : ''}
+          </button>
+        </div>
+      )}
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead>
               <tr>
+                <Th>
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                    className="rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" />
+                </Th>
                 <Th>Flock No</Th>
                 <Th>Status</Th>
                 <Th>Laying Site</Th>
@@ -212,7 +285,11 @@ export const FlockList: React.FC = () => {
             </thead>
             <tbody>
               {filtered.map((f: any) => (
-                <tr key={f.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={f.id} className={`hover:bg-gray-50 transition-colors ${sel.has(f.id) ? 'bg-red-50' : ''}`}>
+                  <Td>
+                    <input type="checkbox" checked={sel.has(f.id)} onChange={() => toggleOne(f.id)}
+                      className="rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" />
+                  </Td>
                   <Td><span className="font-bold text-gray-900">F-{f.flock_no}</span></Td>
                   <Td>
                     <Badge color={f.status==='laying'?'green':f.status==='rearing'?'yellow':'gray'}>
@@ -235,10 +312,16 @@ export const FlockList: React.FC = () => {
                   <Td right className="text-xs font-medium text-green-700">{inr(f.he_revenue+f.nhe_revenue)}</Td>
                   <Td className="text-xs text-gray-400">{fmtDate(f.last_record_date)}</Td>
                   <Td>
-                    <Link to={`/flocks/${f.id}`}
-                      className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors inline-flex">
-                      <Eye size={14}/>
-                    </Link>
+                    <div className="flex items-center gap-1">
+                      <Link to={`/flocks/${f.id}`}
+                        className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors inline-flex">
+                        <Eye size={14}/>
+                      </Link>
+                      <button onClick={() => setDelTarget(f.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors inline-flex">
+                        <Trash2 size={14}/>
+                      </button>
+                    </div>
                   </Td>
                 </tr>
               ))}
@@ -253,6 +336,7 @@ export const FlockList: React.FC = () => {
         </Card>
       )}
 
+      {/* Add flock modal */}
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add New Flock" size="lg"
         footer={
           <>
@@ -261,6 +345,56 @@ export const FlockList: React.FC = () => {
           </>
         }>
         <FlockForm onClose={() => setShowForm(false)} onSuccess={() => setShowForm(false)} />
+      </Modal>
+
+      {/* Single delete confirmation modal */}
+      <Modal open={!!delTarget} onClose={() => setDelTarget(null)} title="Delete Flock" size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDelTarget(null)}>Cancel</Button>
+            <Button
+              variant="danger"
+              loading={singleDelMut.isPending}
+              onClick={() => delTarget && singleDelMut.mutate(delTarget)}>
+              Delete Permanently
+            </Button>
+          </>
+        }>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-700">
+            Are you sure you want to delete <strong>Flock {delTargetFlock?.flock_no}</strong>?
+          </p>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+            <strong>Warning:</strong> This will permanently delete the flock and ALL linked data
+            (daily records, egg dispatches, sales, medicine records, vaccinations).
+            This cannot be undone.
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk delete confirmation modal */}
+      <Modal open={bulkConfirm} onClose={() => setBulkConfirm(false)} title="Delete Multiple Flocks" size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setBulkConfirm(false)}>Cancel</Button>
+            <Button
+              variant="danger"
+              loading={bulkDelMut.isPending}
+              onClick={() => bulkDelMut.mutate(Array.from(sel))}>
+              Delete {sel.size} Flock{sel.size > 1 ? 's' : ''} Permanently
+            </Button>
+          </>
+        }>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-700">
+            Are you sure you want to delete <strong>{sel.size} flock{sel.size > 1 ? 's' : ''}</strong>?
+          </p>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+            <strong>Warning:</strong> This will permanently delete all selected flocks and ALL linked data
+            (daily records, egg dispatches, sales, medicine records, vaccinations).
+            This cannot be undone.
+          </div>
+        </div>
       </Modal>
     </div>
   )

@@ -39,6 +39,7 @@ import { VaccinationRecordsPage } from '@/pages/flocks/VaccinationRecords'
 import { PartyOutstanding as PartyOutstandingPage } from '@/pages/reports/PartyOutstanding'
 import { CompanyPL as CompanyPLPage } from '@/pages/reports/CompanyPL'
 import { GSTReportPage } from '@/pages/reports/GSTReport'
+import { EggStockPage } from '@/pages/reports/EggStock'
 import { CashBookPage } from '@/pages/accounts/CashBook'
 import { Spinner } from '@/components/ui'
 
@@ -154,6 +155,7 @@ export const App: React.FC = () => {
             <Route path="reports/party-outstanding" element={<PartyOutstandingPage />} />
             <Route path="reports/company-pl" element={<CompanyPLPage />} />
             <Route path="reports/gst" element={<GSTReportPage />} />
+            <Route path="reports/egg-stock" element={<EggStockPage />} />
             <Route path="accounts/cash-book" element={<CashBookPage />} />
             <Route path="purchase-orders" element={<RequireRole check={can.viewPurchase}><PurchaseOrdersPage /></RequireRole>} />
             <Route path="pending-payments" element={<RequireRole check={can.viewPurchase}><PendingPaymentsPage /></RequireRole>} />

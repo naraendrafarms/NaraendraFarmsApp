@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
@@ -10,7 +10,7 @@ import {
   Shield, Users, Bird, Factory, Zap, IndianRupee,
   CheckCircle, AlertCircle, Plus, Edit2, ChevronRight
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 // ── TAB IDs ──────────────────────────────────────────────────────

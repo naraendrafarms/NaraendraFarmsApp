@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Link, useLocation, Outlet, Navigate } from 'react-router-dom'
+import { Link, useLocation, Outlet, Navigate, useSearchParams } from 'react-router-dom'
 import {
   LayoutDashboard, Bird, Factory, Zap, Users, Settings,
   ChevronDown, ChevronRight, LogOut, Menu, X,
@@ -22,24 +22,18 @@ const NAV: NavItem[] = [
   {
     label: 'Flock Management', icon: <Bird size={18}/>,
     children: [
-      { label: 'All Flocks',            to: '/flock' },
-      { label: 'Compare Flocks',        to: '/flock/compare' },
-      { label: 'Shed / Site Performance', to: '/flock/shed-performance' },
-    ]
-  },
-  {
-    label: 'Flocks', icon: <Bird size={18}/>,
-    children: [
-      { label: 'All Flocks',     to: '/flocks' },
-      { label: 'Add New Flock',  to: '/flocks/new' },
-      { label: 'Daily Entry',       to: '/flocks/daily' },
-      { label: 'HE Dispatch',       to: '/flocks/he-dispatch' },
-      { label: 'NHE Sales',         to: '/flocks/nhe-sales' },
-      { label: 'Egg Conversions',   to: '/flocks/egg-conversions' },
-      { label: 'Hatch Batches',     to: '/flocks/hatch-batches' },
-      { label: 'Medicine Entry',    to: '/flocks/medicine' },
-      { label: 'Egg Opening Stock', to: '/flocks/opening-stock' },
-      { label: 'Vaccination',       to: '/flocks/vaccination' },
+      { label: 'Dashboard',          to: '/flock' },
+      { label: 'All Flocks (Data)',  to: '/flocks' },
+      { label: 'Compare Flocks',     to: '/flock/compare' },
+      { label: 'Shed Performance',   to: '/flock/shed-performance' },
+      { label: 'Daily Entry',        to: '/flocks/daily' },
+      { label: 'HE Dispatch',        to: '/flocks/he-dispatch' },
+      { label: 'NHE Sales',          to: '/flocks/nhe-sales' },
+      { label: 'Egg Conversions',    to: '/flocks/egg-conversions' },
+      { label: 'Hatch Batches',      to: '/flocks/hatch-batches' },
+      { label: 'Medicine Entry',     to: '/flocks/medicine' },
+      { label: 'Egg Opening Stock',  to: '/flocks/opening-stock' },
+      { label: 'Vaccination',        to: '/flocks/vaccination' },
     ]
   },
   {
@@ -103,6 +97,7 @@ const NAV: NavItem[] = [
       { label: 'Salary Report',         to: '/reports/salary' },
       { label: 'Cost Analysis',         to: '/reports/costs' },
       { label: 'Export to Excel',       to: '/reports/export' },
+      { label: 'Egg Stock Balance',      to: '/reports/egg-stock' },
     ]
   },
   {
@@ -135,9 +130,9 @@ const NAV: NavItem[] = [
     roles: ['admin'],
     children: [
       { label: 'Setup Overview',          to: '/admin' },
-      { label: 'Flock–Shed Assignment',   to: '/admin' },
-      { label: 'Electricity Allocation',  to: '/admin' },
-      { label: 'Salary Allocation',       to: '/admin' },
+      { label: 'Flock–Shed Assignment',   to: '/admin?tab=flocks' },
+      { label: 'Electricity Allocation',  to: '/admin?tab=electricity' },
+      { label: 'Salary Allocation',       to: '/admin?tab=salary' },
       { label: 'User Management',         to: '/admin/users' },
     ]
   },
@@ -170,8 +165,17 @@ function filterNav(nav: NavItem[], role: Role): NavItem[] {
 
 const NavLink: React.FC<{ item: NavItem; collapsed: boolean }> = ({ item, collapsed }) => {
   const location = useLocation()
+
+  const isChildActive = (childTo: string) => {
+    const [childPath, childQuery] = childTo.split('?')
+    if (childQuery) {
+      return location.pathname === childPath && location.search === '?' + childQuery
+    }
+    return location.pathname.startsWith(childPath) && !location.search
+  }
+
   const [open, setOpen] = useState(() =>
-    item.children?.some(c => location.pathname.startsWith(c.to)) ?? false
+    item.children?.some(c => isChildActive(c.to)) ?? false
   )
 
   if (!item.children) {
@@ -187,7 +191,7 @@ const NavLink: React.FC<{ item: NavItem; collapsed: boolean }> = ({ item, collap
     )
   }
 
-  const anyActive = item.children.some(c => location.pathname.startsWith(c.to))
+  const anyActive = item.children.some(c => isChildActive(c.to))
 
   return (
     <div>
@@ -201,7 +205,7 @@ const NavLink: React.FC<{ item: NavItem; collapsed: boolean }> = ({ item, collap
       {open && !collapsed && (
         <div className="ml-7 mt-1 flex flex-col gap-0.5">
           {item.children.map(c => {
-            const active = location.pathname === c.to
+            const active = isChildActive(c.to)
             return (
               <Link key={c.to} to={c.to}
                 className={`px-3 py-1.5 rounded-lg text-sm transition-colors
