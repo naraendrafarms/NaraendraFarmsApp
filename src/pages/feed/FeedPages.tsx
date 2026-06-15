@@ -580,9 +580,46 @@ export const FeedDashboard: React.FC = () => {
   const { data: prods } = useQuery({ queryKey: ['feed_production'], queryFn: async () => { const { data } = await supabase.from('feed_production').select('quantity_kg,production_date,feed_types(code)').order('production_date',{ascending:false}).limit(100); return data ?? [] } })
   const { data: transfers } = useQuery({ queryKey: ['feed_transfers'], queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('quantity_kg,transfer_date').order('transfer_date',{ascending:false}).limit(100); return data ?? [] } })
 
+  // Stock alerts: replicate StockPage logic
+  const { data: allIngredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit').eq('is_active',true).order('code'); return data ?? [] } })
+  const { data: allGrnQty } = useQuery({ queryKey: ['grn_stock'], queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty'); return data ?? [] } })
+  const { data: allProdUsage } = useQuery({ queryKey: ['prod_usage_stock'], queryFn: async () => { const { data } = await supabase.from('feed_production_ingredients').select('ingredient_id,qty_used_kg'); return data ?? [] } })
+
+  const LOW_STOCK_THRESHOLD = 500 // kg
+  const stockAlerts = React.useMemo(() => {
+    if (!allIngredients || !allGrnQty || !allProdUsage) return null
+    const inMap: Record<string, number> = {}
+    const outMap: Record<string, number> = {}
+    for (const g of allGrnQty) { if (g.ingredient_id) inMap[g.ingredient_id] = (inMap[g.ingredient_id] ?? 0) + (g.qty ?? 0) }
+    for (const u of allProdUsage) { if (u.ingredient_id) outMap[u.ingredient_id] = (outMap[u.ingredient_id] ?? 0) + (u.qty_used_kg ?? 0) }
+    return allIngredients
+      .map((ing: any) => ({ ...ing, balance: (inMap[ing.id] ?? 0) - (outMap[ing.id] ?? 0) }))
+      .filter((ing: any) => ing.balance < LOW_STOCK_THRESHOLD)
+  }, [allIngredients, allGrnQty, allProdUsage])
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Feed Mill Dashboard" subtitle="Production, stock and transfer overview" />
+
+      {/* Low Stock Alerts */}
+      {stockAlerts != null && (
+        stockAlerts.length === 0 ? (
+          <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+            <span className="text-green-600 font-semibold text-sm">✓ All ingredient stocks are sufficient (≥500 kg)</span>
+          </div>
+        ) : (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+            <p className="text-red-700 font-semibold text-sm mb-2">⚠ Low Stock Alerts — {stockAlerts.length} ingredient{stockAlerts.length !== 1 ? 's' : ''} below 500 kg threshold</p>
+            <div className="flex flex-wrap gap-2">
+              {stockAlerts.map((ing: any) => (
+                <span key={ing.id} className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${ing.balance <= 0 ? 'bg-red-200 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+                  {ing.short_name ?? ing.name}: {Math.round(ing.balance).toLocaleString('en-IN')} {ing.unit}
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+      )}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard title="Total Purchased" value={inr(grns?.reduce((s:number,g:any)=>s+(g.total_amount??0),0)??0)} subtitle="All GRN value" icon={<Package size={18}/>} color="text-blue-600" />
         <StatCard title="Total Produced" value={`${((prods?.reduce((s:number,p:any)=>s+p.quantity_kg,0)??0)/1000).toFixed(1)} MT`} subtitle="All feed batches" icon={<Factory size={18}/>} color="text-brand-600" />

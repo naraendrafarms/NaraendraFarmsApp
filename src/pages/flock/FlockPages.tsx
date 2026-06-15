@@ -363,6 +363,16 @@ export const FlockDashboard: React.FC = () => {
                     <span className="font-semibold text-brand-700">{inr(f.chick_cost)}</span>
                   </div>
                 )}
+                <div className="flex justify-between">
+                  <span className="text-gray-500">FCR</span>
+                  <span className="font-medium">{fcr != null ? fcr.toFixed(2) : '—'}</span>
+                </div>
+                {costPerBird != null && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Cost/Bird</span>
+                    <span className="font-medium">₹{costPerBird.toFixed(0)}/bird</span>
+                  </div>
+                )}
                 {f.supplier && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Supplier</span>
