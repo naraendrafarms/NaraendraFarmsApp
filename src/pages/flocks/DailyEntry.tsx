@@ -27,6 +27,9 @@ export const DailyEntry: React.FC = () => {
   const [selectedFlock, setSelectedFlock] = useState('')
   const [selectedShed, setSelectedShed] = useState('')
   const [date, setDate] = useState(today())
+  const [quickEntry, setQuickEntry] = useState(false)
+  const [heQuickTotal, setHeQuickTotal] = useState('')
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
 
   const { data: flocks } = useQuery({
@@ -210,8 +213,9 @@ export const DailyEntry: React.FC = () => {
       }
     },
     onSuccess: () => {
-      toast.success(existing ? 'Record updated!' : 'Record saved!')
+      toast.success(existing ? '✅ Record updated' : 'Record saved!')
       qc.invalidateQueries({ queryKey: ['daily_record', selectedFlock, date] })
+      qc.invalidateQueries({ queryKey: ['recent_records', selectedFlock] })
       qc.invalidateQueries({ queryKey: ['flock_summary'] })
     },
     onError: (e: any) => toast.error(e.message)
@@ -322,13 +326,25 @@ export const DailyEntry: React.FC = () => {
         }
       />
 
+      {/* Quick Entry Toggle */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => setQuickEntry(v => !v)}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${quickEntry ? 'bg-brand-600' : 'bg-gray-300'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${quickEntry ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+        <span className="text-sm font-medium text-gray-700">Quick Entry Mode</span>
+        {quickEntry && <span className="text-xs text-gray-400">— Shows only essential fields</span>}
+      </div>
+
       {/* Flock + Shed + Date selector */}
       <Card>
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-48">
             <Select label="Select Flock" required placeholder="— Choose flock —"
               options={(flocks??[]).map((f:any)=>({ value:f.id, label:`Flock ${f.flock_no} — ${f.status}` }))}
-              value={selectedFlock} onChange={e => { setSelectedFlock(e.target.value); setSelectedShed('') }}
+              value={selectedFlock} onChange={e => { setSelectedFlock(e.target.value); setSelectedShed(''); setHeQuickTotal('') }}
             />
           </div>
           <div className="w-52">

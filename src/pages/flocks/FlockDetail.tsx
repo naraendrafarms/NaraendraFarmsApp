@@ -58,7 +58,13 @@ const NHE_LABEL: Record<string, string> = {
 export const FlockDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'>('overview')
+  const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'|'transfers'>('overview')
+  const [transferForm, setTransferForm] = useState({
+    transfer_date: new Date().toISOString().split('T')[0],
+    from_farm_id: '', to_farm_id: '', from_shed_id: '', to_shed_id: '',
+    female_count: '0', male_count: '0', notes: ''
+  })
+  const [showTransferForm, setShowTransferForm] = useState(false)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
@@ -109,6 +115,58 @@ export const FlockDetail: React.FC = () => {
         .select('*').eq('flock_id', id!).order('sale_date', { ascending: false })
       return data ?? []
     }
+  })
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms_list'],
+    queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name,code').order('name')
+      return data ?? []
+    }
+  })
+
+  const { data: allSheds } = useQuery({
+    queryKey: ['all_sheds'],
+    queryFn: async () => {
+      const { data } = await supabase.from('sheds').select('id,shed_no,shed_name,farm_id').eq('is_active', true)
+      return data ?? []
+    }
+  })
+
+  const { data: transfers, refetch: refetchTransfers } = useQuery({
+    queryKey: ['flock_transfers', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('flock_transfers')
+        .select('*,from_farm:farms!from_farm_id(name),to_farm:farms!to_farm_id(name),from_shed:sheds!from_shed_id(shed_no,shed_name),to_shed:sheds!to_shed_id(shed_no,shed_name)')
+        .eq('flock_id', id!).order('transfer_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  const addTransferMut = useMutation({
+    mutationFn: async () => {
+      if (!transferForm.to_farm_id) throw new Error('To Farm is required')
+      const payload = {
+        flock_id: id,
+        transfer_date: transferForm.transfer_date,
+        from_farm_id: transferForm.from_farm_id || null,
+        to_farm_id: transferForm.to_farm_id,
+        from_shed_id: transferForm.from_shed_id || null,
+        to_shed_id: transferForm.to_shed_id || null,
+        female_count: parseInt(transferForm.female_count) || 0,
+        male_count: parseInt(transferForm.male_count) || 0,
+        notes: transferForm.notes || null,
+      }
+      const { error } = await supabase.from('flock_transfers').insert(payload)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Transfer recorded!')
+      qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
+      setShowTransferForm(false)
+      setTransferForm({ transfer_date: new Date().toISOString().split('T')[0], from_farm_id: '', to_farm_id: '', from_shed_id: '', to_shed_id: '', female_count: '0', male_count: '0', notes: '' })
+    },
+    onError: (e: any) => toast.error(e.message)
   })
 
   const { data: medMonthly } = useQuery({
@@ -285,7 +343,7 @@ export const FlockDetail: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {(['overview','daily','monthly','financial'] as const).map(t => (
+        {(['overview','daily','monthly','financial','transfers'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors -mb-px
               ${tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
@@ -540,6 +598,130 @@ export const FlockDetail: React.FC = () => {
             </tbody>
           </Table>
         </Card>
+      )}
+
+      {/* TRANSFERS TAB */}
+      {tab === 'transfers' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-gray-800">Flock Transfers</h3>
+            <Button size="sm" onClick={() => setShowTransferForm(v => !v)}>
+              {showTransferForm ? 'Cancel' : '+ Add Transfer'}
+            </Button>
+          </div>
+
+          {showTransferForm && (
+            <Card>
+              <CardHeader title="New Transfer" />
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Date</label>
+                    <input type="date" value={transferForm.transfer_date}
+                      onChange={e => setTransferForm(f => ({ ...f, transfer_date: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">From Farm</label>
+                    <select value={transferForm.from_farm_id}
+                      onChange={e => setTransferForm(f => ({ ...f, from_farm_id: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                      <option value="">— None —</option>
+                      {(farms ?? []).map((fm: any) => <option key={fm.id} value={fm.id}>{fm.name} ({fm.code})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">To Farm *</label>
+                    <select value={transferForm.to_farm_id}
+                      onChange={e => setTransferForm(f => ({ ...f, to_farm_id: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                      <option value="">— Select —</option>
+                      {(farms ?? []).map((fm: any) => <option key={fm.id} value={fm.id}>{fm.name} ({fm.code})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">From Shed</label>
+                    <select value={transferForm.from_shed_id}
+                      onChange={e => setTransferForm(f => ({ ...f, from_shed_id: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                      <option value="">— None —</option>
+                      {(allSheds ?? []).filter((s: any) => !transferForm.from_farm_id || s.farm_id === transferForm.from_farm_id).map((s: any) => <option key={s.id} value={s.id}>{s.shed_no}{s.shed_name ? ' — '+s.shed_name : ''}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">To Shed</label>
+                    <select value={transferForm.to_shed_id}
+                      onChange={e => setTransferForm(f => ({ ...f, to_shed_id: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                      <option value="">— None —</option>
+                      {(allSheds ?? []).filter((s: any) => !transferForm.to_farm_id || s.farm_id === transferForm.to_farm_id).map((s: any) => <option key={s.id} value={s.id}>{s.shed_no}{s.shed_name ? ' — '+s.shed_name : ''}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Female Count</label>
+                    <input type="number" min="0" value={transferForm.female_count}
+                      onChange={e => setTransferForm(f => ({ ...f, female_count: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Male Count</label>
+                    <input type="number" min="0" value={transferForm.male_count}
+                      onChange={e => setTransferForm(f => ({ ...f, male_count: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                    <input type="text" value={transferForm.notes}
+                      onChange={e => setTransferForm(f => ({ ...f, notes: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      placeholder="Optional notes..." />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setShowTransferForm(false)}>Cancel</Button>
+                  <Button size="sm" loading={addTransferMut.isPending} onClick={() => addTransferMut.mutate()}>Save Transfer</Button>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          <Card padding={false}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600">Date</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600">From</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600">To</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600">♀ Count</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600">♂ Count</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(transfers ?? []).length === 0 ? (
+                    <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400 text-sm">No transfers recorded yet</td></tr>
+                  ) : (transfers ?? []).map((t: any) => (
+                    <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="px-3 py-2 whitespace-nowrap">{fmtDate(t.transfer_date)}</td>
+                      <td className="px-3 py-2 text-sm">
+                        <span className="font-medium">{t.from_farm?.name ?? '—'}</span>
+                        {t.from_shed && <span className="text-gray-400 text-xs ml-1">/ {t.from_shed.shed_no}{t.from_shed.shed_name ? ' '+t.from_shed.shed_name : ''}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-sm">
+                        <span className="font-medium text-brand-700">{t.to_farm?.name ?? '—'}</span>
+                        {t.to_shed && <span className="text-gray-400 text-xs ml-1">/ {t.to_shed.shed_no}{t.to_shed.shed_name ? ' '+t.to_shed.shed_name : ''}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right">{t.female_count > 0 ? t.female_count.toLocaleString('en-IN') : '—'}</td>
+                      <td className="px-3 py-2 text-right">{t.male_count > 0 ? t.male_count.toLocaleString('en-IN') : '—'}</td>
+                      <td className="px-3 py-2 text-gray-500 text-xs">{t.notes ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
 
       {/* FINANCIAL TAB */}

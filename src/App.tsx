@@ -26,6 +26,7 @@ import { ImportDaily, ImportElectricity, ImportSalary, ImportHE, ImportGRN } fro
 import { HatchabilityPage } from '@/pages/hatchability/HatchabilityPage'
 import { SetupPage } from '@/pages/setup/SetupPage'
 import { ProductionReport, PLReport, SalaryReport, FeedReport, ExportPage } from '@/pages/reports/ReportsPages'
+import { DailySummaryPage } from '@/pages/reports/DailySummary'
 import { CostOverviewPage, ElectricityCostPage, SalaryCostPage } from '@/pages/reports/CostAnalysis'
 import { PurchaseOrdersPage, PendingPaymentsPage } from '@/pages/reports/POPages'
 import { UserManagement } from '@/pages/admin/UserManagement'
@@ -156,6 +157,7 @@ export const App: React.FC = () => {
             <Route path="reports/company-pl" element={<CompanyPLPage />} />
             <Route path="reports/gst" element={<GSTReportPage />} />
             <Route path="reports/egg-stock" element={<EggStockPage />} />
+            <Route path="reports/daily-summary" element={<DailySummaryPage />} />
             <Route path="accounts/cash-book" element={<CashBookPage />} />
             <Route path="purchase-orders" element={<RequireRole check={can.viewPurchase}><PurchaseOrdersPage /></RequireRole>} />
             <Route path="pending-payments" element={<RequireRole check={can.viewPurchase}><PendingPaymentsPage /></RequireRole>} />

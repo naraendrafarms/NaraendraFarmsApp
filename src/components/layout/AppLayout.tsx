@@ -98,6 +98,7 @@ const NAV: NavItem[] = [
       { label: 'Cost Analysis',         to: '/reports/costs' },
       { label: 'Export to Excel',       to: '/reports/export' },
       { label: 'Egg Stock Balance',      to: '/reports/egg-stock' },
+      { label: 'Daily Summary',           to: '/reports/daily-summary' },
     ]
   },
   {

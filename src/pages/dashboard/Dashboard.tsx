@@ -7,7 +7,110 @@ import {
   Bird, Egg, TrendingUp, AlertTriangle, Zap, Users,
   ArrowRight, Activity, DollarSign, Package
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+
+const AlertsWidget: React.FC = () => {
+  const navigate = useNavigate()
+  const threeDaysAgo = new Date(); threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
+  const threeDaysStr = threeDaysAgo.toISOString().slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)
+
+  const { data: hdData } = useQuery({
+    queryKey: ['alerts_hd'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('daily_records')
+        .select('flock_id, he_eggs_a, he_eggs_b, he_eggs_c, nhe_je, nhe_te, nhe_be, female_alive, flocks(flock_no)')
+        .gte('record_date', threeDaysStr)
+      return data ?? []
+    }
+  })
+
+  const { data: overdueData } = useQuery({
+    queryKey: ['alerts_overdue'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('pending_payments')
+        .select('amount')
+        .lt('due_date', today)
+        .neq('status', 'paid')
+      return data ?? []
+    }
+  })
+
+  const { data: grnData } = useQuery({
+    queryKey: ['alerts_grn'],
+    queryFn: async () => {
+      const { data } = await supabase.from('feed_grn').select('ingredient_id, quantity_kg')
+      return data ?? []
+    }
+  })
+
+  const { data: prodData } = useQuery({
+    queryKey: ['alerts_prod'],
+    queryFn: async () => {
+      const { data } = await supabase.from('feed_production').select('ingredient_id, quantity_used_kg')
+      return data ?? []
+    }
+  })
+
+  const lowHDFlocks = React.useMemo(() => {
+    if (!hdData) return 0
+    const byFlock: Record<string, { total: number; birds: number; count: number }> = {}
+    for (const r of hdData) {
+      const eggs = (r.he_eggs_a ?? 0) + (r.he_eggs_b ?? 0) + (r.he_eggs_c ?? 0) + (r.nhe_je ?? 0) + (r.nhe_te ?? 0) + (r.nhe_be ?? 0)
+      const alive = r.female_alive ?? 0
+      if (!byFlock[r.flock_id]) byFlock[r.flock_id] = { total: 0, birds: 0, count: 0 }
+      byFlock[r.flock_id].total += eggs
+      byFlock[r.flock_id].birds += alive
+      byFlock[r.flock_id].count += 1
+    }
+    return Object.values(byFlock).filter(v => v.birds > 0 && (v.total / v.birds) * 100 < 65).length
+  }, [hdData])
+
+  const lowStockCount = React.useMemo(() => {
+    if (!grnData || !prodData) return 0
+    const stockIn: Record<string, number> = {}
+    const stockOut: Record<string, number> = {}
+    for (const r of grnData) stockIn[r.ingredient_id] = (stockIn[r.ingredient_id] ?? 0) + (r.quantity_kg ?? 0)
+    for (const r of prodData) stockOut[r.ingredient_id] = (stockOut[r.ingredient_id] ?? 0) + (r.quantity_used_kg ?? 0)
+    const allIds = new Set([...Object.keys(stockIn), ...Object.keys(stockOut)])
+    return [...allIds].filter(id => ((stockIn[id] ?? 0) - (stockOut[id] ?? 0)) < 500).length
+  }, [grnData, prodData])
+
+  const overdueCount = overdueData?.length ?? 0
+  const overdueAmt = overdueData?.reduce((s: number, r: any) => s + (r.amount ?? 0), 0) ?? 0
+
+  const allClear = lowHDFlocks === 0 && lowStockCount === 0 && overdueCount === 0
+
+  if (allClear) {
+    return (
+      <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700 font-medium">
+        <span>✓</span><span>All systems normal</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap gap-3">
+      {lowHDFlocks > 0 && (
+        <button onClick={() => navigate('/flock')} className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 font-medium hover:bg-red-100 transition-colors">
+          <AlertTriangle size={15} />{lowHDFlocks} flock{lowHDFlocks > 1 ? 's' : ''} with HD% &lt; 65%
+        </button>
+      )}
+      {lowStockCount > 0 && (
+        <button onClick={() => navigate('/feed/stock')} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 font-medium hover:bg-amber-100 transition-colors">
+          <Package size={15} />{lowStockCount} feed item{lowStockCount > 1 ? 's' : ''} low stock
+        </button>
+      )}
+      {overdueCount > 0 && (
+        <button onClick={() => navigate('/pending-payments')} className="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 text-sm text-orange-700 font-medium hover:bg-orange-100 transition-colors">
+          <DollarSign size={15} />{overdueCount} overdue payment{overdueCount > 1 ? 's' : ''} ({inr(overdueAmt)})
+        </button>
+      )}
+    </div>
+  )
+}
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, BarChart, Bar
@@ -74,6 +177,7 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <AlertsWidget />
       <SectionHeader
         title="Dashboard"
         subtitle={`${activeFlocks.length} active flock${activeFlocks.length !== 1 ? 's' : ''} • Last updated today`}
