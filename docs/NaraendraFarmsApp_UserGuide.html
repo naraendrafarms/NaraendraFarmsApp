@@ -1,0 +1,1553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Naraendra Farms App – User Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Merriweather:wght@400;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #1a1a1a;
+    background: #f0f4f0;
+  }
+
+  /* ── Page wrapper ── */
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 10mm auto;
+    background: #fff;
+    padding: 20mm 18mm 18mm 18mm;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+    position: relative;
+  }
+
+  /* ── Cover ── */
+  .cover {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 257mm;
+    background: linear-gradient(160deg, #14532d 0%, #1a6e3a 50%, #0f3d22 100%);
+    border-radius: 4px;
+    color: #fff;
+    text-align: center;
+    padding: 30mm 20mm;
+  }
+  .cover-logo {
+    width: 90px; height: 90px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 40px;
+    margin-bottom: 20px;
+    border: 3px solid rgba(255,255,255,0.3);
+  }
+  .cover h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 6px; }
+  .cover h2 { font-size: 16px; font-weight: 400; color: rgba(255,255,255,0.8); margin-bottom: 30px; }
+  .cover-divider { width: 60px; height: 3px; background: rgba(255,255,255,0.4); margin: 20px auto; border-radius: 2px; }
+  .cover-meta { font-size: 12px; color: rgba(255,255,255,0.65); line-height: 2; }
+  .cover-badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 20px;
+    padding: 4px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  /* ── Typography ── */
+  h1 { font-size: 22px; font-weight: 800; color: #14532d; margin-bottom: 8px; }
+  h2 { font-size: 17px; font-weight: 700; color: #14532d; margin: 24px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #d1fae5; }
+  h3 { font-size: 14px; font-weight: 700; color: #166534; margin: 18px 0 8px; }
+  h4 { font-size: 13px; font-weight: 600; color: #15803d; margin: 14px 0 6px; }
+  p { margin-bottom: 8px; color: #374151; }
+  ul, ol { margin: 6px 0 10px 20px; color: #374151; }
+  li { margin-bottom: 4px; }
+  strong { color: #111827; }
+
+  /* ── Section header ── */
+  .section-header {
+    background: linear-gradient(135deg, #14532d, #166534);
+    color: #fff;
+    padding: 12px 18px;
+    border-radius: 8px;
+    margin: 28px 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-header .num {
+    background: rgba(255,255,255,0.25);
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800;
+    flex-shrink: 0;
+  }
+  .section-header h2 {
+    color: #fff; border: none; margin: 0; padding: 0; font-size: 16px;
+  }
+
+  /* ── Table of Contents ── */
+  .toc-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px dotted #d1fae5;
+    font-size: 13px;
+  }
+  .toc-item.toc-main { font-weight: 700; color: #14532d; font-size: 14px; margin-top: 6px; }
+  .toc-item.toc-sub { padding-left: 20px; color: #374151; }
+  .toc-page { color: #9ca3af; font-size: 11px; }
+
+  /* ── Role badges ── */
+  .role { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin: 1px; }
+  .role-admin    { background: #fee2e2; color: #991b1b; }
+  .role-mgmt     { background: #ede9fe; color: #6d28d9; }
+  .role-accounts { background: #dbeafe; color: #1e40af; }
+  .role-sitemgr  { background: #ffedd5; color: #9a3412; }
+  .role-incharge { background: #d1fae5; color: #065f46; }
+  .role-viewer   { background: #f3f4f6; color: #374151; }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 12px; }
+  th { background: #14532d; color: #fff; padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }
+  td { padding: 7px 10px; border-bottom: 1px solid #f0fdf4; vertical-align: top; }
+  tr:nth-child(even) td { background: #f9fffe; }
+  tr:hover td { background: #f0fdf4; }
+  .check { color: #16a34a; font-weight: 700; }
+  .cross { color: #dc2626; }
+  .partial { color: #d97706; }
+
+  /* ── Info boxes ── */
+  .box { border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+  .box-tip  { background: #f0fdf4; border-left: 4px solid #16a34a; }
+  .box-warn { background: #fffbeb; border-left: 4px solid #f59e0b; }
+  .box-info { background: #eff6ff; border-left: 4px solid #3b82f6; }
+  .box-note { background: #faf5ff; border-left: 4px solid #8b5cf6; }
+  .box-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .box-tip .box-title  { color: #15803d; }
+  .box-warn .box-title { color: #b45309; }
+  .box-info .box-title { color: #1d4ed8; }
+  .box-note .box-title { color: #7c3aed; }
+
+  /* ── Steps ── */
+  .steps { list-style: none; margin: 10px 0; padding: 0; }
+  .steps li {
+    display: flex; gap: 12px; margin-bottom: 10px; align-items: flex-start;
+  }
+  .step-num {
+    width: 24px; height: 24px; min-width: 24px;
+    background: #14532d; color: #fff;
+    border-radius: 50%; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 1px;
+  }
+  .step-text { flex: 1; color: #374151; }
+
+  /* ── Flow diagram ── */
+  .flow { display: flex; flex-wrap: wrap; gap: 0; margin: 14px 0; align-items: center; }
+  .flow-box {
+    background: #d1fae5; border: 1.5px solid #6ee7b7;
+    border-radius: 8px; padding: 8px 12px;
+    font-size: 11px; font-weight: 600; color: #065f46;
+    text-align: center; min-width: 80px;
+  }
+  .flow-box.farm  { background: #dbeafe; border-color: #93c5fd; color: #1e40af; }
+  .flow-box.alert { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+  .flow-box.act   { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+  .flow-arrow { font-size: 16px; color: #6b7280; padding: 0 6px; }
+
+  /* ── Field list ── */
+  .field-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0 12px; }
+  .field { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 10px; font-size: 11px; }
+  .field-name { font-weight: 700; color: #374151; }
+  .field-desc { color: #6b7280; font-size: 10px; }
+
+  /* ── Footer ── */
+  .footer {
+    position: absolute; bottom: 12mm; left: 18mm; right: 18mm;
+    display: flex; justify-content: space-between; align-items: center;
+    border-top: 1px solid #e5e7eb; padding-top: 8px;
+    font-size: 10px; color: #9ca3af;
+  }
+
+  /* ── Page break ── */
+  @media print {
+    body { background: #fff; }
+    .page { margin: 0; box-shadow: none; width: 100%; padding: 15mm 15mm 20mm; }
+    .pb { page-break-after: always; }
+    .cover { page-break-after: always; }
+    h2 { page-break-after: avoid; }
+    h3 { page-break-after: avoid; }
+    table { page-break-inside: avoid; }
+  }
+  .pb { margin-bottom: 40px; }
+
+  /* ── Highlight ── */
+  .hl { background: #fef9c3; padding: 1px 4px; border-radius: 3px; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: 11px; color: #374151; }
+
+  /* ── Module card ── */
+  .mod-card {
+    border: 1px solid #d1fae5; border-radius: 8px;
+    padding: 10px 14px; margin: 8px 0;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .mod-icon {
+    font-size: 22px; min-width: 32px; text-align: center; margin-top: 2px;
+  }
+  .mod-title { font-weight: 700; font-size: 13px; color: #14532d; margin-bottom: 3px; }
+  .mod-desc { font-size: 11px; color: #6b7280; }
+
+  .pill { display:inline-block; background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; border-radius:20px; padding:1px 8px; font-size:10px; font-weight:600; margin:1px; }
+  .pill-red { background:#fef2f2; border-color:#fecaca; color:#dc2626; }
+  .pill-blue { background:#eff6ff; border-color:#bfdbfe; color:#1d4ed8; }
+  .pill-amber { background:#fffbeb; border-color:#fed7aa; color:#b45309; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     COVER PAGE
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <div class="cover">
+    <div class="cover-logo">🐔</div>
+    <div class="cover-badge">Official Documentation</div>
+    <h1>Naraendra Farms App</h1>
+    <h2>Broiler Breeder Farm Management System</h2>
+    <div class="cover-divider"></div>
+    <div class="cover-meta">
+      <p><strong style="color:#fff">User Guide &amp; Process Manual</strong></p>
+      <p>Version 2.0 &nbsp;|&nbsp; June 2026</p>
+      <p>Confidential – For Internal Use Only</p>
+      <br>
+      <p>Farms: Kethireddypalli · Agraharam · Potlapally · Bodjanampet</p>
+      <p style="margin-top:30px; font-size:10px; opacity:0.6">
+        To convert to PDF: Open in Chrome → File → Print → Save as PDF → A4 paper
+      </p>
+    </div>
+  </div>
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Confidential | June 2026</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TABLE OF CONTENTS
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <h1>Table of Contents</h1>
+  <div style="margin-top:20px">
+
+    <div class="toc-item toc-main"><span>1. Introduction &amp; App Overview</span></div>
+    <div class="toc-item toc-sub"><span>1.1 What this app does</span></div>
+    <div class="toc-item toc-sub"><span>1.2 How to access</span></div>
+    <div class="toc-item toc-sub"><span>1.3 Key terms and abbreviations</span></div>
+
+    <div class="toc-item toc-main" style="margin-top:10px"><span>2. User Roles &amp; Permissions</span></div>
+    <div class="toc-item toc-sub"><span>2.1 The 6 roles explained</span></div>
+    <div class="toc-item toc-sub"><span>2.2 Module access by role (permission matrix)</span></div>
+
+    <div class="toc-item toc-main" style="margin-top:10px"><span>3. Getting Started</span></div>
+    <div class="toc-item toc-sub"><span>3.1 First-time setup sequence</span></div>
+    <div class="toc-item toc-sub"><span>3.2 Navigation &amp; layout</span></div>
+
+    <div class="toc-item toc-main" style="margin-top:10px"><span>4. Module Guide</span></div>
+    <div class="toc-item toc-sub"><span>4.1 Dashboard</span></div>
+    <div class="toc-item toc-sub"><span>4.2 Flock Management</span></div>
+    <div class="toc-item toc-sub"><span>4.3 Flocks – Data Entry</span></div>
+    <div class="toc-item toc-sub"><span>4.4 Feed Mill</span></div>
+    <div class="toc-item toc-sub"><span>4.5 Electricity</span></div>
+    <div class="toc-item toc-sub"><span>4.6 Employees &amp; Payroll</span></div>
+    <div class="toc-item toc-sub"><span>4.7 Masters</span></div>
+    <div class="toc-item toc-sub"><span>4.8 Reports</span></div>
+    <div class="toc-item toc-sub"><span>4.9 Purchase &amp; Payments</span></div>
+    <div class="toc-item toc-sub"><span>4.10 Accounts</span></div>
+    <div class="toc-item toc-sub"><span>4.11 Import Data</span></div>
+    <div class="toc-item toc-sub"><span>4.12 Admin Centre</span></div>
+
+    <div class="toc-item toc-main" style="margin-top:10px"><span>5. Process Flows</span></div>
+    <div class="toc-item toc-sub"><span>5.1 New Flock Lifecycle (Placement → P&amp;L)</span></div>
+    <div class="toc-item toc-sub"><span>5.2 Feed Mill Process</span></div>
+    <div class="toc-item toc-sub"><span>5.3 Monthly Closing Checklist</span></div>
+    <div class="toc-item toc-sub"><span>5.4 Daily Work by Role</span></div>
+
+    <div class="toc-item toc-main" style="margin-top:10px"><span>6. Role-wise Work Guide</span></div>
+    <div class="toc-item toc-sub"><span>6.1 Site Incharge daily routine</span></div>
+    <div class="toc-item toc-sub"><span>6.2 Site Manager weekly routine</span></div>
+    <div class="toc-item toc-sub"><span>6.3 Accounts monthly routine</span></div>
+    <div class="toc-item toc-sub"><span>6.4 Management – what to review</span></div>
+
+    <div class="toc-item toc-main" style="margin-top:10px"><span>7. Import &amp; Export Reference</span></div>
+    <div class="toc-item toc-main" style="margin-top:10px"><span>8. Troubleshooting &amp; FAQ</span></div>
+  </div>
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Table of Contents</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 1 – INTRODUCTION
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <div class="section-header">
+    <div class="num">1</div>
+    <h2>Introduction &amp; App Overview</h2>
+  </div>
+
+  <h3>1.1 What This App Does</h3>
+  <p>
+    The <strong>Naraendra Farms App</strong> is a web-based management system built specifically for broiler breeder
+    poultry operations. It covers the complete lifecycle of a flock — from chick placement through daily production
+    records, egg sales, feed management, electricity tracking, payroll, and final profit &amp; loss reporting.
+  </p>
+  <p>All four company farms are managed from one central system:</p>
+
+  <div class="flow" style="gap:8px; margin:16px 0;">
+    <div class="flow-box farm" style="min-width:130px">
+      🏠 <strong>Kethireddypalli</strong><br>
+      <span style="font-size:10px">Rearing Farm (0–19 weeks)</span>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      <div class="flow-box farm">🥚 Agraharam<br><span style="font-size:10px">Laying (20+ wks)</span></div>
+      <div class="flow-box farm">🥚 Potlapally<br><span style="font-size:10px">Laying (20+ wks)</span></div>
+      <div class="flow-box farm">🥚 Bodjanampet<br><span style="font-size:10px">Laying (20+ wks)</span></div>
+    </div>
+  </div>
+
+  <div class="box box-info">
+    <div class="box-title">📌 Flock Lifecycle at a Glance</div>
+    Birds are placed as chicks at Kethireddypalli (rearing). At around 19 weeks of age they are transferred to one
+    of the three laying farms where they produce Hatching Eggs (HE) and Non-Hatching Eggs (NHE) until the flock
+    is retired (typically 60–65 weeks).
+  </div>
+
+  <h3>1.2 How to Access</h3>
+  <ul>
+    <li><strong>URL:</strong> Open the app link in any web browser (Chrome recommended)</li>
+    <li><strong>Login:</strong> Enter your email address and password provided by the Admin</li>
+    <li><strong>Mobile:</strong> Works on phone and tablet — use landscape mode for data entry tables</li>
+    <li><strong>No installation needed</strong> — it runs entirely in the browser</li>
+  </ul>
+
+  <div class="box box-warn">
+    <div class="box-title">⚠ Internet Required</div>
+    The app requires an active internet connection. All data is stored securely in the cloud. Do not use
+    browser back/forward buttons — always use the app's navigation menu.
+  </div>
+
+  <h3>1.3 Key Terms &amp; Abbreviations</h3>
+  <table>
+    <tr><th>Term</th><th>Meaning</th></tr>
+    <tr><td><strong>HE</strong></td><td>Hatching Egg — eggs collected from breeder flocks and dispatched to hatcheries to produce chicks. Graded A, B, C.</td></tr>
+    <tr><td><strong>NHE</strong></td><td>Non-Hatching Egg — eggs that don't qualify for hatching. Sold as table/jumbo eggs or broken eggs.</td></tr>
+    <tr><td><strong>JE</strong></td><td>Jumbo Egg — large NHE, higher market value</td></tr>
+    <tr><td><strong>TE</strong></td><td>Table Egg — standard NHE</td></tr>
+    <tr><td><strong>BE</strong></td><td>Broken Egg — cracked/damaged NHE, sold at lower price</td></tr>
+    <tr><td><strong>LE</strong></td><td>Leaker Egg — not sold, discarded</td></tr>
+    <tr><td><strong>HD%</strong></td><td>Hen Day Production % = (total eggs / female birds alive) × 100. Measures flock performance each day.</td></tr>
+    <tr><td><strong>GRN</strong></td><td>Goods Receipt Note — record of raw material (feed ingredient) purchase</td></tr>
+    <tr><td><strong>FY</strong></td><td>Financial Year — April to March (FY 2025-26 = April 2025 to March 2026)</td></tr>
+    <tr><td><strong>USC</strong></td><td>Unit Slab Charge — electricity rate per unit (kWh)</td></tr>
+    <tr><td><strong>ESI</strong></td><td>Employee State Insurance — statutory deduction from salary</td></tr>
+    <tr><td><strong>PF</strong></td><td>Provident Fund — statutory retirement savings deduction</td></tr>
+    <tr><td><strong>P&amp;L</strong></td><td>Profit &amp; Loss — revenue minus all costs for a flock or company period</td></tr>
+    <tr><td><strong>TDS</strong></td><td>Tax Deducted at Source — deducted from vendor payments above threshold</td></tr>
+    <tr><td><strong>GSTIN</strong></td><td>GST Identification Number — 15-digit tax registration number of a party</td></tr>
+  </table>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 1 – Introduction</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 2 – USER ROLES
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <div class="section-header">
+    <div class="num">2</div>
+    <h2>User Roles &amp; Permissions</h2>
+  </div>
+
+  <h3>2.1 The Six Roles Explained</h3>
+
+  <div class="mod-card">
+    <div class="mod-icon">🔴</div>
+    <div>
+      <div class="mod-title"><span class="role role-admin">Admin</span> — Administrator</div>
+      <div class="mod-desc">Full access to everything. Creates users, manages all masters, views all reports, enters any data. Typically the company IT owner or top management.</div>
+    </div>
+  </div>
+
+  <div class="mod-card">
+    <div class="mod-icon">🟣</div>
+    <div>
+      <div class="mod-title"><span class="role role-mgmt">Management</span></div>
+      <div class="mod-desc">Read access to all data and full access to all reports. Can view P&amp;L, Company financials, GST, and outstanding reports. Cannot add/edit users or masters.</div>
+    </div>
+  </div>
+
+  <div class="mod-card">
+    <div class="mod-icon">🔵</div>
+    <div>
+      <div class="mod-title"><span class="role role-accounts">Accounts</span></div>
+      <div class="mod-desc">Manages all financial data: GRN purchases, salary entry, electricity bills, farm expenses, purchase orders, payments, all accounting reports. Also manages masters (parties, ingredients, etc.).</div>
+    </div>
+  </div>
+
+  <div class="mod-card">
+    <div class="mod-icon">🟠</div>
+    <div>
+      <div class="mod-title"><span class="role role-sitemgr">Site Manager</span></div>
+      <div class="mod-desc">Manages production data across farms: flock entry, daily records, HE dispatch, NHE sales, medicine, vaccination, egg conversions, hatch batches, feed transfers. Can see employee list but not salary figures.</div>
+    </div>
+  </div>
+
+  <div class="mod-card">
+    <div class="mod-icon">🟢</div>
+    <div>
+      <div class="mod-title"><span class="role role-incharge">Site Incharge</span></div>
+      <div class="mod-desc">Restricted to their assigned farm only. Enters daily production records, medicine usage, and vaccination data for their site. Cannot see other farms' data.</div>
+    </div>
+  </div>
+
+  <div class="mod-card">
+    <div class="mod-icon">⚫</div>
+    <div>
+      <div class="mod-title"><span class="role role-viewer">Viewer</span></div>
+      <div class="mod-desc">Read-only access across all modules. Cannot add, edit, or delete any data. Suitable for auditors or silent observers.</div>
+    </div>
+  </div>
+
+  <h3>2.2 Module Access by Role – Permission Matrix</h3>
+  <table>
+    <tr>
+      <th>Module / Feature</th>
+      <th>Admin</th>
+      <th>Mgmt</th>
+      <th>Accounts</th>
+      <th>Site Mgr</th>
+      <th>S.Incharge</th>
+      <th>Viewer</th>
+    </tr>
+    <tr>
+      <td>Dashboard</td>
+      <td class="check">✔</td><td class="check">✔</td><td class="check">✔</td>
+      <td class="check">✔</td><td class="check">✔</td><td class="check">✔</td>
+    </tr>
+    <tr>
+      <td>Flock Management (view)</td>
+      <td class="check">✔</td><td class="check">✔</td><td class="check">✔</td>
+      <td class="check">✔</td><td class="partial">Own farm</td><td class="check">✔</td>
+    </tr>
+    <tr>
+      <td>Create / Edit Flocks</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Daily Entry</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+      <td class="check">✔</td><td class="partial">Own farm</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>HE Dispatch &amp; NHE Sales</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Medicine &amp; Vaccination</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+      <td class="check">✔</td><td class="partial">Own farm</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Feed Mill – GRN Entry</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Electricity Bills &amp; Allocation</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Salary Entry</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+      <td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Employee List (view only)</td>
+      <td class="check">✔</td><td class="check">✔</td><td class="check">✔</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+    </tr>
+    <tr>
+      <td>Masters (edit)</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+      <td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>All Reports &amp; P&amp;L</td>
+      <td class="check">✔</td><td class="check">✔</td><td class="check">✔</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+    </tr>
+    <tr>
+      <td>Purchase Orders &amp; Payments</td>
+      <td class="check">✔</td><td class="check">✔</td><td class="check">✔</td>
+      <td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Farm Expenses</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Cash Book</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+      <td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Import Data</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="check">✔</td>
+      <td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>User Management</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+      <td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+    <tr>
+      <td>Admin Centre</td>
+      <td class="check">✔</td><td class="cross">✗</td><td class="cross">✗</td>
+      <td class="cross">✗</td><td class="cross">✗</td><td class="cross">✗</td>
+    </tr>
+  </table>
+
+  <div class="box box-tip">
+    <div class="box-title">💡 Tip</div>
+    If a menu item is not visible in the sidebar, your role does not have access to that module. Contact your
+    Admin to request a role change.
+  </div>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 2 – User Roles</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 3 – GETTING STARTED
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <div class="section-header">
+    <div class="num">3</div>
+    <h2>Getting Started</h2>
+  </div>
+
+  <h3>3.1 First-Time Setup Sequence (Admin)</h3>
+  <p>Before entering any production data, the Admin must set up the masters in this order:</p>
+
+  <ol class="steps">
+    <li><div class="step-num">1</div><div class="step-text"><strong>Farm / Sites:</strong> Go to Masters → Farm/Sites. Add all four farms: Kethireddypalli (type: Rearing), Agraharam, Potlapally, Bodjanampet (type: Laying). Enter electricity meter USC rates.</div></li>
+    <li><div class="step-num">2</div><div class="step-text"><strong>Sheds:</strong> Masters → Sheds. Add each shed under its farm with shed number and capacity.</div></li>
+    <li><div class="step-num">3</div><div class="step-text"><strong>Parties:</strong> Masters → Parties. Add all hatcheries (as customers), feed suppliers, medicine suppliers, and other vendors.</div></li>
+    <li><div class="step-num">4</div><div class="step-text"><strong>Hatcheries:</strong> Masters → Hatcheries. Add hatchery records (linked to parties for egg dispatch).</div></li>
+    <li><div class="step-num">5</div><div class="step-text"><strong>Feed Ingredients:</strong> Masters → Feed Ingredients. Add all raw materials (maize, soya, wheat bran, etc.).</div></li>
+    <li><div class="step-num">6</div><div class="step-text"><strong>Feed Types:</strong> Masters → Feed Types. Add feed product types (Broiler Breeder Developer, Layer, etc.).</div></li>
+    <li><div class="step-num">7</div><div class="step-text"><strong>Medicines:</strong> Masters → Medicines. Add all vaccines and medicines used.</div></li>
+    <li><div class="step-num">8</div><div class="step-text"><strong>Vaccination Schedule:</strong> Masters → Vaccination Schedule. Add the standard vaccination protocol (week-wise vaccine plan).</div></li>
+    <li><div class="step-num">9</div><div class="step-text"><strong>Electricity Meters:</strong> Masters → Electricity Meters. Add meter numbers and their USC rates per farm.</div></li>
+    <li><div class="step-num">10</div><div class="step-text"><strong>Users:</strong> Admin Centre → User Management. Create login accounts for each staff member with the correct role.</div></li>
+    <li><div class="step-num">11</div><div class="step-text"><strong>Create First Flock:</strong> Flocks → All Flocks → Add New Flock. Enter placement details.</div></li>
+    <li><div class="step-num">12</div><div class="step-text"><strong>Assign Sheds:</strong> Admin Centre → Flock-Shed Assignment. Link the flock to sheds.</div></li>
+  </ol>
+
+  <div class="box box-warn">
+    <div class="box-title">⚠ Important Order</div>
+    Masters must be completed before data entry. You cannot enter a HE Dispatch without hatcheries set up,
+    or a GRN without feed ingredients defined. Start with masters, then move to data entry.
+  </div>
+
+  <h3>3.2 Navigation &amp; Layout</h3>
+  <p>The app has a <strong>sidebar menu</strong> on the left and a <strong>main content area</strong> on the right.</p>
+
+  <table>
+    <tr><th>Element</th><th>Description</th></tr>
+    <tr><td><strong>Sidebar</strong></td><td>Click any menu item to expand it. Click a sub-item to navigate to that page. The active page is highlighted in white.</td></tr>
+    <tr><td><strong>Collapse button</strong></td><td>The hamburger (☰) icon at the top of the sidebar collapses it to icons-only for more screen space.</td></tr>
+    <tr><td><strong>Mobile menu</strong></td><td>On phones/tablets, tap the ☰ icon in the top bar to open the menu drawer.</td></tr>
+    <tr><td><strong>Date display</strong></td><td>Today's date is shown in the top-right header bar.</td></tr>
+    <tr><td><strong>Your name &amp; role</strong></td><td>Shown at the bottom of the sidebar. Click the logout icon to sign out.</td></tr>
+    <tr><td><strong>Search/Filter</strong></td><td>Most pages have filter bars at the top. Use them to narrow data by date, farm, flock, or party.</td></tr>
+    <tr><td><strong>Export buttons</strong></td><td>Look for "Export" or "↓ Excel" buttons on report pages to download data.</td></tr>
+  </table>
+
+  <div class="box box-tip">
+    <div class="box-title">💡 Common Actions</div>
+    <ul style="margin:4px 0 0 16px">
+      <li>To <strong>add a new record</strong>, look for a green "+ Add" or "+ New" button (usually top-right)</li>
+      <li>To <strong>edit</strong>, click the pencil (✏) icon on a row</li>
+      <li>To <strong>delete</strong>, click the trash (🗑) icon on a row — you will be asked to confirm</li>
+      <li>To <strong>bulk delete</strong>, tick the checkboxes on the left of rows, then click "Delete Selected"</li>
+      <li>To <strong>import data</strong>, click the import button and download the template first</li>
+    </ul>
+  </div>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 3 – Getting Started</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 4.1 – DASHBOARD
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <div class="section-header">
+    <div class="num">4</div>
+    <h2>Module Guide</h2>
+  </div>
+
+  <h3>4.1 Dashboard</h3>
+  <p><em>Route: / (home page after login)</em></p>
+  <p>The Dashboard gives a company-wide snapshot at a glance. It shows:</p>
+  <ul>
+    <li><strong>Total live birds</strong> across all active flocks</li>
+    <li><strong>Today's egg production</strong> — HE and NHE totals</li>
+    <li><strong>Average HD%</strong> — today's performance across all laying flocks</li>
+    <li><strong>Active flocks count</strong> with links to each</li>
+    <li><strong>7-day production trend</strong> chart</li>
+    <li><strong>Recent activity</strong> — last daily entries, dispatches</li>
+  </ul>
+  <div class="box box-info">
+    <div class="box-title">📊 HD% Colour Coding</div>
+    <span class="pill">🟢 ≥ 80% — Excellent</span>
+    <span class="pill pill-amber">🟡 65–79% — Fair</span>
+    <span class="pill pill-red">🔴 &lt; 65% — Needs attention</span>
+  </div>
+
+  <h3>4.2 Flock Management</h3>
+  <p><em>Route: Flock Management menu</em></p>
+  <p>This is the analytics view of all flocks — not data entry. Use it to review performance.</p>
+
+  <h4>All Flocks</h4>
+  <p>Shows a card for every active flock with live statistics:</p>
+  <ul>
+    <li>Farm name, flock number, placement date, breed</li>
+    <li>Current bird counts (males + females from shed allocations)</li>
+    <li>7-day average HD% (colour-coded)</li>
+    <li>7-day total HE eggs collected</li>
+    <li>Age in weeks</li>
+  </ul>
+  <p>Click a flock card to open the Flock Detail page with full history, daily chart, and shed-wise breakdown.</p>
+
+  <h4>Compare Flocks</h4>
+  <p>Select two or more flocks to compare side-by-side: HD%, feed consumption, mortality, egg output over the same age range. Useful for breed comparison or farm performance benchmarking.</p>
+
+  <h4>Shed / Site Performance</h4>
+  <p>View performance broken down by individual shed. Identify which sheds are underperforming within a farm.</p>
+
+  <h3>4.3 Flocks – Data Entry</h3>
+  <p><em>Route: Flocks menu</em></p>
+
+  <h4>All Flocks (Create &amp; Manage)</h4>
+  <p>This is where flocks are created and listed. Each flock represents a batch of birds placed on a specific date.</p>
+  <p><strong>Fields when creating a flock:</strong></p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Flock No</div><div class="field-desc">Unique identifier e.g. F19, F20</div></div>
+    <div class="field"><div class="field-name">Farm</div><div class="field-desc">Select from the farms master</div></div>
+    <div class="field"><div class="field-name">Placement Date</div><div class="field-desc">Date chicks arrived</div></div>
+    <div class="field"><div class="field-name">Chick Source</div><div class="field-desc">Hatchery that supplied chicks</div></div>
+    <div class="field"><div class="field-name">Chick Cost (₹)</div><div class="field-desc">Total cost of chicks placed</div></div>
+    <div class="field"><div class="field-name">Male Count</div><div class="field-desc">Number of male birds placed</div></div>
+    <div class="field"><div class="field-name">Female Count</div><div class="field-desc">Number of female birds placed</div></div>
+    <div class="field"><div class="field-name">Breed</div><div class="field-desc">e.g. Ross 308, Cobb 500</div></div>
+    <div class="field"><div class="field-name">Status</div><div class="field-desc">Active / Closed / Transferred</div></div>
+    <div class="field"><div class="field-name">Remarks</div><div class="field-desc">Any notes about this batch</div></div>
+  </div>
+
+  <h4>Daily Entry</h4>
+  <p>The most important daily task. Enter this <strong>every day</strong> for each active flock/shed.</p>
+  <p><strong>Fields to enter daily:</strong></p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Date</div><div class="field-desc">Select the production date</div></div>
+    <div class="field"><div class="field-name">Flock</div><div class="field-desc">Select the flock</div></div>
+    <div class="field"><div class="field-name">Shed</div><div class="field-desc">Which shed this record is for</div></div>
+    <div class="field"><div class="field-name">Male Deaths</div><div class="field-desc">Number of male mortalities</div></div>
+    <div class="field"><div class="field-name">Female Deaths</div><div class="field-desc">Number of female mortalities</div></div>
+    <div class="field"><div class="field-name">HE Eggs (A/B/C)</div><div class="field-desc">Grade A, B, C hatching egg count</div></div>
+    <div class="field"><div class="field-name">NHE Eggs (JE/TE/BE/LE)</div><div class="field-desc">Jumbo, Table, Broken, Leaker counts</div></div>
+    <div class="field"><div class="field-name">Feed Consumed (kg)</div><div class="field-desc">Feed given to this shed</div></div>
+    <div class="field"><div class="field-name">Water Consumption</div><div class="field-desc">In litres (optional)</div></div>
+    <div class="field"><div class="field-name">Temperature</div><div class="field-desc">Min/Max temp in °C (optional)</div></div>
+    <div class="field"><div class="field-name">Remarks</div><div class="field-desc">Any observations for the day</div></div>
+  </div>
+
+  <div class="box box-warn">
+    <div class="box-title">⚠ Daily Entry Rule</div>
+    Enter records for <em>each shed separately</em>. If a flock has 3 sheds, enter 3 rows per day.
+    HD% is calculated automatically: (HE + NHE total) ÷ female birds alive × 100.
+  </div>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 4 – Module Guide</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 4.3 continued
+════════════════════════════════════════════════ -->
+<div class="page pb">
+
+  <h4>HE Dispatch</h4>
+  <p>Record each consignment of Hatching Eggs sent to a hatchery.</p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Dispatch Date</div><div class="field-desc">Date eggs were sent</div></div>
+    <div class="field"><div class="field-name">Flock</div><div class="field-desc">Source flock</div></div>
+    <div class="field"><div class="field-name">Hatchery</div><div class="field-desc">Destination hatchery</div></div>
+    <div class="field"><div class="field-name">Grade (A/B/C)</div><div class="field-desc">Egg quality grade</div></div>
+    <div class="field"><div class="field-name">Quantity</div><div class="field-desc">Number of eggs dispatched</div></div>
+    <div class="field"><div class="field-name">Rate (₹)</div><div class="field-desc">Price per egg</div></div>
+    <div class="field"><div class="field-name">Invoice No</div><div class="field-desc">Bill number for this consignment</div></div>
+    <div class="field"><div class="field-name">Truck / Vehicle No</div><div class="field-desc">Transport details</div></div>
+    <div class="field"><div class="field-name">Production Date Range</div><div class="field-desc">From/To date eggs were laid</div></div>
+  </div>
+  <p>The page shows a filterable table of all dispatches with totals. Use <strong>Export</strong> to download as CSV.</p>
+
+  <h4>NHE Sales</h4>
+  <p>Record sales of Non-Hatching Eggs and other by-products.</p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Sale Date</div><div class="field-desc">Date of sale</div></div>
+    <div class="field"><div class="field-name">Flock</div><div class="field-desc">Source flock</div></div>
+    <div class="field"><div class="field-name">Party</div><div class="field-desc">Customer from parties master</div></div>
+    <div class="field"><div class="field-name">JE Qty &amp; Rate</div><div class="field-desc">Jumbo eggs sold</div></div>
+    <div class="field"><div class="field-name">TE Qty &amp; Rate</div><div class="field-desc">Table eggs sold</div></div>
+    <div class="field"><div class="field-name">BE Qty &amp; Rate</div><div class="field-desc">Broken eggs sold</div></div>
+    <div class="field"><div class="field-name">Cull Birds Qty &amp; Rate</div><div class="field-desc">Birds culled and sold</div></div>
+    <div class="field"><div class="field-name">Gunny / Maize / Plastic Bags</div><div class="field-desc">Bag sales by type and rate</div></div>
+    <div class="field"><div class="field-name">Gas Cylinders</div><div class="field-desc">If brooding gas sold</div></div>
+    <div class="field"><div class="field-name">Manure</div><div class="field-desc">Poultry litter/manure sale</div></div>
+  </div>
+
+  <h4>Egg Conversions</h4>
+  <p>When HE-grade eggs are downgraded to NHE (e.g., due to fertility check or quality issues), record the conversion here. This keeps your HE stock and NHE stock accurate.</p>
+  <ul>
+    <li>Select: Date, Flock, From Grade, To Type (JE/TE/BE), Quantity, Reason</li>
+    <li>This creates a debit in HE stock and credit in NHE stock</li>
+  </ul>
+
+  <h4>Hatch Batches</h4>
+  <p>Record results reported back from the hatchery after eggs hatch.</p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Batch No</div><div class="field-desc">Hatchery batch reference</div></div>
+    <div class="field"><div class="field-name">Hatchery</div><div class="field-desc">Which hatchery</div></div>
+    <div class="field"><div class="field-name">Flock</div><div class="field-desc">Source flock of eggs</div></div>
+    <div class="field"><div class="field-name">Set Date</div><div class="field-desc">Date eggs were set in incubator</div></div>
+    <div class="field"><div class="field-name">Hatch Date</div><div class="field-desc">Date chicks hatched</div></div>
+    <div class="field"><div class="field-name">Eggs Set</div><div class="field-desc">Total eggs placed in incubator</div></div>
+    <div class="field"><div class="field-name">Eggs Hatched</div><div class="field-desc">Number of chicks that hatched</div></div>
+    <div class="field"><div class="field-name">Chicks Supplied</div><div class="field-desc">Net chicks delivered to farms</div></div>
+  </div>
+  <p>Hatchability % = (Eggs Hatched ÷ Eggs Set) × 100 — calculated automatically.</p>
+
+  <h4>Medicine Entry</h4>
+  <p>Record every medicine or vaccine administered to a flock/shed.</p>
+  <ul>
+    <li>Date, Flock, Shed, Medicine name (from master), Quantity, Unit, Cost per unit, Administered by</li>
+    <li>These costs feed into the Flock P&amp;L automatically</li>
+  </ul>
+
+  <h4>Egg Opening Stock</h4>
+  <p>Use this <em>once</em> when starting to use the app to enter existing egg inventories so stock balances are accurate from day one. Enter HE stock (grade-wise) and NHE stock (type-wise) per flock.</p>
+
+  <h4>Vaccination Records</h4>
+  <p>Log each vaccination event. The page shows:</p>
+  <ul>
+    <li><span class="pill pill-red">🔴 Overdue</span> — vaccines past due date not yet given</li>
+    <li><span class="pill pill-amber">🟡 Due Soon</span> — vaccines due within 7 days</li>
+    <li>A schedule reference table from the Vaccination Schedule master</li>
+    <li>Multi-select bulk delete for incorrect records</li>
+  </ul>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 4.3 – Flocks Data Entry</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 4.4 – FEED MILL
+════════════════════════════════════════════════ -->
+<div class="page pb">
+
+  <h3>4.4 Feed Mill</h3>
+  <p><em>Route: Feed Mill menu</em></p>
+  <p>The Feed Mill module tracks the complete feed manufacturing cycle — from purchasing raw ingredients to producing finished feed and transferring it to farms.</p>
+
+  <h4>Feed Dashboard</h4>
+  <p>Overview of current stock levels: ingredient inventory with low-stock warnings, finished feed stock per type, recent production summary.</p>
+
+  <h4>GRN Entry (Goods Receipt Note)</h4>
+  <p>Record every raw material purchase. This is the primary source for feed cost in P&amp;L and for ingredient stock.</p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">GRN Date</div><div class="field-desc">Date material received</div></div>
+    <div class="field"><div class="field-name">Supplier</div><div class="field-desc">Select from parties master</div></div>
+    <div class="field"><div class="field-name">Ingredient</div><div class="field-desc">Select from ingredients master</div></div>
+    <div class="field"><div class="field-name">Quantity (kg/MT)</div><div class="field-desc">Amount received</div></div>
+    <div class="field"><div class="field-name">Rate (₹/unit)</div><div class="field-desc">Purchase price</div></div>
+    <div class="field"><div class="field-name">GST %</div><div class="field-desc">Tax rate (5%, 12%, 18%)</div></div>
+    <div class="field"><div class="field-name">Invoice No</div><div class="field-desc">Supplier bill number</div></div>
+    <div class="field"><div class="field-name">Vehicle No</div><div class="field-desc">Truck/transport number</div></div>
+    <div class="field"><div class="field-name">Remarks</div><div class="field-desc">Quality notes etc.</div></div>
+  </div>
+  <p>GRN entry automatically increases ingredient stock. GST amount is used in the GST Summary report for input credit.</p>
+
+  <h4>Formula &amp; Production (Feed Mill page)</h4>
+  <p><strong>Step 1 – Define a formula:</strong> Create a recipe specifying what % of each ingredient goes into a feed type (e.g., "Layer Feed: 60% Maize, 25% Soya, 10% Wheat Bran, 5% Premix").</p>
+  <p><strong>Step 2 – Record production:</strong> Enter how many kg/MT of finished feed were produced. The app automatically deducts the ingredient quantities used based on the formula ratio.</p>
+
+  <h4>Feed Transfer</h4>
+  <p>When finished feed is moved from the feed mill to a farm, record it here. This reduces mill stock and records farm-level feed receipt.</p>
+  <ul>
+    <li>Transfer Date, Feed Type, Quantity (kg), From (Mill), To (Farm), Vehicle No</li>
+  </ul>
+
+  <h4>Stock Status</h4>
+  <p>Real-time view of current ingredient stock (after purchases minus production used) and finished feed stock (after production minus transfers). Rows in red indicate stock below minimum level.</p>
+
+  <div class="box box-tip">
+    <div class="box-title">💡 Feed Cost in P&amp;L</div>
+    Feed cost per flock is calculated from the daily entry feed consumption figures × feed cost per kg
+    (derived from GRN purchase prices). Ensure daily entry feed amounts are accurate.
+  </div>
+
+  <h3>4.5 Electricity</h3>
+  <p><em>Route: Electricity menu (3 tabs)</em></p>
+
+  <h4>Bills Entry Tab</h4>
+  <p>Enter every electricity bill received from the power company.</p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Meter</div><div class="field-desc">Select the meter from Electricity Meters master</div></div>
+    <div class="field"><div class="field-name">Billing Period</div><div class="field-desc">From date – To date</div></div>
+    <div class="field"><div class="field-name">Units Consumed</div><div class="field-desc">kWh reading (current – previous)</div></div>
+    <div class="field"><div class="field-name">Bill Amount (₹)</div><div class="field-desc">Total amount on the bill</div></div>
+    <div class="field"><div class="field-name">Due Date</div><div class="field-desc">Payment deadline</div></div>
+    <div class="field"><div class="field-name">Payment Date</div><div class="field-desc">When it was paid (leave blank if unpaid)</div></div>
+    <div class="field"><div class="field-name">Payment Mode</div><div class="field-desc">Cash / UPI / Cheque / Online</div></div>
+  </div>
+
+  <h4>Allocation Tab</h4>
+  <p>Assign each electricity bill's cost across flocks for accurate P&amp;L. Click the gear icon on any bill to open the allocation modal.</p>
+  <ul>
+    <li>Each row = one flock, enter the <strong>percentage (%)</strong> of the bill cost attributable to that flock</li>
+    <li>Percentages must <strong>add up to exactly 100%</strong></li>
+    <li>Status badges: <span class="pill">Done</span> <span class="pill pill-amber">Partial</span> <span class="pill pill-red">Pending</span></li>
+    <li>Once allocated, the electricity cost flows into the Flock P&amp;L for each flock</li>
+  </ul>
+
+  <h4>History Tab</h4>
+  <p>Month-grouped view of all bills. Filter by meter. See paid/unpaid status. Export to CSV. View grand totals per meter and per month.</p>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 4.4–4.5 – Feed Mill &amp; Electricity</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 4.6 – EMPLOYEES
+════════════════════════════════════════════════ -->
+<div class="page pb">
+
+  <h3>4.6 Employees &amp; Payroll</h3>
+  <p><em>Route: Employees menu — visible to Admin, Accounts, Site Manager (view only)</em></p>
+
+  <h4>Employee List</h4>
+  <p>Master record for all company staff. Fields include:</p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Employee Name</div><div class="field-desc">Full name</div></div>
+    <div class="field"><div class="field-name">Employee Code</div><div class="field-desc">Unique ID</div></div>
+    <div class="field"><div class="field-name">Designation</div><div class="field-desc">Job title</div></div>
+    <div class="field"><div class="field-name">Department</div><div class="field-desc">Dept / Farm</div></div>
+    <div class="field"><div class="field-name">Date of Joining</div><div class="field-desc">DOJ</div></div>
+    <div class="field"><div class="field-name">ESI Number</div><div class="field-desc">Statutory ID</div></div>
+    <div class="field"><div class="field-name">PF Number</div><div class="field-desc">UAN / PF account</div></div>
+    <div class="field"><div class="field-name">Bank Account</div><div class="field-desc">Account no &amp; IFSC</div></div>
+    <div class="field"><div class="field-name">Basic Salary</div><div class="field-desc">Monthly basic pay</div></div>
+    <div class="field"><div class="field-name">Salary Type</div><div class="field-desc">Monthly / Daily wage</div></div>
+  </div>
+
+  <h4>Salary Entry</h4>
+  <p>Enter monthly salary for each employee. For each month and employee:</p>
+  <ul>
+    <li>Basic, HRA, Allowances, Other Earnings</li>
+    <li>ESI Deduction (employee share), PF Deduction, TDS, Other Deductions</li>
+    <li>Net Pay = Gross Earnings − Total Deductions</li>
+    <li>Payment Mode (Bank / Cash) and Payment Date</li>
+  </ul>
+
+  <h4>Salary Abstract</h4>
+  <p>Monthly summary table: all employees in one view with department subtotals. Used for management review and cost allocation.</p>
+
+  <h4>Bonus</h4>
+  <p>Record one-time bonus payments: Diwali bonus, annual performance bonus, etc. Select employee, bonus type, amount, payment date.</p>
+
+  <h4>ESI / PF Report</h4>
+  <p>Generates the monthly ESI and PF contribution summary (employer + employee share) ready for filing with the respective offices.</p>
+
+  <h4>Payroll Summary</h4>
+  <p>Bank transfer statement listing each employee's net pay and bank details — ready for submission to your bank for bulk salary transfer.</p>
+
+  <h4>Attendance Register</h4>
+  <p>Monthly attendance grid: mark each day as Present (P), Absent (A), Half Day (H), Leave (L), or Holiday (H). Used for daily-wage payroll calculation.</p>
+
+  <h4>Payslip Generator</h4>
+  <p>Generate individual payslips for any employee for any month. Shows full salary breakdown with company letterhead. Print or save as PDF.</p>
+
+  <h3>4.7 Masters</h3>
+  <p><em>Route: Masters menu — Admin &amp; Accounts only</em></p>
+  <p>Masters are the reference data that power all other modules. Always keep these up to date.</p>
+
+  <h4>Farm / Sites</h4>
+  <table>
+    <tr><th>Field</th><th>Notes</th></tr>
+    <tr><td>Farm Name</td><td>Full name e.g. "Kethireddypalli"</td></tr>
+    <tr><td>Farm Code</td><td>Short code e.g. "KRP" — used in imports</td></tr>
+    <tr><td>Location / Address</td><td>Physical address</td></tr>
+    <tr><td>Farm Type</td><td>Rearing (0-19 wks) or Laying (20+ wks)</td></tr>
+    <tr><td>Elec. USC 1 &amp; USC 2</td><td>Unit slab charges for Meter 1 and Meter 2</td></tr>
+    <tr><td>Capacity</td><td>Total bird capacity</td></tr>
+  </table>
+  <div class="box box-warn">
+    <div class="box-title">⚠ Two Meters Per Site</div>
+    If a farm has two electricity meters, enter both USC rates (USC 1 and USC 2). Also add both meters
+    in the Electricity Meters master so they can be selected when entering bills.
+  </div>
+
+  <h4>Sheds</h4>
+  <p>Each shed belongs to one farm. Fields: Shed Number, Farm, Capacity (birds), Shed Type (breeder/rearing).</p>
+
+  <h4>Feed Ingredients, Feed Types, Medicines, Hatcheries, Parties</h4>
+  <p>All these masters support:</p>
+  <ul>
+    <li>✅ <strong>Checkbox multi-select</strong> for bulk operations</li>
+    <li>🗑 <strong>Bulk Delete</strong> — select multiple, delete at once</li>
+    <li>🔀 <strong>Merge Duplicates</strong> — select two records, merge into one (re-maps all linked records)</li>
+    <li>📥 <strong>Import CSV/Excel</strong> — download template, fill, upload</li>
+    <li>📤 <strong>Export CSV</strong> — download current master list</li>
+  </ul>
+
+  <h4>Vaccination Schedule</h4>
+  <p>Standard protocol: Vaccine name + Age in days (or week of life). This is used by the Vaccination Records page to show due/overdue alerts.</p>
+
+  <h4>Electricity Meters</h4>
+  <p>Meter Number, assigned Farm, USC Rate. Multiple meters per farm are supported.</p>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 4.6–4.7 – Employees &amp; Masters</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 4.8 – REPORTS
+════════════════════════════════════════════════ -->
+<div class="page pb">
+
+  <h3>4.8 Reports</h3>
+  <p><em>Route: Reports menu</em></p>
+
+  <h4>Flock P&amp;L (Full)</h4>
+  <p>The most detailed report — shows complete profit &amp; loss for one or all flocks:</p>
+  <ul>
+    <li><strong>Revenue:</strong> HE Dispatch income + NHE Sales income + Chick Sales + Cull Bird Sales + Other</li>
+    <li><strong>Direct Costs:</strong> Chick Cost, Feed Cost, Medicine Cost</li>
+    <li><strong>Allocated Costs:</strong> Electricity (from allocation), Salary (from salary allocation)</li>
+    <li><strong>Other Costs:</strong> Farm Expenses</li>
+    <li><strong>Net Profit / Loss</strong> and <strong>Profit per Bird</strong></li>
+  </ul>
+
+  <h4>Company P&amp;L</h4>
+  <p>Company-wide financial summary across all flocks for a chosen Financial Year.</p>
+  <ul>
+    <li><strong>FY Selector:</strong> Choose 2022-23 through 2026-27</li>
+    <li><strong>View Mode:</strong> Monthly (columns = Apr, May, Jun…) or Annual (single column)</li>
+    <li><strong>Revenue rows:</strong> HE Sales, NHE Sales, Chick Sales, Cull/Bird Sales, Other Income</li>
+    <li><strong>Cost rows:</strong> Chick Cost, Feed Cost, Medicine, Electricity, Salary, Farm Expenses</li>
+    <li><strong>Cost breakdown %</strong> bar chart — shows which cost is biggest</li>
+    <li><strong>Export to Excel</strong> with the pivot table layout</li>
+  </ul>
+
+  <h4>Party Outstanding</h4>
+  <p>Tracks money owed to and by the company.</p>
+  <ul>
+    <li><strong>Debtors tab:</strong> HE dispatch + NHE sales grouped by customer. Shows total billed vs paid vs outstanding. Click a party to expand individual invoices.</li>
+    <li><strong>Creditors tab:</strong> Pending payments to suppliers. Aging buckets:
+      <span class="pill">Not Due</span>
+      <span class="pill pill-amber">0–30 days</span>
+      <span class="pill pill-amber">31–60 days</span>
+      <span class="pill pill-red">61–90 days</span>
+      <span class="pill pill-red">90+ days overdue</span>
+    </li>
+    <li>Filter by date range, party, flock. Export to Excel.</li>
+  </ul>
+
+  <h4>GST Summary</h4>
+  <p>Estimated GST figures for reference (not a substitute for professional filing).</p>
+  <ul>
+    <li><strong>Input GST</strong> (credit): From GRN purchases — broken down by rate: 5% / 12% / 18% with CGST/SGST split</li>
+    <li><strong>Output GST</strong> (liability): HE dispatch (0% exempt), NHE sales by category (cull=5%, gas=18%, bags=12%, eggs=0%), chicks (0% exempt)</li>
+    <li><strong>Net GST Payable</strong> = Output GST − Input GST credit</li>
+    <li>Monthly breakdown + FY totals + Export CSV</li>
+    <li>⚠ <em>CA disclaimer banner shown — always verify with your chartered accountant before filing</em></li>
+  </ul>
+
+  <h4>Production Report</h4>
+  <p>Daily / weekly / monthly egg production trends per flock and per farm. Filter by date range and flock.</p>
+
+  <h4>Feed Cost Report</h4>
+  <p>Feed cost analysis: cost per bird per day, cost per dozen eggs produced, monthly trend.</p>
+
+  <h4>Salary Report</h4>
+  <p>Monthly salary summary by farm/department. Useful for cost budget comparison.</p>
+
+  <h4>Cost Analysis</h4>
+  <p>Sub-pages for electricity cost analysis (units consumed, cost per bird) and salary cost breakdown (department-wise, farm-wise).</p>
+
+  <h4>Export to Excel</h4>
+  <p>Bulk data export — download raw data tables (daily records, dispatches, sales, GRN, salary) as Excel files for custom analysis.</p>
+
+  <h3>4.9 Purchase &amp; Payments</h3>
+
+  <h4>Purchase Orders &amp; Payments</h4>
+  <p>Tracks all vendor purchases and payment status:</p>
+  <ul>
+    <li>PO details: vendor, item, quantity, rate, GST, expected delivery date</li>
+    <li>GRN receipts linked to each PO</li>
+    <li>Payment tracking: amount paid, balance due, TDS deducted, payment mode</li>
+    <li>HOLD status for disputed invoices</li>
+    <li>Filter by vendor, status (Pending / HOLD / Paid)</li>
+  </ul>
+
+  <h4>Farm Expenses</h4>
+  <p>Record miscellaneous expenses that don't fit other categories (repairs, consumables, vehicle, admin):</p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Date</div><div class="field-desc">Expense date</div></div>
+    <div class="field"><div class="field-name">Farm</div><div class="field-desc">Which farm</div></div>
+    <div class="field"><div class="field-name">Flock</div><div class="field-desc">Linked flock (optional)</div></div>
+    <div class="field"><div class="field-name">Category</div><div class="field-desc">e.g. Repairs, Vehicle, Admin</div></div>
+    <div class="field"><div class="field-name">Amount (₹)</div><div class="field-desc">Expense amount</div></div>
+    <div class="field"><div class="field-name">Description</div><div class="field-desc">What was spent on</div></div>
+    <div class="field"><div class="field-name">Paid by</div><div class="field-desc">Who paid (employee name)</div></div>
+  </div>
+  <p>Supports: Edit ✏, Delete 🗑, Multi-select + Bulk Delete, Import Excel, Export Excel, Download Template.</p>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 4.8–4.9 – Reports &amp; Purchase</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 4.10 – ACCOUNTS + 4.11 + 4.12
+════════════════════════════════════════════════ -->
+<div class="page pb">
+
+  <h3>4.10 Accounts</h3>
+
+  <h4>Cash Book</h4>
+  <p>A manual ledger for tracking all cash, UPI, and cheque transactions not captured elsewhere.</p>
+  <ul>
+    <li><strong>Opening Balance:</strong> Set once at the top — stored for the session. Edit by clicking the pencil icon.</li>
+    <li><strong>Running Balance:</strong> Auto-calculated — shows how much cash is on hand after each transaction.</li>
+    <li><strong>Transaction Types:</strong>
+      <span class="pill">Receipt</span> (money in) &nbsp;
+      <span class="pill pill-red">Payment</span> (money out) &nbsp;
+      <span class="pill pill-blue">Contra</span> (bank↔cash transfer)
+    </li>
+  </ul>
+  <p><strong>Fields for each transaction:</strong></p>
+  <div class="field-list">
+    <div class="field"><div class="field-name">Date</div><div class="field-desc">Transaction date</div></div>
+    <div class="field"><div class="field-name">Type</div><div class="field-desc">Receipt / Payment / Contra</div></div>
+    <div class="field"><div class="field-name">Category</div><div class="field-desc">Salary, Feed, Medicine, Sales, etc.</div></div>
+    <div class="field"><div class="field-name">Farm</div><div class="field-desc">Which farm (optional)</div></div>
+    <div class="field"><div class="field-name">Flock</div><div class="field-desc">Linked flock (optional)</div></div>
+    <div class="field"><div class="field-name">Description</div><div class="field-desc">What this is for</div></div>
+    <div class="field"><div class="field-name">Party Name</div><div class="field-desc">Payer/payee name</div></div>
+    <div class="field"><div class="field-name">Reference No</div><div class="field-desc">Cheque no / UTR / bill no</div></div>
+    <div class="field"><div class="field-name">Amount In (₹)</div><div class="field-desc">Receipt amount</div></div>
+    <div class="field"><div class="field-name">Amount Out (₹)</div><div class="field-desc">Payment amount</div></div>
+    <div class="field"><div class="field-name">Payment Mode</div><div class="field-desc">Cash / UPI / Cheque</div></div>
+  </div>
+  <p>Summary cards at top: Opening Balance | Total Receipts | Total Payments | <strong>Closing Balance</strong></p>
+  <p>Supports: Import CSV/Excel (+ download template), Export Excel, multi-select bulk delete.</p>
+
+  <h3>4.11 Import Data</h3>
+  <p><em>Route: Import Data menu — Admin &amp; Accounts only</em></p>
+  <p>Bulk upload historical data from Excel/CSV files. Available importers:</p>
+  <table>
+    <tr><th>Import Type</th><th>What it imports</th><th>Key columns needed</th></tr>
+    <tr><td>Daily Records</td><td>Historical daily egg production and mortality data</td><td>date, flock_no, shed_no, he_a, he_b, he_c, nhe_je, nhe_te, nhe_be, feed_kg, male_deaths, female_deaths</td></tr>
+    <tr><td>HE Dispatch</td><td>Historical egg dispatch records to hatcheries</td><td>date, flock_no, hatchery_name, grade, quantity, rate, invoice_no</td></tr>
+    <tr><td>Salary</td><td>Historical monthly salary data</td><td>month, emp_code, basic, hra, allowances, esi_deduction, pf_deduction, net_pay</td></tr>
+    <tr><td>Electricity</td><td>Past electricity bills</td><td>meter_no, period_from, period_to, units, amount, due_date</td></tr>
+    <tr><td>GRN</td><td>Historical feed ingredient purchases</td><td>date, supplier, ingredient, quantity, rate, gst_pct, invoice_no</td></tr>
+  </table>
+  <div class="box box-tip">
+    <div class="box-title">💡 Import Process</div>
+    <ol style="margin:4px 0 0 16px">
+      <li>Click the "Download Template" button to get the exact format required</li>
+      <li>Fill in your data (do not change column headers)</li>
+      <li>Upload the filled file using the import button</li>
+      <li>Review the preview — fix any errors shown in red</li>
+      <li>Click "Import" to save</li>
+    </ol>
+  </div>
+
+  <h3>4.12 Admin Centre</h3>
+  <p><em>Route: Admin Centre — Admin only</em></p>
+  <ul>
+    <li><strong>Setup Overview:</strong> Checklist showing what masters are complete and what's missing</li>
+    <li><strong>Flock–Shed Assignment:</strong> Link flocks to sheds (required before daily entry can reference sheds correctly). Also set bird counts per shed.</li>
+    <li><strong>Electricity Allocation:</strong> Default allocation % for each meter across flocks</li>
+    <li><strong>Salary Allocation:</strong> Allocate salary costs across flocks by %</li>
+    <li><strong>User Management:</strong> Create new login accounts, assign roles, deactivate users</li>
+  </ul>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 4.10–4.12 – Accounts, Import, Admin</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 5 – PROCESS FLOWS
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <div class="section-header">
+    <div class="num">5</div>
+    <h2>Process Flows</h2>
+  </div>
+
+  <h3>5.1 New Flock Lifecycle — From Placement to P&amp;L</h3>
+
+  <div class="box box-info" style="margin-bottom:14px">
+    <div class="box-title">📋 Overview</div>
+    This flow covers everything from when chicks arrive at the farm to when the flock's final P&amp;L is available.
+    Each step depends on the previous one — do not skip any step.
+  </div>
+
+  <ol class="steps">
+    <li><div class="step-num">1</div><div class="step-text">
+      <strong>Confirm Masters are ready</strong><br>
+      Farm, Sheds, Hatchery (chick source), Vaccination Schedule, Medicines — all must be in the master tables before creating the flock.
+    </div></li>
+    <li><div class="step-num">2</div><div class="step-text">
+      <strong>Create the Flock</strong> — Flocks → All Flocks → + Add New Flock<br>
+      Enter: Flock No, Farm, Placement Date, Chick Source (hatchery), Chick Cost (total ₹), Male Count, Female Count, Breed.
+    </div></li>
+    <li><div class="step-num">3</div><div class="step-text">
+      <strong>Assign Flock to Sheds</strong> — Admin Centre → Flock–Shed Assignment<br>
+      Link the flock to each shed it occupies. Enter bird count per shed. This is required for daily entry and HD% calculation.
+    </div></li>
+    <li><div class="step-num">4</div><div class="step-text">
+      <strong>Set Egg Opening Stock (if applicable)</strong> — Flocks → Egg Opening Stock<br>
+      If the flock already has eggs in stock when you start using the app, enter those here. Otherwise skip.
+    </div></li>
+    <li><div class="step-num">5</div><div class="step-text">
+      <strong>Start Daily Entry</strong> — Flocks → Daily Entry (enter every day, per shed)<br>
+      Deaths → Male Deaths, Female Deaths<br>
+      Eggs → HE (A/B/C) and NHE (JE/TE/BE/LE)<br>
+      Feed → kg consumed<br>
+      This data drives HD%, feed cost, mortality tracking, and egg stock.
+    </div></li>
+    <li><div class="step-num">6</div><div class="step-text">
+      <strong>Enter HE Dispatch</strong> — Flocks → HE Dispatch<br>
+      Each time eggs are sent to a hatchery, record it: hatchery, grade, qty, rate, invoice no.
+      This records HE sales revenue.
+    </div></li>
+    <li><div class="step-num">7</div><div class="step-text">
+      <strong>Enter NHE Sales</strong> — Flocks → NHE Sales<br>
+      Record jumbo/table/broken egg sales, cull bird sales, bag sales, manure sales.
+      These record NHE revenue.
+    </div></li>
+    <li><div class="step-num">8</div><div class="step-text">
+      <strong>Enter Medicine Usage</strong> — Flocks → Medicine Entry<br>
+      After any treatment or vaccination: medicine name, quantity, cost. Feeds into P&amp;L.
+    </div></li>
+    <li><div class="step-num">9</div><div class="step-text">
+      <strong>Log Vaccination</strong> — Flocks → Vaccination<br>
+      Record each vaccine given. Check the overdue/due-soon banners regularly.
+    </div></li>
+    <li><div class="step-num">10</div><div class="step-text">
+      <strong>Record Hatch Batch Results</strong> — Flocks → Hatch Batches<br>
+      When the hatchery reports back: eggs set, eggs hatched, chicks supplied. Calculates hatchability %.
+    </div></li>
+    <li><div class="step-num">11</div><div class="step-text">
+      <strong>Allocate Electricity Cost</strong> — Electricity → Allocation<br>
+      After entering each electricity bill, allocate % to this flock. Required for P&amp;L electricity cost.
+    </div></li>
+    <li><div class="step-num">12</div><div class="step-text">
+      <strong>Enter Farm Expenses</strong> — Purchase &amp; Payments → Farm Expenses<br>
+      Any miscellaneous costs linked to this flock (repairs, transport, consumables).
+    </div></li>
+    <li><div class="step-num">13</div><div class="step-text">
+      <strong>View Flock P&amp;L</strong> — Reports → Flock P&amp;L (Full)<br>
+      Select this flock. See complete revenue vs cost breakdown. Export as Excel.
+    </div></li>
+  </ol>
+
+  <div class="flow" style="flex-wrap:wrap; gap:4px; margin:16px 0; align-items:center; justify-content:center;">
+    <div class="flow-box">Chick Placement</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box act">Daily Entry</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">HE Dispatch</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">NHE Sales</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box act">Elec. Allocation</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">Flock P&amp;L</div>
+  </div>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 5 – Process Flows</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 5.2 – 5.4 PROCESS FLOWS
+════════════════════════════════════════════════ -->
+<div class="page pb">
+
+  <h3>5.2 Feed Mill Process</h3>
+
+  <ol class="steps">
+    <li><div class="step-num">1</div><div class="step-text"><strong>Add supplier to Parties master</strong> (if new)</div></li>
+    <li><div class="step-num">2</div><div class="step-text"><strong>Add ingredient to Feed Ingredients master</strong> (if new)</div></li>
+    <li><div class="step-num">3</div><div class="step-text"><strong>Enter GRN</strong> — Feed Mill → GRN Entry. Each purchase creates ingredient stock and records the cost.</div></li>
+    <li><div class="step-num">4</div><div class="step-text"><strong>Create formula</strong> (one-time or when recipe changes) — Feed Mill → Formula &amp; Production → Define Formula. Set ingredient ratios.</div></li>
+    <li><div class="step-num">5</div><div class="step-text"><strong>Record production batch</strong> — Feed Mill → Formula &amp; Production → Record Production. Enter kg produced. Ingredient stock auto-reduces.</div></li>
+    <li><div class="step-num">6</div><div class="step-text"><strong>Transfer to farm</strong> — Feed Mill → Feed Transfer. Select feed type, quantity, destination farm.</div></li>
+    <li><div class="step-num">7</div><div class="step-text"><strong>Check stock</strong> — Feed Mill → Stock Status. Verify ingredient and finished feed levels are adequate.</div></li>
+  </ol>
+
+  <div class="flow" style="gap:4px; margin:12px 0; flex-wrap:wrap; justify-content:center;">
+    <div class="flow-box farm">GRN Purchase</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">Ingredient Stock ↑</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box act">Production</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box">Feed Stock ↑</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-box farm">Transfer to Farm</div>
+  </div>
+
+  <h3>5.3 Monthly Closing Checklist</h3>
+  <p>At the end of each month, run through this checklist to ensure all data is complete before reviewing financials:</p>
+
+  <table>
+    <tr><th>#</th><th>Task</th><th>Who</th><th>Where in App</th></tr>
+    <tr><td>1</td><td>All daily records entered for every day of the month</td><td>Site Incharge</td><td>Flocks → Daily Entry</td></tr>
+    <tr><td>2</td><td>All HE dispatches recorded</td><td>Site Manager</td><td>Flocks → HE Dispatch</td></tr>
+    <tr><td>3</td><td>All NHE sales recorded</td><td>Site Manager</td><td>Flocks → NHE Sales</td></tr>
+    <tr><td>4</td><td>All medicine entries recorded</td><td>Site Manager</td><td>Flocks → Medicine Entry</td></tr>
+    <tr><td>5</td><td>Electricity bill entered and allocated to flocks</td><td>Accounts</td><td>Electricity → Bills Entry + Allocation</td></tr>
+    <tr><td>6</td><td>Monthly salary entered for all employees</td><td>Accounts</td><td>Employees → Salary Entry</td></tr>
+    <tr><td>7</td><td>All GRN purchases entered for the month</td><td>Accounts</td><td>Feed Mill → GRN Entry</td></tr>
+    <tr><td>8</td><td>Farm expenses recorded</td><td>Accounts / Site Mgr</td><td>Purchase &amp; Payments → Farm Expenses</td></tr>
+    <tr><td>9</td><td>Pending payments updated (paid/unpaid status)</td><td>Accounts</td><td>Purchase &amp; Payments</td></tr>
+    <tr><td>10</td><td>Cash book entries complete for the month</td><td>Accounts</td><td>Accounts → Cash Book</td></tr>
+    <tr><td>11</td><td>Review Company P&amp;L for the month</td><td>Management</td><td>Reports → Company P&amp;L</td></tr>
+    <tr><td>12</td><td>Check Party Outstanding for collections due</td><td>Accounts</td><td>Reports → Party Outstanding</td></tr>
+    <tr><td>13</td><td>Review GST figures (for CA)</td><td>Accounts</td><td>Reports → GST Summary</td></tr>
+  </table>
+
+  <h3>5.4 Daily Work by Role</h3>
+
+  <h4>Site Incharge — Daily Routine (15–20 minutes)</h4>
+  <ol style="margin-left:20px">
+    <li>Log in → Go to Flocks → Daily Entry</li>
+    <li>Select today's date and your flock</li>
+    <li>Enter one row per shed: deaths, HE eggs (A/B/C), NHE eggs (JE/TE/BE/LE), feed consumed</li>
+    <li>Check Flocks → Vaccination — any <span class="pill pill-red">Overdue</span> or <span class="pill pill-amber">Due Soon</span> alerts?</li>
+    <li>If any treatment given → Flocks → Medicine Entry (log it same day)</li>
+    <li>If vaccination done → Flocks → Vaccination → record it</li>
+  </ol>
+
+  <h4>Site Manager — Weekly Routine</h4>
+  <ol style="margin-left:20px">
+    <li>Verify all incharges have submitted daily records for the week</li>
+    <li>Enter HE Dispatch records for any egg consignments sent this week</li>
+    <li>Enter NHE Sales for any egg/cull bird sales this week</li>
+    <li>Enter Farm Expenses for any misc. spends</li>
+    <li>Review Flock Management → All Flocks — check HD% trends, flag any flock below 65%</li>
+  </ol>
+
+  <h4>Accounts — Monthly Routine</h4>
+  <ol style="margin-left:20px">
+    <li>Enter all GRN receipts (feed purchases) for the month</li>
+    <li>Enter electricity bills and allocate to flocks</li>
+    <li>Enter salary for all employees</li>
+    <li>Update pending payment status (mark as paid when settled)</li>
+    <li>Update cash book with all cash/UPI/cheque transactions</li>
+    <li>Run Company P&amp;L and Party Outstanding reports</li>
+    <li>Send GST Summary to CA for filing review</li>
+  </ol>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 5 – Process Flows</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 6 – ROLE-WISE WORK GUIDE
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <div class="section-header">
+    <div class="num">6</div>
+    <h2>Role-wise Work Guide</h2>
+  </div>
+
+  <h3>6.1 Site Incharge — Complete Guide</h3>
+  <p><span class="role role-incharge">Site Incharge</span> — Restricted to assigned farm only.</p>
+
+  <p><strong>What you can do:</strong></p>
+  <ul>
+    <li>Enter daily production records for your farm's sheds</li>
+    <li>Log medicine and vaccine usage</li>
+    <li>View flock performance for your farm</li>
+    <li>View vaccination schedule and due alerts</li>
+  </ul>
+
+  <p><strong>What you cannot do:</strong></p>
+  <ul>
+    <li>See other farms' data</li>
+    <li>Enter HE dispatch or NHE sales</li>
+    <li>Access financial reports or salary</li>
+    <li>Edit masters</li>
+  </ul>
+
+  <p><strong>Step-by-step: How to enter Daily Records</strong></p>
+  <ol class="steps">
+    <li><div class="step-num">1</div><div class="step-text">Go to <strong>Flocks → Daily Entry</strong></div></li>
+    <li><div class="step-num">2</div><div class="step-text">Click <strong>+ Add Entry</strong> (or the date at the top to select today)</div></li>
+    <li><div class="step-num">3</div><div class="step-text">Select <strong>Date</strong> (should be today), <strong>Flock</strong>, <strong>Shed</strong></div></li>
+    <li><div class="step-num">4</div><div class="step-text">Enter <strong>Male Deaths</strong> and <strong>Female Deaths</strong> for the day (enter 0 if none)</div></li>
+    <li><div class="step-num">5</div><div class="step-text">Enter <strong>HE Eggs</strong>: Grade A count, Grade B count, Grade C count</div></li>
+    <li><div class="step-num">6</div><div class="step-text">Enter <strong>NHE Eggs</strong>: JE (Jumbo), TE (Table), BE (Broken), LE (Leaker) counts</div></li>
+    <li><div class="step-num">7</div><div class="step-text">Enter <strong>Feed Consumed</strong> in kg for this shed</div></li>
+    <li><div class="step-num">8</div><div class="step-text">Add any <strong>Remarks</strong> (unusual observations, health issues, weather)</div></li>
+    <li><div class="step-num">9</div><div class="step-text">Click <strong>Save</strong>. Repeat for each shed.</div></li>
+  </ol>
+
+  <div class="box box-warn">
+    <div class="box-title">⚠ Do This Every Day</div>
+    Enter records for the current day before midnight. Do not bunch multiple days together —
+    the system timestamps each record and late entries affect trend accuracy.
+  </div>
+
+  <h3>6.2 Site Manager — Complete Guide</h3>
+  <p><span class="role role-sitemgr">Site Manager</span> — Access to all farms' production data.</p>
+
+  <p><strong>Key responsibilities in the app:</strong></p>
+  <table>
+    <tr><th>Task</th><th>Frequency</th><th>Location</th></tr>
+    <tr><td>Review all sites' daily entries</td><td>Daily</td><td>Flock Management → All Flocks</td></tr>
+    <tr><td>Enter HE Dispatch when eggs shipped</td><td>Per shipment</td><td>Flocks → HE Dispatch</td></tr>
+    <tr><td>Enter NHE Sales when eggs/birds sold</td><td>Per sale</td><td>Flocks → NHE Sales</td></tr>
+    <tr><td>Enter new flocks</td><td>Each placement</td><td>Flocks → All Flocks → Add</td></tr>
+    <tr><td>Enter egg conversions (HE→NHE)</td><td>As needed</td><td>Flocks → Egg Conversions</td></tr>
+    <tr><td>Enter hatch batch results</td><td>Per hatch</td><td>Flocks → Hatch Batches</td></tr>
+    <tr><td>Record farm expenses</td><td>As incurred</td><td>Purchase → Farm Expenses</td></tr>
+    <tr><td>Review flock performance</td><td>Weekly</td><td>Flock Management → Compare</td></tr>
+    <tr><td>Check vaccination due alerts</td><td>Weekly</td><td>Flocks → Vaccination</td></tr>
+  </table>
+
+  <h3>6.3 Accounts — Complete Guide</h3>
+  <p><span class="role role-accounts">Accounts</span> — Financial data entry and reporting.</p>
+
+  <table>
+    <tr><th>Task</th><th>Frequency</th><th>Location</th></tr>
+    <tr><td>Enter GRN for feed/material purchases</td><td>Per delivery</td><td>Feed Mill → GRN Entry</td></tr>
+    <tr><td>Enter electricity bills</td><td>Monthly</td><td>Electricity → Bills Entry</td></tr>
+    <tr><td>Allocate electricity to flocks</td><td>Monthly</td><td>Electricity → Allocation</td></tr>
+    <tr><td>Enter monthly salary</td><td>Monthly</td><td>Employees → Salary Entry</td></tr>
+    <tr><td>Enter farm expenses</td><td>Weekly</td><td>Purchase → Farm Expenses</td></tr>
+    <tr><td>Update pending payment status</td><td>As payments made</td><td>Purchase → Payments</td></tr>
+    <tr><td>Cash book entries</td><td>Daily</td><td>Accounts → Cash Book</td></tr>
+    <tr><td>Company P&amp;L review</td><td>Monthly</td><td>Reports → Company P&amp;L</td></tr>
+    <tr><td>Party outstanding follow-up</td><td>Monthly</td><td>Reports → Party Outstanding</td></tr>
+    <tr><td>GST summary for CA</td><td>Monthly</td><td>Reports → GST Summary</td></tr>
+    <tr><td>Update masters (parties, ingredients)</td><td>As needed</td><td>Masters → respective page</td></tr>
+  </table>
+
+  <h3>6.4 Management — What to Review</h3>
+  <p><span class="role role-mgmt">Management</span> — Read-only strategic view.</p>
+
+  <table>
+    <tr><th>What to check</th><th>Where</th><th>Frequency</th></tr>
+    <tr><td>Company-wide P&amp;L</td><td>Reports → Company P&amp;L</td><td>Monthly / Quarterly</td></tr>
+    <tr><td>Live flock performance (HD%, mortality)</td><td>Flock Management → All Flocks</td><td>Weekly</td></tr>
+    <tr><td>Flock comparison</td><td>Flock Management → Compare Flocks</td><td>Monthly</td></tr>
+    <tr><td>Outstanding receivables</td><td>Reports → Party Outstanding (Debtors)</td><td>Monthly</td></tr>
+    <tr><td>Overdue payables</td><td>Reports → Party Outstanding (Creditors)</td><td>Monthly</td></tr>
+    <tr><td>Flock-wise P&amp;L</td><td>Reports → Flock P&amp;L (Full)</td><td>Quarterly</td></tr>
+    <tr><td>Cost breakdown trends</td><td>Reports → Cost Analysis</td><td>Monthly</td></tr>
+    <tr><td>Production trends</td><td>Reports → Production Report</td><td>Weekly</td></tr>
+  </table>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 6 – Role-wise Work Guide</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     SECTION 7 – IMPORT/EXPORT + SECTION 8 – FAQ
+════════════════════════════════════════════════ -->
+<div class="page pb">
+  <div class="section-header">
+    <div class="num">7</div>
+    <h2>Import &amp; Export Reference</h2>
+  </div>
+
+  <h3>7.1 Importing Data</h3>
+  <p>Most data entry pages support bulk import via Excel or CSV. Always follow this process:</p>
+  <ol class="steps">
+    <li><div class="step-num">1</div><div class="step-text"><strong>Download the template</strong> — Click "Download Template" or "📄 Template" button on the import page. This gives you the exact column structure.</div></li>
+    <li><div class="step-num">2</div><div class="step-text"><strong>Fill in your data</strong> in Excel. Do NOT change column header names. Do NOT add extra columns.</div></li>
+    <li><div class="step-num">3</div><div class="step-text"><strong>Save as .xlsx or .csv</strong> (both formats accepted).</div></li>
+    <li><div class="step-num">4</div><div class="step-text"><strong>Click Import / Upload</strong> on the page and select your file.</div></li>
+    <li><div class="step-num">5</div><div class="step-text"><strong>Review the preview</strong> — rows in red have errors (e.g., unknown farm name, invalid date). Fix in the file and re-upload.</div></li>
+    <li><div class="step-num">6</div><div class="step-text"><strong>Click Confirm Import</strong> to save. A success count is shown.</div></li>
+  </ol>
+
+  <div class="box box-warn">
+    <div class="box-title">⚠ Common Import Errors</div>
+    <ul style="margin:4px 0 0 16px">
+      <li><strong>Unknown farm:</strong> Farm code/name in the file must exactly match the Masters → Farm/Sites record</li>
+      <li><strong>Unknown flock:</strong> Flock number must match an existing flock</li>
+      <li><strong>Date format:</strong> Use YYYY-MM-DD (e.g., 2025-06-15) or DD/MM/YYYY</li>
+      <li><strong>Numbers:</strong> Do not include ₹ symbols or commas in amount columns</li>
+    </ul>
+  </div>
+
+  <h3>7.2 Exporting Data</h3>
+  <table>
+    <tr><th>Page</th><th>Export Button</th><th>Format</th></tr>
+    <tr><td>All Reports pages</td><td>"Export" or "↓ Excel"</td><td>.xlsx</td></tr>
+    <tr><td>HE Dispatch</td><td>"Export CSV" (top right)</td><td>.csv</td></tr>
+    <tr><td>NHE Sales</td><td>"Export CSV"</td><td>.csv</td></tr>
+    <tr><td>Farm Expenses</td><td>"Export Excel"</td><td>.xlsx</td></tr>
+    <tr><td>Cash Book</td><td>"Export Excel"</td><td>.xlsx</td></tr>
+    <tr><td>All Masters pages</td><td>"Export CSV"</td><td>.csv</td></tr>
+    <tr><td>Electricity History</td><td>"Export CSV"</td><td>.csv</td></tr>
+    <tr><td>Company P&amp;L</td><td>"Export Excel"</td><td>.xlsx (pivot table)</td></tr>
+    <tr><td>Party Outstanding</td><td>"Export Excel"</td><td>.xlsx</td></tr>
+  </table>
+
+  <div class="section-header" style="margin-top:30px">
+    <div class="num">8</div>
+    <h2>Troubleshooting &amp; FAQ</h2>
+  </div>
+
+  <table>
+    <tr><th>Problem</th><th>Solution</th></tr>
+    <tr>
+      <td>I can't see a menu item</td>
+      <td>Your role doesn't have access to it. Contact your Admin to check/change your role.</td>
+    </tr>
+    <tr>
+      <td>My data is missing after I entered it</td>
+      <td>Check that you clicked "Save" and got a green success message. If you navigated away without saving, re-enter the data.</td>
+    </tr>
+    <tr>
+      <td>HD% shows as 0 or wrong value</td>
+      <td>Check that the shed has birds assigned in Admin Centre → Flock–Shed Assignment. The female bird count must be > 0.</td>
+    </tr>
+    <tr>
+      <td>Flock P&amp;L shows no electricity cost</td>
+      <td>Go to Electricity → Allocation and ensure all bills for this flock's period are allocated with % assigned to this flock.</td>
+    </tr>
+    <tr>
+      <td>Import fails with "Unknown farm" error</td>
+      <td>The farm_code or farm_name in your Excel must exactly match what's in Masters → Farm/Sites.</td>
+    </tr>
+    <tr>
+      <td>I edited a farm/site but old data appeared again</td>
+      <td>Ensure you clicked Save and confirmed. If the issue persists, check that no other user is editing the same record.</td>
+    </tr>
+    <tr>
+      <td>Vaccination alerts not showing</td>
+      <td>Check that the Vaccination Schedule master has entries (Masters → Vaccination Schedule). Also check that the flock placement date is correct.</td>
+    </tr>
+    <tr>
+      <td>Can't find a party in HE Dispatch dropdown</td>
+      <td>The hatchery must be added in Masters → Hatcheries (not just Parties). Add it there and it will appear.</td>
+    </tr>
+    <tr>
+      <td>GST figures seem wrong</td>
+      <td>Ensure GST % is entered correctly on each GRN line. For NHE sales, the rates are pre-mapped. Consult your CA for final filing figures.</td>
+    </tr>
+    <tr>
+      <td>App is slow or not loading</td>
+      <td>Check internet connection. Try refreshing the page (F5 / Ctrl+R). If it persists, clear browser cache and try again.</td>
+    </tr>
+    <tr>
+      <td>I need to correct a past daily entry</td>
+      <td>Go to Flocks → Daily Entry, filter to the date, find the row, click the pencil (✏) icon to edit.</td>
+    </tr>
+    <tr>
+      <td>How do I close/retire a flock?</td>
+      <td>Go to Flocks → All Flocks, open the flock, change Status to "Closed" and enter the close date. The flock will still appear in historical reports.</td>
+    </tr>
+  </table>
+
+  <div class="box box-note">
+    <div class="box-title">📞 Support</div>
+    For technical issues with the app, contact your system administrator. For data-related questions (what to enter, which report to use), refer to your department head or this guide.
+  </div>
+
+  <div style="margin-top:30px; padding:16px; background:#f0fdf4; border-radius:8px; text-align:center; border:1px solid #bbf7d0;">
+    <p style="font-size:14px; font-weight:700; color:#14532d; margin-bottom:6px">Naraendra Farms App</p>
+    <p style="font-size:11px; color:#6b7280">Broiler Breeder Farm Management System</p>
+    <p style="font-size:11px; color:#6b7280">Version 2.0 &nbsp;|&nbsp; June 2026 &nbsp;|&nbsp; Confidential – Internal Use Only</p>
+    <p style="font-size:10px; color:#9ca3af; margin-top:8px">
+      To save as PDF: Open in Chrome → Press Ctrl+P → Select "Save as PDF" → Paper size: A4 → Save
+    </p>
+  </div>
+
+  <div class="footer">
+    <span>Naraendra Farms App – User Guide</span>
+    <span>Section 7–8 – Import/Export &amp; FAQ</span>
+  </div>
+</div>
+
+</body>
+</html>
