@@ -155,7 +155,15 @@ export const EmployeeList: React.FC = () => {
   })
 
   const bulkDelMut = useMutation({
-    mutationFn: async (ids: string[]) => { const{error}=await supabase.from('employees').delete().in('id',ids); if(error)throw error },
+    mutationFn: async (ids: string[]) => {
+      // Delete linked records first (FK constraints without CASCADE)
+      const { error: e1 } = await supabase.from('salary_monthly').delete().in('employee_id', ids)
+      if (e1) throw e1
+      const { error: e2 } = await supabase.from('bonus').delete().in('employee_id', ids)
+      if (e2) throw e2
+      const { error: e3 } = await supabase.from('employees').delete().in('id', ids)
+      if (e3) throw e3
+    },
     onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({queryKey:['employees']}); setSel(new Set()); setBulkConfirm(false) },
     onError: (e:any) => { toast.error(e.message); setBulkConfirm(false) }
   })
