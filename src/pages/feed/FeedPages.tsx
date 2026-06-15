@@ -24,6 +24,10 @@ export const GRNEntry: React.FC = () => {
   const [importing, setImporting] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
 
+  // PO alert state
+  const [openPOs, setOpenPOs] = useState<any[]>([])
+  const [poLoading, setPoLoading] = useState(false)
+
   // Filters
   const [fFarm,    setFFarm]    = useState('')
   const [fParties, setFParties] = useState<string[]>([])
@@ -103,8 +107,25 @@ export const GRNEntry: React.FC = () => {
     vehicle_no: form.vehicle_no || null, remarks: form.remarks || null
   })
 
+  const fetchOpenPOs = async (ingredientId: string) => {
+    if (!ingredientId) { setOpenPOs([]); return }
+    const ingr = ingredients?.find((i: any) => i.id === ingredientId)
+    if (!ingr) { setOpenPOs([]); return }
+    setPoLoading(true)
+    try {
+      const { data } = await supabase.from('purchase_orders')
+        .select('id, po_no, po_date, vendor_name, item_name, quantity, material_status')
+        .ilike('item_name', `%${ingr.name}%`)
+        .eq('material_status', 'Pending')
+        .order('po_date', { ascending: false })
+      setOpenPOs(data ?? [])
+    } catch { setOpenPOs([]) }
+    finally { setPoLoading(false) }
+  }
+
   const openAdd = () => {
     setEditing(null)
+    setOpenPOs([])
     setForm({ grn_no:'', grn_date:today(), farm_id:'', party_id:'', invoice_no:'',
       invoice_date:today(), ingredient_id:'', item_name:'', qty:'', unit:'kg',
       bags:'', price_per_unit:'', basic_amount:'', gst_pct:'0', total_amount:'',
@@ -113,6 +134,7 @@ export const GRNEntry: React.FC = () => {
   }
 
   const openEdit = (g: any) => {
+    setOpenPOs([])
     setEditing(g)
     setForm({
       grn_no: g.grn_no ?? '', grn_date: g.grn_date ?? today(),
@@ -336,10 +358,31 @@ export const GRNEntry: React.FC = () => {
           </FormRow>
           <FormRow>
             <Select label="Ingredient" placeholder="— Select from master —" options={ingrOptions}
-              value={form.ingredient_id} onChange={e => s('ingredient_id', e.target.value)} />
+              value={form.ingredient_id} onChange={e => { s('ingredient_id', e.target.value); fetchOpenPOs(e.target.value) }} />
             <Input label="Item Name (if not in master)" value={form.item_name}
               onChange={e => s('item_name', e.target.value)} hint="Use if ingredient not in master" />
           </FormRow>
+          {/* PO Alert */}
+          {poLoading && <p className="text-xs text-blue-500">Checking open POs…</p>}
+          {!poLoading && openPOs.length > 0 && (() => {
+            const totalOrdered = openPOs.reduce((s: number, po: any) => s + (po.quantity ?? 0), 0)
+            const grnQty = parseFloat(form.qty) || 0
+            const vendors = [...new Set(openPOs.map((po: any) => po.vendor_name).filter(Boolean))]
+            const latestDate = openPOs[0]?.po_date ?? ''
+            return (
+              <div className="space-y-2">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800">
+                  📋 Open PO: <strong>{totalOrdered.toLocaleString('en-IN')} kg</strong> ordered (Pending) from{' '}
+                  {vendors.join(', ')}{latestDate ? ` (PO date: ${latestDate})` : ''}
+                </div>
+                {grnQty > totalOrdered && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800">
+                    ⚠ Quantity exceeds PO balance by <strong>{(grnQty - totalOrdered).toLocaleString('en-IN')} kg</strong>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
           <Divider label="Quantity & Price" />
           <FormRow cols={4}>
             <Input label="Qty" type="number" step="0.001" value={form.qty} onChange={e => s('qty', e.target.value)} />

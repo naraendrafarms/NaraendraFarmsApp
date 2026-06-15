@@ -498,6 +498,59 @@ export const SalaryEntryPage: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
 
+  // ⚡ Quick Generate state
+  const [genOpen, setGenOpen] = useState(false)
+  const [genMonth, setGenMonth] = useState(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+  })
+  const [genLoading, setGenLoading] = useState(false)
+  const [genResult, setGenResult] = useState<{generated:number;skipped:number}|null>(null)
+
+  const handleGenerate = async () => {
+    if (!genMonth) { toast.error('Pick a month first'); return }
+    setGenLoading(true); setGenResult(null)
+    try {
+      const monthStr = genMonth + '-01'
+      const { data: emps, error: empErr } = await supabase.from('employees')
+        .select('id,base_salary').eq('is_active', true)
+      if (empErr) throw empErr
+      if (!emps?.length) { toast.error('No active employees found'); return }
+      const { data: existing, error: exErr } = await supabase.from('salary_monthly')
+        .select('employee_id').eq('month', monthStr)
+      if (exErr) throw exErr
+      const existingIds = new Set((existing ?? []).map((r: any) => r.employee_id))
+      const toInsert = (emps ?? []).filter((e: any) => !existingIds.has(e.id)).map((e: any) => {
+        const base = e.base_salary ?? 0
+        return {
+          employee_id: e.id,
+          month: monthStr,
+          basic_salary: base,
+          earned_salary: base,
+          gross_salary: base,
+          advance: 0,
+          net_salary: base,
+          esi_employee: 0, esi_employer: 0,
+          pf_employee: 0, pf_employer: 0,
+          hra: 0, tds: 0, hold: 0, arrears: 0, ot_bonus: 0, pt: 0,
+          payment_mode: 'Cash', is_paid: false,
+        }
+      })
+      const skipped = existingIds.size
+      if (toInsert.length === 0) {
+        setGenResult({ generated: 0, skipped })
+        toast.success(`All ${skipped} records already exist`)
+        return
+      }
+      const { error: insErr } = await supabase.from('salary_monthly').insert(toInsert)
+      if (insErr) throw insErr
+      setGenResult({ generated: toInsert.length, skipped })
+      toast.success(`Generated ${toInsert.length} records`)
+      qc.invalidateQueries({ queryKey: ['salary_monthly_detail'] })
+      qc.invalidateQueries({ queryKey: ['salary_fy_summary'] })
+    } catch (e: any) { toast.error(e.message) }
+    finally { setGenLoading(false) }
+  }
+
   const blankForm = () => ({
     employee_id:'', month:'', days_worked:'',
     basic_salary:'', hra:'0', advance:'0', tds:'0', hold:'0', arrears:'0', ot_bonus:'0',
@@ -710,6 +763,34 @@ export const SalaryEntryPage: React.FC = () => {
           </div>
         }
       />
+
+      {/* ⚡ Quick Generate Panel */}
+      <div className="border border-green-200 rounded-lg overflow-hidden">
+        <button onClick={()=>{setGenOpen(o=>!o);setGenResult(null)}}
+          className="w-full flex items-center justify-between px-4 py-3 bg-green-50 hover:bg-green-100 transition-colors text-left">
+          <span className="font-semibold text-green-800 text-sm">⚡ Quick Generate — Month-End Salaries</span>
+          <span className="text-green-600 text-xs">{genOpen ? '▲ Collapse' : '▼ Expand'}</span>
+        </button>
+        {genOpen && (
+          <div className="px-4 py-4 bg-white flex flex-wrap gap-3 items-end">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
+              <input type="month" value={genMonth} onChange={e=>setGenMonth(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"/>
+            </div>
+            <Button onClick={handleGenerate} loading={genLoading}
+              className="!bg-green-600 hover:!bg-green-700 !text-white">
+              Generate All Salaries
+            </Button>
+            {genResult && (
+              <div className="text-sm text-gray-700 bg-green-50 border border-green-200 rounded px-3 py-2">
+                Generated <strong>{genResult.generated}</strong> records,{' '}
+                <strong>{genResult.skipped}</strong> already existed (skipped)
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="Financial Year" options={FY_OPTIONS} value={selectedFY} onChange={e=>{setSelectedFY(e.target.value);setSelectedMonth('')}} className="w-40"/>
