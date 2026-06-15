@@ -14,6 +14,9 @@ import {
   Package, Truck, FlaskConical, ShoppingCart, Pencil, Trash2, X, Check,
   Upload, Download, Plus
 } from 'lucide-react'
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer
+} from 'recharts'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +36,17 @@ function pctFmt(v: number | null | undefined, decimals = 1) {
 }
 
 const PAGE_SIZE = 50
+
+function daysSince(dateStr: string): number {
+  const d = new Date(dateStr)
+  const now = new Date()
+  return Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function fmtChartDate(dateStr: string): string {
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
 
 // ── SHARED: Bulk select helpers ───────────────────────────────────────────────
 
@@ -179,6 +193,47 @@ export const FlockDashboard: React.FC = () => {
     enabled: !!flocks && flocks.length > 0
   })
 
+  // First egg date per flock (earliest record_date where HE eggs > 0)
+  const { data: firstEggRows } = useQuery({
+    queryKey: ['flock_first_egg'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('daily_records')
+        .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
+        .gt('he_eggs_a', 0)
+        .order('record_date', { ascending: true })
+      // Also try he_eggs_b, he_eggs_c — we need rows where any of them > 0
+      // Supabase doesn't support OR on gt easily, so fetch all with he_eggs_a>0 first
+      // We'll do a broader query below
+      return data ?? []
+    },
+    enabled: !!flocks && flocks.length > 0
+  })
+
+  // Broader first egg query covering all egg columns
+  const { data: firstEggRowsAll } = useQuery({
+    queryKey: ['flock_first_egg_all'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('daily_records')
+        .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
+        .order('record_date', { ascending: true })
+      return (data ?? []).filter((r: any) =>
+        ((r.he_eggs_a ?? 0) + (r.he_eggs_b ?? 0) + (r.he_eggs_c ?? 0)) > 0
+      )
+    },
+    enabled: !!flocks && flocks.length > 0
+  })
+
+  // First egg date per flock
+  const firstEggByFlock = React.useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const r of (firstEggRowsAll ?? [])) {
+      if (!map[r.flock_id]) map[r.flock_id] = r.record_date
+    }
+    return map
+  }, [firstEggRowsAll])
+
   // Current bird counts from shed_allocations (latest per flock+shed)
   const { data: allocations } = useQuery({
     queryKey: ['shed_alloc_latest'],
@@ -310,6 +365,10 @@ export const FlockDashboard: React.FC = () => {
           const hdColor = live?.hdPct == null ? '' : live.hdPct >= 0.80 ? 'text-green-600' : live.hdPct >= 0.65 ? 'text-amber-600' : 'text-red-600'
           const fcr = fcrByFlock[f.id]
           const costPerBird = f.chick_rate != null ? f.chick_rate : null
+          const weeksOfLife = f.placement_date ? Math.floor(daysSince(f.placement_date) / 7) : null
+          const firstEgg = firstEggByFlock[f.id]
+          const weeksOfLaying = firstEgg ? Math.floor(daysSince(firstEgg) / 7) : null
+          const readyToShift = f.status === 'rearing' && weeksOfLife != null && weeksOfLife >= 19
 
           return (
             <div
@@ -322,7 +381,14 @@ export const FlockDashboard: React.FC = () => {
                   <p className="font-bold text-gray-900 text-base">Flock {f.flock_no}</p>
                   <p className="text-sm text-gray-500">{f.breed ?? '—'}</p>
                 </div>
-                <Badge color={statusBadge(f.status)}>{f.status}</Badge>
+                <div className="flex flex-col items-end gap-1">
+                  <Badge color={statusBadge(f.status)}>{f.status}</Badge>
+                  {readyToShift && (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300 rounded-full px-2 py-0.5">
+                      ⚠ Ready to shift
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-1.5 text-sm">
@@ -330,6 +396,14 @@ export const FlockDashboard: React.FC = () => {
                   <span className="text-gray-500">Placement</span>
                   <span className="font-medium">{fmtDate(f.placement_date)}</span>
                 </div>
+                {weeksOfLife != null && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Age</span>
+                    <span className="font-medium text-xs text-indigo-700">
+                      Week {weeksOfLife} of life{weeksOfLaying != null ? ` · Week ${weeksOfLaying} of laying` : ''}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-500">Placed</span>
                   <span className="font-medium" title={`Paid: ${paidF}F + ${paidM}M · Free: ${freeF}F + ${freeM}M`}>
@@ -481,6 +555,59 @@ export const FlockDetail: React.FC = () => {
 
 // ── OVERVIEW TAB ──────────────────────────────────────────────────────────────
 
+const HDTrendChart: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+  const thirtyStr = thirtyDaysAgo.toISOString().slice(0, 10)
+
+  const { data: trendData } = useQuery({
+    queryKey: ['flock_hd_trend', flockId, thirtyStr],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('daily_records')
+        .select('record_date,he_eggs_a,he_eggs_b,he_eggs_c,nhe_je,nhe_te,nhe_be,female_alive')
+        .eq('flock_id', flockId)
+        .gte('record_date', thirtyStr)
+        .order('record_date')
+      return data ?? []
+    }
+  })
+
+  const chartData = React.useMemo(() => {
+    if (!trendData) return []
+    return trendData
+      .map((r: any) => {
+        const totalEggs = (r.he_eggs_a ?? 0) + (r.he_eggs_b ?? 0) + (r.he_eggs_c ?? 0) +
+          (r.nhe_je ?? 0) + (r.nhe_te ?? 0) + (r.nhe_be ?? 0)
+        const female = r.female_alive ?? 0
+        const hd = female > 0 ? parseFloat(((totalEggs / female) * 100).toFixed(1)) : null
+        return { date: fmtChartDate(r.record_date), hd }
+      })
+      .filter((r: any) => r.hd != null)
+  }, [trendData])
+
+  if (!chartData.length) return null
+
+  return (
+    <Card>
+      <div className="p-4 pb-0">
+        <p className="font-semibold text-gray-800 text-sm">HD% Trend — Last 30 Days</p>
+      </div>
+      <div className="p-4" style={{ height: 260 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+            <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+            <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
+            <Tooltip formatter={(v: number) => [`${v}%`, 'HD%']} />
+            <ReferenceLine y={80} stroke="#16a34a" strokeDasharray="4 4" label={{ value: '80%', position: 'right', fontSize: 10, fill: '#16a34a' }} />
+            <ReferenceLine y={65} stroke="#dc2626" strokeDasharray="4 4" label={{ value: '65%', position: 'right', fontSize: 10, fill: '#dc2626' }} />
+            <Line type="monotone" dataKey="hd" stroke="#6366f1" strokeWidth={2} dot={false} name="HD%" />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </Card>
+  )
+}
+
 const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
   const { data: daily } = useQuery({
     queryKey: ['flock_daily_all', flock.id],
@@ -593,6 +720,8 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
           </Table>
         </Card>
       )}
+
+      <HDTrendChart flockId={flock.id} />
     </div>
   )
 }
