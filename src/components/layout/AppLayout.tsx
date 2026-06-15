@@ -93,13 +93,23 @@ const NAV: NavItem[] = [
   {
     label: 'Reports', icon: <BarChart2 size={18}/>,
     children: [
-      { label: 'Flock P&L (Full)',    to: '/reports/pl' },
+      { label: 'Flock P&L (Full)',      to: '/reports/pl' },
+      { label: 'Company P&L',           to: '/reports/company-pl' },
+      { label: 'Party Outstanding',     to: '/reports/party-outstanding' },
+      { label: 'GST Summary',           to: '/reports/gst' },
       { label: 'Hatchability (Legacy)', to: '/hatchability' },
-      { label: 'Production Report',  to: '/reports/production' },
-      { label: 'Feed Cost Report',   to: '/reports/feed' },
-      { label: 'Salary Report',      to: '/reports/salary' },
-      { label: 'Cost Analysis',      to: '/reports/costs' },
-      { label: 'Export to Excel',    to: '/reports/export' },
+      { label: 'Production Report',     to: '/reports/production' },
+      { label: 'Feed Cost Report',      to: '/reports/feed' },
+      { label: 'Salary Report',         to: '/reports/salary' },
+      { label: 'Cost Analysis',         to: '/reports/costs' },
+      { label: 'Export to Excel',       to: '/reports/export' },
+    ]
+  },
+  {
+    label: 'Accounts', icon: <BarChart2 size={18}/>,
+    children: [
+      { label: 'Cash Book', to: '/accounts/cash-book' },
+      { label: 'Pending Payments', to: '/pending-payments' },
     ]
   },
   {
