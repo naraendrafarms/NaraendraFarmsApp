@@ -156,9 +156,13 @@ export const EmployeeList: React.FC = () => {
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      // CASCADE is set on DB (migration 054) — single delete cascades salary_monthly + bonus
-      const { error } = await supabase.from('employees').delete().in('id', ids)
-      if (error) throw new Error(error.message)
+      // Batch in chunks of 100 to avoid Supabase URL length limits
+      const CHUNK = 100
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK)
+        const { error } = await supabase.from('employees').delete().in('id', chunk)
+        if (error) throw new Error(error.message)
+      }
     },
     onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({queryKey:['employees']}); setSel(new Set()); setBulkConfirm(false) },
     onError: (e:any) => { toast.error(e.message); setBulkConfirm(false) }

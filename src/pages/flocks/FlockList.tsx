@@ -170,8 +170,11 @@ export const FlockList: React.FC = () => {
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      const { error } = await supabase.from('flocks').delete().in('id', ids)
-      if (error) throw error
+      const CHUNK = 100
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const { error } = await supabase.from('flocks').delete().in('id', ids.slice(i, i + CHUNK))
+        if (error) throw error
+      }
     },
     onSuccess: () => {
       toast.success(`${sel.size} flock(s) deleted`)
