@@ -65,8 +65,11 @@ const NAV: NavItem[] = [
       { label: 'Bonus',           to: '/employees/bonus' },
       { label: 'ESI / PF Report', to: '/employees/esi-pf' },
       { label: 'Payroll Summary', to: '/employees/payroll-summary' },
-      { label: 'Attendance Register', to: '/employees/attendance' },
-      { label: 'Payslip Generator',   to: '/employees/payslip' },
+      { label: 'Daily Attendance',     to: '/employees/attendance-daily' },
+      { label: 'Month Attendance',     to: '/employees/attendance-month' },
+      { label: 'Attendance Register',  to: '/employees/attendance' },
+      { label: 'Advances',             to: '/employees/advances' },
+      { label: 'Payslip Generator',    to: '/employees/payslip' },
     ]
   },
   {
