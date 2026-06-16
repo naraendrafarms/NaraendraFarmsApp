@@ -132,5 +132,6 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.SUPABASE_MGMT_TOKEN }}" \
             -H "Content-Type: application/json" && echo "Services restarted"
       - name: Import NBF Excel PO data (all FY)
+        continue-on-error: true
         run: python3 scripts/import_nbf_excel.py
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
