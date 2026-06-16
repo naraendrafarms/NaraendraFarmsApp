@@ -609,6 +609,30 @@ export const SalaryEntryPage: React.FC = () => {
     }
   })
 
+  const autoFillFromAttendance = async () => {
+    if (!form.employee_id || !form.month) { toast.error('Select employee and month first'); return }
+    const [yr, mn] = form.month.split('-')
+    const daysInMonth = new Date(parseInt(yr), parseInt(mn), 0).getDate()
+    const start = `${form.month}-01`
+    const end = `${form.month}-${String(daysInMonth).padStart(2,'0')}`
+    const { data: att, error: attErr } = await supabase.from('attendance_daily')
+      .select('status,ot_hours').eq('employee_id', form.employee_id)
+      .gte('attendance_date', start).lte('attendance_date', end)
+    if (attErr) { toast.error(attErr.message); return }
+    const days = (att ?? []).reduce((s, r: any) =>
+      s + (r.status === 'P' ? 1 : r.status === 'H' ? 0.5 : r.status === 'OT' ? 1 : 0), 0)
+    const otHours = (att ?? []).reduce((s, r: any) => s + (r.ot_hours ?? 0), 0)
+
+    const { data: adv, error: advErr } = await supabase.from('employee_advances')
+      .select('amount').eq('employee_id', form.employee_id).eq('salary_month', form.month)
+    if (advErr) { toast.error(advErr.message); return }
+    const totalAdv = (adv ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+
+    setForm(f => ({ ...f, days_worked: String(days), advance: String(totalAdv) }))
+    setTimeout(() => calcPayroll(), 50)
+    toast.success(`Auto-filled: ${days} days worked${otHours > 0 ? `, ${otHours}h OT` : ''}, ₹${totalAdv.toLocaleString('en-IN')} advance`)
+  }
+
   const calcPayroll = () => {
     const emp = employees?.find((e:any) => e.id === form.employee_id)
     const basic = parseFloat(form.basic_salary) || parseFloat(emp?.base_salary) || 0
@@ -912,6 +936,11 @@ export const SalaryEntryPage: React.FC = () => {
           <FormRow>
             <Input label="Month" required type="month" value={form.month} onChange={e=>s('month',e.target.value)}/>
             <Input label="Days Worked" type="number" value={form.days_worked} onChange={e=>s('days_worked',e.target.value)}/>
+            <div className="flex items-end">
+              <Button variant="secondary" size="sm" onClick={autoFillFromAttendance} title="Auto-fill days worked and advance from attendance records">
+                📋 Auto-fill Attendance
+              </Button>
+            </div>
           </FormRow>
           <Divider label="Earnings"/>
           <FormRow>

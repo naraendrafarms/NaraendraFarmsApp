@@ -22,7 +22,7 @@ const STATUS_COLORS: Record<string, string> = {
   OT: 'bg-blue-100 text-blue-800 border-blue-300',
 }
 const STATUS_OPTIONS = ['P','A','H','WO','OT']
-const STATUS_LABELS: Record<string, string> = { P:'Present', A:'Absent', H:'Half Day', WO:'Week Off', OT:'Overtime' }
+const STATUS_LABELS: Record<string, string> = { P:'Present', A:'Absent', H:'Half Day', WO:'Week Off', OT:'Full OT Day' }
 
 function daysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate()
@@ -37,6 +37,7 @@ export const DailyAttendancePage: React.FC = () => {
   const [date, setDate] = useState(todayStr())
   const [farmId, setFarmId] = useState('')
   const [localStatus, setLocalStatus] = useState<Record<string, string>>({})
+  const [localOT, setLocalOT] = useState<Record<string, number>>({})
   const [saving, setSaving] = useState(false)
 
   const { data: farms } = useQuery({
@@ -65,7 +66,7 @@ export const DailyAttendancePage: React.FC = () => {
     queryFn: async () => {
       if (!empIds.length) return []
       const { data } = await supabase.from('attendance_daily')
-        .select('employee_id, status')
+        .select('employee_id, status, ot_hours')
         .in('employee_id', empIds)
         .eq('attendance_date', date)
       return data ?? []
@@ -76,12 +77,17 @@ export const DailyAttendancePage: React.FC = () => {
   // Merge DB records into localStatus when data loads
   React.useEffect(() => {
     const map: Record<string, string> = {}
-    for (const r of (existing ?? [])) map[r.employee_id] = r.status
+    const otMap: Record<string, number> = {}
+    for (const r of (existing ?? [])) {
+      map[r.employee_id] = r.status
+      if (r.ot_hours) otMap[r.employee_id] = r.ot_hours
+    }
     // Default to 'P' for any employee without a record
     for (const e of (employees ?? [])) {
       if (!map[e.id]) map[e.id] = 'P'
     }
     setLocalStatus(map)
+    setLocalOT(otMap)
   }, [existing, employees])
 
   const markAll = (status: string) => {
@@ -99,6 +105,7 @@ export const DailyAttendancePage: React.FC = () => {
         farm_id: farmId || e.farm_id,
         attendance_date: date,
         status: localStatus[e.id] ?? 'P',
+        ot_hours: localOT[e.id] ?? 0,
       }))
       const { error } = await supabase.from('attendance_daily').upsert(rows, { onConflict: 'employee_id,attendance_date' })
       if (error) throw error
@@ -162,11 +169,13 @@ export const DailyAttendancePage: React.FC = () => {
                   <Th>Emp ID</Th>
                   <Th>Designation</Th>
                   {STATUS_OPTIONS.map(s => <Th key={s}>{s}</Th>)}
+                  <Th>OT Hrs</Th>
                 </tr>
               </thead>
               <tbody>
                 {employees.map((e: any) => {
                   const cur = localStatus[e.id] ?? 'P'
+                  const otVal = localOT[e.id] ?? 0
                   return (
                     <tr key={e.id} className={`hover:bg-gray-50 ${cur === 'A' ? 'bg-red-50' : cur === 'H' ? 'bg-amber-50' : ''}`}>
                       <Td className="font-medium">{e.name}</Td>
@@ -180,6 +189,15 @@ export const DailyAttendancePage: React.FC = () => {
                           </button>
                         </Td>
                       ))}
+                      <Td>
+                        <input type="number" min="0" max="12" step="0.5"
+                          value={otVal || ''}
+                          placeholder="0"
+                          onChange={e2 => setLocalOT(prev => ({ ...prev, [e.id]: parseFloat(e2.target.value) || 0 }))}
+                          className="w-14 border border-gray-300 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          title="Overtime hours (in addition to status)"
+                        />
+                      </Td>
                     </tr>
                   )
                 })}
@@ -243,7 +261,7 @@ export const MonthAttendancePage: React.FC = () => {
       const start = `${monthStr}-01`
       const end = `${monthStr}-${String(numDays).padStart(2, '0')}`
       const { data } = await supabase.from('attendance_daily')
-        .select('employee_id, attendance_date, status')
+        .select('employee_id, attendance_date, status, ot_hours')
         .in('employee_id', empIds)
         .gte('attendance_date', start)
         .lte('attendance_date', end)
