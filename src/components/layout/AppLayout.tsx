@@ -52,6 +52,7 @@ const NAV: NavItem[] = [
       { label: 'Bills Entry', to: '/electricity' },
       { label: 'Allocation',  to: '/electricity/allocation' },
       { label: 'History',     to: '/electricity/history' },
+      { label: 'Analysis',    to: '/electricity/analysis' },
     ]
   },
   {

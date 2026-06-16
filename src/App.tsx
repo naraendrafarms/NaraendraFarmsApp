@@ -121,6 +121,7 @@ export const App: React.FC = () => {
             <Route path="electricity" element={<ElectricityEntry />} />
             <Route path="electricity/allocation" element={<ElectricityEntry />} />
             <Route path="electricity/history" element={<ElectricityEntry />} />
+            <Route path="electricity/analysis" element={<ElectricityEntry />} />
 
             {/* Employees */}
             <Route path="employees" element={<EmployeeList />} />
