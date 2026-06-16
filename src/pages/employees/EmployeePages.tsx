@@ -512,7 +512,7 @@ export const SalaryEntryPage: React.FC = () => {
     try {
       const monthStr = genMonth + '-01'
       const { data: emps, error: empErr } = await supabase.from('employees')
-        .select('id,base_salary').eq('is_active', true)
+        .select('id,base_salary,esi_applicable,pf_applicable,pt_applicable').eq('is_active', true)
       if (empErr) throw empErr
       if (!emps?.length) { toast.error('No active employees found'); return }
       const { data: existing, error: exErr } = await supabase.from('salary_monthly')
@@ -521,17 +521,24 @@ export const SalaryEntryPage: React.FC = () => {
       const existingIds = new Set((existing ?? []).map((r: any) => r.employee_id))
       const toInsert = (emps ?? []).filter((e: any) => !existingIds.has(e.id)).map((e: any) => {
         const base = e.base_salary ?? 0
+        const gross = base
+        const esi_emp = e.esi_applicable && gross <= 21000 ? Math.round(gross * 0.0075) : 0
+        const esi_er  = e.esi_applicable && gross <= 21000 ? Math.round(gross * 0.0325) : 0
+        const pf_emp  = e.pf_applicable ? Math.round(base * 0.12) : 0
+        const pf_er   = e.pf_applicable ? Math.round(base * 0.12) : 0
+        const pt      = e.pt_applicable ? (gross <= 15000 ? 0 : gross <= 20000 ? 150 : 200) : 0
+        const net     = gross - esi_emp - pf_emp - pt
         return {
           employee_id: e.id,
           month: monthStr,
           basic_salary: base,
-          earned_salary: base,
-          gross_salary: base,
+          earned_salary: gross,
+          gross_salary: gross,
           advance: 0,
-          net_salary: base,
-          esi_employee: 0, esi_employer: 0,
-          pf_employee: 0, pf_employer: 0,
-          hra: 0, tds: 0, hold: 0, arrears: 0, ot_bonus: 0, pt: 0,
+          net_salary: net,
+          esi_employee: esi_emp, esi_employer: esi_er,
+          pf_employee: pf_emp, pf_employer: pf_er,
+          hra: 0, tds: 0, hold: 0, arrears: 0, ot_bonus: 0, pt,
           payment_mode: 'Cash', is_paid: false,
         }
       })
@@ -633,17 +640,27 @@ export const SalaryEntryPage: React.FC = () => {
     toast.success(`Auto-filled: ${days} days worked${otHours > 0 ? `, ${otHours}h OT` : ''}, ₹${totalAdv.toLocaleString('en-IN')} advance`)
   }
 
+  const calcPT = (gross: number, ptApplicable: boolean, month?: string): number => {
+    if (!ptApplicable) return 0
+    // PT slab (Telangana/AP): ≤15000→0, ≤20000→150, >20000→200
+    // February is same rate but annual max ₹2500 (handled by employer)
+    if (gross <= 15000) return 0
+    if (gross <= 20000) return 150
+    return 200
+  }
+
   const calcPayroll = () => {
     const emp = employees?.find((e:any) => e.id === form.employee_id)
     const basic = parseFloat(form.basic_salary) || parseFloat(emp?.base_salary) || 0
     const hra = parseFloat(form.hra) || 0
     const gross = basic + hra + (parseFloat(form.arrears)||0) + (parseFloat(form.ot_bonus)||0)
-    const esi_emp = emp?.esi_applicable ? Math.round(gross * 0.0075) : 0
+    const esi_emp = (emp?.esi_applicable && gross <= 21000) ? Math.round(gross * 0.0075) : 0
     const pf_emp = emp?.pf_applicable ? Math.round(basic * 0.12) : 0
     const pf_er = emp?.pf_applicable ? Math.round(basic * 0.12) : 0
-    const esi_er = emp?.esi_applicable ? Math.round(gross * 0.0325) : 0
-    const net = gross - esi_emp - pf_emp - (parseFloat(form.pt)||0) - (parseFloat(form.advance)||0) - (parseFloat(form.tds)||0) - (parseFloat(form.hold)||0)
-    setForm(f => ({...f, gross_salary: gross.toFixed(0), esi_employee: esi_emp.toFixed(2), esi_employer: esi_er.toFixed(2), pf_employee: pf_emp.toFixed(2), pf_employer: pf_er.toFixed(2), net_salary: net.toFixed(0)}))
+    const esi_er = (emp?.esi_applicable && gross <= 21000) ? Math.round(gross * 0.0325) : 0
+    const pt = calcPT(gross, emp?.pt_applicable ?? false, form.month)
+    const net = gross - esi_emp - pf_emp - pt - (parseFloat(form.advance)||0) - (parseFloat(form.tds)||0) - (parseFloat(form.hold)||0)
+    setForm(f => ({...f, gross_salary: gross.toFixed(0), esi_employee: esi_emp.toFixed(2), esi_employer: esi_er.toFixed(2), pf_employee: pf_emp.toFixed(2), pf_employer: pf_er.toFixed(2), pt: pt.toFixed(0), net_salary: net.toFixed(0)}))
   }
 
   const openEditEntry = (rec: any) => {
