@@ -139,6 +139,10 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
         <Input label="Supplier / Source"
           value={form.supplier} onChange={e => set('supplier', e.target.value)} />
       </FormRow>
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save Flock</Button>
+      </div>
     </div>
   )
 }
@@ -421,13 +425,7 @@ export const FlockList: React.FC = () => {
       </Modal>
 
       {/* Add flock modal */}
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="Add New Flock" size="lg"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
-            <Button>Save Flock</Button>
-          </>
-        }>
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Add New Flock" size="lg">
         <FlockForm onClose={() => setShowForm(false)} onSuccess={() => setShowForm(false)} />
       </Modal>
 
