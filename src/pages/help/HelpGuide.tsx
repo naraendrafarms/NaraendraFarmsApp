@@ -2,11 +2,31 @@ import React, { useState } from 'react'
 import {
   BookOpen, Bird, Calendar, ArrowRightLeft, ShoppingCart, Users, Zap,
   Package, FileSpreadsheet, BarChart2, Settings, ChevronRight, ChevronDown,
-  AlertCircle, CheckCircle, Info, ArrowRight, Hash, MapPin, CreditCard
+  AlertCircle, CheckCircle, Info, ArrowRight, Hash, MapPin, CreditCard,
+  Sparkles, Clock
 } from 'lucide-react'
 
 // ── last updated ───────────────────────────────────────────────────────────────
-const LAST_UPDATED = '2026-06-18'
+const LAST_UPDATED = '2026-06-17'
+
+// ── changelog ─────────────────────────────────────────────────────────────────
+interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
+const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-06-17', tag: 'New',      text: 'Chick Placements tab added to each flock — record staggered chick intake per shed per day. Total Placed updates automatically.' },
+  { date: '2026-06-17', tag: 'New',      text: 'Invoice Register added under Accounts — track all supplier invoices (chick, feed, medicine, electricity). Link to flock or farm. Mark payment. Import/Export Excel.' },
+  { date: '2026-06-17', tag: 'New',      text: 'Chick invoice fields added to flock creation form — auto-creates an invoice record in Invoice Register.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Daily Entry: Egg Collection fields (Total Eggs, HE, grades, JE/TE/BE) are now hidden during Rearing phase and only appear from Laying Start Date.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Daily Entry: When a shed has a Placement batch for the selected date, opening bird count auto-fills from the batch.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Payments & Bank Ledger: Checkboxes, bulk delete, edit, import, and export added.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Vaccination Schedule: Full CRUD — add, edit, delete, bulk delete.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Item Master renamed from "Feed Ingredients" in sidebar.' },
+  { date: '2026-06-17', tag: 'Fix',      text: 'Flock creation Save button was disconnected — fixed.' },
+  { date: '2026-06-17', tag: 'Fix',      text: 'Edit flock form now loads correct data (rearing farm, laying farm, chick rate, paid counts).' },
+  { date: '2026-06-17', tag: 'Fix',      text: 'Laying Site now shows correctly in Flock List (database view updated).' },
+  { date: '2026-06-17', tag: 'Fix',      text: 'GRN table name fixed across all pages — was incorrectly using "grn_entries" internally.' },
+  { date: '2026-06-17', tag: 'Fix',      text: 'Dashboard low-stock alert now reads correct tables and columns.' },
+  { date: '2026-06-17', tag: 'Fix',      text: 'All mutations now show error toasts when something fails (previously silent).' },
+]
 
 // ── types ──────────────────────────────────────────────────────────────────────
 interface Step { text: string; note?: string; warning?: string }
@@ -23,6 +43,32 @@ interface Section {
 
 // ── content ────────────────────────────────────────────────────────────────────
 const SECTIONS: Section[] = [
+  // ── CHANGELOG / AUDIT ─────────────────────────────────────────────────────────
+  {
+    id: 'changelog',
+    icon: <Sparkles size={20}/>,
+    label: "What's New",
+    color: 'bg-brand-600',
+    intro: 'Recent improvements, new features, and bug fixes. The Audit Log (Admin → Audit Log) tracks every data entry and change made by each user.',
+    workflows: [
+      {
+        title: 'Where to see all data changes (Audit Log)',
+        path: 'Admin → Audit Log',
+        steps: [
+          { text: 'Every record created, edited, or deleted is logged automatically with timestamp and user name.' },
+          { text: 'Filter by table (e.g. "daily_records", "flocks", "grn") to see changes to a specific area.' },
+          { text: 'Filter by date range to find what was changed on a specific day.' },
+          { text: 'Each entry shows: Table, Action (Created/Updated/Deleted), Summary, User, and Time.' },
+          { text: 'This log cannot be deleted or tampered with by normal users — it is the permanent record of all activity in the app.', note: 'Only Admin role can access the Audit Log.' },
+        ]
+      },
+    ],
+    tips: [
+      'If something was accidentally deleted, check the Audit Log to find when it was deleted and by whom.',
+      'Use the Audit Log during year-end review to verify all entries are complete.',
+    ]
+  },
+
   // ── FLOCK SETUP ───────────────────────────────────────────────────────────────
   {
     id: 'flock-setup',
@@ -43,6 +89,29 @@ const SECTIONS: Section[] = [
         ]
       },
       {
+        title: 'Record chick intake per shed (staggered placement)',
+        path: 'Flock Management → Flock List → click Flock No → Placements tab → + Add Placement',
+        steps: [
+          { text: 'Use this when chicks arrive in batches over multiple days or across multiple sheds.', note: 'Example: 6,000 chicks arrive in Shed 10 on Day 1. Another 10,000 arrive in Shed 11 on Day 2.' },
+          { text: 'Date Received — the date this batch of chicks arrived.' },
+          { text: 'Shed — which shed these chicks went into.' },
+          { text: 'Female Count and Male Count for this batch.' },
+          { text: 'Notes — optional (e.g. vehicle number, supplier batch ID).' },
+          { text: 'Save. The flock\'s Total Placed count updates automatically to the sum of all placement records.', note: 'If no placements are recorded, Total Placed falls back to the Paid Female + Paid Male entered at flock creation.' },
+          { text: 'When you next open Daily Entry for that shed on the placement date, Opening Female/Male will auto-fill from this batch.' },
+        ]
+      },
+      {
+        title: 'Record chick invoice at flock creation',
+        path: 'Flock Management → Flock List → + New Flock → Chick Invoice section',
+        steps: [
+          { text: 'While creating a flock, scroll to the "Chick Invoice" section.' },
+          { text: 'Enter Invoice No (from hatchery invoice) and Invoice Date.' },
+          { text: 'Save the flock. An invoice record is automatically created in Accounts → Invoice Register, linked to this flock.', note: 'The invoice amount is auto-calculated from (Paid Female + Paid Male) × Chick Rate.' },
+          { text: 'Go to Invoice Register to mark it paid when payment is made.' },
+        ]
+      },
+      {
         title: 'Edit an existing flock',
         path: 'Flock Management → Flock List → ✏ pencil icon on the row',
         steps: [
@@ -55,6 +124,7 @@ const SECTIONS: Section[] = [
     tips: [
       'Flock No should match your physical records (ledger / Excel) exactly.',
       'If rearing and laying are on the same farm, enter the same farm in both fields.',
+      'Use the Placements tab for staggered chick intake. The Total Placed on the overview always reflects the sum of all placement batches.',
     ]
   },
 
@@ -72,14 +142,15 @@ const SECTIONS: Section[] = [
         steps: [
           { text: 'Select the Flock from the dropdown (e.g. Flock 19 — rearing).' },
           { text: 'Select the Shed (e.g. Shed A). Each shed is entered separately.', note: 'For rearing flocks the sheds shown are from the Rearing Farm. For laying flocks, from the Laying Farm.' },
-          { text: 'Select the Date. The previous day\'s closing count auto-fills as today\'s opening.' },
+          { text: 'Select the Date. The previous day\'s closing count auto-fills as today\'s opening.', note: 'If a Chick Placement batch exists for this shed on this date (first day of intake), Opening will auto-fill from the placement batch instead.' },
           { text: 'Bird Count section: Enter Opening Female and Opening Male.' },
           { text: 'Transfer Female/Male — birds physically moved to another farm on this day. Leave 0 if no transfer.' },
           { text: 'Cull Female/Male — birds removed and sold (culls, lame, weak). Leave 0 if none.', note: 'When you save a Cull entry here OR record a Bird Sale in NHE & Bird Sales, both update these numbers automatically.' },
           { text: 'Mortality Female/Male — birds that died today.' },
           { text: 'Click "Auto-compute Closing" — the app calculates: Closing = Opening − Transfer − Cull − Mortality.' },
           { text: 'Feed: enter Female Feed (kg) and Male Feed (kg) with their feed types.' },
-          { text: 'Eggs: Total Eggs, HE Total. If no shed is selected, also enter HE Grade A/B/C.' },
+          { text: 'Eggs: The Egg Collection section only appears once the flock reaches its Laying Start Date.', warning: 'If you do not see egg fields, check that the Laying Start Date is set correctly on the flock (edit flock → Laying Start Date).' },
+          { text: 'Enter Total Eggs, HE Total. If no shed is selected, also enter HE Grade A/B/C.' },
           { text: 'Save Record.' },
         ]
       },
@@ -491,6 +562,68 @@ const SECTIONS: Section[] = [
     ]
   },
 
+  // ── INVOICE REGISTER ──────────────────────────────────────────────────────────
+  {
+    id: 'invoices',
+    icon: <CreditCard size={20}/>,
+    label: 'Invoice Register',
+    color: 'bg-violet-600',
+    intro: 'Every invoice you receive from a supplier — for chicks, feed, medicines, electricity, or any other purchase — should be recorded here. This gives you a single place to track what is owed, what is partially paid, and what is fully settled.',
+    workflows: [
+      {
+        title: 'Add a supplier invoice',
+        path: 'Accounts → Invoice Register → Add Invoice',
+        steps: [
+          { text: 'Invoice No — the number printed on the supplier\'s invoice.' },
+          { text: 'Invoice Date — date on the invoice.' },
+          { text: 'Invoice Type — select one: Chick Supply, Feed/GRN, Medicine, Electricity, Labour/Contractor, Other.' },
+          { text: 'Supplier — select from Party Master, or type the name in the free-text field.' },
+          { text: 'For Chick Supply invoices — also select the Flock. This links the invoice directly to that flock.' },
+          { text: 'Farm — the farm/site this invoice relates to.' },
+          { text: 'Basic Amount, GST%, GST Amount — enter Basic and GST%, then click outside the field to auto-calculate Total.' },
+          { text: 'Total Amount (required) — the final invoice value.' },
+          { text: 'Due Date — when payment must be made. Overdue invoices are highlighted red.' },
+          { text: 'Payment Status — Unpaid, Partial, or Paid.' },
+          { text: 'Save.' },
+        ]
+      },
+      {
+        title: 'Mark an invoice as paid (or partially paid)',
+        path: 'Accounts → Invoice Register → Pay button on the row',
+        steps: [
+          { text: 'Click the green "Pay" button on any unpaid or partial invoice row.' },
+          { text: 'Enter the amount paid so far (can be less than total for partial).' },
+          { text: 'Save. Status automatically updates: full amount = Paid, less than total = Partial.' },
+          { text: 'For partial payments, click Pay again when additional payments are made.' },
+        ]
+      },
+      {
+        title: 'Import invoices from Excel',
+        path: 'Accounts → Invoice Register → Template → Import',
+        steps: [
+          { text: 'Click Template to download the Excel format with all columns and one example row.' },
+          { text: 'Fill your invoice data in the same format.' },
+          { text: 'Key columns: invoice_no, invoice_date, supplier_name, source_type (chick/grn/medicine/electricity/labour/other), flock_no, farm_name, basic_amount, gst_pct, total_amount, payment_status, paid_amount, due_date.' },
+          { text: 'Click Import and select your file. Flock numbers and farm names are matched automatically.' },
+        ]
+      },
+      {
+        title: 'Chick invoice auto-created from flock',
+        path: 'Flock Management → + New Flock → Chick Invoice section',
+        steps: [
+          { text: 'When creating a new flock, fill in Invoice No and Invoice Date in the Chick Invoice section.' },
+          { text: 'On save, the app automatically creates an invoice record in Invoice Register linked to that flock.', note: 'The invoice amount is set to Paid Count × Chick Rate. You can edit it later in Invoice Register if needed.' },
+        ]
+      },
+    ],
+    tips: [
+      'Overdue invoices (past due date, not paid) are shown with a red highlight and "Overdue" label.',
+      'Use the filter bar to view by type (e.g. only Chick Supply), or by status (e.g. only Unpaid).',
+      'Invoice Register does not affect stock — it is a financial tracking tool only.',
+      'For feed invoices: the GRN entry already has an Invoice No field. You can also add those invoices here for payment tracking.',
+    ]
+  },
+
   // ── REPORTS ───────────────────────────────────────────────────────────────────
   {
     id: 'reports',
@@ -621,14 +754,19 @@ export const HelpGuidePage: React.FC = () => {
         <div className="p-4 border-t border-gray-100 mt-2">
           <p className="text-[10px] uppercase font-semibold text-gray-400 mb-2">Quick index</p>
           <div className="space-y-1 text-xs text-gray-500">
+            <div className="flex items-center gap-1"><Hash size={10}/>Chick intake → Flock Setup</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Daily entry → Daily Entry</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Egg fields missing → Daily Entry</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Bird sold → NHE & Bird Sales</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Transfer flock → Flock Transfer</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Invoice received → Invoice Register</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Mark invoice paid → Invoice Register</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Pay salary → Employees</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Electricity bill → Electricity</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Raise PO → Purchase & Payments</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Record payment → Purchase & Payments</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Import Excel → Import Data</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Who changed what → What's New</div>
           </div>
         </div>
       </aside>
@@ -669,6 +807,27 @@ export const HelpGuidePage: React.FC = () => {
               <WorkflowCard key={i} wf={wf} accent={section.color}/>
             ))}
           </div>
+
+          {/* Changelog panel — only shown on changelog section */}
+          {active === 'changelog' && (
+            <div className="space-y-3">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Recent Changes</h2>
+              <div className="space-y-2">
+                {CHANGELOG.map((c, i) => (
+                  <div key={i} className="flex gap-3 items-start p-3 bg-white border border-gray-100 rounded-xl">
+                    <span className={`mt-0.5 px-2 py-0.5 rounded text-xs font-bold flex-shrink-0
+                      ${c.tag === 'New' ? 'bg-green-100 text-green-700' : c.tag === 'Fix' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {c.tag}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-800">{c.text}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1"><Clock size={10}/>{c.date}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Footer note */}
           <div className="border-t border-gray-200 pt-4 flex items-start gap-2">
