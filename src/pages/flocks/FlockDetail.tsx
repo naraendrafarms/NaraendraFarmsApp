@@ -59,11 +59,16 @@ export const FlockDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
   const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'|'transfers'>('overview')
-  const [transferForm, setTransferForm] = useState({
+  const transferImportRef = useRef<HTMLInputElement>(null)
+  const blankTransfer = () => ({
     transfer_date: new Date().toISOString().split('T')[0],
     from_farm_id: '', to_farm_id: '', from_shed_id: '', to_shed_id: '',
-    female_count: '0', male_count: '0', notes: ''
+    female_count: '0', male_count: '0',
+    sex_error_female: '0', sex_error_male: '0',
+    sold_female: '0', sold_male: '0',
+    is_final_transfer: false, notes: ''
   })
+  const [transferForm, setTransferForm] = useState(blankTransfer())
   const [showTransferForm, setShowTransferForm] = useState(false)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
@@ -155,19 +160,70 @@ export const FlockDetail: React.FC = () => {
         to_shed_id: transferForm.to_shed_id || null,
         female_count: parseInt(transferForm.female_count) || 0,
         male_count: parseInt(transferForm.male_count) || 0,
+        sex_error_female: parseInt(transferForm.sex_error_female) || 0,
+        sex_error_male: parseInt(transferForm.sex_error_male) || 0,
+        sold_female: parseInt(transferForm.sold_female) || 0,
+        sold_male: parseInt(transferForm.sold_male) || 0,
+        is_final_transfer: transferForm.is_final_transfer,
         notes: transferForm.notes || null,
       }
       const { error } = await supabase.from('flock_transfers').insert(payload)
       if (error) throw error
+      // If marked as final transfer, update flock status to laying
+      if (transferForm.is_final_transfer) {
+        const { error: fe } = await supabase.from('flocks').update({
+          status: 'laying',
+          laying_farm_id: transferForm.to_farm_id,
+          laying_start_date: transferForm.transfer_date,
+        }).eq('id', id!)
+        if (fe) throw fe
+      }
     },
     onSuccess: () => {
-      toast.success('Transfer recorded!')
+      toast.success(transferForm.is_final_transfer ? 'Transfer complete! Flock status → Laying' : 'Transfer recorded!')
       qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
+      qc.invalidateQueries({ queryKey: ['flock', id] })
       setShowTransferForm(false)
-      setTransferForm({ transfer_date: new Date().toISOString().split('T')[0], from_farm_id: '', to_farm_id: '', from_shed_id: '', to_shed_id: '', female_count: '0', male_count: '0', notes: '' })
+      setTransferForm(blankTransfer())
     },
     onError: (e: any) => toast.error(e.message)
   })
+
+  const handleTransferImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    const text = await file.text()
+    const lines = text.split('\n').filter(l => l.trim())
+    if (lines.length < 2) { toast.error('Empty file'); return }
+    const hdrs = lines[0].split(',').map(h => h.replace(/"/g,'').trim().toLowerCase().replace(/\s+/g,'_'))
+    const col = (n: string) => hdrs.indexOf(n)
+    const { data: allFarmsData } = await supabase.from('farms').select('id,name,code')
+    const farmMap: Record<string,string> = {}
+    for (const f of allFarmsData??[]) { farmMap[f.name.toLowerCase()] = f.id; farmMap[f.code?.toLowerCase()] = f.id }
+    let saved = 0
+    for (const line of lines.slice(1)) {
+      const vals = line.split(',').map(v => v.replace(/"/g,'').trim())
+      const fromFarm = farmMap[vals[col('from_farm')]?.toLowerCase()]
+      const toFarm = farmMap[vals[col('to_farm')]?.toLowerCase()]
+      if (!vals[col('transfer_date')] || !toFarm) continue
+      await supabase.from('flock_transfers').insert({
+        flock_id: id,
+        transfer_date: vals[col('transfer_date')],
+        from_farm_id: fromFarm || null,
+        to_farm_id: toFarm,
+        female_count: parseInt(vals[col('female_count')])||0,
+        male_count: parseInt(vals[col('male_count')])||0,
+        sex_error_female: parseInt(vals[col('sex_error_female')])||0,
+        sex_error_male: parseInt(vals[col('sex_error_male')])||0,
+        sold_female: parseInt(vals[col('sold_female')])||0,
+        sold_male: parseInt(vals[col('sold_male')])||0,
+        notes: vals[col('notes')]||null,
+      })
+      saved++
+    }
+    toast.success(`Imported ${saved} transfer records`)
+    qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
+    if (e.target) e.target.value = ''
+  }
 
   const { data: medMonthly } = useQuery({
     queryKey: ['flock_med', id],
@@ -603,44 +659,57 @@ export const FlockDetail: React.FC = () => {
       {/* TRANSFERS TAB */}
       {tab === 'transfers' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-gray-800">Flock Transfers</h3>
-            <Button size="sm" onClick={() => setShowTransferForm(v => !v)}>
-              {showTransferForm ? 'Cancel' : '+ Add Transfer'}
-            </Button>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="font-semibold text-gray-800">Flock Transfers</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Record bird movements between sites. Include sex errors and pre-transfer sales.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => {
+                const hdrs = ['transfer_date','from_farm','to_farm','female_count','male_count','sex_error_female','sex_error_male','sold_female','sold_male','notes']
+                const ex = [new Date().toISOString().slice(0,10),'Kethereddypally','Agraharam','8000','800','50','0','0','0','Batch 1']
+                const csv = [hdrs, ex].map(r => r.map(v=>`"${v}"`).join(',')).join('\n')
+                const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'transfer_template.csv'; a.click()
+              }}>Template</Button>
+              <Button variant="outline" size="sm" onClick={() => transferImportRef.current?.click()}>Import CSV</Button>
+              <input ref={transferImportRef} type="file" accept=".csv" className="hidden" onChange={handleTransferImport}/>
+              <Button size="sm" onClick={() => setShowTransferForm(v => !v)}>
+                {showTransferForm ? 'Cancel' : '+ Add Transfer'}
+              </Button>
+            </div>
           </div>
 
           {showTransferForm && (
             <Card>
-              <CardHeader title="New Transfer" />
+              <CardHeader title="New Transfer Entry" />
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Date</label>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Transfer Date *</label>
                     <input type="date" value={transferForm.transfer_date}
                       onChange={e => setTransferForm(f => ({ ...f, transfer_date: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">From Farm</label>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">From Farm</label>
                     <select value={transferForm.from_farm_id}
                       onChange={e => setTransferForm(f => ({ ...f, from_farm_id: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
                       <option value="">— None —</option>
-                      {(farms ?? []).map((fm: any) => <option key={fm.id} value={fm.id}>{fm.name} ({fm.code})</option>)}
+                      {(farms ?? []).map((fm: any) => <option key={fm.id} value={fm.id}>{fm.name}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">To Farm *</label>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">To Farm *</label>
                     <select value={transferForm.to_farm_id}
                       onChange={e => setTransferForm(f => ({ ...f, to_farm_id: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
                       <option value="">— Select —</option>
-                      {(farms ?? []).map((fm: any) => <option key={fm.id} value={fm.id}>{fm.name} ({fm.code})</option>)}
+                      {(farms ?? []).map((fm: any) => <option key={fm.id} value={fm.id}>{fm.name}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">From Shed</label>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">From Shed</label>
                     <select value={transferForm.from_shed_id}
                       onChange={e => setTransferForm(f => ({ ...f, from_shed_id: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
@@ -649,7 +718,7 @@ export const FlockDetail: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">To Shed</label>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">To Shed</label>
                     <select value={transferForm.to_shed_id}
                       onChange={e => setTransferForm(f => ({ ...f, to_shed_id: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
@@ -657,29 +726,84 @@ export const FlockDetail: React.FC = () => {
                       {(allSheds ?? []).filter((s: any) => !transferForm.to_farm_id || s.farm_id === transferForm.to_farm_id).map((s: any) => <option key={s.id} value={s.id}>{s.shed_no}{s.shed_name ? ' — '+s.shed_name : ''}</option>)}
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Female Count</label>
-                    <input type="number" min="0" value={transferForm.female_count}
-                      onChange={e => setTransferForm(f => ({ ...f, female_count: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Male Count</label>
-                    <input type="number" min="0" value={transferForm.male_count}
-                      onChange={e => setTransferForm(f => ({ ...f, male_count: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <input type="text" value={transferForm.notes}
-                      onChange={e => setTransferForm(f => ({ ...f, notes: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="Optional notes..." />
+                </div>
+
+                {/* Birds transferred */}
+                <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+                  <p className="text-xs font-semibold text-green-700 mb-2 uppercase">Birds Transferred</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">♀ Female Count</label>
+                      <input type="number" min="0" value={transferForm.female_count}
+                        onChange={e => setTransferForm(f => ({ ...f, female_count: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">♂ Male Count</label>
+                      <input type="number" min="0" value={transferForm.male_count}
+                        onChange={e => setTransferForm(f => ({ ...f, male_count: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+                    </div>
                   </div>
                 </div>
+
+                {/* Birds NOT transferred */}
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+                  <p className="text-xs font-semibold text-amber-700 mb-2 uppercase">Birds Not Transferred (optional)</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Sex Error ♀</label>
+                      <input type="number" min="0" value={transferForm.sex_error_female}
+                        onChange={e => setTransferForm(f => ({ ...f, sex_error_female: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        placeholder="Wrong sex removed"/>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Sex Error ♂</label>
+                      <input type="number" min="0" value={transferForm.sex_error_male}
+                        onChange={e => setTransferForm(f => ({ ...f, sex_error_male: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Sold ♀</label>
+                      <input type="number" min="0" value={transferForm.sold_female}
+                        onChange={e => setTransferForm(f => ({ ...f, sold_female: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        placeholder="Sold before shift"/>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Sold ♂</label>
+                      <input type="number" min="0" value={transferForm.sold_male}
+                        onChange={e => setTransferForm(f => ({ ...f, sold_male: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                  <input type="text" value={transferForm.notes}
+                    onChange={e => setTransferForm(f => ({ ...f, notes: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    placeholder="Optional notes..." />
+                </div>
+
+                {/* Final transfer checkbox */}
+                <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${transferForm.is_final_transfer ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-200'}`}>
+                  <input type="checkbox" checked={transferForm.is_final_transfer}
+                    onChange={e => setTransferForm(f => ({ ...f, is_final_transfer: e.target.checked }))}
+                    className="mt-0.5 rounded text-green-600"/>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">✅ This is the final transfer — all birds shifted</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Checking this will automatically change flock status from <strong>Rearing → Laying</strong> and set the laying farm to the destination.</p>
+                  </div>
+                </label>
+
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => setShowTransferForm(false)}>Cancel</Button>
-                  <Button size="sm" loading={addTransferMut.isPending} onClick={() => addTransferMut.mutate()}>Save Transfer</Button>
+                  <Button size="sm" loading={addTransferMut.isPending} onClick={() => addTransferMut.mutate()}>
+                    {transferForm.is_final_transfer ? 'Save & Mark as Laying' : 'Save Transfer'}
+                  </Button>
                 </div>
               </div>
             </Card>
@@ -690,34 +814,65 @@ export const FlockDetail: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50">
-                    <th className="px-3 py-2 text-left font-semibold text-gray-600">Date</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-600">From</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-600">To</th>
-                    <th className="px-3 py-2 text-right font-semibold text-gray-600">♀ Count</th>
-                    <th className="px-3 py-2 text-right font-semibold text-gray-600">♂ Count</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-600">Notes</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600 text-xs">Date</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600 text-xs">From → To</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600 text-xs">♀ Transferred</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600 text-xs">♂ Transferred</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600 text-xs">Sex Errors</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600 text-xs">Sold</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600 text-xs">Notes</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-600 text-xs">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(transfers ?? []).length === 0 ? (
-                    <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400 text-sm">No transfers recorded yet</td></tr>
+                    <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400 text-sm">No transfers recorded yet</td></tr>
                   ) : (transfers ?? []).map((t: any) => (
                     <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="px-3 py-2 whitespace-nowrap">{fmtDate(t.transfer_date)}</td>
-                      <td className="px-3 py-2 text-sm">
-                        <span className="font-medium">{t.from_farm?.name ?? '—'}</span>
-                        {t.from_shed && <span className="text-gray-400 text-xs ml-1">/ {t.from_shed.shed_no}{t.from_shed.shed_name ? ' '+t.from_shed.shed_name : ''}</span>}
-                      </td>
-                      <td className="px-3 py-2 text-sm">
+                      <td className="px-3 py-2 whitespace-nowrap text-xs">{fmtDate(t.transfer_date)}</td>
+                      <td className="px-3 py-2 text-xs">
+                        <span className="text-gray-500">{t.from_farm?.name ?? 'KRP'}</span>
+                        <span className="text-gray-400 mx-1">→</span>
                         <span className="font-medium text-brand-700">{t.to_farm?.name ?? '—'}</span>
-                        {t.to_shed && <span className="text-gray-400 text-xs ml-1">/ {t.to_shed.shed_no}{t.to_shed.shed_name ? ' '+t.to_shed.shed_name : ''}</span>}
+                        {t.from_shed && <div className="text-gray-400 text-[10px]">Shed {t.from_shed.shed_no} → {t.to_shed?.shed_no ?? '—'}</div>}
                       </td>
-                      <td className="px-3 py-2 text-right">{t.female_count > 0 ? t.female_count.toLocaleString('en-IN') : '—'}</td>
-                      <td className="px-3 py-2 text-right">{t.male_count > 0 ? t.male_count.toLocaleString('en-IN') : '—'}</td>
+                      <td className="px-3 py-2 text-right text-xs font-medium">{t.female_count > 0 ? t.female_count.toLocaleString('en-IN') : '—'}</td>
+                      <td className="px-3 py-2 text-right text-xs font-medium">{t.male_count > 0 ? t.male_count.toLocaleString('en-IN') : '—'}</td>
+                      <td className="px-3 py-2 text-right text-xs text-amber-600">
+                        {(t.sex_error_female||0)+(t.sex_error_male||0) > 0
+                          ? `${t.sex_error_female||0}♀ ${t.sex_error_male||0}♂` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs text-orange-600">
+                        {(t.sold_female||0)+(t.sold_male||0) > 0
+                          ? `${t.sold_female||0}♀ ${t.sold_male||0}♂` : '—'}
+                      </td>
                       <td className="px-3 py-2 text-gray-500 text-xs">{t.notes ?? '—'}</td>
+                      <td className="px-3 py-2">
+                        {t.is_final_transfer
+                          ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">Final ✓</span>
+                          : <span className="text-xs text-gray-400">Partial</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
+                {(transfers ?? []).length > 0 && (() => {
+                  const totF = (transfers??[]).reduce((s:number,t:any)=>s+(t.female_count||0),0)
+                  const totM = (transfers??[]).reduce((s:number,t:any)=>s+(t.male_count||0),0)
+                  const totSEF = (transfers??[]).reduce((s:number,t:any)=>s+(t.sex_error_female||0),0)
+                  const totSEM = (transfers??[]).reduce((s:number,t:any)=>s+(t.sex_error_male||0),0)
+                  const totSF = (transfers??[]).reduce((s:number,t:any)=>s+(t.sold_female||0),0)
+                  const totSM = (transfers??[]).reduce((s:number,t:any)=>s+(t.sold_male||0),0)
+                  return (
+                    <tfoot><tr className="bg-gray-50 font-semibold text-xs">
+                      <td className="px-3 py-2" colSpan={2}>TOTAL ({(transfers??[]).length} entries)</td>
+                      <td className="px-3 py-2 text-right">{totF.toLocaleString('en-IN')} ♀</td>
+                      <td className="px-3 py-2 text-right">{totM.toLocaleString('en-IN')} ♂</td>
+                      <td className="px-3 py-2 text-right text-amber-600">{totSEF}♀ {totSEM}♂</td>
+                      <td className="px-3 py-2 text-right text-orange-600">{totSF}♀ {totSM}♂</td>
+                      <td colSpan={2}/>
+                    </tr></tfoot>
+                  )
+                })()}
               </table>
             </div>
           </Card>
