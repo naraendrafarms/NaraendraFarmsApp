@@ -79,7 +79,7 @@ const NAV: NavItem[] = [
     children: [
       { label: 'Farm / Sites',        to: '/masters/farms' },
       { label: 'Sheds',               to: '/masters/sheds' },
-      { label: 'Feed Ingredients',    to: '/masters/ingredients' },
+      { label: 'Item Master',          to: '/masters/ingredients' },
       { label: 'Feed Types',          to: '/masters/feed-types' },
       { label: 'Vaccination Schedule',to: '/masters/vaccination' },
       { label: 'Parties',             to: '/masters/parties' },

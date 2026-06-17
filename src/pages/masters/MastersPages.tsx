@@ -1352,7 +1352,12 @@ export const FeedTypesMaster: React.FC = () => {
 // ══════════════════════════════════════════════════════════════════
 // VACCINATION SCHEDULE MASTER
 // ══════════════════════════════════════════════════════════════════
+const EMPTY_VACC = { sno: '', age_label: '', vaccine_name: '', dose: '', route: '', product: '' }
+const ROUTES = ['S/C','I/M','I/O','D/W','N/D','W/W','Spray','Eye Drop','Drinking Water']
+const routeColor: Record<string,any> = { 'S/C':'blue','I/M':'red','I/O':'green','D/W':'yellow','N/D':'orange','W/W':'gray','Spray':'purple','Eye Drop':'teal','Drinking Water':'blue' }
+
 export const VaccinationSchedulePage: React.FC = () => {
+  const qc = useQueryClient()
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['vaccination_schedule'],
     queryFn: async () => {
@@ -1362,11 +1367,45 @@ export const VaccinationSchedulePage: React.FC = () => {
   })
 
   const [sel, setSel] = useState<Set<string>>(new Set())
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
+  const [form, setForm] = useState<any>(EMPTY_VACC)
+  const [delId, setDelId] = useState<string|null>(null)
+  const [bulkDel, setBulkDel] = useState(false)
+
   const ids = rows.map((r: any) => r.id)
   const allSel = ids.length > 0 && ids.every((id: string) => sel.has(id))
   const someSel = ids.some((id: string) => sel.has(id))
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? ids.forEach((id: string) => n.delete(id)) : ids.forEach((id: string) => n.add(id)); return n })
+  const f = (k: string) => (e: any) => setForm((p: any) => ({...p, [k]: e.target.value}))
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      const p = { sno: form.sno ? Number(form.sno) : null, age_label: form.age_label, vaccine_name: form.vaccine_name, dose: form.dose||null, route: form.route||null, product: form.product||null }
+      if (editing) await supabase.from('vaccination_schedule').update(p).eq('id', editing.id)
+      else await supabase.from('vaccination_schedule').insert(p)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); setOpen(false); toast.success('Saved') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => { await supabase.from('vaccination_schedule').delete().eq('id', id) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); setDelId(null); toast.success('Deleted') },
+  })
+
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('vaccination_schedule').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); setSel(new Set()); setBulkDel(false); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const openNew  = () => { setEditing(null); setForm({...EMPTY_VACC}); setOpen(true) }
+  const openEdit = (r: any) => { setEditing(r); setForm({...EMPTY_VACC,...r, sno: r.sno?.toString()??''}); setOpen(true) }
 
   function handleExport() {
     const toExport = sel.size > 0 ? rows.filter((r: any) => sel.has(r.id)) : rows
@@ -1375,27 +1414,29 @@ export const VaccinationSchedulePage: React.FC = () => {
       toExport.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose??'', r.route??'', r.product??'']))
   }
 
-  const routeColor: Record<string,any> = { 'S/C':'blue','I/M':'red','I/O':'green','D/W':'yellow','N/D':'orange','W/W':'gray' }
-
   return (
     <div className="space-y-4">
-      <SectionHeader title="Vaccination Schedule" subtitle="Narendra Breeder — Recommended Schedule (67 entries)" action={
-        <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={handleExport}>
-          {sel.size > 0 ? `Export ${sel.size} selected` : 'Export CSV'}
-        </Button>
+      <SectionHeader title="Vaccination Schedule" subtitle="Narendra Breeder — Recommended Schedule" action={
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={handleExport}>
+            {sel.size > 0 ? `Export ${sel.size}` : 'Export CSV'}
+          </Button>
+          <Button size="sm" icon={<Plus size={14}/>} onClick={openNew}>Add Entry</Button>
+        </div>
       } />
       {sel.size > 0 && (
         <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
           <span className="text-sm font-medium text-blue-700">{sel.size} selected</span>
-          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+          <button onClick={() => setBulkDel(true)} className="text-sm text-red-600 hover:underline font-medium">Delete selected</button>
+          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline ml-auto">Clear</button>
         </div>
       )}
-      {isLoading ? <Spinner /> : rows.length === 0 ? <EmptyState title="No schedule data. Run migration 029 first." /> : (
+      {isLoading ? <Spinner /> : rows.length === 0 ? <EmptyState title="No schedule data." /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
               <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
-              <Th>S.No</Th><Th>Age</Th><Th>Vaccine / Treatment</Th><Th>Dose</Th><Th>Route</Th><Th>Product</Th>
+              <Th>S.No</Th><Th>Age</Th><Th>Vaccine / Treatment</Th><Th>Dose</Th><Th>Route</Th><Th>Product</Th><Th></Th>
             </tr></thead>
             <tbody>
               {rows.map((r: any) => (
@@ -1407,12 +1448,49 @@ export const VaccinationSchedulePage: React.FC = () => {
                   <Td className="text-sm text-gray-600">{r.dose}</Td>
                   <Td>{r.route ? <Badge color={routeColor[r.route] ?? 'gray'}>{r.route}</Badge> : null}</Td>
                   <Td className="text-sm text-gray-600">{r.product}</Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(r)} className="p-1 text-blue-400 hover:text-blue-600"><Edit2 size={13}/></button>
+                      <button onClick={() => setDelId(r.id)} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
         </Card>
       )}
+
+      <Modal open={open} onClose={() => setOpen(false)} title={editing ? 'Edit Schedule Entry' : 'Add Schedule Entry'}
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="S.No" type="number" value={form.sno} onChange={f('sno')} />
+            <Input label="Age Label *" value={form.age_label} onChange={f('age_label')} placeholder="e.g. Day 1, Week 4" required />
+          </div>
+          <Input label="Vaccine / Treatment Name *" value={form.vaccine_name} onChange={f('vaccine_name')} required />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Dose" value={form.dose} onChange={f('dose')} placeholder="e.g. 1 drop" />
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Route</label>
+              <select value={form.route} onChange={f('route')} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="">Select route</option>
+                {ROUTES.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+          </div>
+          <Input label="Product / Brand" value={form.product} onChange={f('product')} placeholder="e.g. Nobilis IB+ND" />
+        </div>
+      </Modal>
+
+      <Modal open={!!delId} onClose={() => setDelId(null)} title="Delete Entry"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelId(null)}>Cancel</Button><Button variant="danger" onClick={() => delId && delMut.mutate(delId)} loading={delMut.isPending}>Delete</Button></div>}>
+        <p className="text-sm text-gray-600">Delete this vaccination schedule entry?</p>
+      </Modal>
+      <Modal open={bulkDel} onClose={() => setBulkDel(false)} title="Delete Selected Entries"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkDel(false)}>Cancel</Button><Button variant="danger" onClick={() => bulkDelMut.mutate(Array.from(sel))} loading={bulkDelMut.isPending}>Delete {sel.size} entries</Button></div>}>
+        <p className="text-sm text-gray-600">Delete {sel.size} selected vaccination schedule entries?</p>
+      </Modal>
     </div>
   )
 }

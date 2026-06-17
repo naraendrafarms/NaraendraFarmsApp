@@ -663,6 +663,8 @@ const PaymentsTab: React.FC = () => {
   const [delId, setDelId]       = useState<string|null>(null)
   const [payMergeOpen, setPayMergeOpen] = useState(false)
   const importPayRef = useRef<HTMLInputElement>(null)
+  const [selPay, setSelPay]     = useState<Set<string>>(new Set())
+  const [bulkDelPay, setBulkDelPay] = useState(false)
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
 
   const handlePayImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -788,6 +790,17 @@ const PaymentsTab: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['pending_payments'] }); setDelId(null); toast.success('Deleted') },
   })
 
+  const bulkDelPayMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('pending_payments').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['pending_payments'] }); setSelPay(new Set()); setBulkDelPay(false); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const togglePayOne = (id: string) => setSelPay(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
   const types  = useMemo(() => Array.from(new Set(payments.map((p:any)=>p.payment_type).filter(Boolean))).sort() as string[], [payments])
   const months = useMemo(() => Array.from(new Set(payments.map((p:any)=>p.invoice_date?.substring(0,7)).filter(Boolean))).sort().reverse() as string[], [payments])
 
@@ -805,6 +818,14 @@ const PaymentsTab: React.FC = () => {
     if (search) { const q=search.toLowerCase(); if (!p.vendor_name?.toLowerCase().includes(q)&&!p.po_no?.toLowerCase().includes(q)&&!p.grn_no?.toLowerCase().includes(q)&&!p.invoice_no?.toLowerCase().includes(q)) return false }
     return true
   }), [payments, statusF, typeF, monthF, alertF, search])
+
+  const togglePayAll = () => {
+    const ids = filtered.map((p: any) => p.id)
+    const allSel = ids.every((id: string) => selPay.has(id))
+    setSelPay(allSel ? new Set() : new Set(ids))
+  }
+  const payAllSel  = filtered.length > 0 && filtered.every((p: any) => selPay.has(p.id))
+  const paySomeSel = filtered.some((p: any) => selPay.has(p.id))
 
   const summary = useMemo(() => {
     const tot = (arr:any[]) => arr.reduce((s,p)=>s+Number(p.invoice_amount??0),0)
@@ -902,10 +923,19 @@ const PaymentsTab: React.FC = () => {
         </div>
       </div>
 
+      {selPay.size > 0 && (
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-blue-700">{selPay.size} selected</span>
+          {canDel && <button onClick={() => setBulkDelPay(true)} className="text-sm text-red-600 hover:underline font-medium">Delete selected</button>}
+          <button onClick={() => setSelPay(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline ml-auto">Clear</button>
+        </div>
+      )}
+
       <Card padding={false}>
         <div className="overflow-x-auto">
           <Table>
             <thead><tr>
+              <Th><input type="checkbox" checked={payAllSel} ref={el => { if (el) el.indeterminate = paySomeSel && !payAllSel }} onChange={togglePayAll} className="rounded" /></Th>
               <Th>Vendor</Th><Th>Invoice No</Th><Th>Invoice Date</Th>
               <Th right>Amount</Th><Th right>TDS%</Th><Th right>Net Payable</Th><Th>Type</Th><Th>Pay Before</Th>
               <Th>Days Left</Th><Th>PO No</Th><Th>GRN No</Th>
@@ -917,7 +947,8 @@ const PaymentsTab: React.FC = () => {
                 const days = daysUntilDue(p)
                 const rowCls = RowCls(p)
                 return (
-                  <tr key={p.id} className={`text-sm ${rowCls}`}>
+                  <tr key={p.id} className={`text-sm ${rowCls} ${selPay.has(p.id) ? 'bg-blue-50' : ''}`}>
+                    <Td><input type="checkbox" checked={selPay.has(p.id)} onChange={() => togglePayOne(p.id)} className="rounded" /></Td>
                     <Td className="max-w-[160px] truncate font-medium">{p.vendor_name}</Td>
                     <Td className="text-xs text-gray-500">{p.invoice_no ?? '—'}</Td>
                     <Td className="text-xs">{p.invoice_date ? fmtDate(p.invoice_date) : '—'}</Td>
@@ -944,7 +975,7 @@ const PaymentsTab: React.FC = () => {
                   </tr>
                 )
               })}
-              {filtered.length===0 && <tr><td colSpan={16} className="text-center py-8 text-gray-400 text-sm">No payment records found</td></tr>}
+              {filtered.length===0 && <tr><td colSpan={17} className="text-center py-8 text-gray-400 text-sm">No payment records found</td></tr>}
             </tbody>
           </Table>
         </div>
@@ -1044,6 +1075,10 @@ const PaymentsTab: React.FC = () => {
       <Modal open={!!delId} onClose={() => setDelId(null)} title="Delete Payment"
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelId(null)}>Cancel</Button><Button variant="danger" onClick={() => delId && delMut.mutate(delId)} loading={delMut.isPending}>Delete</Button></div>}>
         <p className="text-sm text-gray-600">Delete this payment record? This cannot be undone.</p>
+      </Modal>
+      <Modal open={bulkDelPay} onClose={() => setBulkDelPay(false)} title="Delete Selected Payments"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkDelPay(false)}>Cancel</Button><Button variant="danger" onClick={() => bulkDelPayMut.mutate(Array.from(selPay))} loading={bulkDelPayMut.isPending}>Delete {selPay.size} records</Button></div>}>
+        <p className="text-sm text-gray-600">Delete {selPay.size} selected payment record(s)? This cannot be undone.</p>
       </Modal>
 
       <VendorMergeModal open={payMergeOpen} onClose={() => { setPayMergeOpen(false); qc.invalidateQueries({ queryKey: ['pending_payments'] }) }} />
@@ -1454,6 +1489,9 @@ const BankLedgerTab: React.FC = () => {
   const [txnForm, setTxnForm]     = useState<any>(EMPTY_TXN)
   const [delAcct, setDelAcct]     = useState<string|null>(null)
   const [delTxn, setDelTxn]       = useState<string|null>(null)
+  const [selTxn, setSelTxn]       = useState<Set<string>>(new Set())
+  const [bulkDelTxn, setBulkDelTxn] = useState(false)
+  const importTxnRef = useRef<HTMLInputElement>(null)
   const fa = (k:string) => (e:any) => setAcctForm((p:any)=>({...p,[k]:e.target.value}))
   const ft = (k:string) => (e:any) => setTxnForm((p:any) =>({...p,[k]:e.target.value}))
 
@@ -1530,6 +1568,67 @@ const BankLedgerTab: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['bank_transactions'] }); setDelTxn(null); toast.success('Deleted') },
   })
 
+  const bulkDelTxnMut = useMutation({
+    mutationFn: async (ids:string[]) => {
+      const { error } = await supabase.from('bank_transactions').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bank_transactions'] }); setSelTxn(new Set()); setBulkDelTxn(false); toast.success('Deleted') },
+    onError: (e:any) => toast.error(e.message),
+  })
+
+  const toggleTxnOne = (id:string) => setSelTxn(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleTxnAll = () => {
+    const ids = ledgerRows.map((t:any) => t.id)
+    const allSel = ids.every((id:string) => selTxn.has(id))
+    setSelTxn(allSel ? new Set() : new Set(ids))
+  }
+  const txnAllSel  = ledgerRows.length > 0 && ledgerRows.every((t:any) => selTxn.has(t.id))
+  const txnSomeSel = ledgerRows.some((t:any) => selTxn.has(t.id))
+
+  const exportLedger = () => exportCSV(`ledger_${selectedAccount?.bank_name ?? 'bank'}.csv`, [...ledgerRows].reverse(), [
+    {key:'txn_date',label:'Date'},{key:'txn_type',label:'Type'},{key:'category',label:'Category'},
+    {key:'description',label:'Description'},{key:'reference_no',label:'Reference'},
+    {key:'amount',label:'Amount'},{key:'running_balance',label:'Balance'},
+  ])
+
+  const handleTxnImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file || !selAcct) return
+    try {
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer)
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const raw: any[][] = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''})
+      if (raw.length < 2) { toast.error('No data rows'); return }
+      const headers = (raw[0] as string[]).map(h => String(h).trim().toLowerCase().replace(/\s+/g,'_'))
+      const col = (name:string) => headers.indexOf(name)
+      const rows = raw.slice(1).filter(r => r.some((c:any) => c !== ''))
+      const inserts = rows.map(r => ({
+        bank_account_id: selAcct,
+        txn_date: r[col('txn_date')] || r[col('date')] || null,
+        txn_type: r[col('txn_type')] || r[col('type')] || 'Debit',
+        category: r[col('category')] || null,
+        reference_no: r[col('reference_no')] || r[col('reference')] || null,
+        description: r[col('description')] || null,
+        amount: Number(r[col('amount')] || 0),
+      }))
+      const { error } = await supabase.from('bank_transactions').insert(inserts)
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      toast.success(`Imported ${inserts.length} transactions`)
+    } catch (err:any) { toast.error(err.message) }
+    finally { e.target.value = '' }
+  }
+
+  const downloadTxnTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['txn_date','txn_type','category','reference_no','description','amount'],
+      ['2026-06-01','Debit','Payment to Vendor','UTR123','Feed payment','50000'],
+    ])
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Transactions')
+    XLSX.writeFile(wb, 'bank_transactions_template.xlsx')
+  }
+
   const openNewAcct  = () => { setEditAcct(null); setAcctForm({...EMPTY_ACCT}); setAcctOpen(true) }
   const openEditAcct = (r:any) => { setEditAcct(r); setAcctForm({...EMPTY_ACCT,...r,opening_balance:String(r.opening_balance??0)}); setAcctOpen(true) }
   const openNewTxn   = () => { setEditTxn(null); setTxnForm({...EMPTY_TXN, bank_account_id: selAcct, txn_date: today()}); setTxnOpen(true) }
@@ -1573,10 +1672,24 @@ const BankLedgerTab: React.FC = () => {
       {/* Ledger for selected account */}
       {selAcct && selectedAccount && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="font-semibold text-gray-800">Ledger — {selectedAccount.bank_name} ({selectedAccount.account_name})</h3>
-            <Button size="sm" onClick={openNewTxn} icon={<Plus size={14}/>}>Add Transaction</Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={downloadTxnTemplate}>Template</Button>
+              <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={() => importTxnRef.current?.click()}>Import</Button>
+              <input ref={importTxnRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleTxnImport} />
+              <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={exportLedger}>Export</Button>
+              <Button size="sm" onClick={openNewTxn} icon={<Plus size={14}/>}>Add Transaction</Button>
+            </div>
           </div>
+
+          {selTxn.size > 0 && (
+            <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+              <span className="text-sm font-medium text-blue-700">{selTxn.size} selected</span>
+              <button onClick={() => setBulkDelTxn(true)} className="text-sm text-red-600 hover:underline font-medium">Delete selected</button>
+              <button onClick={() => setSelTxn(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline ml-auto">Clear</button>
+            </div>
+          )}
 
           <div className="grid grid-cols-3 gap-3">
             <StatCard title="Current Balance" value={inr(currentBalance)} icon={<CreditCard size={18}/>} color={currentBalance >= 0 ? 'text-green-600' : 'text-red-600'} />
@@ -1589,13 +1702,15 @@ const BankLedgerTab: React.FC = () => {
               <div className="overflow-x-auto">
                 <Table>
                   <thead><tr>
+                    <Th><input type="checkbox" checked={txnAllSel} ref={el => { if (el) el.indeterminate = txnSomeSel && !txnAllSel }} onChange={toggleTxnAll} className="rounded" /></Th>
                     <Th>Date</Th><Th>Type</Th><Th>Category</Th><Th>Description</Th>
                     <Th>Reference</Th><Th>Linked Payment</Th>
                     <Th right>Debit</Th><Th right>Credit</Th><Th right>Balance</Th><Th></Th>
                   </tr></thead>
                   <tbody>
                     {[...ledgerRows].reverse().map((t: any) => (
-                      <tr key={t.id} className={`text-sm hover:bg-gray-50 ${t.txn_type==='Credit'?'':'bg-red-50/30'}`}>
+                      <tr key={t.id} className={`text-sm hover:bg-gray-50 ${selTxn.has(t.id) ? 'bg-blue-50' : t.txn_type==='Credit'?'':'bg-red-50/30'}`}>
+                        <Td><input type="checkbox" checked={selTxn.has(t.id)} onChange={() => toggleTxnOne(t.id)} className="rounded" /></Td>
                         <Td className="text-xs">{fmtDate(t.txn_date)}</Td>
                         <Td><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${t.txn_type==='Credit'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{t.txn_type}</span></Td>
                         <Td className="text-xs text-gray-500">{t.category ?? '—'}</Td>
@@ -1613,7 +1728,7 @@ const BankLedgerTab: React.FC = () => {
                         </Td>
                       </tr>
                     ))}
-                    {ledgerRows.length === 0 && <tr><td colSpan={10}><EmptyState icon={<CreditCard size={32}/>} title="No transactions yet" subtitle="Add transactions to see the running balance" /></td></tr>}
+                    {ledgerRows.length === 0 && <tr><td colSpan={11}><EmptyState icon={<CreditCard size={32}/>} title="No transactions yet" subtitle="Add transactions to see the running balance" /></td></tr>}
                   </tbody>
                 </Table>
               </div>
@@ -1672,6 +1787,10 @@ const BankLedgerTab: React.FC = () => {
       <Modal open={!!delTxn} onClose={() => setDelTxn(null)} title="Delete Transaction"
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelTxn(null)}>Cancel</Button><Button variant="danger" onClick={() => delTxn && delTxnMut.mutate(delTxn)} loading={delTxnMut.isPending}>Delete</Button></div>}>
         <p className="text-sm text-gray-600">Delete this transaction? Running balance will be recalculated.</p>
+      </Modal>
+      <Modal open={bulkDelTxn} onClose={() => setBulkDelTxn(false)} title="Delete Selected Transactions"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkDelTxn(false)}>Cancel</Button><Button variant="danger" onClick={() => bulkDelTxnMut.mutate(Array.from(selTxn))} loading={bulkDelTxnMut.isPending}>Delete {selTxn.size} transactions</Button></div>}>
+        <p className="text-sm text-gray-600">Delete {selTxn.size} selected transaction(s)? Running balance will be recalculated.</p>
       </Modal>
     </div>
   )
