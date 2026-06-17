@@ -32,6 +32,7 @@ import { CostOverviewPage, ElectricityCostPage, SalaryCostPage } from '@/pages/r
 import { PurchaseOrdersPage, PendingPaymentsPage } from '@/pages/reports/POPages'
 import { UserManagement } from '@/pages/admin/UserManagement'
 import { AdminCentre } from '@/pages/admin/AdminCentre'
+import { AuditLogPage } from '@/pages/admin/AuditLog'
 import { FlockDashboard, FlockDetail as NewFlockDetail } from '@/pages/flock/FlockPages'
 import { FlockComparison } from '@/pages/flock/FlockComparison'
 import { ShedPerformancePage } from '@/pages/flock/ShedPerformance'
@@ -178,6 +179,7 @@ export const App: React.FC = () => {
             <Route path="import/mapper" element={<ExcelMapperPage />} />
             <Route path="help" element={<HelpGuidePage />} />
             <Route path="admin/users" element={<RequireRole check={can.manageUsers}><UserManagement /></RequireRole>} />
+            <Route path="admin/audit" element={<RequireRole check={can.manageUsers}><AuditLogPage /></RequireRole>} />
             <Route path="admin" element={<RequireRole check={can.manageUsers}><AdminCentre /></RequireRole>} />
 
             {/* Flock Management (new) */}

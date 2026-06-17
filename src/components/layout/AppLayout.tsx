@@ -145,6 +145,7 @@ const NAV: NavItem[] = [
       { label: 'Electricity Allocation',  to: '/admin?tab=electricity' },
       { label: 'Salary Allocation',       to: '/admin?tab=salary' },
       { label: 'User Management',         to: '/admin/users' },
+      { label: '🔍 Audit Log',            to: '/admin/audit' },
     ]
   },
 ]
