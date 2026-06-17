@@ -128,6 +128,7 @@ const NAV: NavItem[] = [
       { label: 'Import Salary',        to: '/import/salary' },
       { label: 'Import Electricity',   to: '/import/electricity' },
       { label: 'Import GRN',           to: '/import/grn' },
+      { label: '✦ Excel Converter',    to: '/import/mapper' },
     ]
   },
   {
