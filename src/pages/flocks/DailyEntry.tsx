@@ -37,7 +37,7 @@ export const DailyEntry: React.FC = () => {
     queryFn: async () => {
       let q = supabase
         .from('flocks')
-        .select('id, flock_no, status, laying_farm_id, rearing_farm_id, farms!laying_farm_id(name)')
+        .select('id, flock_no, status, laying_farm_id, rearing_farm_id, laying_start_date, farms!laying_farm_id(name)')
         .neq('status', 'closed')
         .order('flock_no')
       q = applyFlockFarmFilter(q)
@@ -177,6 +177,8 @@ export const DailyEntry: React.FC = () => {
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const selectedFlockData = flocks?.find((f: any) => f.id === selectedFlock)
+  const isLayingPhase = selectedFlockData?.status === 'laying' ||
+    !!(selectedFlockData?.laying_start_date && date >= selectedFlockData.laying_start_date)
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -457,7 +459,8 @@ export const DailyEntry: React.FC = () => {
             </FormRow>
           </Card>
 
-          {/* Eggs */}
+          {/* Eggs — only shown after laying starts */}
+          {isLayingPhase ? (
           <Card>
             <CardHeader
               title="Egg Collection"
@@ -513,6 +516,14 @@ export const DailyEntry: React.FC = () => {
               </div>
             </div>
           </Card>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+              🥚 Egg collection fields will appear once laying starts
+              {selectedFlockData?.laying_start_date
+                ? ` (Laying start: ${selectedFlockData.laying_start_date})`
+                : ' — set Laying Start Date in the flock settings'}
+            </div>
+          )}
 
           {/* Misc */}
           <Card>
