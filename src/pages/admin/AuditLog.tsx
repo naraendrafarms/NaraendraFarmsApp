@@ -10,7 +10,7 @@ const TABLE_LABELS: Record<string, string> = {
   nhe_sales:           'NHE / Bird Sales',
   salary_monthly:      'Salary',
   attendance_daily:    'Attendance',
-  grn:                 'GRN / Purchases',
+  grn_entries:         'GRN / Purchases',
   electricity_bills:   'Electricity Bills',
   flocks:              'Flocks',
   employees:           'Employees',
@@ -19,6 +19,7 @@ const TABLE_LABELS: Record<string, string> = {
   cash_book:           'Cash Book',
   farm_expenses:       'Farm Expenses',
   vaccination_records: 'Vaccinations',
+  daily_feed:          'Feed Records',
 }
 
 const ACTION_COLOR: Record<string, string> = {
@@ -115,6 +116,13 @@ export const AuditLogPage: React.FC = () => {
           </div>
         }
       />
+
+      {total === 0 && !isLoading && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+          <strong>Audit log is empty.</strong> It records all data changes from the time it was enabled (17-Jun-2026 onwards).
+          Try creating or editing any record — it will appear here instantly.
+        </div>
+      )}
 
       {/* Filters */}
       <Card>

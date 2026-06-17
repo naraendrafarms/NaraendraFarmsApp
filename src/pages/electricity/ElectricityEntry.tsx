@@ -80,14 +80,14 @@ const BillsTab: React.FC = () => {
     }
   })
 
-  const blank = () => ({ meter_id:'', bill_month:'', units_consumed:'', amount:'', acd_dc_due:'0', deposit_amount:'0', paid_date:'', remarks:'' })
+  const blank = () => ({ meter_id:'', bill_month:'', units_consumed:'', amount:'', acd_dc_due:'0', deposit_amount:'0', deposit_interest:'0', meter_rent:'0', paid_date:'', remarks:'' })
   const [form, setForm] = useState(blank())
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const openForm = (bill?: any) => {
     if (bill) {
       setEditing(bill)
-      setForm({ meter_id: bill.meter_id, bill_month: bill.bill_month?.slice(0,7)??'', units_consumed: bill.units_consumed?.toString()??'', amount: bill.amount?.toString()??'', acd_dc_due: bill.acd_dc_due?.toString()??'0', deposit_amount: bill.deposit_amount?.toString()??'0', paid_date: bill.paid_date??'', remarks: bill.remarks??'' })
+      setForm({ meter_id: bill.meter_id, bill_month: bill.bill_month?.slice(0,7)??'', units_consumed: bill.units_consumed?.toString()??'', amount: bill.amount?.toString()??'', acd_dc_due: bill.acd_dc_due?.toString()??'0', deposit_amount: bill.deposit_amount?.toString()??'0', deposit_interest: bill.deposit_interest?.toString()??'0', meter_rent: bill.meter_rent?.toString()??'0', paid_date: bill.paid_date??'', remarks: bill.remarks??'' })
     } else {
       setEditing(null)
       setForm(blank())
@@ -97,7 +97,7 @@ const BillsTab: React.FC = () => {
 
   const mut = useMutation({
     mutationFn: async () => {
-      const payload = { meter_id: form.meter_id, bill_month: form.bill_month+'-01', units_consumed: parseInt(form.units_consumed)||null, amount: parseFloat(form.amount), acd_dc_due: parseFloat(form.acd_dc_due)||0, deposit_amount: parseFloat(form.deposit_amount)||0, paid_date: form.paid_date||null, remarks: form.remarks||null }
+      const payload = { meter_id: form.meter_id, bill_month: form.bill_month+'-01', units_consumed: parseInt(form.units_consumed)||null, amount: parseFloat(form.amount), acd_dc_due: parseFloat(form.acd_dc_due)||0, deposit_amount: parseFloat(form.deposit_amount)||0, deposit_interest: parseFloat(form.deposit_interest)||0, meter_rent: parseFloat(form.meter_rent)||0, paid_date: form.paid_date||null, remarks: form.remarks||null }
       if (!payload.meter_id || !payload.bill_month || !payload.amount) throw new Error('Meter, month and amount required')
       if (editing) { const{error}=await supabase.from('electricity_bills').update(payload).eq('id',editing.id); if(error)throw error }
       else { const{error}=await supabase.from('electricity_bills').insert(payload); if(error)throw error }
@@ -107,20 +107,30 @@ const BillsTab: React.FC = () => {
   })
 
   const delMut = useMutation({
-    mutationFn: async (id: string) => { const{error}=await supabase.from('electricity_bills').delete().eq('id',id); if(error)throw error },
-    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({queryKey:['elec_bills']}) },
-    onError: (e:any) => toast.error(e.message)
+    mutationFn: async (id: string) => {
+      // Delete allocations first (cascade in case FK doesn't have ON DELETE CASCADE yet)
+      await supabase.from('electricity_allocation').delete().eq('bill_id', id)
+      const { error } = await supabase.from('electricity_bills').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({queryKey:['elec_bills']}); qc.invalidateQueries({queryKey:['elec_allocations']}) },
+    onError: (e:any) => toast.error('Delete failed: ' + e.message)
   })
 
   const bulkDelete = async () => {
     if (!selected.size) return
     if (!confirm(`Delete ${selected.size} bill(s)?`)) return
     const ids = [...selected]
+    // Delete allocations first, then bills
+    for (let i = 0; i < ids.length; i += 50) {
+      await supabase.from('electricity_allocation').delete().in('bill_id', ids.slice(i, i+50))
+    }
     for (let i = 0; i < ids.length; i += 50) {
       await supabase.from('electricity_bills').delete().in('id', ids.slice(i, i+50))
     }
     setSelected(new Set())
     qc.invalidateQueries({queryKey:['elec_bills']})
+    qc.invalidateQueries({queryKey:['elec_allocations']})
     toast.success(`Deleted ${ids.length} bills`)
   }
 
@@ -152,7 +162,12 @@ const BillsTab: React.FC = () => {
   }
 
   const meterOptions = (meters??[]).map((m:any) => ({ value: m.id, label: `${m.meter_name} (${m.usc_no}) — ${m.farms?.name}` }))
-  const totals = { amount: (bills??[]).reduce((s:number,b:any)=>s+(b.amount??0),0), units: (bills??[]).reduce((s:number,b:any)=>s+(b.units_consumed??0),0) }
+  const totals = {
+    amount: (bills??[]).reduce((s:number,b:any)=>s+(b.amount??0),0),
+    units: (bills??[]).reduce((s:number,b:any)=>s+(b.units_consumed??0),0),
+    depositInterest: (bills??[]).reduce((s:number,b:any)=>s+(b.deposit_interest??0),0),
+    netPayable: (bills??[]).reduce((s:number,b:any)=>s+(b.amount??0)-(b.deposit_interest??0),0),
+  }
 
   return (
     <>
@@ -161,7 +176,7 @@ const BillsTab: React.FC = () => {
           <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-44" />
           <Select label="" placeholder="All Meters" options={meterOptions} value={filterMeter} onChange={e=>setFilterMeter(e.target.value)} className="w-56" />
           {(filterMonth||filterMeter) && <Button variant="ghost" size="sm" onClick={()=>{setFilterMonth('');setFilterMeter('')}}>Clear</Button>}
-          {bills && <span className="text-sm text-gray-500 self-center">{bills.length} bills · {totals.units.toLocaleString('en-IN')} units · <strong>{inr(totals.amount)}</strong></span>}
+          {bills && <span className="text-sm text-gray-500 self-center">{bills.length} bills · {totals.units.toLocaleString('en-IN')} units · <strong>{inr(totals.amount)}</strong>{totals.depositInterest>0 && <span className="text-green-600 ml-2">− {inr(totals.depositInterest)} interest = <strong>{inr(totals.netPayable)}</strong> net</span>}</span>}
         </div>
         <div className="flex gap-2">
           {selected.size > 0 && <Button variant="outline" size="sm" className="!text-red-600 !border-red-300" onClick={bulkDelete}>Delete {selected.size}</Button>}
@@ -203,7 +218,7 @@ const BillsTab: React.FC = () => {
               <Th><input type="checkbox" checked={selected.size>0&&selected.size===(bills??[]).length} onChange={toggleAll} className="rounded"/></Th>
               <Th>Meter / Site</Th><Th>USC No</Th><Th>Month</Th>
               <Th right>Units</Th><Th right>Amount</Th><Th right>ACD/DC</Th>
-              <Th right>Deposit</Th><Th>Paid Date</Th><Th>Remarks</Th><Th></Th>
+              <Th right>Deposit</Th><Th right>Int. Credit</Th><Th right>Net Payable</Th><Th>Paid Date</Th><Th>Remarks</Th><Th></Th>
             </tr></thead>
             <tbody>
               {(bills??[]).map((b:any) => (
@@ -216,6 +231,8 @@ const BillsTab: React.FC = () => {
                   <Td right><span className="font-semibold">{inr(b.amount)}</span></Td>
                   <Td right>{b.acd_dc_due>0?inr(b.acd_dc_due):'—'}</Td>
                   <Td right>{b.deposit_amount>0?inr(b.deposit_amount):'—'}</Td>
+                  <Td right>{b.deposit_interest>0?<span className="text-green-600 font-medium">+{inr(b.deposit_interest)}</span>:'—'}</Td>
+                  <Td right><span className="font-semibold">{inr((b.amount??0)-(b.deposit_interest??0))}</span></Td>
                   <Td className="text-xs">{b.paid_date ? <Badge color="green">{b.paid_date}</Badge> : <span className="text-gray-300">—</span>}</Td>
                   <Td className="text-xs text-gray-400 max-w-xs truncate">{b.remarks??''}</Td>
                   <Td>
@@ -232,7 +249,10 @@ const BillsTab: React.FC = () => {
                 <Td colSpan={4}>TOTAL ({(bills??[]).length} bills)</Td>
                 <Td right>{totals.units.toLocaleString('en-IN')}</Td>
                 <Td right>{inr(totals.amount)}</Td>
-                <Td colSpan={5}/>
+                <Td colSpan={2}/>
+                <Td right className="text-green-600">{totals.depositInterest>0?`+${inr(totals.depositInterest)}`:'—'}</Td>
+                <Td right className="font-bold">{inr(totals.netPayable)}</Td>
+                <Td colSpan={3}/>
               </tr></tfoot>
             )}
           </Table>
@@ -253,9 +273,19 @@ const BillsTab: React.FC = () => {
             <Input label="ACD/DC Due (₹)" type="number" step="0.01" value={form.acd_dc_due} onChange={e=>set('acd_dc_due',e.target.value)}/>
           </FormRow>
           <FormRow>
-            <Input label="Deposit Amount (₹)" type="number" step="0.01" value={form.deposit_amount} onChange={e=>set('deposit_amount',e.target.value)}/>
+            <Input label="Security Deposit (₹)" type="number" step="0.01" value={form.deposit_amount} onChange={e=>set('deposit_amount',e.target.value)}/>
+            <Input label="Deposit Interest Credit (₹)" type="number" step="0.01" value={form.deposit_interest} onChange={e=>set('deposit_interest',e.target.value)} hint="Annual interest credited by APEPDCL — reduces net payable"/>
+          </FormRow>
+          <FormRow>
+            <Input label="Meter Rent (₹)" type="number" step="0.01" value={form.meter_rent} onChange={e=>set('meter_rent',e.target.value)}/>
             <Input label="Paid Date" type="date" value={form.paid_date} onChange={e=>set('paid_date',e.target.value)}/>
           </FormRow>
+          {(parseFloat(form.deposit_interest)||0) > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-800">
+              Net Payable = {inr((parseFloat(form.amount)||0) - (parseFloat(form.deposit_interest)||0))}
+              &nbsp;(Bill {inr(parseFloat(form.amount)||0)} − Interest {inr(parseFloat(form.deposit_interest)||0)})
+            </div>
+          )}
           <Input label="Remarks" value={form.remarks} onChange={e=>set('remarks',e.target.value)}/>
         </div>
       </Modal>

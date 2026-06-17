@@ -132,6 +132,12 @@ jobs:
       - name: Run migration 062
         run: python3 scripts/run_sql.py supabase/migrations/062_audit_log.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 063
+        run: python3 scripts/run_sql.py supabase/migrations/063_electricity_deposit_interest.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 064
+        run: python3 scripts/run_sql.py supabase/migrations/064_fix_audit_triggers.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Reload PostgREST schema cache
         run: |
           curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" \
