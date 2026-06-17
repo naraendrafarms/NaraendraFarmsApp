@@ -124,9 +124,11 @@ export const VaccinationRecordsPage: React.FC = () => {
 
   const delMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      for (const id of ids) await supabase.from('vaccination_records').delete().eq('id', id)
+      const { error } = await supabase.from('vaccination_records').delete().in('id', ids)
+      if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_records'] }); toast.success('Deleted'); setSel(new Set()) }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_records'] }); toast.success('Deleted'); setSel(new Set()) },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const rows = records ?? []

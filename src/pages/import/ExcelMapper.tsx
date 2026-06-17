@@ -167,7 +167,7 @@ const IMPORT_TYPES: ImportTypeDef[] = [
     id: 'grn',
     label: 'GRN / Purchases',
     description: 'Goods Received Notes for feed ingredients',
-    table: 'grn_entries',
+    table: 'grn',
     conflictKey: 'grn_no',
     previewCols: ['grn_date','ingredient_name','quantity_kg','rate_per_kg','total_amount'],
     fields: [
@@ -420,10 +420,10 @@ export const ExcelMapperPage: React.FC = () => {
         const toInsert = validRows.map(r => {
           const ingName = String(r.row.ingredient_name||'').toLowerCase()
           const ingId = ingMap[ingName] || Object.entries(ingMap).find(([k])=>ingName.includes(k)||k.includes(ingName))?.[1]
-          return { grn_date: r.row.grn_date, grn_no: r.row.grn_no, ingredient_id: ingId||null, ingredient_name: r.row.ingredient_name, quantity_kg: r.row.quantity_kg, rate_per_kg: r.row.rate_per_kg||null, total_amount: r.row.total_amount||null, vehicle_no: r.row.vehicle_no||null, party_name: r.row.party_name||null, remarks: r.row.remarks }
+          return { grn_date: r.row.grn_date, grn_no: r.row.grn_no, ingredient_id: ingId||null, item_name: r.row.ingredient_name||null, qty: r.row.quantity_kg||null, price_per_unit: r.row.rate_per_kg||null, total_amount: r.row.total_amount||null, vehicle_no: r.row.vehicle_no||null, remarks: r.row.remarks||null }
         })
         for (let i=0;i<toInsert.length;i+=50) {
-          const { error } = await supabase.from('grn_entries').upsert(toInsert.slice(i,i+50),{onConflict:'grn_no',ignoreDuplicates:true})
+          const { error } = await supabase.from('grn').upsert(toInsert.slice(i,i+50),{onConflict:'grn_no',ignoreDuplicates:true})
           if (error) { errors++; messages.push(error.message) } else success += Math.min(50,toInsert.length-i)
         }
       }

@@ -210,7 +210,7 @@ export const IngredientsMaster: React.FC = () => {
       for(const oldId of dropIds){
         // Remap formula composition and GRN lines to the kept ingredient
         await supabase.from('feed_formula_ingredients').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
-        await supabase.from('grn_items').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
+        await supabase.from('grn').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
         const{error}=await supabase.from('feed_ingredients').delete().eq('id',oldId)
         if(error)throw error
       }

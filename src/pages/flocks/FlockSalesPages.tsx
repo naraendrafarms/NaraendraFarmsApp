@@ -160,8 +160,9 @@ export const HEDispatch: React.FC = () => {
   }
 
   const bulkDelMut = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('he_dispatch').delete().in('id', ids) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['he_dispatch'] }); setSel(new Set()); setBulkConfirm(false) }
+    mutationFn: async (ids: string[]) => { const{error}=await supabase.from('he_dispatch').delete().in('id', ids); if(error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['he_dispatch'] }); setSel(new Set()); setBulkConfirm(false) },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const mut = useMutation({
@@ -778,8 +779,9 @@ export const NHESales: React.FC = () => {
     : ((parseFloat(form.quantity)||0) * (parseFloat(form.rate)||0))
 
   const bulkDelMut = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('nhe_sales').delete().in('id', ids) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['nhe_sales'] }); setSel(new Set()); setBulkConfirm(false) }
+    mutationFn: async (ids: string[]) => { const{error}=await supabase.from('nhe_sales').delete().in('id', ids); if(error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['nhe_sales'] }); setSel(new Set()); setBulkConfirm(false) },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const saveMut = useMutation({
@@ -1342,8 +1344,9 @@ export const MedicineEntry: React.FC = () => {
   })
 
   const bulkDelMutMed = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('medicine_usage').delete().in('id', ids) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['medicine_usage'] }); setSel(new Set()); setBulkConfirm(false) }
+    mutationFn: async (ids: string[]) => { const{error}=await supabase.from('medicine_usage').delete().in('id', ids); if(error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['medicine_usage'] }); setSel(new Set()); setBulkConfirm(false) },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []

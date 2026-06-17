@@ -148,7 +148,8 @@ const FormulasTab: React.FC = () => {
         if (rows.length) { const { error } = await supabase.from('feed_formula_ingredients').insert(rows); if (error) throw error }
       }
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setShowForm(false); setEditing(null); toast.success('Saved') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setShowForm(false); setEditing(null); toast.success('Saved') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const delMut = useMutation({
@@ -156,15 +157,18 @@ const FormulasTab: React.FC = () => {
       const { error } = await supabase.from('feed_formulas').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); toast.success('Deleted') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
   })
 
-  const bulkDelete = async () => {
-    if (!confirm(`Delete ${selected.size} formula(s)? This cannot be undone.`)) return
-    for (const id of selected) await supabase.from('feed_formulas').delete().eq('id', id)
-    qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']})
-    setSelected(new Set()); toast.success(`Deleted ${selected.size} formula(s)`)
-  }
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('feed_formulas').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setSelected(new Set()); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
 
   const saveIngMut = useMutation({
     mutationFn: async (d: any) => {
@@ -177,7 +181,8 @@ const FormulasTab: React.FC = () => {
         if (error) throw error
       }
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setEditIngredient(null); setShowAddIngredient(null); toast.success('Saved') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setEditIngredient(null); setShowAddIngredient(null); toast.success('Saved') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const delIngMut = useMutation({
@@ -185,7 +190,8 @@ const FormulasTab: React.FC = () => {
       const { error } = await supabase.from('feed_formula_ingredients').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); toast.success('Deleted') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   function handleExport() {
@@ -249,7 +255,7 @@ const FormulasTab: React.FC = () => {
           <Button size="sm" variant="outline" onClick={handleTemplate}><Download size={14}/> Template</Button>
           <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}><Upload size={14}/> Import</Button>
           <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export</Button>
-          {selected.size > 0 && <Button size="sm" variant="outline" onClick={bulkDelete} className="text-red-600 border-red-300"><Trash2 size={14}/> Delete ({selected.size})</Button>}
+          {selected.size > 0 && <Button size="sm" variant="outline" loading={bulkDelMut.isPending} onClick={() => { if(confirm(`Delete ${selected.size} formula(s)?`)) bulkDelMut.mutate(Array.from(selected)) }} className="text-red-600 border-red-300"><Trash2 size={14}/> Delete ({selected.size})</Button>}
           <Button size="sm" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={14}/> Add Formula</Button>
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
         </div>
@@ -527,12 +533,14 @@ const ProductionTab: React.FC = () => {
         await supabase.from('feed_production_ingredients').insert(rows)
       }
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); setShowForm(false); setEditing(null); toast.success('Saved') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); setShowForm(false); setEditing(null); toast.success('Saved') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const delMut = useMutation({
     mutationFn: async (id: string) => { const {error} = await supabase.from('feed_production_log').delete().eq('id',id); if(error) throw error },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); toast.success('Deleted') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   function handleExport() {
@@ -748,7 +756,7 @@ const StockTab: React.FC = () => {
   const { data: grnData = [], isLoading: grnLoading } = useQuery({
     queryKey: ['stock_grn', fFarm, fFrom, fTo],
     queryFn: async () => {
-      let q = supabase.from('grn').select('feed_ingredients(name,code), quantity_kg, grn_date, farm_id')
+      let q = supabase.from('grn').select('ingredient_id,item_name,feed_ingredients(name,code), qty, grn_date, farm_id')
       if (fFarm) q = q.eq('farm_id', fFarm)
       if (fFrom) q = q.gte('grn_date', fFrom)
       if (fTo)   q = q.lte('grn_date', fTo)
@@ -801,7 +809,7 @@ const StockTab: React.FC = () => {
     const name = (g.feed_ingredients as any)?.name ?? 'Unknown'
     const code = (g.feed_ingredients as any)?.code
     if (!stockMap[name]) stockMap[name] = { code, received: 0, adjusted: 0, consumed: 0 }
-    stockMap[name].received += Number(g.quantity_kg ?? 0)
+    stockMap[name].received += Number(g.qty ?? 0)
   })
 
   adjData.forEach((a: any) => {
@@ -1117,12 +1125,14 @@ const ExpensesTab: React.FC = () => {
       if (d.id) { const {error} = await supabase.from('feedmill_expenses').update(d).eq('id',d.id); if(error) throw error }
       else { const {error} = await supabase.from('feedmill_expenses').insert(d); if(error) throw error }
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feedmill_expenses']}); setShowForm(false); setEditing(null); toast.success('Saved') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feedmill_expenses']}); setShowForm(false); setEditing(null); toast.success('Saved') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const delMut = useMutation({
     mutationFn: async (id: string) => { const {error} = await supabase.from('feedmill_expenses').delete().eq('id',id); if(error) throw error },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feedmill_expenses']}); toast.success('Deleted') }
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feedmill_expenses']}); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   function handleExport() {

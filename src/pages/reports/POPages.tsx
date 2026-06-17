@@ -195,8 +195,9 @@ const POTab: React.FC = () => {
   })
 
   const delMut = useMutation({
-    mutationFn: async (id: string) => { await supabase.from('purchase_orders').delete().eq('id', id) },
+    mutationFn: async (id: string) => { const{error}=await supabase.from('purchase_orders').delete().eq('id', id); if(error) throw error },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setDelId(null); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const receiptMut = useMutation({
@@ -1399,8 +1400,9 @@ const VendorBanksTab: React.FC = () => {
   })
 
   const delMut = useMutation({
-    mutationFn: async (id: string) => { await supabase.from('vendor_bank_details').delete().eq('id', id) },
+    mutationFn: async (id: string) => { const{error}=await supabase.from('vendor_bank_details').delete().eq('id', id); if(error) throw error },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['vendor_bank_details'] }); setDelId(null); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const filtered = useMemo(() => {

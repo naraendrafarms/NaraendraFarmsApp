@@ -1329,15 +1329,16 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     queryKey: ['grn_feed_rates'],
     queryFn: async () => {
       const { data } = await supabase
-        .from('grn_entries')
-        .select('ingredient_name,rate_per_kg,grn_date')
+        .from('grn')
+        .select('item_name,price_per_unit,grn_date,feed_ingredients(name)')
         .order('grn_date', { ascending: false })
       if (!data) return {} as Record<string, number>
       const map: Record<string, number> = {}
       for (const g of data) {
-        if (g.ingredient_name && g.rate_per_kg) {
-          const k = g.ingredient_name.trim().toLowerCase()
-          if (!(k in map)) map[k] = g.rate_per_kg
+        const name = g.item_name || (g as any).feed_ingredients?.name
+        if (name && g.price_per_unit) {
+          const k = name.trim().toLowerCase()
+          if (!(k in map)) map[k] = g.price_per_unit
         }
       }
       return map

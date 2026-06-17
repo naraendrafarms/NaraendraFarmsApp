@@ -267,8 +267,9 @@ export const FlockDetail: React.FC = () => {
   })
 
   const bulkDelMut = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('daily_records').delete().in('id', ids) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily', id] }); setSel(new Set()); setBulkConfirm(false) }
+    mutationFn: async (ids: string[]) => { const{error}=await supabase.from('daily_records').delete().in('id', ids); if(error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily', id] }); setSel(new Set()); setBulkConfirm(false) },
+    onError: (e: any) => toast.error(e.message),
   })
 
   // dailyIndexMap: maps record id → original ascending index (for week number)
