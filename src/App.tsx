@@ -44,6 +44,7 @@ import { GSTReportPage } from '@/pages/reports/GSTReport'
 import { EggStockPage } from '@/pages/reports/EggStock'
 import { CashBookPage } from '@/pages/accounts/CashBook'
 import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
+import { HelpGuidePage } from '@/pages/help/HelpGuide'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -175,6 +176,7 @@ export const App: React.FC = () => {
             <Route path="import/electricity" element={<ImportElectricity />} />
             <Route path="import/grn" element={<ImportGRN />} />
             <Route path="import/mapper" element={<ExcelMapperPage />} />
+            <Route path="help" element={<HelpGuidePage />} />
             <Route path="admin/users" element={<RequireRole check={can.manageUsers}><UserManagement /></RequireRole>} />
             <Route path="admin" element={<RequireRole check={can.manageUsers}><AdminCentre /></RequireRole>} />
 
