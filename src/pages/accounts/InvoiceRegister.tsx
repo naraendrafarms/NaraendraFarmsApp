@@ -33,6 +33,12 @@ const EMPTY = {
   due_date: '', remarks: '',
 }
 
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
+
 export const InvoiceRegister: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
@@ -40,6 +46,8 @@ export const InvoiceRegister: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY })
   const [filterType, setFilterType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
   const [markPayId, setMarkPayId] = useState<string|null>(null)
@@ -144,6 +152,18 @@ export const InvoiceRegister: React.FC = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       setDelId(null); toast.success('Deleted')
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('supplier_invoices').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
+      setSel(new Set()); setBulkConfirm(false); toast.success('Deleted')
     },
     onError: (e: any) => toast.error(e.message)
   })
@@ -350,10 +370,28 @@ export const InvoiceRegister: React.FC = () => {
         </Card>
       ) : (
         <Card>
+          {sel.size > 0 && (
+            <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 mb-3">
+              <span className="text-sm font-medium text-red-700">{sel.size} selected</span>
+              <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+              <div className="ml-auto">
+                <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} onClick={() => setBulkConfirm(true)}>
+                  Delete {sel.size}
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <Table>
               <thead>
                 <tr>
+                  <Th>
+                    <CB
+                      checked={filtered.length > 0 && sel.size === filtered.length}
+                      indeterminate={sel.size > 0 && sel.size < filtered.length}
+                      onChange={() => { if (sel.size === filtered.length) setSel(new Set()); else setSel(new Set(filtered.map((i: any) => i.id))) }}
+                    />
+                  </Th>
                   <Th>Invoice No</Th>
                   <Th>Date</Th>
                   <Th>Type</Th>
@@ -372,7 +410,8 @@ export const InvoiceRegister: React.FC = () => {
                   const balance = (inv.total_amount ?? 0) - (inv.paid_amount ?? 0)
                   const isOverdue = inv.payment_status !== 'paid' && inv.due_date && inv.due_date < today()
                   return (
-                    <tr key={inv.id} className={`border-b border-gray-50 hover:bg-gray-50 ${isOverdue ? 'bg-red-50/40' : ''}`}>
+                    <tr key={inv.id} className={`border-b border-gray-50 hover:bg-gray-50 ${sel.has(inv.id) ? 'bg-red-50' : isOverdue ? 'bg-red-50/40' : ''}`}>
+                      <Td><CB checked={sel.has(inv.id)} onChange={() => setSel(prev => { const n = new Set(prev); n.has(inv.id) ? n.delete(inv.id) : n.add(inv.id); return n })} /></Td>
                       <Td>
                         <span className="font-medium text-gray-900">{inv.invoice_no}</span>
                       </Td>
@@ -419,7 +458,7 @@ export const InvoiceRegister: React.FC = () => {
               </tbody>
               <tfoot>
                 <tr className="bg-gray-50 font-semibold text-sm">
-                  <td colSpan={5} className="px-3 py-2 text-gray-600">Total ({filtered.length} invoices)</td>
+                  <td colSpan={6} className="px-3 py-2 text-gray-600">Total ({filtered.length} invoices)</td>
                   <td className="px-3 py-2 text-right">{inr(totalAmt)}</td>
                   <td className="px-3 py-2 text-right text-green-600">{inr(totalPaid)}</td>
                   <td className="px-3 py-2 text-right text-red-600">{inr(totalUnpaid)}</td>
@@ -454,6 +493,20 @@ export const InvoiceRegister: React.FC = () => {
           </div>
         )
       })()}
+
+      {/* Bulk Delete Confirm */}
+      {bulkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-80">
+            <p className="font-semibold text-gray-900 mb-2">Delete {sel.size} invoices?</p>
+            <p className="text-sm text-gray-500 mb-5">This cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <Button variant="outline" size="sm" onClick={() => setBulkConfirm(false)}>Cancel</Button>
+              <Button variant="danger" size="sm" loading={bulkDelMut.isPending} onClick={() => bulkDelMut.mutate([...sel])}>Delete</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirm */}
       {delId && (

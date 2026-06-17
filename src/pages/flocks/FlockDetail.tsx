@@ -62,6 +62,8 @@ export const FlockDetail: React.FC = () => {
   const [placementForm, setPlacementForm] = useState({ allocated_date: '', shed_id: '', female_count: '', male_count: '', notes: '' })
   const [editPlacementId, setEditPlacementId] = useState<string|null>(null)
   const [showPlacementForm, setShowPlacementForm] = useState(false)
+  const [selPlacements, setSelPlacements] = useState<Set<string>>(new Set())
+  const [bulkPlacementConfirm, setBulkPlacementConfirm] = useState(false)
   const transferImportRef = useRef<HTMLInputElement>(null)
   const blankTransfer = () => ({
     transfer_date: new Date().toISOString().split('T')[0],
@@ -200,6 +202,20 @@ export const FlockDetail: React.FC = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['flock_placements', id] })
       qc.invalidateQueries({ queryKey: ['flock', id] })
+      toast.success('Deleted')
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const bulkDelPlacementMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('shed_allocations').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flock_placements', id] })
+      qc.invalidateQueries({ queryKey: ['flock', id] })
+      setSelPlacements(new Set()); setBulkPlacementConfirm(false)
       toast.success('Deleted')
     },
     onError: (e: any) => toast.error(e.message)
@@ -807,10 +823,31 @@ export const FlockDetail: React.FC = () => {
             </Card>
           ) : (
             <Card>
+              {selPlacements.size > 0 && (
+                <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2 mb-3">
+                  <span className="text-sm font-medium text-red-700">{selPlacements.size} selected</span>
+                  <button onClick={() => setSelPlacements(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+                  <div className="ml-auto">
+                    <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} onClick={() => setBulkPlacementConfirm(true)}>
+                      Delete {selPlacements.size}
+                    </Button>
+                  </div>
+                </div>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-left text-xs text-gray-500 uppercase">
+                      <th className="px-3 py-2 w-8">
+                        <CB
+                          checked={(placements ?? []).length > 0 && selPlacements.size === (placements ?? []).length}
+                          indeterminate={selPlacements.size > 0 && selPlacements.size < (placements ?? []).length}
+                          onChange={() => {
+                            if (selPlacements.size === (placements ?? []).length) setSelPlacements(new Set())
+                            else setSelPlacements(new Set((placements ?? []).map((p: any) => p.id)))
+                          }}
+                        />
+                      </th>
                       <th className="px-3 py-2">Date</th>
                       <th className="px-3 py-2">Shed</th>
                       <th className="px-3 py-2 text-right">Female</th>
@@ -822,7 +859,10 @@ export const FlockDetail: React.FC = () => {
                   </thead>
                   <tbody>
                     {(placements ?? []).map((p: any) => (
-                      <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                      <tr key={p.id} className={`border-b border-gray-50 hover:bg-gray-50 ${selPlacements.has(p.id) ? 'bg-red-50' : ''}`}>
+                        <td className="px-3 py-2">
+                          <CB checked={selPlacements.has(p.id)} onChange={() => setSelPlacements(prev => { const n = new Set(prev); n.has(p.id) ? n.delete(p.id) : n.add(p.id); return n })} />
+                        </td>
                         <td className="px-3 py-2">{fmtDate(p.allocated_date)}</td>
                         <td className="px-3 py-2">{p.shed ? `${p.shed.shed_no}${p.shed.shed_name ? ' — ' + p.shed.shed_name : ''}` : <span className="text-gray-400">—</span>}</td>
                         <td className="px-3 py-2 text-right">{p.female_count?.toLocaleString('en-IN')}</td>
@@ -843,7 +883,7 @@ export const FlockDetail: React.FC = () => {
                   </tbody>
                   <tfoot>
                     <tr className="bg-gray-50 font-semibold text-sm">
-                      <td className="px-3 py-2" colSpan={2}>Total Received</td>
+                      <td className="px-3 py-2" colSpan={3}>Total Received</td>
                       <td className="px-3 py-2 text-right">{(placements ?? []).reduce((s: number, p: any) => s + (p.female_count ?? 0), 0).toLocaleString('en-IN')} F</td>
                       <td className="px-3 py-2 text-right">{(placements ?? []).reduce((s: number, p: any) => s + (p.male_count ?? 0), 0).toLocaleString('en-IN')} M</td>
                       <td className="px-3 py-2 text-right text-brand-700">{(placements ?? []).reduce((s: number, p: any) => s + (p.female_count ?? 0) + (p.male_count ?? 0), 0).toLocaleString('en-IN')}</td>
@@ -856,6 +896,11 @@ export const FlockDetail: React.FC = () => {
                 ✓ "Total Placed" on the flock overview updates automatically from these placement records.
               </p>
             </Card>
+          )}
+          {bulkPlacementConfirm && (
+            <ConfirmBulkDelete label={`Delete ${selPlacements.size} placement records? This cannot be undone.`}
+              onConfirm={() => bulkDelPlacementMut.mutate([...selPlacements])}
+              onCancel={() => setBulkPlacementConfirm(false)} />
           )}
         </div>
       )}
