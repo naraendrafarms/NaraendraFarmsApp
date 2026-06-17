@@ -37,7 +37,7 @@ export const DailyEntry: React.FC = () => {
     queryFn: async () => {
       let q = supabase
         .from('flocks')
-        .select('id, flock_no, status, laying_farm_id, rearing_farm_id, laying_start_date, farms!laying_farm_id(name)')
+        .select('id, flock_no, status, laying_farm_id, rearing_farm_id, laying_start_date, placement_date, farms!laying_farm_id(name)')
         .neq('status', 'closed')
         .order('flock_no')
       q = applyFlockFarmFilter(q)
@@ -203,6 +203,14 @@ export const DailyEntry: React.FC = () => {
   const selectedFlockData = flocks?.find((f: any) => f.id === selectedFlock)
   const isLayingPhase = selectedFlockData?.status === 'laying' ||
     !!(selectedFlockData?.laying_start_date && date >= selectedFlockData.laying_start_date)
+
+  // Auto-fill age_weeks from placement_date when no existing record
+  React.useEffect(() => {
+    if (existing || !selectedFlockData?.placement_date || !date) return
+    const dayAge = Math.floor((new Date(date).getTime() - new Date(selectedFlockData.placement_date).getTime()) / 86400000)
+    const wk = parseFloat((dayAge / 7).toFixed(1))
+    if (wk >= 0) setForm(f => ({ ...f, age_weeks: wk.toString() }))
+  }, [existing, selectedFlockData, date])
 
   const mut = useMutation({
     mutationFn: async () => {

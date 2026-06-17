@@ -648,7 +648,7 @@ export const FlockDetail: React.FC = () => {
                   <tr className="bg-gray-50">
                     <th className="px-2 py-2 sticky left-0 bg-gray-50"><CB checked={allDailySel} indeterminate={someDailySel && !allDailySel} onChange={toggleAllDaily}/></th>
                     <th className="px-2 py-2 text-left font-semibold text-gray-600 sticky left-0 bg-gray-50">Date</th>
-                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Wk</th>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-600">Wk/Day</th>
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♀</th>
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♂</th>
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♀</th>
@@ -668,7 +668,11 @@ export const FlockDetail: React.FC = () => {
                 <tbody>
                   {displayDaily.map((d) => {
                     const isLayingPeriod = flock.laying_start_date && d.record_date >= flock.laying_start_date
-                    const weekNum = Math.floor((dailyIndexMap.get(d.id) ?? 0) / 7) + 1
+                    const dayAge = flock.placement_date
+                      ? Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
+                      : (dailyIndexMap.get(d.id) ?? 0)
+                    const weekNum = Math.floor(dayAge / 7) + 1
+                    const dayInWeek = (dayAge % 7) + 1
                     return (
                       <tr key={d.id} className={`border-b border-gray-50 hover:bg-gray-50
                         ${sel.has(d.id) ? 'bg-red-50' : isLayingPeriod ? 'bg-green-50/30' : 'bg-yellow-50/30'}`}>
@@ -677,7 +681,7 @@ export const FlockDetail: React.FC = () => {
                           style={{ backgroundColor: sel.has(d.id) ? '#fef2f2' : isLayingPeriod ? '#f0fdf4' : '#fefce8' }}>
                           {fmtDate(d.record_date)}
                         </td>
-                        <td className="px-2 py-1.5 text-gray-400">{weekNum}</td>
+                        <td className="px-2 py-1.5 text-gray-400 text-xs whitespace-nowrap">W{weekNum} D{dayInWeek}</td>
                         <td className="px-2 py-1.5 text-right">{d.opening_female?.toLocaleString('en-IN')}</td>
                         <td className="px-2 py-1.5 text-right">{d.opening_male?.toLocaleString('en-IN')}</td>
                         <td className="px-2 py-1.5 text-right">{d.feed_female_kg?.toLocaleString('en-IN')}</td>
