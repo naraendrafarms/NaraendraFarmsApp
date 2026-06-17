@@ -144,6 +144,9 @@ jobs:
       - name: Run migration 066
         run: python3 scripts/run_sql.py supabase/migrations/066_fix_audit_grn_table.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 067
+        run: python3 scripts/run_sql.py supabase/migrations/067_shed_placement_totals.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Reload PostgREST schema cache
         run: |
           curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" \

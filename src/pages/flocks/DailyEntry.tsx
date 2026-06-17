@@ -84,6 +84,23 @@ export const DailyEntry: React.FC = () => {
     enabled: !!selectedFlock && !!date
   })
 
+  // Check shed placement batch for this shed+date (to auto-fill opening on first day)
+  const { data: shedPlacement } = useQuery({
+    queryKey: ['shed_placement', selectedFlock, selectedShed, date],
+    queryFn: async () => {
+      if (!selectedFlock || !selectedShed || !date) return null
+      const { data } = await supabase
+        .from('shed_allocations')
+        .select('female_count, male_count')
+        .eq('flock_id', selectedFlock)
+        .eq('shed_id', selectedShed)
+        .eq('allocated_date', date)
+        .single()
+      return data
+    },
+    enabled: !!selectedFlock && !!selectedShed && !!date
+  })
+
   // Get previous day to pre-fill opening birds
   const { data: prevRecord } = useQuery({
     queryKey: ['prev_daily', selectedFlock, date],
@@ -148,6 +165,13 @@ export const DailyEntry: React.FC = () => {
         age_weeks:      existing.age_weeks?.toString() ?? '',
         remarks:        existing.remarks ?? ''
       })
+    } else if (shedPlacement && !existing) {
+      // First-day placement: opening = the batch size received
+      setForm(f => ({
+        ...f,
+        opening_female: shedPlacement.female_count?.toString() ?? '',
+        opening_male:   shedPlacement.male_count?.toString() ?? '',
+      }))
     } else if (prevRecord && !existing) {
       setForm(f => ({
         ...f,
@@ -155,7 +179,7 @@ export const DailyEntry: React.FC = () => {
         opening_male:   prevRecord.closing_male?.toString() ?? '',
       }))
     }
-  }, [existing, prevRecord])
+  }, [existing, prevRecord, shedPlacement])
 
   // Auto-compute closing = opening - transfer - cull - mortality
   const autoClose = () => {
@@ -386,7 +410,10 @@ export const DailyEntry: React.FC = () => {
           </div>
           {selectedShed && (() => { const s = (sheds??[]).find((x:any)=>x.id===selectedShed); return s ? <Badge color="green">Shed: {s.shed_no}{s.shed_name ? ' — '+s.shed_name : ''}</Badge> : null })()}
           {existing && <Badge color="blue">Editing existing record</Badge>}
-          {prevRecord && !existing && (
+          {shedPlacement && !existing && (
+            <span className="text-xs text-green-600 font-medium">🐣 Placement day — opening filled from batch ({shedPlacement.female_count}F + {shedPlacement.male_count}M)</span>
+          )}
+          {prevRecord && !existing && !shedPlacement && (
             <span className="text-xs text-gray-400">Opening pre-filled from previous day ({prevRecord.record_date})</span>
           )}
         </div>

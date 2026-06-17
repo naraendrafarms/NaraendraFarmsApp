@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, pct, fmtDate, flockAgeWeeks } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Badge, Table, Th, Td,
-  SectionHeader, Spinner, StatCard, Divider
+  SectionHeader, Spinner, StatCard, Divider, Input, Select
 } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, Calendar,
@@ -58,7 +58,10 @@ const NHE_LABEL: Record<string, string> = {
 export const FlockDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'|'transfers'>('overview')
+  const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'|'transfers'|'placements'>('overview')
+  const [placementForm, setPlacementForm] = useState({ allocated_date: '', shed_id: '', female_count: '', male_count: '', notes: '' })
+  const [editPlacementId, setEditPlacementId] = useState<string|null>(null)
+  const [showPlacementForm, setShowPlacementForm] = useState(false)
   const transferImportRef = useRef<HTMLInputElement>(null)
   const blankTransfer = () => ({
     transfer_date: new Date().toISOString().split('T')[0],
@@ -146,6 +149,60 @@ export const FlockDetail: React.FC = () => {
         .eq('flock_id', id!).order('transfer_date', { ascending: false })
       return data ?? []
     }
+  })
+
+  const { data: placements } = useQuery({
+    queryKey: ['flock_placements', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('shed_allocations')
+        .select('*,shed:sheds(shed_no,shed_name)')
+        .eq('flock_id', id!).order('allocated_date')
+      return data ?? []
+    }
+  })
+
+  const savePlacementMut = useMutation({
+    mutationFn: async () => {
+      if (!placementForm.allocated_date) throw new Error('Date required')
+      const payload = {
+        flock_id: id,
+        farm_id: flock?.rearing_farm_id ?? flock?.laying_farm_id,
+        allocated_date: placementForm.allocated_date,
+        shed_id: placementForm.shed_id || null,
+        female_count: parseInt(placementForm.female_count) || 0,
+        male_count: parseInt(placementForm.male_count) || 0,
+        notes: placementForm.notes || null,
+      }
+      if (editPlacementId) {
+        const { error } = await supabase.from('shed_allocations').update(payload).eq('id', editPlacementId)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('shed_allocations').insert(payload)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flock_placements', id] })
+      qc.invalidateQueries({ queryKey: ['flock', id] })
+      qc.invalidateQueries({ queryKey: ['flock_dashboard'] })
+      setPlacementForm({ allocated_date: '', shed_id: '', female_count: '', male_count: '', notes: '' })
+      setEditPlacementId(null); setShowPlacementForm(false)
+      toast.success(editPlacementId ? 'Placement updated' : 'Placement recorded')
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delPlacementMut = useMutation({
+    mutationFn: async (pid: string) => {
+      const { error } = await supabase.from('shed_allocations').delete().eq('id', pid)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flock_placements', id] })
+      qc.invalidateQueries({ queryKey: ['flock', id] })
+      toast.success('Deleted')
+    },
+    onError: (e: any) => toast.error(e.message)
   })
 
   const addTransferMut = useMutation({
@@ -438,7 +495,7 @@ export const FlockDetail: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {(['overview','daily','monthly','financial','transfers'] as const).map(t => (
+        {(['overview','placements','daily','monthly','financial','transfers'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors -mb-px
               ${tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
@@ -697,6 +754,110 @@ export const FlockDetail: React.FC = () => {
             </tbody>
           </Table>
         </Card>
+      )}
+
+      {/* PLACEMENTS TAB */}
+      {tab === 'placements' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="font-semibold text-gray-800">Chick Placements</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Record each batch of chicks received — per shed, per day. Total Placed on the flock updates automatically.</p>
+            </div>
+            <Button size="sm" onClick={() => { setPlacementForm({ allocated_date: flock?.placement_date ?? '', shed_id: '', female_count: '', male_count: '', notes: '' }); setEditPlacementId(null); setShowPlacementForm(true) }}>
+              + Add Placement
+            </Button>
+          </div>
+
+          {showPlacementForm && (
+            <Card>
+              <CardHeader title={editPlacementId ? 'Edit Placement' : 'Record Chick Intake'} />
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <Input label="Date Received" type="date" required value={placementForm.allocated_date}
+                    onChange={e => setPlacementForm(f => ({ ...f, allocated_date: e.target.value }))} />
+                  <Select label="Shed" placeholder="— Select shed —"
+                    options={(allSheds ?? []).map((s: any) => ({ value: s.id, label: `${s.shed_no}${s.shed_name ? ' — ' + s.shed_name : ''}` }))}
+                    value={placementForm.shed_id}
+                    onChange={e => setPlacementForm(f => ({ ...f, shed_id: e.target.value }))} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <Input label="Female Count" type="number" required value={placementForm.female_count}
+                    onChange={e => setPlacementForm(f => ({ ...f, female_count: e.target.value }))} />
+                  <Input label="Male Count" type="number" value={placementForm.male_count}
+                    onChange={e => setPlacementForm(f => ({ ...f, male_count: e.target.value }))} />
+                </div>
+                <Input label="Notes" value={placementForm.notes}
+                  onChange={e => setPlacementForm(f => ({ ...f, notes: e.target.value }))} />
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => { setShowPlacementForm(false); setEditPlacementId(null) }}>Cancel</Button>
+                  <Button size="sm" loading={savePlacementMut.isPending} onClick={() => savePlacementMut.mutate()}>
+                    {editPlacementId ? 'Update' : 'Save Placement'}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {(placements ?? []).length === 0 ? (
+            <Card>
+              <div className="text-center py-8 text-gray-400 text-sm">
+                No placements recorded yet. Click "Add Placement" to record your first chick batch.
+              </div>
+            </Card>
+          ) : (
+            <Card>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 text-left text-xs text-gray-500 uppercase">
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2">Shed</th>
+                      <th className="px-3 py-2 text-right">Female</th>
+                      <th className="px-3 py-2 text-right">Male</th>
+                      <th className="px-3 py-2 text-right">Total</th>
+                      <th className="px-3 py-2">Notes</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(placements ?? []).map((p: any) => (
+                      <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="px-3 py-2">{fmtDate(p.allocated_date)}</td>
+                        <td className="px-3 py-2">{p.shed ? `${p.shed.shed_no}${p.shed.shed_name ? ' — ' + p.shed.shed_name : ''}` : <span className="text-gray-400">—</span>}</td>
+                        <td className="px-3 py-2 text-right">{p.female_count?.toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-2 text-right">{p.male_count?.toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-2 text-right font-medium">{((p.female_count ?? 0) + (p.male_count ?? 0)).toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-2 text-gray-400 text-xs">{p.notes ?? '—'}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-2 justify-end">
+                            <button className="text-xs text-blue-600 hover:underline" onClick={() => {
+                              setPlacementForm({ allocated_date: p.allocated_date, shed_id: p.shed_id ?? '', female_count: p.female_count?.toString() ?? '', male_count: p.male_count?.toString() ?? '', notes: p.notes ?? '' })
+                              setEditPlacementId(p.id); setShowPlacementForm(true)
+                            }}>Edit</button>
+                            <button className="text-xs text-red-500 hover:underline" onClick={() => { if (confirm('Delete this placement?')) delPlacementMut.mutate(p.id) }}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-50 font-semibold text-sm">
+                      <td className="px-3 py-2" colSpan={2}>Total Received</td>
+                      <td className="px-3 py-2 text-right">{(placements ?? []).reduce((s: number, p: any) => s + (p.female_count ?? 0), 0).toLocaleString('en-IN')} F</td>
+                      <td className="px-3 py-2 text-right">{(placements ?? []).reduce((s: number, p: any) => s + (p.male_count ?? 0), 0).toLocaleString('en-IN')} M</td>
+                      <td className="px-3 py-2 text-right text-brand-700">{(placements ?? []).reduce((s: number, p: any) => s + (p.female_count ?? 0) + (p.male_count ?? 0), 0).toLocaleString('en-IN')}</td>
+                      <td colSpan={2}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <p className="text-xs text-gray-400 mt-3 px-1">
+                ✓ "Total Placed" on the flock overview updates automatically from these placement records.
+              </p>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* TRANSFERS TAB */}
