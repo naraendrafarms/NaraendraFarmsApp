@@ -41,7 +41,7 @@ const Sel: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { placeholde
   </select>
 )
 
-const TABS = ['Formulas','Production','Stock','Expenses'] as const
+const TABS = ['Formulas','Production','Stock','Expenses','Flock Allocation'] as const
 type Tab = typeof TABS[number]
 
 // ══════════════════════════════════════════════════════════════════
@@ -60,10 +60,11 @@ export const FeedMillPage: React.FC = () => {
           </button>
         ))}
       </div>
-      {tab === 'Formulas'    && <FormulasTab />}
-      {tab === 'Production'  && <ProductionTab />}
-      {tab === 'Stock'       && <StockTab />}
-      {tab === 'Expenses'    && <ExpensesTab />}
+      {tab === 'Formulas'         && <FormulasTab />}
+      {tab === 'Production'       && <ProductionTab />}
+      {tab === 'Stock'            && <StockTab />}
+      {tab === 'Expenses'         && <ExpensesTab />}
+      {tab === 'Flock Allocation' && <FlockAllocationTab />}
     </div>
   )
 }
@@ -1279,5 +1280,210 @@ const ExpenseForm: React.FC<{ initial: any; farms: any[]; onSave: (d:any) => voi
         <Button type="submit" loading={loading}>Save Expense</Button>
       </div>
     </form>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FLOCK ALLOCATION TAB
+// Enter total feed per farm → auto-distribute to all flocks in that
+// farm proportionally by average bird count for the month
+// ══════════════════════════════════════════════════════════════════
+const FlockAllocationTab: React.FC = () => {
+  const qc = useQueryClient()
+  const [farm, setFarm]   = React.useState('')
+  const [month, setMonth] = React.useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })
+  const [feedType, setFeedType] = React.useState('')
+  const [totalKg, setTotalKg]   = React.useState('')
+  const [rows, setRows] = React.useState<{flockId:string;flockNo:string|number;avgBirds:number;femaleKg:string;maleKg:string}[]>([])
+  const [saving, setSaving] = React.useState(false)
+
+  const { data: farms = [] } = useQuery({ queryKey:['farms'], queryFn: async () => { const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[] } })
+
+  const { data: flockData, isLoading: loadingFlocks } = useQuery({
+    queryKey: ['alloc_flocks', farm, month],
+    enabled: !!(farm && month),
+    queryFn: async () => {
+      const monthStart = month + '-01'
+      const [y, m] = month.split('-').map(Number)
+      const lastDay = new Date(y, m, 0).getDate()
+      const monthEnd = `${month}-${lastDay}`
+
+      const { data } = await supabase
+        .from('daily_records')
+        .select('flock_id, opening_female, opening_male, flocks(flock_no, farm_id)')
+        .gte('record_date', monthStart)
+        .lte('record_date', monthEnd)
+        .not('flocks', 'is', null)
+
+      if (!data) return []
+      const map: Record<string, { flockNo: string|number; totalBirds: number; count: number }> = {}
+      for (const r of data) {
+        const flock = r.flocks as any
+        if (!flock || flock.farm_id !== farm) continue
+        if (!map[r.flock_id]) map[r.flock_id] = { flockNo: flock.flock_no, totalBirds: 0, count: 0 }
+        map[r.flock_id].totalBirds += (r.opening_female ?? 0) + (r.opening_male ?? 0)
+        map[r.flock_id].count++
+      }
+      return Object.entries(map).map(([flockId, v]) => ({
+        flockId, flockNo: v.flockNo,
+        avgBirds: v.count > 0 ? Math.round(v.totalBirds / v.count) : 0,
+      })).sort((a, b) => Number(a.flockNo) - Number(b.flockNo))
+    }
+  })
+
+  React.useEffect(() => {
+    if (!flockData?.length) { setRows([]); return }
+    const total = parseFloat(totalKg) || 0
+    const totalBirds = flockData.reduce((s, f) => s + f.avgBirds, 0)
+    setRows(flockData.map(f => {
+      const pct = totalBirds > 0 ? f.avgBirds / totalBirds : 1 / flockData.length
+      const kg = total * pct
+      return {
+        flockId: f.flockId, flockNo: f.flockNo, avgBirds: f.avgBirds,
+        femaleKg: kg > 0 ? (kg * 0.9).toFixed(1) : '',
+        maleKg:   kg > 0 ? (kg * 0.1).toFixed(1) : '',
+      }
+    }))
+  }, [flockData, totalKg])
+
+  const allocTotal = rows.reduce((s, r) => s + (parseFloat(r.femaleKg)||0) + (parseFloat(r.maleKg)||0), 0)
+  const enteredTotal = parseFloat(totalKg) || 0
+  const diff = Math.abs(allocTotal - enteredTotal)
+
+  const handleSave = async () => {
+    if (!farm || !month || !feedType) { toast.error('Select farm, month and feed type'); return }
+    if (!rows.length) { toast.error('No flocks found for this farm and month'); return }
+    const validRows = rows.filter(r => (parseFloat(r.femaleKg)||0) > 0 || (parseFloat(r.maleKg)||0) > 0)
+    if (!validRows.length) { toast.error('Enter feed quantities'); return }
+    setSaving(true)
+    try {
+      const feedDate = month + '-01'
+      for (const r of validRows) {
+        const { error } = await supabase.from('daily_feed').upsert({
+          flock_id: r.flockId, feed_date: feedDate, feed_type: feedType,
+          female_kg: parseFloat(r.femaleKg) || 0,
+          male_kg:   parseFloat(r.maleKg)   || 0,
+        }, { onConflict: 'flock_id,feed_date,feed_type' })
+        if (error) throw error
+      }
+      qc.invalidateQueries({ queryKey: ['flock_daily_feed'] })
+      toast.success(`Feed allocated to ${validRows.length} flocks for ${month}`)
+    } catch(e: any) {
+      toast.error('Save failed: ' + e.message)
+    }
+    setSaving(false)
+  }
+
+  const resetAuto = () => {
+    const total = parseFloat(totalKg) || 0
+    const totalBirds = rows.reduce((s,r)=>s+r.avgBirds,0)
+    setRows(rows.map(r => {
+      const pct = totalBirds > 0 ? r.avgBirds / totalBirds : 1/rows.length
+      const kg = total * pct
+      return { ...r, femaleKg: (kg*0.9).toFixed(1), maleKg: (kg*0.1).toFixed(1) }
+    }))
+  }
+
+  const inputCls = 'block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white'
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader
+        title="Farm-level Feed Allocation"
+        subtitle="Enter total feed for a farm/month — auto-distributes to all flocks by bird count. Each flock's monthly entry is saved to its Feed tab."
+      />
+
+      <Card>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Field label="Farm *">
+            <Sel value={farm} onChange={e => setFarm(e.target.value)} placeholder="Select Farm">
+              {(farms as any[]).map((f:any) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </Sel>
+          </Field>
+          <Field label="Month *">
+            <input type="month" value={month} onChange={e => setMonth(e.target.value)} className={inputCls} />
+          </Field>
+          <Field label="Feed Type *">
+            <input value={feedType} onChange={e => setFeedType(e.target.value)} placeholder="e.g. BCM, L1, Male" className={inputCls} />
+          </Field>
+          <Field label="Total Kg for Farm *">
+            <input type="number" step="0.1" value={totalKg} onChange={e => setTotalKg(e.target.value)} placeholder="e.g. 45000" className={inputCls} />
+          </Field>
+        </div>
+      </Card>
+
+      {farm && month && (
+        loadingFlocks ? <Spinner /> : rows.length === 0 ? (
+          <div className="text-center text-gray-400 py-8 text-sm">No daily records found for this farm in {month}</div>
+        ) : (
+          <>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
+              Found <strong>{rows.length} active flock(s)</strong> at this farm in {month}.
+              Feed split proportionally by average bird count. Female/Male ratio defaults to 90/10 — adjust as needed before saving.
+              {diff > 1 && enteredTotal > 0 && (
+                <span className="ml-2 text-amber-700 font-medium">
+                  ⚠ Allocated {allocTotal.toFixed(1)} kg vs entered {enteredTotal.toFixed(1)} kg (diff: {diff.toFixed(1)} kg).
+                </span>
+              )}
+            </div>
+
+            <Card padding={false}>
+              <Table>
+                <thead><tr>
+                  <Th>Flock</Th>
+                  <Th right>Avg Birds (Month)</Th>
+                  <Th right>Share %</Th>
+                  <Th right>Female Kg</Th>
+                  <Th right>Male Kg</Th>
+                  <Th right>Total Kg</Th>
+                </tr></thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const totalBirds = rows.reduce((s, x) => s + x.avgBirds, 0)
+                    const pct = totalBirds > 0 ? (r.avgBirds / totalBirds * 100).toFixed(1) : '—'
+                    const rowTotal = (parseFloat(r.femaleKg)||0) + (parseFloat(r.maleKg)||0)
+                    return (
+                      <tr key={r.flockId} className="hover:bg-gray-50">
+                        <Td className="font-semibold text-brand-700">F-{r.flockNo}</Td>
+                        <Td right>{r.avgBirds.toLocaleString('en-IN')}</Td>
+                        <Td right className="text-gray-500 text-xs font-semibold">{pct}%</Td>
+                        <Td right>
+                          <input type="number" step="0.1" value={r.femaleKg}
+                            onChange={e => setRows(prev => prev.map((x,j) => j===i ? {...x,femaleKg:e.target.value} : x))}
+                            className="w-24 text-right border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                        </Td>
+                        <Td right>
+                          <input type="number" step="0.1" value={r.maleKg}
+                            onChange={e => setRows(prev => prev.map((x,j) => j===i ? {...x,maleKg:e.target.value} : x))}
+                            className="w-24 text-right border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
+                        </Td>
+                        <Td right className="font-semibold">{rowTotal > 0 ? rowTotal.toFixed(1) : '—'}</Td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 font-semibold text-sm">
+                    <Td>TOTAL</Td>
+                    <Td right>{rows.reduce((s,r)=>s+r.avgBirds,0).toLocaleString('en-IN')}</Td>
+                    <Td right>100%</Td>
+                    <Td right>{rows.reduce((s,r)=>s+(parseFloat(r.femaleKg)||0),0).toFixed(1)}</Td>
+                    <Td right>{rows.reduce((s,r)=>s+(parseFloat(r.maleKg)||0),0).toFixed(1)}</Td>
+                    <Td right className={diff > 1 && enteredTotal > 0 ? 'text-amber-600' : 'text-green-700'}>{allocTotal.toFixed(1)}</Td>
+                  </tr>
+                </tfoot>
+              </Table>
+            </Card>
+
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={resetAuto}>Reset to Auto</Button>
+              <Button loading={saving} onClick={handleSave}>
+                Save to {rows.length} Flocks
+              </Button>
+            </div>
+          </>
+        )
+      )}
+    </div>
   )
 }
