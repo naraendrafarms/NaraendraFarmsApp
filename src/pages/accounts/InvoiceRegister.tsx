@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
@@ -6,7 +6,7 @@ import {
   Card, CardHeader, Button, Input, Select, Badge,
   SectionHeader, Spinner, Table, Th, Td, StatCard
 } from '@/components/ui'
-import { Plus, Download, Edit2, Trash2, CheckCircle, Clock, AlertCircle } from 'lucide-react'
+import { Plus, Download, Upload, Edit2, Trash2, CheckCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
@@ -48,6 +48,7 @@ export const InvoiceRegister: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
   const [markPayId, setMarkPayId] = useState<string|null>(null)
@@ -235,6 +236,75 @@ export const InvoiceRegister: React.FC = () => {
     XLSX.writeFile(wb, `invoice_register_${today()}.xlsx`)
   }
 
+  const downloadTemplate = () => {
+    const headers = ['invoice_no','invoice_date','supplier_name','source_type','flock_no','farm_name','basic_amount','gst_pct','gst_amount','total_amount','payment_status','paid_amount','due_date','remarks']
+    const example = ['INV-2024-001','2024-06-01','Venkateshwara Hatcheries','chick','F21','Kethereddypally','500000','5','25000','525000','unpaid','0','2024-06-15','']
+    const ws = XLSX.utils.aoa_to_sheet([headers, example])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Template')
+    XLSX.writeFile(wb, 'invoice_register_template.xlsx')
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    const reader = new FileReader()
+    reader.onload = async (ev) => {
+      try {
+        const wb = XLSX.read(ev.target?.result, { type: 'binary', cellDates: true })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' })
+        if (!rows.length) { toast.error('No data found in file'); return }
+
+        // Build flock_no → id map
+        const { data: flockData } = await supabase.from('flocks').select('id,flock_no')
+        const flockMap: Record<string, string> = {}
+        for (const f of flockData ?? []) flockMap[String(f.flock_no).trim()] = f.id
+
+        // Build farm name → id map
+        const { data: farmData } = await supabase.from('farms').select('id,name')
+        const farmMap: Record<string, string> = {}
+        for (const f of farmData ?? []) farmMap[f.name.trim().toLowerCase()] = f.id
+
+        let saved = 0, skipped = 0
+        for (const r of rows) {
+          const invNo = String(r.invoice_no ?? '').trim()
+          const invDate = r.invoice_date ? (r.invoice_date instanceof Date ? r.invoice_date.toISOString().split('T')[0] : String(r.invoice_date).trim()) : null
+          const total = parseFloat(r.total_amount) || 0
+          if (!invNo || !invDate || !total) { skipped++; continue }
+
+          const flockNo = String(r.flock_no ?? '').trim()
+          const farmName = String(r.farm_name ?? '').trim().toLowerCase()
+          const srcType = String(r.source_type ?? 'other').trim().toLowerCase()
+
+          const payload: any = {
+            invoice_no:     invNo,
+            invoice_date:   invDate,
+            supplier_name:  String(r.supplier_name ?? '').trim() || null,
+            source_type:    ['chick','grn','medicine','electricity','labour','other'].includes(srcType) ? srcType : 'other',
+            flock_id:       flockNo && flockMap[flockNo] ? flockMap[flockNo] : null,
+            farm_id:        farmName && farmMap[farmName] ? farmMap[farmName] : null,
+            basic_amount:   parseFloat(r.basic_amount) || null,
+            gst_pct:        parseFloat(r.gst_pct) || 0,
+            gst_amount:     parseFloat(r.gst_amount) || null,
+            total_amount:   total,
+            payment_status: ['unpaid','partial','paid'].includes(String(r.payment_status)) ? r.payment_status : 'unpaid',
+            paid_amount:    parseFloat(r.paid_amount) || 0,
+            due_date:       r.due_date ? (r.due_date instanceof Date ? r.due_date.toISOString().split('T')[0] : String(r.due_date).trim()) : null,
+            remarks:        String(r.remarks ?? '').trim() || null,
+          }
+          const { error } = await supabase.from('supplier_invoices').insert(payload)
+          if (error) { skipped++; console.error(error) } else { saved++ }
+        }
+        qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
+        toast.success(`Imported ${saved} invoices${skipped ? `, skipped ${skipped}` : ''}`)
+      } catch (err: any) {
+        toast.error('Import failed: ' + err.message)
+      }
+    }
+    reader.readAsBinaryString(file)
+    e.target.value = ''
+  }
+
   if (isLoading) return <Spinner />
 
   return (
@@ -243,9 +313,12 @@ export const InvoiceRegister: React.FC = () => {
         title="Invoice Register"
         subtitle="All supplier invoices — chick supply, feed, medicines and more"
         action={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={downloadTemplate}>Template</Button>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportExcel}>Export</Button>
             <Button size="sm" icon={<Plus size={14}/>} onClick={() => { setForm({ ...EMPTY }); setEditId(null); setShowForm(true) }}>Add Invoice</Button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
           </div>
         }
       />
