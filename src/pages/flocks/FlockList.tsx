@@ -73,6 +73,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
       toast.success(`Flock ${form.flock_no} added successfully!`)
       qc.invalidateQueries({ queryKey: ['flocks'] })
       qc.invalidateQueries({ queryKey: ['flock_summary'] })
+      qc.invalidateQueries({ queryKey: ['flock_dashboard'] })
       onSuccess()
     },
     onError: (e: any) => toast.error(e.message)
@@ -148,27 +149,46 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
 }
 
 // ── EDIT FLOCK FORM ─────────────────────────────────────────────
-const EditFlockForm: React.FC<{ flock: any; onClose: () => void }> = ({ flock, onClose }) => {
+const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flockId, onClose }) => {
   const qc = useQueryClient()
   const { data: farms } = useQuery({ queryKey:['farms'], queryFn: async()=>{ const{data}=await supabase.from('farms').select('*').eq('is_active',true).order('name'); return data??[] } })
   const farmOptions = (farms??[]).map((f:any) => ({ value: f.id, label: f.name }))
 
-  const [form, setForm] = useState({
-    flock_no: flock.flock_no ?? '',
-    breed: flock.breed ?? 'VENCO-430',
-    rearing_farm_id: flock.rearing_farm_id ?? '',
-    laying_farm_id: flock.laying_farm_id ?? '',
-    status: flock.status ?? 'rearing',
-    placement_date: flock.placement_date ?? '',
-    laying_start_date: flock.laying_start_date ?? '',
-    chick_rate: flock.chick_rate?.toString() ?? '320',
-    supplier: flock.supplier ?? '',
-    remarks: flock.remarks ?? '',
+  const { data: flock, isLoading: flockLoading } = useQuery({
+    queryKey: ['flock_full', flockId],
+    queryFn: async () => {
+      const { data } = await supabase.from('flocks').select('*').eq('id', flockId).single()
+      return data
+    },
+    enabled: !!flockId
   })
+
+  const [form, setForm] = useState({
+    flock_no: '', breed: 'VENCO-430', rearing_farm_id: '', laying_farm_id: '',
+    status: 'rearing', placement_date: '', laying_start_date: '',
+    chick_rate: '320', supplier: '', remarks: '',
+  })
+
+  // populate form once flock loads
+  React.useEffect(() => {
+    if (flock) setForm({
+      flock_no: flock.flock_no ?? '',
+      breed: flock.breed ?? 'VENCO-430',
+      rearing_farm_id: flock.rearing_farm_id ?? '',
+      laying_farm_id: flock.laying_farm_id ?? '',
+      status: flock.status ?? 'rearing',
+      placement_date: flock.placement_date ?? '',
+      laying_start_date: flock.laying_start_date ?? '',
+      chick_rate: flock.chick_rate?.toString() ?? '320',
+      supplier: flock.supplier ?? '',
+      remarks: flock.remarks ?? '',
+    })
+  }, [flock])
   const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
 
   const mut = useMutation({
     mutationFn: async () => {
+      if (!flockId) return
       const { error } = await supabase.from('flocks').update({
         flock_no: form.flock_no,
         breed: form.breed,
@@ -180,17 +200,25 @@ const EditFlockForm: React.FC<{ flock: any; onClose: () => void }> = ({ flock, o
         chick_rate: parseFloat(form.chick_rate) || null,
         supplier: form.supplier || null,
         remarks: form.remarks || null,
-      }).eq('id', flock.id)
+      }).eq('id', flockId)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('Flock updated'); qc.invalidateQueries({queryKey:['flocks']}); onClose() },
+    onSuccess: () => {
+      toast.success('Flock updated')
+      qc.invalidateQueries({queryKey:['flocks']})
+      qc.invalidateQueries({queryKey:['flock_full', flockId]})
+      qc.invalidateQueries({queryKey:['flock_dashboard']})
+      onClose()
+    },
     onError: (e:any) => toast.error(e.message)
   })
+
+  if (flockLoading || !flock) return <Spinner />
 
   return (
     <div className="space-y-4">
       <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-700">
-        Editing <strong>Flock F-{flock.flock_no}</strong>. Change farm assignments or status as needed.
+        Editing <strong>Flock F-{flock.flock_no}</strong>. All fields pre-loaded from database.
       </div>
       <FormRow>
         <Input label="Flock No" value={form.flock_no} onChange={e=>s('flock_no',e.target.value)}/>
@@ -221,7 +249,7 @@ const EditFlockForm: React.FC<{ flock: any; onClose: () => void }> = ({ flock, o
 // ── FLOCK LIST ──────────────────────────────────────────────────
 export const FlockList: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
-  const [editFlock, setEditFlock] = useState<any>(null)
+  const [editFlock, setEditFlock] = useState<string|null>(null)
   const [filter, setFilter] = useState<'all'|'rearing'|'laying'|'closed'>('all')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
@@ -396,7 +424,7 @@ export const FlockList: React.FC = () => {
                         className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors inline-flex">
                         <Eye size={14}/>
                       </Link>
-                      <button onClick={() => setEditFlock(f)}
+                      <button onClick={() => setEditFlock(f.id)}
                         className="p-1.5 rounded-lg hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors inline-flex">
                         <Edit2 size={14}/>
                       </button>
@@ -420,8 +448,8 @@ export const FlockList: React.FC = () => {
       )}
 
       {/* Edit flock modal */}
-      <Modal open={!!editFlock} onClose={() => setEditFlock(null)} title={`Edit Flock F-${editFlock?.flock_no}`} size="lg">
-        {editFlock && <EditFlockForm flock={editFlock} onClose={() => setEditFlock(null)} />}
+      <Modal open={!!editFlock} onClose={() => setEditFlock(null)} title="Edit Flock" size="lg">
+        {editFlock && <EditFlockForm flockId={editFlock} onClose={() => setEditFlock(null)} />}
       </Modal>
 
       {/* Add flock modal */}
