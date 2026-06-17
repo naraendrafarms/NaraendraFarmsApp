@@ -814,10 +814,64 @@ export const NHESales: React.FC = () => {
         const { error } = await supabase.from('nhe_sales').insert(payload)
         if (error) throw error
       }
+
+      // Auto-deduct bird sale qty from daily record cull counts
+      if (bird) {
+        const qty = parseFloat(form.quantity) || 0
+        const sex = form.bird_sex // female | male | sex_error | mixed
+        if (qty > 0 && sex !== 'mixed') {
+          const isEditReplace = !!editing
+          const prevQty = isEditReplace ? (parseFloat(editing.quantity) || 0) : 0
+          const prevSex = isEditReplace ? (editing.bird_sex ?? 'female') : 'female'
+
+          const { data: dr } = await supabase.from('daily_records')
+            .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
+            .eq('flock_id', form.flock_id).eq('record_date', form.sale_date).maybeSingle()
+
+          // Reverse previous edit deduction first
+          let prevCullF = dr?.cull_female ?? 0
+          let prevCullM = dr?.cull_male ?? 0
+          if (isEditReplace && prevQty > 0) {
+            if (prevSex === 'female' || prevSex === 'sex_error') prevCullF = Math.max(0, prevCullF - prevQty)
+            else if (prevSex === 'male') prevCullM = Math.max(0, prevCullM - prevQty)
+          }
+
+          // Apply new deduction
+          let newCullF = prevCullF
+          let newCullM = prevCullM
+          if (sex === 'female' || sex === 'sex_error') newCullF = prevCullF + qty
+          else if (sex === 'male') newCullM = prevCullM + qty
+
+          const trcullF = (dr?.transfer_female ?? 0) + newCullF
+          const trcullM = (dr?.transfer_male ?? 0) + newCullM
+          const closingF = Math.max(0, (dr?.opening_female ?? 0) - trcullF - (dr?.mortality_female ?? 0))
+          const closingM = Math.max(0, (dr?.opening_male ?? 0) - trcullM - (dr?.mortality_male ?? 0))
+
+          if (dr) {
+            await supabase.from('daily_records').update({
+              cull_female: newCullF, cull_male: newCullM,
+              trcull_female: trcullF, trcull_male: trcullM,
+              ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+            }).eq('id', dr.id)
+          } else {
+            await supabase.from('daily_records').insert({
+              flock_id: form.flock_id, record_date: form.sale_date,
+              cull_female: sex === 'female' || sex === 'sex_error' ? qty : 0,
+              cull_male: sex === 'male' ? qty : 0,
+              trcull_female: sex === 'female' || sex === 'sex_error' ? qty : 0,
+              trcull_male: sex === 'male' ? qty : 0,
+              transfer_female: 0, transfer_male: 0,
+              mortality_female: 0, mortality_male: 0,
+            })
+          }
+        }
+      }
     },
     onSuccess: () => {
       toast.success(editing ? 'Updated!' : 'Sale recorded!')
       qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+      qc.invalidateQueries({ queryKey: ['daily_record'] })
+      qc.invalidateQueries({ queryKey: ['flock_daily'] })
       setShowForm(false); setEditing(null)
     },
     onError: (e: any) => toast.error(e.message)

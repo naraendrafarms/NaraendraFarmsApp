@@ -151,6 +151,8 @@ export const FlockDetail: React.FC = () => {
   const addTransferMut = useMutation({
     mutationFn: async () => {
       if (!transferForm.to_farm_id) throw new Error('To Farm is required')
+      const trF = parseInt(transferForm.female_count) || 0
+      const trM = parseInt(transferForm.male_count) || 0
       const payload = {
         flock_id: id,
         transfer_date: transferForm.transfer_date,
@@ -158,8 +160,8 @@ export const FlockDetail: React.FC = () => {
         to_farm_id: transferForm.to_farm_id,
         from_shed_id: transferForm.from_shed_id || null,
         to_shed_id: transferForm.to_shed_id || null,
-        female_count: parseInt(transferForm.female_count) || 0,
-        male_count: parseInt(transferForm.male_count) || 0,
+        female_count: trF,
+        male_count: trM,
         sex_error_female: parseInt(transferForm.sex_error_female) || 0,
         sex_error_male: parseInt(transferForm.sex_error_male) || 0,
         sold_female: parseInt(transferForm.sold_female) || 0,
@@ -169,6 +171,35 @@ export const FlockDetail: React.FC = () => {
       }
       const { error } = await supabase.from('flock_transfers').insert(payload)
       if (error) throw error
+
+      // Auto-deduct transferred birds from daily record for that date
+      if (trF > 0 || trM > 0) {
+        const { data: dr } = await supabase.from('daily_records')
+          .select('id,transfer_female,transfer_male,opening_female,opening_male,cull_female,cull_male,mortality_female,mortality_male')
+          .eq('flock_id', id!).eq('record_date', transferForm.transfer_date).maybeSingle()
+        const newTrF = (dr?.transfer_female ?? 0) + trF
+        const newTrM = (dr?.transfer_male ?? 0) + trM
+        const closingF = Math.max(0, (dr?.opening_female ?? 0) - newTrF - (dr?.cull_female ?? 0) - (dr?.mortality_female ?? 0))
+        const closingM = Math.max(0, (dr?.opening_male ?? 0) - newTrM - (dr?.cull_male ?? 0) - (dr?.mortality_male ?? 0))
+        const trcullF = newTrF + (dr?.cull_female ?? 0)
+        const trcullM = newTrM + (dr?.cull_male ?? 0)
+        if (dr) {
+          await supabase.from('daily_records').update({
+            transfer_female: newTrF, transfer_male: newTrM,
+            trcull_female: trcullF, trcull_male: trcullM,
+            ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+          }).eq('id', dr.id)
+        } else {
+          await supabase.from('daily_records').insert({
+            flock_id: id!, record_date: transferForm.transfer_date,
+            transfer_female: trF, transfer_male: trM,
+            trcull_female: trF, trcull_male: trM,
+            cull_female: 0, cull_male: 0,
+            mortality_female: 0, mortality_male: 0,
+          })
+        }
+      }
+
       // If marked as final transfer, update flock status to laying
       if (transferForm.is_final_transfer) {
         const { error: fe } = await supabase.from('flocks').update({
@@ -182,6 +213,7 @@ export const FlockDetail: React.FC = () => {
     onSuccess: () => {
       toast.success(transferForm.is_final_transfer ? 'Transfer complete! Flock status → Laying' : 'Transfer recorded!')
       qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
+      qc.invalidateQueries({ queryKey: ['flock_daily', id] })
       qc.invalidateQueries({ queryKey: ['flock', id] })
       setShowTransferForm(false)
       setTransferForm(blankTransfer())
