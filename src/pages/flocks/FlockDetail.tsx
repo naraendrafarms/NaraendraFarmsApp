@@ -271,8 +271,10 @@ export const FlockDetail: React.FC = () => {
   const totalHE   = daily?.reduce((s, d) => s + (d.he_eggs ?? 0), 0) ?? 0
   const totalMortF = daily?.reduce((s, d) => s + (d.mortality_female ?? 0), 0) ?? 0
   const totalMortM = daily?.reduce((s, d) => s + (d.mortality_male ?? 0), 0) ?? 0
-  const totalTrF   = daily?.reduce((s, d) => s + (d.trcull_female ?? 0), 0) ?? 0
-  const totalTrM   = daily?.reduce((s, d) => s + (d.trcull_male ?? 0), 0) ?? 0
+  const totalTrF   = daily?.reduce((s, d) => s + (d.transfer_female ?? d.trcull_female ?? 0), 0) ?? 0
+  const totalTrM   = daily?.reduce((s, d) => s + (d.transfer_male   ?? d.trcull_male   ?? 0), 0) ?? 0
+  const totalCullF = daily?.reduce((s, d) => s + (d.cull_female ?? 0), 0) ?? 0
+  const totalCullM = daily?.reduce((s, d) => s + (d.cull_male   ?? 0), 0) ?? 0
   const totalFeedF = daily?.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0) ?? 0
   const totalFeedM = daily?.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0) ?? 0
   const hePct = totalEggs > 0 ? totalHE / totalEggs : 0
@@ -312,7 +314,7 @@ export const FlockDetail: React.FC = () => {
 
   // CSV template download
   const handleDownloadTemplate = () => {
-    const headers = 'flock_no,record_date,opening_female,opening_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,trcull_female,trcull_male,mortality_female,mortality_male,closing_female,closing_male'
+    const headers = 'flock_no,record_date,opening_female,opening_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,transfer_female,transfer_male,cull_female,cull_male,mortality_female,mortality_male,closing_female,closing_male'
     const blob = new Blob([headers + '\n'], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -338,8 +340,12 @@ export const FlockDetail: React.FC = () => {
         feed_male_kg: parseFloat(r.feed_male_kg) || null,
         total_eggs: parseInt(r.total_eggs) || null,
         he_eggs: parseInt(r.he_eggs) || null,
-        trcull_female: parseInt(r.trcull_female) || 0,
-        trcull_male: parseInt(r.trcull_male) || 0,
+        transfer_female: parseInt(r.transfer_female) || parseInt(r.trcull_female) || 0,
+        transfer_male:   parseInt(r.transfer_male)   || parseInt(r.trcull_male)   || 0,
+        cull_female:     parseInt(r.cull_female) || 0,
+        cull_male:       parseInt(r.cull_male)   || 0,
+        trcull_female:   (parseInt(r.transfer_female)||0) + (parseInt(r.cull_female)||0) || parseInt(r.trcull_female) || 0,
+        trcull_male:     (parseInt(r.transfer_male)||0) + (parseInt(r.cull_male)||0) || parseInt(r.trcull_male) || 0,
         mortality_female: parseInt(r.mortality_female) || 0,
         mortality_male: parseInt(r.mortality_male) || 0,
         closing_female: parseInt(r.closing_female) || null,
@@ -421,7 +427,8 @@ export const FlockDetail: React.FC = () => {
                     ['Placed (Paid)', flock.paid_female?.toLocaleString('en-IN')+' F + '+flock.paid_male?.toLocaleString('en-IN')+' M'],
                     ['Placed (Free)', flock.free_female?.toLocaleString('en-IN')+' F + '+flock.free_male?.toLocaleString('en-IN')+' M'],
                     ['Total Placed', flock.total_placed_f?.toLocaleString('en-IN')+' F + '+flock.total_placed_m?.toLocaleString('en-IN')+' M'],
-                    ['Tr+Cull (C13/C14)', totalTrF.toLocaleString('en-IN')+' F + '+totalTrM.toLocaleString('en-IN')+' M'],
+                    ['Transfers', totalTrF.toLocaleString('en-IN')+' F + '+totalTrM.toLocaleString('en-IN')+' M'],
+                    ['Culls Removed', totalCullF.toLocaleString('en-IN')+' F + '+totalCullM.toLocaleString('en-IN')+' M'],
                     ['Mortality (C15/C16)', totalMortF.toLocaleString('en-IN')+' F + '+totalMortM.toLocaleString('en-IN')+' M'],
                     ['Closing Alive', (lastRecord?.closing_female??0).toLocaleString('en-IN')+' F + '+(lastRecord?.closing_male??0).toLocaleString('en-IN')+' M'],
                   ].map(([label, val]) => (
@@ -544,7 +551,8 @@ export const FlockDetail: React.FC = () => {
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">HD%</th>
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">HE</th>
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">HE%</th>
-                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Tr+Cull ♀</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Tr ♀</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-600">Cull ♀</th>
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">Mort ♀</th>
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">Mort ♂</th>
                     <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♀</th>
@@ -576,7 +584,8 @@ export const FlockDetail: React.FC = () => {
                         <td className={`px-2 py-1.5 text-right ${(d.he_pct??0)>0.88?'text-green-600':'text-orange-500'}`}>
                           {pct(d.he_pct, 1)}
                         </td>
-                        <td className="px-2 py-1.5 text-right text-orange-500">{d.trcull_female > 0 ? d.trcull_female : '—'}</td>
+                        <td className="px-2 py-1.5 text-right text-blue-500">{(d.transfer_female??d.trcull_female??0) > 0 ? (d.transfer_female??d.trcull_female) : '—'}</td>
+                        <td className="px-2 py-1.5 text-right text-orange-500">{(d.cull_female??0) > 0 ? d.cull_female : '—'}</td>
                         <td className="px-2 py-1.5 text-right text-red-500">{d.mortality_female > 0 ? d.mortality_female : '—'}</td>
                         <td className="px-2 py-1.5 text-right text-red-500">{d.mortality_male > 0 ? d.mortality_male : '—'}</td>
                         <td className="px-2 py-1.5 text-right">{d.closing_female?.toLocaleString('en-IN')}</td>
@@ -600,6 +609,7 @@ export const FlockDetail: React.FC = () => {
                       <td className="px-2 py-2 text-right">{totalHE.toLocaleString('en-IN')}</td>
                       <td className="px-2 py-2 text-right">{pct(hePct,1)}</td>
                       <td className="px-2 py-2 text-right">{totalTrF.toLocaleString('en-IN')}</td>
+                      <td className="px-2 py-2 text-right">{totalCullF.toLocaleString('en-IN')}</td>
                       <td className="px-2 py-2 text-right">{totalMortF.toLocaleString('en-IN')}</td>
                       <td className="px-2 py-2 text-right">{totalMortM.toLocaleString('en-IN')}</td>
                       <td className="px-2 py-2 text-right">{lastRecord?.closing_female?.toLocaleString('en-IN')}</td>

@@ -673,25 +673,40 @@ export const HEDispatch: React.FC = () => {
 
 // ── NHE SALES ────────────────────────────────────────────────────
 const NHE_TYPES = [
-  { value: 'je',             label: 'Jumbo Eggs (JE)' },
-  { value: 'te',             label: 'Table Eggs (TE)' },
-  { value: 'be',             label: 'Broken/Crack Eggs (BE)' },
-  { value: 'bird_cull',      label: 'Bird Sales — Cull' },
-  { value: 'bird_lame',      label: 'Bird Sales — Lame' },
-  { value: 'bird_weak',      label: 'Bird Sales — Weak' },
-  { value: 'bird_sex_error', label: 'Bird Sales — Sex Error' },
-  { value: 'gas',            label: 'Gas Cylinders (income)' },
-  { value: 'manure',         label: 'Manure / Litter' },
-  { value: 'gunny_bags',     label: 'Gunny Bags' },
-  { value: 'maize_bags',     label: 'Maize Bags' },
-  { value: 'plastic_bags',   label: 'Plastic Bags' },
-  { value: 'other',          label: 'Other Income' },
+  { value: 'je',         label: 'Jumbo Eggs (JE)' },
+  { value: 'te',         label: 'Table Eggs (TE)' },
+  { value: 'be',         label: 'Broken/Crack Eggs (BE)' },
+  { value: 'bird_sale',  label: 'Bird Sales' },
+  { value: 'gas',        label: 'Gas Cylinders' },
+  { value: 'manure',     label: 'Manure / Litter' },
+  { value: 'gunny_bags', label: 'Gunny Bags' },
+  { value: 'other',      label: 'Other Income' },
 ]
-const BIRD_SALE_TYPES = ['bird_cull','bird_lame','bird_weak','bird_sex_error']
+// Legacy types kept for display backward-compat
+const LEGACY_BIRD_TYPES = ['bird_cull','bird_lame','bird_weak','bird_sex_error']
+const isBirdSale = (t: string) => t === 'bird_sale' || LEGACY_BIRD_TYPES.includes(t)
+
+const BIRD_SEX_OPTS = [
+  { value: 'female',    label: 'Female' },
+  { value: 'male',      label: 'Male' },
+  { value: 'sex_error', label: 'Sex Error' },
+  { value: 'mixed',     label: 'Mixed' },
+]
+const BIRD_CAT_OPTS = [
+  { value: 'cull',      label: 'Cull' },
+  { value: 'lame',      label: 'Lame' },
+  { value: 'weak',      label: 'Weak' },
+  { value: 'other',     label: 'Other' },
+]
 
 const EMPTY_NHE_FORM = {
   flock_id: '', sale_date: today(), sale_type: 'je',
-  party_id: '', dc_no: '', quantity: '', unit: 'nos', rate: '', amount: '', remarks: ''
+  party_id: '', dc_no: '', vehicle_no: '',
+  quantity: '', unit: 'nos', rate: '', amount: '',
+  bird_sex: 'female', bird_category: 'cull',
+  avg_weight_kg: '', total_weight_kg: '', rate_per_kg: '',
+  payment_cash: '', payment_online: '',
+  remarks: ''
 }
 
 export const NHESales: React.FC = () => {
@@ -737,8 +752,30 @@ export const NHESales: React.FC = () => {
   })
 
   const [form, setForm] = useState<any>(EMPTY_NHE_FORM)
-  const sv = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }))
-  const autoAmt = (parseFloat(form.quantity)||0) * (parseFloat(form.rate)||0)
+  const sv = (k: string, v: string) => setForm((f: any) => {
+    const nf = { ...f, [k]: v }
+    // Bird sale auto-calcs
+    if (['quantity','avg_weight_kg'].includes(k)) {
+      const q = parseFloat(k==='quantity' ? v : nf.quantity) || 0
+      const w = parseFloat(k==='avg_weight_kg' ? v : nf.avg_weight_kg) || 0
+      nf.total_weight_kg = q && w ? (q*w).toFixed(3) : ''
+    }
+    if (['total_weight_kg','rate_per_kg','avg_weight_kg','quantity'].includes(k)) {
+      const tw = parseFloat(nf.total_weight_kg) || 0
+      const rk = parseFloat(nf.rate_per_kg) || 0
+      if (tw && rk) nf.amount = (tw * rk).toFixed(2)
+    }
+    // Payment split auto-total
+    if (['payment_cash','payment_online'].includes(k)) {
+      const cash = parseFloat(k==='payment_cash' ? v : nf.payment_cash) || 0
+      const onl  = parseFloat(k==='payment_online' ? v : nf.payment_online) || 0
+      if (cash || onl) nf.amount = (cash + onl).toFixed(2)
+    }
+    return nf
+  })
+  const autoAmt = isBirdSale(form.sale_type)
+    ? ((parseFloat(form.total_weight_kg)||0) * (parseFloat(form.rate_per_kg)||0))
+    : ((parseFloat(form.quantity)||0) * (parseFloat(form.rate)||0))
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => { await supabase.from('nhe_sales').delete().in('id', ids) },
@@ -747,14 +784,28 @@ export const NHESales: React.FC = () => {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      if (!form.flock_id || !form.sale_date || !form.amount) throw new Error('Flock, date and amount required')
-      const payload = {
-        flock_id: form.flock_id, sale_date: form.sale_date, sale_type: form.sale_type,
+      const finalAmt = parseFloat(form.amount) || autoAmt
+      if (!form.flock_id || !form.sale_date || !finalAmt) throw new Error('Flock, date and amount required')
+      const bird = isBirdSale(form.sale_type)
+      const payload: any = {
+        flock_id: form.flock_id, sale_date: form.sale_date,
+        sale_type: bird ? 'bird_sale' : form.sale_type,
         party_id: form.party_id || null, dc_no: form.dc_no || null,
-        quantity: parseFloat(form.quantity) || null, unit: form.unit,
-        rate: parseFloat(form.rate) || null,
-        amount: parseFloat(form.amount) || autoAmt,
-        remarks: form.remarks || null
+        quantity: parseFloat(form.quantity) || null,
+        unit: bird ? 'nos' : (form.unit || 'nos'),
+        rate: bird ? null : (parseFloat(form.rate) || null),
+        amount: finalAmt,
+        remarks: form.remarks || null,
+        vehicle_no: form.vehicle_no || null,
+      }
+      if (bird) {
+        payload.bird_sex       = form.bird_sex || null
+        payload.bird_category  = form.bird_category || null
+        payload.avg_weight_kg  = parseFloat(form.avg_weight_kg)  || null
+        payload.total_weight_kg= parseFloat(form.total_weight_kg)|| null
+        payload.rate_per_kg    = parseFloat(form.rate_per_kg)    || null
+        payload.payment_cash   = parseFloat(form.payment_cash)   || 0
+        payload.payment_online = parseFloat(form.payment_online) || 0
       }
       if (editing) {
         const { error } = await supabase.from('nhe_sales').update(payload).eq('id', editing.id)
@@ -780,10 +831,20 @@ export const NHESales: React.FC = () => {
   const openEdit = (row: any) => {
     setEditing(row)
     setForm({
-      flock_id: row.flock_id, sale_date: row.sale_date, sale_type: row.sale_type,
+      flock_id: row.flock_id, sale_date: row.sale_date,
+      sale_type: isBirdSale(row.sale_type) ? 'bird_sale' : row.sale_type,
       party_id: row.party_id ?? '', dc_no: row.dc_no ?? '',
+      vehicle_no: row.vehicle_no ?? '',
       quantity: row.quantity ?? '', unit: row.unit ?? 'nos',
-      rate: row.rate ?? '', amount: row.amount ?? '', remarks: row.remarks ?? ''
+      rate: row.rate ?? '', amount: row.amount ?? '',
+      bird_sex:        row.bird_sex ?? (row.sale_type==='bird_sex_error' ? 'sex_error' : 'female'),
+      bird_category:   row.bird_category ?? (row.sale_type==='bird_cull'?'cull':row.sale_type==='bird_lame'?'lame':row.sale_type==='bird_weak'?'weak':'other'),
+      avg_weight_kg:   row.avg_weight_kg ?? '',
+      total_weight_kg: row.total_weight_kg ?? '',
+      rate_per_kg:     row.rate_per_kg ?? '',
+      payment_cash:    row.payment_cash ?? '',
+      payment_online:  row.payment_online ?? '',
+      remarks: row.remarks ?? ''
     })
     setShowForm(true)
   }
@@ -861,7 +922,11 @@ export const NHESales: React.FC = () => {
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
 
-  const filtered = (sales ?? []).filter((s: any) => !typeFilter || s.sale_type === typeFilter)
+  const filtered = (sales ?? []).filter((s: any) => {
+    if (!typeFilter) return true
+    if (typeFilter === 'bird_sale') return isBirdSale(s.sale_type)
+    return s.sale_type === typeFilter
+  })
 
   const saleIds = filtered.map((s: any) => s.id)
   const allSel  = saleIds.length > 0 && saleIds.every((id: string) => sel.has(id))
@@ -878,12 +943,20 @@ export const NHESales: React.FC = () => {
     return acc
   }, {})
 
-  // Bird sales summary: avg rate per type
-  const birdSummary = BIRD_SALE_TYPES.filter(t => byType[t]).map(t => {
-    const d = byType[t]
-    const avgRate = d.qty > 0 ? d.amount / d.qty : 0
-    return { type: t, label: NHE_TYPES.find(x => x.value === t)?.label ?? t, ...d, avgRate }
-  })
+  // Bird sales summary: total birds + weight + value
+  const birdSales = (sales ?? []).filter((s: any) => isBirdSale(s.sale_type))
+  const birdTotalBirds  = birdSales.reduce((s: number, r: any) => s + (r.quantity ?? 0), 0)
+  const birdTotalWeight = birdSales.reduce((s: number, r: any) => s + (r.total_weight_kg ?? 0), 0)
+  const birdTotalAmt    = birdSales.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const birdAvgRateKg   = birdTotalWeight > 0 ? birdTotalAmt / birdTotalWeight : 0
+  const birdByCategory  = birdSales.reduce((acc: any, r: any) => {
+    const cat = r.bird_category || (r.sale_type === 'bird_cull' ? 'cull' : r.sale_type === 'bird_lame' ? 'lame' : r.sale_type === 'bird_weak' ? 'weak' : r.sale_type === 'bird_sex_error' ? 'sex_error' : 'other')
+    if (!acc[cat]) acc[cat] = { qty: 0, weight: 0, amount: 0 }
+    acc[cat].qty    += r.quantity ?? 0
+    acc[cat].weight += r.total_weight_kg ?? 0
+    acc[cat].amount += r.amount ?? 0
+    return acc
+  }, {})
 
   return (
     <div className="space-y-5">
@@ -919,26 +992,48 @@ export const NHESales: React.FC = () => {
       </div>
 
       {/* Bird Sales Summary */}
-      {birdSummary.length > 0 && (
+      {birdSales.length > 0 && (
         <Card>
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Bird Sales Summary</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {birdSummary.map(b => (
-              <div key={b.type} className="bg-orange-50 border border-orange-100 rounded-lg p-3">
-                <p className="text-xs text-orange-700 font-medium">{b.label}</p>
-                <p className="text-sm font-bold text-gray-900 mt-1">{inr(b.amount)}</p>
-                <p className="text-xs text-gray-500">{b.qty.toLocaleString('en-IN')} birds · {b.count} entries</p>
-                <p className="text-xs text-orange-600 font-semibold">Avg Rate: ₹{b.avgRate.toFixed(2)}/bird</p>
-              </div>
-            ))}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div className="bg-orange-50 border border-orange-100 rounded-lg p-3">
+              <p className="text-xs text-orange-700 font-medium">Total Revenue</p>
+              <p className="text-lg font-bold text-gray-900 mt-1">{inr(birdTotalAmt)}</p>
+              <p className="text-xs text-gray-500">{birdSales.length} transactions</p>
+            </div>
+            <div className="bg-orange-50 border border-orange-100 rounded-lg p-3">
+              <p className="text-xs text-orange-700 font-medium">Total Birds Sold</p>
+              <p className="text-lg font-bold text-gray-900 mt-1">{birdTotalBirds.toLocaleString('en-IN')}</p>
+              <p className="text-xs text-gray-500">birds</p>
+            </div>
+            <div className="bg-orange-50 border border-orange-100 rounded-lg p-3">
+              <p className="text-xs text-orange-700 font-medium">Total Weight</p>
+              <p className="text-lg font-bold text-gray-900 mt-1">{birdTotalWeight.toFixed(1)} kg</p>
+              <p className="text-xs text-gray-500">live weight</p>
+            </div>
+            <div className="bg-orange-50 border border-orange-100 rounded-lg p-3">
+              <p className="text-xs text-orange-700 font-medium">Avg Rate / kg</p>
+              <p className="text-lg font-bold text-gray-900 mt-1">₹{birdAvgRateKg.toFixed(2)}</p>
+              <p className="text-xs text-gray-500">overall</p>
+            </div>
           </div>
+          {Object.keys(birdByCategory).length > 1 && (
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(birdByCategory).map(([cat, d]: any) => (
+                <div key={cat} className="px-3 py-1.5 bg-white border border-orange-200 rounded-lg text-xs">
+                  <span className="font-semibold capitalize text-orange-700">{cat}</span>
+                  <span className="text-gray-500 ml-2">{d.qty} birds · {d.weight.toFixed(1)} kg · {inr(d.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       )}
 
       {/* Other income summary */}
-      {Object.keys(byType).filter(t => !BIRD_SALE_TYPES.includes(t)).length > 0 && (
+      {Object.keys(byType).filter(t => !isBirdSale(t)).length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Object.entries(byType).filter(([t]) => !BIRD_SALE_TYPES.includes(t)).map(([type, d]: any) => (
+          {Object.entries(byType).filter(([t]) => !isBirdSale(t)).map(([type, d]: any) => (
             <Card key={type} className="!p-3">
               <p className="text-xs text-gray-500">{NHE_TYPES.find(t => t.value === type)?.label ?? type}</p>
               <p className="text-sm font-bold text-gray-900 mt-1">{inr(d.amount)}</p>
@@ -956,26 +1051,37 @@ export const NHESales: React.FC = () => {
             <thead><tr>
               <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Date</Th><Th>Type</Th><Th>Party</Th>
-              <Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th>
-              <Th>DC No</Th><Th>Remarks</Th><Th></Th>
+              <Th right>Qty</Th><Th right>Wt (kg)</Th><Th right>₹/kg</Th><Th right>Amount</Th>
+              <Th>Vehicle/DC</Th><Th>Remarks</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((s: any) => (
-                <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''} ${BIRD_SALE_TYPES.includes(s.sale_type) ? 'bg-orange-50/40' : ''}`}>
+                <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''} ${isBirdSale(s.sale_type) ? 'bg-orange-50/40' : ''}`}>
                   <Td><CB checked={sel.has(s.id)} onChange={() => toggle(s.id)}/></Td>
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
                   <Td className="text-xs">{fmtDate(s.sale_date)}</Td>
                   <Td className="text-xs">
-                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${BIRD_SALE_TYPES.includes(s.sale_type) ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
-                      {NHE_TYPES.find(t => t.value === s.sale_type)?.label ?? s.sale_type}
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${isBirdSale(s.sale_type) ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {isBirdSale(s.sale_type)
+                        ? `Birds — ${s.bird_category ?? (s.sale_type==='bird_sex_error'?'sex_error':s.sale_type.replace('bird_',''))} (${s.bird_sex ?? '?'})`
+                        : (NHE_TYPES.find(t => t.value === s.sale_type)?.label ?? s.sale_type)}
                     </span>
                   </Td>
                   <Td className="text-xs text-gray-500">{s.parties?.name ?? '—'}</Td>
-                  <Td right className="text-xs">{s.quantity != null ? s.quantity.toLocaleString('en-IN') : '—'} <span className="text-gray-400">{s.unit}</span></Td>
-                  <Td right className="text-xs">{s.rate ? `₹${s.rate}` : '—'}</Td>
-                  <Td right className="font-semibold text-green-700 text-xs">{inr(s.amount)}</Td>
-                  <Td className="text-xs text-gray-400">{s.dc_no ?? '—'}</Td>
-                  <Td className="text-xs text-gray-400 max-w-[140px] truncate">{s.remarks ?? ''}</Td>
+                  <Td right className="text-xs">{s.quantity != null ? s.quantity.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-xs text-gray-500">{s.total_weight_kg ? s.total_weight_kg.toFixed(1) : '—'}</Td>
+                  <Td right className="text-xs">{s.rate_per_kg ? `₹${s.rate_per_kg}` : s.rate ? `₹${s.rate}` : '—'}</Td>
+                  <Td right className="font-semibold text-green-700 text-xs">
+                    {inr(s.amount)}
+                    {(s.payment_cash > 0 || s.payment_online > 0) && (
+                      <div className="text-[10px] text-gray-400 font-normal">
+                        {s.payment_cash > 0 && `💵${inr(s.payment_cash)}`}
+                        {s.payment_online > 0 && ` 📲${inr(s.payment_online)}`}
+                      </div>
+                    )}
+                  </Td>
+                  <Td className="text-xs text-gray-400">{s.vehicle_no ?? s.dc_no ?? '—'}</Td>
+                  <Td className="text-xs text-gray-400 max-w-[120px] truncate">{s.remarks ?? ''}</Td>
                   <Td>
                     <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600"><Edit2 size={13}/></button>
                   </Td>
@@ -1000,7 +1106,7 @@ export const NHESales: React.FC = () => {
       )}
 
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }}
-        title={editing ? 'Edit NHE / Bird Sale' : 'Record NHE / Bird Sale'} size="md"
+        title={editing ? 'Edit NHE / Bird Sale' : 'Record NHE / Bird Sale'} size="lg"
         footer={<><Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
           <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
@@ -1008,24 +1114,81 @@ export const NHESales: React.FC = () => {
             <Select label="Flock" required placeholder="— Select —" options={flockOptions}
               value={form.flock_id} onChange={e => sv('flock_id', e.target.value)} />
             <Input label="Sale Date" required type="date" value={form.sale_date} onChange={e => sv('sale_date', e.target.value)} />
-          </FormRow>
-          <FormRow>
             <Select label="Sale Type" required options={NHE_TYPES} value={form.sale_type} onChange={e => sv('sale_type', e.target.value)} />
-            <Select label="Party" placeholder="— Select —" options={partyOptions}
-              value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
           </FormRow>
-          <FormRow cols={4}>
-            <Input label="Qty" type="number" value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
-            <Input label="Unit" value={form.unit} onChange={e => sv('unit', e.target.value)} />
-            <Input label="Rate (₹)" type="number" step="0.01" value={form.rate} onChange={e => sv('rate', e.target.value)} />
-            <Input label="Amount (₹)" required type="number" step="0.01" value={form.amount}
-              onChange={e => sv('amount', e.target.value)}
-              hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : undefined} />
-          </FormRow>
-          <FormRow>
-            <Input label="DC No" value={form.dc_no} onChange={e => sv('dc_no', e.target.value)} />
-            <Input label="Remarks" value={form.remarks} onChange={e => sv('remarks', e.target.value)} />
-          </FormRow>
+
+          {/* ── Bird Sale fields ── */}
+          {isBirdSale(form.sale_type) && (
+            <>
+              <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg space-y-3">
+                <p className="text-xs font-semibold text-orange-700 uppercase">Bird Details</p>
+                <FormRow cols={4}>
+                  <Select label="Bird Sex" options={BIRD_SEX_OPTS}
+                    value={form.bird_sex} onChange={e => sv('bird_sex', e.target.value)} />
+                  <Select label="Category" options={BIRD_CAT_OPTS}
+                    value={form.bird_category} onChange={e => sv('bird_category', e.target.value)} />
+                  <Input label="No. of Birds" type="number"
+                    value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
+                  <Input label="Avg Weight/bird (kg)" type="number" step="0.001"
+                    value={form.avg_weight_kg} onChange={e => sv('avg_weight_kg', e.target.value)}
+                    hint="per bird live weight" />
+                </FormRow>
+                <FormRow cols={3}>
+                  <Input label="Total Weight (kg)" type="number" step="0.001"
+                    value={form.total_weight_kg} onChange={e => sv('total_weight_kg', e.target.value)}
+                    hint={form.quantity && form.avg_weight_kg ? `Auto: ${(parseFloat(form.quantity)*(parseFloat(form.avg_weight_kg)||0)).toFixed(3)} kg` : 'qty × avg wt'} />
+                  <Input label="Rate per kg (₹)" type="number" step="0.01"
+                    value={form.rate_per_kg} onChange={e => sv('rate_per_kg', e.target.value)} />
+                  <Input label="Total Amount (₹)" required type="number" step="0.01"
+                    value={form.amount} onChange={e => sv('amount', e.target.value)}
+                    hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : 'wt × rate/kg'} />
+                </FormRow>
+              </div>
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+                <p className="text-xs font-semibold text-blue-700 uppercase">Payment & Logistics</p>
+                <FormRow cols={3}>
+                  <Input label="Cash (₹)" type="number" step="0.01"
+                    value={form.payment_cash} onChange={e => sv('payment_cash', e.target.value)} />
+                  <Input label="Online / NEFT (₹)" type="number" step="0.01"
+                    value={form.payment_online} onChange={e => sv('payment_online', e.target.value)} />
+                  <div className="flex items-end pb-1">
+                    {(parseFloat(form.payment_cash)||0)+(parseFloat(form.payment_online)||0) > 0 && (
+                      <p className="text-sm font-semibold text-gray-700">
+                        Total: {inr((parseFloat(form.payment_cash)||0)+(parseFloat(form.payment_online)||0))}
+                      </p>
+                    )}
+                  </div>
+                </FormRow>
+                <FormRow cols={3}>
+                  <Input label="Vehicle No" value={form.vehicle_no} onChange={e => sv('vehicle_no', e.target.value)} />
+                  <Select label="Party / Buyer" placeholder="— Select —" options={partyOptions}
+                    value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
+                  <Input label="DC No" value={form.dc_no} onChange={e => sv('dc_no', e.target.value)} />
+                </FormRow>
+              </div>
+            </>
+          )}
+
+          {/* ── Non-bird sale fields ── */}
+          {!isBirdSale(form.sale_type) && (
+            <>
+              <FormRow>
+                <Select label="Party" placeholder="— Select —" options={partyOptions}
+                  value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
+                <Input label="DC No" value={form.dc_no} onChange={e => sv('dc_no', e.target.value)} />
+              </FormRow>
+              <FormRow cols={4}>
+                <Input label="Qty" type="number" value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
+                <Input label="Unit" value={form.unit} onChange={e => sv('unit', e.target.value)} />
+                <Input label="Rate (₹)" type="number" step="0.01" value={form.rate} onChange={e => sv('rate', e.target.value)} />
+                <Input label="Amount (₹)" required type="number" step="0.01" value={form.amount}
+                  onChange={e => sv('amount', e.target.value)}
+                  hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : undefined} />
+              </FormRow>
+            </>
+          )}
+
+          <Input label="Remarks" value={form.remarks} onChange={e => sv('remarks', e.target.value)} />
         </div>
       </Modal>
     </div>

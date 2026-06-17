@@ -123,6 +123,12 @@ jobs:
       - name: Run migration 059
         run: python3 scripts/run_sql.py supabase/migrations/059_flock_transfers_extra.sql
         env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 060
+        run: python3 scripts/run_sql.py supabase/migrations/060_daily_records_split_trcull.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
+      - name: Run migration 061
+        run: python3 scripts/run_sql.py supabase/migrations/061_bird_sales_redesign.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Reload PostgREST schema cache
         run: |
           curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" \

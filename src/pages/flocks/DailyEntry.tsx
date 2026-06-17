@@ -16,8 +16,8 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
 }
 
-const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','total_eggs','he_eggs','he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs','wastage_eggs','trcull_female','trcull_male','mortality_female','mortality_male','closing_female','closing_male','lighting_hrs','age_weeks','remarks']
-const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',450,440,400,30,10,0,0,5,5,0,0,0,1,0,499,20,16,25,'']
+const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','total_eggs','he_eggs','he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs','wastage_eggs','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male','closing_female','closing_male','lighting_hrs','age_weeks','remarks']
+const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',450,440,400,30,10,0,0,5,5,0,0,0,0,0,1,0,499,20,16,25,'']
 
 const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK']
 
@@ -108,7 +108,8 @@ export const DailyEntry: React.FC = () => {
     feed_type_f: 'L1', feed_type_m: 'MALE',
     total_eggs: '', he_eggs: '', he_grade_a: '', he_grade_b: '', he_grade_c: '',
     je_eggs: '0', te_eggs: '0', be_eggs: '0', le_eggs: '0', wastage_eggs: '0',
-    trcull_female: '0', trcull_male: '0',
+    transfer_female: '0', transfer_male: '0',
+    cull_female: '0', cull_male: '0',
     mortality_female: '0', mortality_male: '0',
     closing_female: '', closing_male: '',
     lighting_hrs: '', age_weeks: '',
@@ -135,8 +136,10 @@ export const DailyEntry: React.FC = () => {
         be_eggs:        existing.be_eggs?.toString() ?? '0',
         le_eggs:        existing.le_eggs?.toString() ?? '0',
         wastage_eggs:   existing.wastage_eggs?.toString() ?? '0',
-        trcull_female:  existing.trcull_female?.toString() ?? '0',
-        trcull_male:    existing.trcull_male?.toString() ?? '0',
+        transfer_female: existing.transfer_female?.toString() ?? existing.trcull_female?.toString() ?? '0',
+        transfer_male:   existing.transfer_male?.toString() ?? existing.trcull_male?.toString() ?? '0',
+        cull_female:     existing.cull_female?.toString() ?? '0',
+        cull_male:       existing.cull_male?.toString() ?? '0',
         mortality_female: existing.mortality_female?.toString() ?? '0',
         mortality_male:   existing.mortality_male?.toString() ?? '0',
         closing_female: existing.closing_female?.toString() ?? '',
@@ -154,18 +157,20 @@ export const DailyEntry: React.FC = () => {
     }
   }, [existing, prevRecord])
 
-  // Auto-compute closing = opening - trcull - mort
+  // Auto-compute closing = opening - transfer - cull - mortality
   const autoClose = () => {
     const of = parseInt(form.opening_female) || 0
     const om = parseInt(form.opening_male) || 0
-    const tcf = parseInt(form.trcull_female) || 0
-    const tcm = parseInt(form.trcull_male) || 0
+    const trf = parseInt(form.transfer_female) || 0
+    const trm = parseInt(form.transfer_male) || 0
+    const cf = parseInt(form.cull_female) || 0
+    const cm = parseInt(form.cull_male) || 0
     const mf = parseInt(form.mortality_female) || 0
     const mm = parseInt(form.mortality_male) || 0
     setForm(f => ({
       ...f,
-      closing_female: Math.max(0, of - tcf - mf).toString(),
-      closing_male:   Math.max(0, om - tcm - mm).toString(),
+      closing_female: Math.max(0, of - trf - cf - mf).toString(),
+      closing_male:   Math.max(0, om - trm - cm - mm).toString(),
     }))
   }
 
@@ -199,8 +204,12 @@ export const DailyEntry: React.FC = () => {
         be_eggs:          parseInt(form.be_eggs) || 0,
         le_eggs:          parseInt(form.le_eggs) || 0,
         wastage_eggs:     parseInt(form.wastage_eggs) || null,
-        trcull_female:    parseInt(form.trcull_female) || 0,
-        trcull_male:      parseInt(form.trcull_male) || 0,
+        transfer_female:  parseInt(form.transfer_female) || 0,
+        transfer_male:    parseInt(form.transfer_male) || 0,
+        cull_female:      parseInt(form.cull_female) || 0,
+        cull_male:        parseInt(form.cull_male) || 0,
+        trcull_female:    (parseInt(form.transfer_female)||0) + (parseInt(form.cull_female)||0),
+        trcull_male:      (parseInt(form.transfer_male)||0) + (parseInt(form.cull_male)||0),
         mortality_female: parseInt(form.mortality_female) || 0,
         mortality_male:   parseInt(form.mortality_male) || 0,
         closing_female:   parseInt(form.closing_female) || 0,
@@ -265,7 +274,7 @@ export const DailyEntry: React.FC = () => {
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`daily_${selectedFlockData?.flock_no}_records.csv`,
       DAILY_HEADERS,
-      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.total_eggs,r.he_eggs,r.he_grade_a,r.he_grade_b,r.he_grade_c,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.wastage_eggs,r.trcull_female,r.trcull_male,r.mortality_female,r.mortality_male,r.closing_female,r.closing_male,r.lighting_hrs,r.age_weeks,r.remarks])
+      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.total_eggs,r.he_eggs,r.he_grade_a,r.he_grade_b,r.he_grade_c,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.wastage_eggs,r.transfer_female??r.trcull_female,r.transfer_male??r.trcull_male,r.cull_female??0,r.cull_male??0,r.mortality_female,r.mortality_male,r.closing_female,r.closing_male,r.lighting_hrs,r.age_weeks,r.remarks])
     )
   }
 
@@ -301,8 +310,12 @@ export const DailyEntry: React.FC = () => {
         be_eggs:          parseInt(r[col('be_eggs')]          || r[col('beeggs')]          || '0') || 0,
         le_eggs:          parseInt(r[col('le_eggs')]          || r[col('leeggs')]          || '0') || 0,
         wastage_eggs:     parseInt(r[col('wastage_eggs')]     || r[col('wastageeggs')]     || '0') || null,
-        trcull_female:    parseInt(r[col('trcull_female')]    || r[col('trcullfemale')]    || '0') || 0,
-        trcull_male:      parseInt(r[col('trcull_male')]      || r[col('trcullmale')]      || '0') || 0,
+        transfer_female:  parseInt(r[col('transfer_female')]  || r[col('transferfemale')]  || r[col('trcull_female')] || '0') || 0,
+        transfer_male:    parseInt(r[col('transfer_male')]    || r[col('transfermale')]    || r[col('trcull_male')]   || '0') || 0,
+        cull_female:      parseInt(r[col('cull_female')]      || r[col('cullfemale')]      || '0') || 0,
+        cull_male:        parseInt(r[col('cull_male')]        || r[col('cullmale')]        || '0') || 0,
+        trcull_female:    (parseInt(r[col('transfer_female')]||r[col('trcull_female')]||'0')||0) + (parseInt(r[col('cull_female')]||'0')||0),
+        trcull_male:      (parseInt(r[col('transfer_male')]  ||r[col('trcull_male')]  ||'0')||0) + (parseInt(r[col('cull_male')]  ||'0')||0),
         mortality_female: parseInt(r[col('mortality_female')] || r[col('mortalityfemale')] || '0') || 0,
         mortality_male:   parseInt(r[col('mortality_male')]   || r[col('mortalitymale')]   || '0') || 0,
         closing_female:   parseInt(r[col('closing_female')]   || r[col('closingfemale')]   || '0') || 0,
@@ -394,15 +407,29 @@ export const DailyEntry: React.FC = () => {
                 </Button>
               </FormRow>
               <FormRow cols={4}>
-                <Input label="Tr+Cull Female" type="number"
-                  value={form.trcull_female} onChange={e => set('trcull_female', e.target.value)}
-                  hint="Transfers + culls" />
-                <Input label="Tr+Cull Male" type="number"
-                  value={form.trcull_male} onChange={e => set('trcull_male', e.target.value)} />
+                <Input label="Transfer Female" type="number"
+                  value={form.transfer_female} onChange={e => set('transfer_female', e.target.value)}
+                  hint="Moved to another farm" />
+                <Input label="Transfer Male" type="number"
+                  value={form.transfer_male} onChange={e => set('transfer_male', e.target.value)}
+                  hint="Moved to another farm" />
+                <Input label="Cull Female" type="number"
+                  value={form.cull_female} onChange={e => set('cull_female', e.target.value)}
+                  hint="Sold/disposed as culls" />
+                <Input label="Cull Male" type="number"
+                  value={form.cull_male} onChange={e => set('cull_male', e.target.value)}
+                  hint="Sold/disposed as culls" />
+              </FormRow>
+              <FormRow cols={4}>
                 <Input label="Mortality Female" type="number"
                   value={form.mortality_female} onChange={e => set('mortality_female', e.target.value)} />
                 <Input label="Mortality Male" type="number"
                   value={form.mortality_male} onChange={e => set('mortality_male', e.target.value)} />
+                <div className="col-span-2 flex items-end">
+                  <div className="text-xs text-gray-500 pb-1">
+                    Closing = Opening − Transfer − Cull − Mortality
+                  </div>
+                </div>
               </FormRow>
               <FormRow cols={4}>
                 <Input label="Closing Female" type="number"
