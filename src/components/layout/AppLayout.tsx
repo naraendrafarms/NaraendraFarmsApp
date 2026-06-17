@@ -109,6 +109,7 @@ const NAV: NavItem[] = [
     label: 'Accounts', icon: <BarChart2 size={18}/>,
     children: [
       { label: 'Cash Book', to: '/accounts/cash-book' },
+      { label: 'Invoice Register', to: '/accounts/invoices' },
       { label: 'Pending Payments', to: '/pending-payments' },
     ]
   },

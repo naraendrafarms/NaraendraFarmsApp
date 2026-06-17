@@ -30,7 +30,8 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
     rearing_farm_id: '', laying_farm_id: '',
     placement_date: '', paid_female: '', paid_male: '',
     free_female: '0', free_male: '0', chick_rate: '320',
-    laying_start_date: '', supplier: 'Venkateshwara Hatcheries', remarks: ''
+    laying_start_date: '', supplier: 'Venkateshwara Hatcheries', remarks: '',
+    chick_invoice_no: '', chick_invoice_date: '',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -51,7 +52,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
   const mut = useMutation({
     mutationFn: async () => {
       if (!validate()) throw new Error('Validation failed')
-      const { error } = await supabase.from('flocks').insert({
+      const { data: newFlock, error } = await supabase.from('flocks').insert({
         flock_no:         form.flock_no.trim(),
         breed:            form.breed,
         rearing_farm_id:  form.rearing_farm_id,
@@ -65,9 +66,25 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
         laying_start_date: form.laying_start_date || null,
         supplier:         form.supplier,
         remarks:          form.remarks,
+        chick_invoice_no:   form.chick_invoice_no || null,
+        chick_invoice_date: form.chick_invoice_date || null,
         status:           'rearing',
-      })
+      }).select('id').single()
       if (error) throw error
+      // Auto-create supplier_invoice record if invoice details provided
+      if (form.chick_invoice_no && newFlock) {
+        const chickCost = ((parseInt(form.paid_female)||0)+(parseInt(form.paid_male)||0)) * (parseFloat(form.chick_rate)||320)
+        await supabase.from('supplier_invoices').insert({
+          invoice_no:   form.chick_invoice_no,
+          invoice_date: form.chick_invoice_date || form.placement_date,
+          supplier_name: form.supplier,
+          source_type:  'chick',
+          flock_id:     newFlock.id,
+          farm_id:      form.rearing_farm_id || null,
+          total_amount: chickCost,
+          payment_status: 'unpaid',
+        })
+      }
     },
     onSuccess: () => {
       toast.success(`Flock ${form.flock_no} added successfully!`)
@@ -133,11 +150,20 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
         {inr(((parseInt(form.paid_female)||0)+(parseInt(form.paid_male)||0)) * (parseFloat(form.chick_rate)||320))}
       </div>
 
+      <Divider label="Chick Invoice" />
+      <FormRow>
+        <Input label="Invoice No" placeholder="e.g. VH/2024/1234"
+          value={form.chick_invoice_no} onChange={e => set('chick_invoice_no', e.target.value)} />
+        <Input label="Invoice Date" type="date"
+          value={form.chick_invoice_date} onChange={e => set('chick_invoice_date', e.target.value)} />
+      </FormRow>
+      <p className="text-xs text-gray-400 -mt-2">Entering invoice details will auto-add it to the Invoice Register for payment tracking.</p>
+
       <Divider label="Optional" />
       <FormRow>
         <Input label="Laying Start Date" type="date"
           value={form.laying_start_date} onChange={e => set('laying_start_date', e.target.value)} />
-        <Input label="Supplier / Source"
+        <Input label="Supplier / Hatchery"
           value={form.supplier} onChange={e => set('supplier', e.target.value)} />
       </FormRow>
       <div className="flex justify-end gap-2 pt-2">
