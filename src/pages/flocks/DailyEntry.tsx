@@ -46,12 +46,15 @@ export const DailyEntry: React.FC = () => {
     }
   })
 
-  // Load sheds for the flock's current farm
+  // Load sheds from rearing farm if status=rearing, else laying farm
   const { data: sheds } = useQuery({
     queryKey: ['sheds_for_flock', selectedFlock],
     queryFn: async () => {
       const flock = flocks?.find((f: any) => f.id === selectedFlock)
-      const farmId = flock?.laying_farm_id ?? flock?.rearing_farm_id
+      // Use rearing farm sheds when still in rearing phase, laying farm sheds after transfer
+      const farmId = flock?.status === 'rearing'
+        ? (flock?.rearing_farm_id ?? flock?.laying_farm_id)
+        : (flock?.laying_farm_id ?? flock?.rearing_farm_id)
       if (!farmId) return []
       const { data } = await supabase
         .from('sheds')
@@ -176,7 +179,9 @@ export const DailyEntry: React.FC = () => {
       const payload = {
         flock_id:         selectedFlock,
         record_date:      date,
-        farm_id:          selectedFlockData?.laying_farm_id ?? selectedFlockData?.rearing_farm_id,
+        farm_id:          selectedFlockData?.status === 'rearing'
+          ? (selectedFlockData?.rearing_farm_id ?? selectedFlockData?.laying_farm_id)
+          : (selectedFlockData?.laying_farm_id ?? selectedFlockData?.rearing_farm_id),
         shed_id:          selectedShed || null,
         opening_female:   parseInt(form.opening_female) || 0,
         opening_male:     parseInt(form.opening_male) || 0,
@@ -271,7 +276,9 @@ export const DailyEntry: React.FC = () => {
     if (!selectedFlock) { toast.error('Select a flock first'); e.target.value = ''; return }
     const { headers, rows } = await parseFile(file)
     const col = (n: string) => { const i = headers.indexOf(n); return i >= 0 ? i : headers.indexOf(n.replace(/_/g,'')) }
-    const farmId = selectedFlockData?.laying_farm_id ?? selectedFlockData?.rearing_farm_id
+    const farmId = selectedFlockData?.status === 'rearing'
+      ? (selectedFlockData?.rearing_farm_id ?? selectedFlockData?.laying_farm_id)
+      : (selectedFlockData?.laying_farm_id ?? selectedFlockData?.rearing_farm_id)
     let saved = 0, skipped = 0
     for (const r of rows) {
       const dateVal = r[col('date')]?.trim()

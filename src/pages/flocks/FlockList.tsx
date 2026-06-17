@@ -7,7 +7,7 @@ import {
   Card, CardHeader, Button, Modal, Input, Select, FormRow, Divider,
   Table, Th, Td, Badge, Spinner, SectionHeader, EmptyState
 } from '@/components/ui'
-import { Plus, Bird, Eye, Trash2, CheckSquare } from 'lucide-react'
+import { Plus, Bird, Eye, Trash2, CheckSquare, Edit2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Link } from 'react-router-dom'
 import type { Flock } from '@/types'
@@ -143,9 +143,81 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
   )
 }
 
+// ── EDIT FLOCK FORM ─────────────────────────────────────────────
+const EditFlockForm: React.FC<{ flock: any; onClose: () => void }> = ({ flock, onClose }) => {
+  const qc = useQueryClient()
+  const { data: farms } = useQuery({ queryKey:['farms'], queryFn: async()=>{ const{data}=await supabase.from('farms').select('*').eq('is_active',true).order('name'); return data??[] } })
+  const farmOptions = (farms??[]).map((f:any) => ({ value: f.id, label: f.name }))
+
+  const [form, setForm] = useState({
+    flock_no: flock.flock_no ?? '',
+    breed: flock.breed ?? 'VENCO-430',
+    rearing_farm_id: flock.rearing_farm_id ?? '',
+    laying_farm_id: flock.laying_farm_id ?? '',
+    status: flock.status ?? 'rearing',
+    placement_date: flock.placement_date ?? '',
+    laying_start_date: flock.laying_start_date ?? '',
+    chick_rate: flock.chick_rate?.toString() ?? '320',
+    supplier: flock.supplier ?? '',
+    remarks: flock.remarks ?? '',
+  })
+  const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('flocks').update({
+        flock_no: form.flock_no,
+        breed: form.breed,
+        rearing_farm_id: form.rearing_farm_id || null,
+        laying_farm_id: form.laying_farm_id || null,
+        status: form.status,
+        placement_date: form.placement_date || null,
+        laying_start_date: form.laying_start_date || null,
+        chick_rate: parseFloat(form.chick_rate) || null,
+        supplier: form.supplier || null,
+        remarks: form.remarks || null,
+      }).eq('id', flock.id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Flock updated'); qc.invalidateQueries({queryKey:['flocks']}); onClose() },
+    onError: (e:any) => toast.error(e.message)
+  })
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-700">
+        Editing <strong>Flock F-{flock.flock_no}</strong>. Change farm assignments or status as needed.
+      </div>
+      <FormRow>
+        <Input label="Flock No" value={form.flock_no} onChange={e=>s('flock_no',e.target.value)}/>
+        <Select label="Breed" options={BREEDS} value={form.breed} onChange={e=>s('breed',e.target.value)}/>
+        <Select label="Status" options={['rearing','laying','closed']} value={form.status} onChange={e=>s('status',e.target.value)}/>
+      </FormRow>
+      <FormRow>
+        <Select label="Rearing Farm (start site)" placeholder="— Select —" options={farmOptions} value={form.rearing_farm_id} onChange={e=>s('rearing_farm_id',e.target.value)}/>
+        <Select label="Laying Farm (transfer site)" placeholder="— Select —" options={farmOptions} value={form.laying_farm_id} onChange={e=>s('laying_farm_id',e.target.value)}/>
+      </FormRow>
+      <FormRow>
+        <Input label="Placement Date" type="date" value={form.placement_date} onChange={e=>s('placement_date',e.target.value)}/>
+        <Input label="Laying Start Date" type="date" value={form.laying_start_date} onChange={e=>s('laying_start_date',e.target.value)}/>
+        <Input label="Chick Rate (₹)" type="number" value={form.chick_rate} onChange={e=>s('chick_rate',e.target.value)}/>
+      </FormRow>
+      <FormRow>
+        <Input label="Supplier" value={form.supplier} onChange={e=>s('supplier',e.target.value)}/>
+        <Input label="Remarks" value={form.remarks} onChange={e=>s('remarks',e.target.value)}/>
+      </FormRow>
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save Changes</Button>
+      </div>
+    </div>
+  )
+}
+
 // ── FLOCK LIST ──────────────────────────────────────────────────
 export const FlockList: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
+  const [editFlock, setEditFlock] = useState<any>(null)
   const [filter, setFilter] = useState<'all'|'rearing'|'laying'|'closed'>('all')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
@@ -320,6 +392,10 @@ export const FlockList: React.FC = () => {
                         className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors inline-flex">
                         <Eye size={14}/>
                       </Link>
+                      <button onClick={() => setEditFlock(f)}
+                        className="p-1.5 rounded-lg hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors inline-flex">
+                        <Edit2 size={14}/>
+                      </button>
                       <button onClick={() => setDelTarget(f.id)}
                         className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors inline-flex">
                         <Trash2 size={14}/>
@@ -338,6 +414,11 @@ export const FlockList: React.FC = () => {
           )}
         </Card>
       )}
+
+      {/* Edit flock modal */}
+      <Modal open={!!editFlock} onClose={() => setEditFlock(null)} title={`Edit Flock F-${editFlock?.flock_no}`} size="lg">
+        {editFlock && <EditFlockForm flock={editFlock} onClose={() => setEditFlock(null)} />}
+      </Modal>
 
       {/* Add flock modal */}
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add New Flock" size="lg"
