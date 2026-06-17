@@ -2,11 +2,11 @@ import React, { useState } from 'react'
 import {
   BookOpen, Bird, Calendar, ArrowRightLeft, ShoppingCart, Users, Zap,
   Package, FileSpreadsheet, BarChart2, Settings, ChevronRight, ChevronDown,
-  AlertCircle, CheckCircle, Info, ArrowRight, Hash, MapPin
+  AlertCircle, CheckCircle, Info, ArrowRight, Hash, MapPin, CreditCard
 } from 'lucide-react'
 
 // ── last updated ───────────────────────────────────────────────────────────────
-const LAST_UPDATED = '2026-06-17'
+const LAST_UPDATED = '2026-06-18'
 
 // ── types ──────────────────────────────────────────────────────────────────────
 interface Step { text: string; note?: string; warning?: string }
@@ -404,6 +404,93 @@ const SECTIONS: Section[] = [
     ]
   },
 
+  // ── PURCHASE & PAYMENTS ───────────────────────────────────────────────────────
+  {
+    id: 'purchase-payments',
+    icon: <CreditCard size={20}/>,
+    label: 'Purchase & Payments',
+    color: 'bg-emerald-700',
+    intro: 'Track every purchase made for the farm — feed ingredients, medicines, equipment, services. Each purchase is raised as a Purchase Order (PO). Payments are recorded separately against each PO and tracked until fully paid. The Bank Ledger shows all money going out.',
+    workflows: [
+      {
+        title: 'Raise a Purchase Order (PO)',
+        path: 'Purchase & Payments → + New PO',
+        steps: [
+          { text: 'PO No — your internal PO number (e.g. PO-2025-001). One PO can have multiple line items (ingredients or products).' },
+          { text: 'Vendor Name — type the supplier name. Existing vendors auto-suggest.' },
+          { text: 'Financial Year — select the FY this PO belongs to (e.g. 2025-26).' },
+          { text: 'Item/Ingredient — what is being purchased (Maize, Soya, Medicine, etc.).' },
+          { text: 'Quantity and Unit (kg, bags, nos, ltrs).' },
+          { text: 'Rate per unit and Total Amount.' },
+          { text: 'Expected Delivery Date if known.' },
+          { text: 'Save. The PO status starts as "Pending".' },
+          { text: 'To add more items to the same PO, click the + icon on the PO row in the list.' },
+        ]
+      },
+      {
+        title: 'Record stock receipt against a PO',
+        path: 'Purchase & Payments → PO row → 📦 receipt icon',
+        steps: [
+          { text: 'When goods physically arrive, click the green box/package icon on the PO row.' },
+          { text: 'Enter the quantity actually received (may differ from ordered quantity).' },
+          { text: 'Enter the actual rate and invoice amount.' },
+          { text: 'Vehicle No and Bill/Invoice No.' },
+          { text: 'Save. PO status updates to "Received". Stock in Feed Mill also increases if it is a raw material.' },
+        ]
+      },
+      {
+        title: 'Record a payment against a PO',
+        path: 'Purchase & Payments → Payments tab → + Add Payment',
+        steps: [
+          { text: 'Select the PO No from the dropdown — the vendor name and outstanding amount fill automatically.' },
+          { text: 'Payment Date.' },
+          { text: 'Amount Paid.' },
+          { text: 'Payment Mode: Cash, NEFT, RTGS, Cheque, UPI.' },
+          { text: 'Bank Reference No / UTR / Cheque No — important for reconciliation.' },
+          { text: 'TDS deducted (if applicable) — enter TDS amount separately.' },
+          { text: 'Remarks (e.g. "Partial payment, balance in July").' },
+          { text: 'Save. Outstanding balance on that PO reduces automatically.' },
+          { text: 'A PO can have multiple payments spread over time. The system tracks Total Invoiced vs Total Paid vs Outstanding for each vendor.' },
+        ]
+      },
+      {
+        title: 'View pending / overdue payments',
+        path: 'Purchase & Payments → Pending Payments tab',
+        steps: [
+          { text: 'This tab shows all POs where payment is not fully done.' },
+          { text: 'Filter by vendor or financial year.' },
+          { text: 'Outstanding column = Invoiced Amount − Total Paid so far.' },
+          { text: 'Click on a vendor row to see all their POs and payment history.' },
+        ]
+      },
+      {
+        title: 'View vendor-wise outstanding (Party Outstanding)',
+        path: 'Reports → Party Outstanding',
+        steps: [
+          { text: 'Shows total amount owed to each vendor across all POs.' },
+          { text: 'Filter by vendor name or date range.' },
+          { text: 'Use this when a vendor calls to ask how much is pending.' },
+        ]
+      },
+      {
+        title: 'Merge duplicate vendor names',
+        path: 'Purchase & Payments → Vendors tab → Merge button',
+        steps: [
+          { text: 'If the same vendor was entered with slightly different names (e.g. "ABC Feeds" and "A.B.C Feeds"), use Merge to combine them.' },
+          { text: 'Select the two names, pick which one to keep, click Merge.' },
+          { text: 'All POs and payments are reassigned to the kept name.' },
+        ]
+      },
+    ],
+    tips: [
+      'Always record stock receipt before recording payment — the receipt confirms goods arrived.',
+      'TDS: if you deduct TDS before paying the vendor, enter TDS amount in the payment form. The vendor\'s outstanding is reduced by the full invoice amount, not just what was paid in cash.',
+      'One PO can cover multiple deliveries — just record a new receipt each time a truck arrives.',
+      'Bank Ledger (Accounts → Cash Book) shows all outgoing payments in date order — use this to match with your bank statement.',
+      'Party Outstanding report is the fastest way to answer "how much do we owe to [vendor]?"',
+    ]
+  },
+
   // ── REPORTS ───────────────────────────────────────────────────────────────────
   {
     id: 'reports',
@@ -539,6 +626,8 @@ export const HelpGuidePage: React.FC = () => {
             <div className="flex items-center gap-1"><Hash size={10}/>Transfer flock → Flock Transfer</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Pay salary → Employees</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Electricity bill → Electricity</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Raise PO → Purchase & Payments</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Record payment → Purchase & Payments</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Import Excel → Import Data</div>
           </div>
         </div>
