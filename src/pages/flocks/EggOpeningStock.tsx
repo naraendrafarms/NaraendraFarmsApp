@@ -87,8 +87,9 @@ export const EggOpeningStockPage: React.FC = () => {
   })
 
   const delMut = useMutation({
-    mutationFn: async (id: string) => { await supabase.from('egg_opening_stock').delete().eq('id', id) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['egg_opening_stock'] }); toast.success('Deleted') }
+    mutationFn: async (id: string) => { const { error } = await supabase.from('egg_opening_stock').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['egg_opening_stock'] }); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message)
   })
 
   const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no} (${f.status})` }))

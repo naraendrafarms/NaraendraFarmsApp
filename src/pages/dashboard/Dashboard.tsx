@@ -41,7 +41,7 @@ const AlertsWidget: React.FC = () => {
   const { data: grnData } = useQuery({
     queryKey: ['alerts_grn'],
     queryFn: async () => {
-      const { data } = await supabase.from('feed_grn').select('ingredient_id, quantity_kg')
+      const { data } = await supabase.from('grn').select('ingredient_id, qty')
       return data ?? []
     }
   })
@@ -49,7 +49,7 @@ const AlertsWidget: React.FC = () => {
   const { data: prodData } = useQuery({
     queryKey: ['alerts_prod'],
     queryFn: async () => {
-      const { data } = await supabase.from('feed_production').select('ingredient_id, quantity_used_kg')
+      const { data } = await supabase.from('feed_production_ingredients').select('ingredient_id, quantity_kg')
       return data ?? []
     }
   })
@@ -72,8 +72,8 @@ const AlertsWidget: React.FC = () => {
     if (!grnData || !prodData) return 0
     const stockIn: Record<string, number> = {}
     const stockOut: Record<string, number> = {}
-    for (const r of grnData) stockIn[r.ingredient_id] = (stockIn[r.ingredient_id] ?? 0) + (r.quantity_kg ?? 0)
-    for (const r of prodData) stockOut[r.ingredient_id] = (stockOut[r.ingredient_id] ?? 0) + (r.quantity_used_kg ?? 0)
+    for (const r of grnData) stockIn[r.ingredient_id] = (stockIn[r.ingredient_id] ?? 0) + (r.qty ?? 0)
+    for (const r of prodData) stockOut[r.ingredient_id] = (stockOut[r.ingredient_id] ?? 0) + (r.quantity_kg ?? 0)
     const allIds = new Set([...Object.keys(stockIn), ...Object.keys(stockOut)])
     return [...allIds].filter(id => ((stockIn[id] ?? 0) - (stockOut[id] ?? 0)) < 500).length
   }, [grnData, prodData])

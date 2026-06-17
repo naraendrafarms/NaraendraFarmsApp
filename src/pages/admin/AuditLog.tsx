@@ -10,7 +10,7 @@ const TABLE_LABELS: Record<string, string> = {
   nhe_sales:           'NHE / Bird Sales',
   salary_monthly:      'Salary',
   attendance_daily:    'Attendance',
-  grn_entries:         'GRN / Purchases',
+  grn:                 'GRN / Purchases',
   electricity_bills:   'Electricity Bills',
   flocks:              'Flocks',
   employees:           'Employees',

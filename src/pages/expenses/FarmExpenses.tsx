@@ -145,10 +145,8 @@ export const FarmExpensesPage: React.FC = () => {
 
   const delMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      for (const id of ids) {
-        const { error } = await supabase.from('farm_expenses').delete().eq('id', id)
-        if (error) throw error
-      }
+      const { error } = await supabase.from('farm_expenses').delete().in('id', ids)
+      if (error) throw error
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['farm_expenses'] })
