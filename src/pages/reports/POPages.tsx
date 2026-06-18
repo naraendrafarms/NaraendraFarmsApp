@@ -1385,6 +1385,8 @@ const VendorBanksTab: React.FC = () => {
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm]     = useState<any>(EMPTY_VB)
   const [delId, setDelId]   = useState<string|null>(null)
+  const [sel, setSel]       = useState<Set<string>>(new Set())
+  const [bulkDelConfirm, setBulkDelConfirm] = useState(false)
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
 
   const { data: banks=[], isLoading } = useQuery({
@@ -1408,6 +1410,17 @@ const VendorBanksTab: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (let i = 0; i < ids.length; i += 50) {
+        const { error } = await supabase.from('vendor_bank_details').delete().in('id', ids.slice(i, i + 50))
+        if (error) throw error
+      }
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vendor_bank_details'] }); setSel(new Set()); setBulkDelConfirm(false); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   const filtered = useMemo(() => {
     if (!search) return banks
     const q = search.toLowerCase()
@@ -1416,6 +1429,9 @@ const VendorBanksTab: React.FC = () => {
 
   const openNew  = () => { setEditing(null); setForm({...EMPTY_VB}); setOpen(true) }
   const openEdit = (r: any) => { setEditing(r); setForm({...EMPTY_VB,...r}); setOpen(true) }
+  const allSelected = filtered.length > 0 && filtered.every((b:any) => sel.has(b.id))
+  const toggleAll = () => setSel(allSelected ? new Set() : new Set(filtered.map((b:any) => b.id)))
+  const toggleOne = (id: string) => setSel(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   if (isLoading) return <Spinner />
 
@@ -1427,15 +1443,25 @@ const VendorBanksTab: React.FC = () => {
         <Button size="sm" onClick={openNew} icon={<Plus size={14}/>}>Add Vendor Bank</Button>
       </div>
 
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-md px-4 py-2 text-sm">
+          <span className="font-medium text-red-700">{sel.size} selected</span>
+          <Button size="sm" variant="danger" onClick={() => setBulkDelConfirm(true)} icon={<Trash2 size={13}/>}>Delete Selected</Button>
+          <button onClick={() => setSel(new Set())} className="text-gray-500 hover:text-gray-700 text-xs">Clear</button>
+        </div>
+      )}
+
       <Card padding={false}>
         <Table>
           <thead><tr>
+            <Th><input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded" /></Th>
             <Th>Vendor Name</Th><Th>Bank Name</Th><Th>Branch</Th>
             <Th>IFSC</Th><Th>Account No</Th><Th></Th>
           </tr></thead>
           <tbody>
             {filtered.map((b: any) => (
-              <tr key={b.id} className="hover:bg-gray-50 text-sm">
+              <tr key={b.id} className={`hover:bg-gray-50 text-sm ${sel.has(b.id) ? 'bg-red-50' : ''}`}>
+                <Td><input type="checkbox" checked={sel.has(b.id)} onChange={() => toggleOne(b.id)} className="rounded" /></Td>
                 <Td className="font-medium">{b.vendor_name}</Td>
                 <Td>{b.bank_name ?? '—'}</Td>
                 <Td className="text-xs text-gray-500">{b.branch ?? '—'}</Td>
@@ -1449,10 +1475,15 @@ const VendorBanksTab: React.FC = () => {
                 </Td>
               </tr>
             ))}
-            {filtered.length===0 && <tr><td colSpan={6}><EmptyState icon={<Building2 size={32}/>} title="No vendor bank details" /></td></tr>}
+            {filtered.length===0 && <tr><td colSpan={7}><EmptyState icon={<Building2 size={32}/>} title="No vendor bank details" /></td></tr>}
           </tbody>
         </Table>
       </Card>
+
+      <Modal open={bulkDelConfirm} onClose={() => setBulkDelConfirm(false)} title="Delete Vendor Banks"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkDelConfirm(false)}>Cancel</Button><Button variant="danger" onClick={() => bulkDelMut.mutate(Array.from(sel))} loading={bulkDelMut.isPending}>Delete {sel.size} Records</Button></div>}>
+        <p className="text-sm text-gray-600">Delete {sel.size} vendor bank record{sel.size > 1 ? 's' : ''}? This cannot be undone.</p>
+      </Modal>
 
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? 'Edit Vendor Bank' : 'Add Vendor Bank'}
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
