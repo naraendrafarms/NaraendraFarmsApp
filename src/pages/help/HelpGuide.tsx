@@ -7,18 +7,29 @@ import {
 } from 'lucide-react'
 
 // ── last updated ───────────────────────────────────────────────────────────────
-const LAST_UPDATED = '2026-06-17'
+const LAST_UPDATED = '2026-06-18'
 
 // ── changelog ─────────────────────────────────────────────────────────────────
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-06-18', tag: 'New',      text: 'Vendors Master tab added in Purchase & Payments — lists all unique vendors from POs, Payments, and Vendor Banks. Delete all data for a vendor (POs + payments + bank details) in one step. Supports bulk select and bulk delete.' },
+  { date: '2026-06-18', tag: 'Improved', text: 'Vendor Banks tab now has checkboxes and bulk delete — select multiple bank records and delete them at once.' },
+  { date: '2026-06-18', tag: 'Improved', text: 'Feed Formulas: Feed Type is now linked to the master feed types (BCM, BGM, L1, etc.) instead of a hardcoded Breeder/Broiler/Layer dropdown. Flock Type auto-derives from the selected feed type name. Filter bar also uses master feed types.' },
+  { date: '2026-06-18', tag: 'Fix',      text: 'GRN bulk delete: fixed "invalid input syntax for uuid: undefined" error when selecting all 100+ records. Rows with missing IDs are now safely skipped.' },
+  { date: '2026-06-18', tag: 'Fix',      text: 'GRN data not being restored — previous bulk deletions were failing silently (no error shown) due to the uuid error. Data appeared to reappear but was never actually deleted. Now fixed.' },
   { date: '2026-06-17', tag: 'New',      text: 'Chick Placements tab added to each flock — record staggered chick intake per shed per day. Total Placed updates automatically.' },
   { date: '2026-06-17', tag: 'New',      text: 'Invoice Register added under Accounts — track all supplier invoices (chick, feed, medicine, electricity). Link to flock or farm. Mark payment. Import/Export Excel.' },
   { date: '2026-06-17', tag: 'New',      text: 'Chick invoice fields added to flock creation form — auto-creates an invoice record in Invoice Register.' },
+  { date: '2026-06-17', tag: 'New',      text: 'Medicine Purchases linked to Invoice Register — when a medicine purchase has an invoice number, a matching invoice record is auto-created/updated in Invoice Register.' },
+  { date: '2026-06-17', tag: 'New',      text: 'GRN page: checkboxes and bulk delete added — select multiple GRN records and delete them at once.' },
+  { date: '2026-06-17', tag: 'New',      text: 'Shed capacity shown in Flock placements — Shed Capacity, Box Usage, and Utilization % columns added per placement row. Utilization is colour-coded green/orange/red.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Vaccination Schedule: Clear All button added to start fresh. Single delete now shows proper error if it fails.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Parties master: bulk delete now works correctly for large selections (chunked in batches of 50 to avoid URL length limit).' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Purchase Orders: bulk delete fixed — was silently swallowing errors, causing data to appear after deletion. Now correctly errors and is chunked in batches of 50.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Parties can now be deleted even if they have linked GRN, HE Dispatch, or NHE Sales records — those links are set to null on delete (no more bad request).' },
   { date: '2026-06-17', tag: 'Improved', text: 'Daily Entry: Egg Collection fields (Total Eggs, HE, grades, JE/TE/BE) are now hidden during Rearing phase and only appear from Laying Start Date.' },
   { date: '2026-06-17', tag: 'Improved', text: 'Daily Entry: When a shed has a Placement batch for the selected date, opening bird count auto-fills from the batch.' },
   { date: '2026-06-17', tag: 'Improved', text: 'Payments & Bank Ledger: Checkboxes, bulk delete, edit, import, and export added.' },
-  { date: '2026-06-17', tag: 'Improved', text: 'Vaccination Schedule: Full CRUD — add, edit, delete, bulk delete.' },
   { date: '2026-06-17', tag: 'Improved', text: 'Item Master renamed from "Feed Ingredients" in sidebar.' },
   { date: '2026-06-17', tag: 'Fix',      text: 'Flock creation Save button was disconnected — fixed.' },
   { date: '2026-06-17', tag: 'Fix',      text: 'Edit flock form now loads correct data (rearing farm, laying farm, chick rate, paid counts).' },
@@ -386,6 +397,17 @@ const SECTIONS: Section[] = [
         ]
       },
       {
+        title: 'Set up feed formulas',
+        path: 'Feed Mill → Formulas → + Add Formula',
+        steps: [
+          { text: 'Formula Code — your internal code (e.g. BRD-PRE-V2).' },
+          { text: 'Feed Type — select from the master feed types (BCM, BGM, L1, L2, etc.). This is the required link to the feed type master. Flock Type (Breeder/Layer/Broiler) auto-fills from the feed type name.', note: 'Feed Types must be set up in Masters → Feed Types before formulas can be created.' },
+          { text: 'Week From / Week To — the age range (weeks) this formula applies to.' },
+          { text: 'Add ingredients with percentage and kg per 1000 kg batch. Total % should add up to 100.' },
+          { text: 'Save. Formula can then be selected when recording feed production.' },
+        ]
+      },
+      {
         title: 'Record feed production',
         path: 'Feed Mill → Feed Production → + New Batch',
         steps: [
@@ -544,12 +566,14 @@ const SECTIONS: Section[] = [
         ]
       },
       {
-        title: 'Merge duplicate vendor names',
-        path: 'Purchase & Payments → Vendors tab → Merge button',
+        title: 'Delete a vendor and all their data',
+        path: 'Purchase & Payments → Vendors Master tab',
         steps: [
-          { text: 'If the same vendor was entered with slightly different names (e.g. "ABC Feeds" and "A.B.C Feeds"), use Merge to combine them.' },
-          { text: 'Select the two names, pick which one to keep, click Merge.' },
-          { text: 'All POs and payments are reassigned to the kept name.' },
+          { text: 'The Vendors Master tab lists every unique vendor name from Purchase Orders, Payments, and Vendor Bank Details.' },
+          { text: 'Each row shows how many POs, payments, and whether bank details exist for that vendor.' },
+          { text: 'Click the trash icon on a row to delete ALL data for that vendor — their POs, payments, and bank details are permanently removed.', warning: 'This cannot be undone. Use only when you want to completely remove a vendor and all their history.' },
+          { text: 'To delete multiple vendors at once, tick checkboxes and click "Delete All Data for Selected".' },
+          { text: 'After deletion, Vendor Statement and Rate Analysis will no longer show those vendor names.' },
         ]
       },
     ],
