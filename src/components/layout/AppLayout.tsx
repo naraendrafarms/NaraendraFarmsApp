@@ -32,6 +32,7 @@ const NAV: NavItem[] = [
       { label: 'Egg Conversions',    to: '/flocks/egg-conversions' },
       { label: 'Hatch Batches',      to: '/flocks/hatch-batches' },
       { label: 'Medicine Entry',     to: '/flocks/medicine' },
+      { label: 'Medicine Purchases', to: '/flocks/medicine-purchases' },
       { label: 'Egg Opening Stock',  to: '/flocks/opening-stock' },
       { label: 'Vaccination',        to: '/flocks/vaccination' },
     ]

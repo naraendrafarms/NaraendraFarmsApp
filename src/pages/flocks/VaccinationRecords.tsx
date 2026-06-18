@@ -9,6 +9,19 @@ import {
 import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
+      <p className="text-gray-800 font-semibold mb-1">Confirm Delete</p>
+      <p className="text-sm text-gray-600 mb-5">{label}</p>
+      <div className="flex gap-3 justify-end">
+        <button onClick={onCancel} className="px-4 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50">Cancel</button>
+        <button onClick={onConfirm} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700">Delete</button>
+      </div>
+    </div>
+  </div>
+)
+
 const ROUTES = ['drinking_water', 'eye_drop', 'injection', 'spray']
 const ROUTE_LABELS: Record<string, string> = {
   drinking_water: 'Drinking Water', eye_drop: 'Eye Drop',
@@ -34,6 +47,7 @@ export const VaccinationRecordsPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(empty())
   const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
   const [filterFlock, setFilterFlock] = useState('')
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
@@ -222,7 +236,7 @@ export const VaccinationRecordsPage: React.FC = () => {
           <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
           <div className="ml-auto">
             <Button size="sm" variant="danger" loading={delMut.isPending}
-              onClick={() => { if (confirm(`Delete ${sel.size} record(s)?`)) delMut.mutate([...sel]) }}>
+              onClick={() => setBulkConfirm(true)}>
               Delete Selected
             </Button>
           </div>
@@ -261,7 +275,7 @@ export const VaccinationRecordsPage: React.FC = () => {
                     <Td>
                       <div className="flex gap-1">
                         <button onClick={() => openForm(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
-                        <button onClick={() => { if (confirm('Delete this record?')) delMut.mutate([r.id]) }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                        <button onClick={() => { setSel(new Set([r.id])); setBulkConfirm(true) }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
                       </div>
                     </Td>
                   </tr>
@@ -271,6 +285,14 @@ export const VaccinationRecordsPage: React.FC = () => {
           </Table>
           {rows.length === 0 && <EmptyState title="No vaccination records" action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Record</Button>} />}
         </Card>
+      )}
+
+      {bulkConfirm && (
+        <ConfirmBulkDelete
+          label={`Delete ${sel.size} vaccination record(s)? This cannot be undone.`}
+          onConfirm={() => { delMut.mutate([...sel]); setBulkConfirm(false) }}
+          onCancel={() => setBulkConfirm(false)}
+        />
       )}
 
       {/* Vaccination Schedule reference */}

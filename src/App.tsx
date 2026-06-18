@@ -10,7 +10,7 @@ import { Dashboard } from '@/pages/dashboard/Dashboard'
 import { FlockList } from '@/pages/flocks/FlockList'
 import { FlockDetail } from '@/pages/flocks/FlockDetail'
 import { DailyEntry } from '@/pages/flocks/DailyEntry'
-import { HEDispatch, NHESales, MedicineEntry } from '@/pages/flocks/FlockSalesPages'
+import { HEDispatch, NHESales, MedicineEntry, MedicinePurchases } from '@/pages/flocks/FlockSalesPages'
 import { EggConversions } from '@/pages/flocks/EggConversions'
 import { HatchBatches } from '@/pages/flocks/HatchBatches'
 import { FeedDashboard, GRNEntry, FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
@@ -110,6 +110,7 @@ export const App: React.FC = () => {
             <Route path="flocks/egg-conversions" element={<EggConversions />} />
             <Route path="flocks/hatch-batches" element={<HatchBatches />} />
             <Route path="flocks/medicine" element={<MedicineEntry />} />
+            <Route path="flocks/medicine-purchases" element={<MedicinePurchases />} />
             <Route path="flocks/opening-stock" element={<EggOpeningStockPage />} />
             <Route path="flocks/vaccination" element={<VaccinationRecordsPage />} />
 

@@ -1349,6 +1349,12 @@ export const MedicineEntry: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const delMonthlyMut = useMutation({
+    mutationFn: async (id: string) => { const{error}=await supabase.from('medicine_monthly').delete().eq('id', id); if(error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['medicine_monthly'] }); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const medOptions = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.unit})` })) ?? []
 
@@ -1421,7 +1427,7 @@ export const MedicineEntry: React.FC = () => {
       {isLoading ? <Spinner /> : tab === 'monthly' ? (
         <Card padding={false}>
           <Table>
-            <thead><tr><Th>Flock</Th><Th>Month</Th><Th right>Total Amount</Th><Th>Remarks</Th></tr></thead>
+            <thead><tr><Th>Flock</Th><Th>Month</Th><Th right>Total Amount</Th><Th>Remarks</Th><Th></Th></tr></thead>
             <tbody>
               {monthly?.map((m: any) => (
                 <tr key={m.id} className="hover:bg-gray-50">
@@ -1429,6 +1435,7 @@ export const MedicineEntry: React.FC = () => {
                   <Td className="text-xs">{fmtDate(m.month)}</Td>
                   <Td right className="font-semibold">{inr(m.total_amount)}</Td>
                   <Td className="text-xs text-gray-400">{m.remarks ?? ''}</Td>
+                  <Td><button onClick={() => delMonthlyMut.mutate(m.id)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button></Td>
                 </tr>
               ))}
             </tbody>
@@ -1522,6 +1529,288 @@ export const MedicineEntry: React.FC = () => {
             <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
           </div>
         )}
+      </Modal>
+    </div>
+  )
+}
+
+// ─── Medicine Purchases (GRN / Stock tracking) ───────────────────────────────
+export const MedicinePurchases: React.FC = () => {
+  const qc = useQueryClient()
+  const { farmId } = useFarmScope()
+  const [showForm, setShowForm] = useState(false)
+  const [editId, setEditId] = useState<string|null>(null)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [filterMed, setFilterMed] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [activeTab, setActiveTab] = useState<'purchases'|'stock'>('stock')
+
+  const emptyForm = () => ({ purchase_date: today(), medicine_id: '', farm_id: farmId ?? '', supplier_id: '',
+    invoice_no: '', invoice_date: '', qty: '', unit: '', rate: '', gst_pct: '0',
+    batch_no: '', expiry_date: '', remarks: '' })
+  const [form, setForm] = useState(emptyForm())
+  const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const { data: medicines } = useQuery({
+    queryKey: ['medicines_all'],
+    queryFn: async () => { const{data}=await supabase.from('medicines_master').select('id,name,unit,rate').order('name'); return data??[] }
+  })
+  const { data: farms } = useQuery({
+    queryKey: ['farms_all'],
+    queryFn: async () => { const{data}=await supabase.from('farms').select('id,name').order('name'); return data??[] }
+  })
+  const { data: suppliers } = useQuery({
+    queryKey: ['parties_supplier'],
+    queryFn: async () => { const{data}=await supabase.from('parties').select('id,name').order('name'); return data??[] }
+  })
+
+  const { data: stock } = useQuery({
+    queryKey: ['v_medicine_stock'],
+    queryFn: async () => { const{data}=await supabase.from('v_medicine_stock').select('*').order('name'); return data??[] }
+  })
+
+  const { data: purchases, isLoading } = useQuery({
+    queryKey: ['medicine_purchases', filterMed, fromDate, toDate],
+    queryFn: async () => {
+      let q = supabase.from('medicine_purchases')
+        .select('*, medicines_master(name,unit), farms(name), parties(name)')
+        .order('purchase_date', { ascending: false })
+      if (filterMed) q = q.eq('medicine_id', filterMed)
+      if (fromDate) q = q.gte('purchase_date', fromDate)
+      if (toDate) q = q.lte('purchase_date', toDate)
+      const{data}=await q; return data??[]
+    }
+  })
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      if (!form.medicine_id || !form.qty || !form.purchase_date) throw new Error('Medicine, Qty and Date required')
+      const payload: any = {
+        purchase_date: form.purchase_date,
+        medicine_id:   form.medicine_id,
+        farm_id:       form.farm_id || null,
+        supplier_id:   form.supplier_id || null,
+        invoice_no:    form.invoice_no || null,
+        invoice_date:  form.invoice_date || null,
+        qty:           parseFloat(form.qty),
+        unit:          form.unit || null,
+        rate:          parseFloat(form.rate) || 0,
+        gst_pct:       parseFloat(form.gst_pct) || 0,
+        batch_no:      form.batch_no || null,
+        expiry_date:   form.expiry_date || null,
+        remarks:       form.remarks || null,
+      }
+      if (editId) {
+        const{error}=await supabase.from('medicine_purchases').update(payload).eq('id', editId)
+        if(error) throw error
+      } else {
+        const{error}=await supabase.from('medicine_purchases').insert(payload)
+        if(error) throw error
+      }
+    },
+    onSuccess: () => {
+      toast.success('Saved!'); setShowForm(false); setEditId(null); setForm(emptyForm())
+      qc.invalidateQueries({ queryKey: ['medicine_purchases'] })
+      qc.invalidateQueries({ queryKey: ['v_medicine_stock'] })
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => { const{error}=await supabase.from('medicine_purchases').delete().in('id', ids); if(error) throw error },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['medicine_purchases'] })
+      qc.invalidateQueries({ queryKey: ['v_medicine_stock'] })
+      setSel(new Set()); setBulkConfirm(false)
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const openEdit = (p: any) => {
+    setEditId(p.id); setForm({
+      purchase_date: p.purchase_date, medicine_id: p.medicine_id ?? '',
+      farm_id: p.farm_id ?? '', supplier_id: p.supplier_id ?? '',
+      invoice_no: p.invoice_no ?? '', invoice_date: p.invoice_date ?? '',
+      qty: p.qty?.toString() ?? '', unit: p.unit ?? '',
+      rate: p.rate?.toString() ?? '', gst_pct: p.gst_pct?.toString() ?? '0',
+      batch_no: p.batch_no ?? '', expiry_date: p.expiry_date ?? '', remarks: p.remarks ?? ''
+    }); setShowForm(true)
+  }
+
+  const medOptions = (medicines??[]).map((m: any) => ({ value: m.id, label: `${m.name} (${m.unit})` }))
+  const farmOptions = (farms??[]).map((f: any) => ({ value: f.id, label: f.name }))
+  const supplierOptions = (suppliers??[]).map((p: any) => ({ value: p.id, label: p.name }))
+  const ids = (purchases??[]).map((p: any) => p.id)
+  const allSel = ids.length > 0 && ids.every((id: string) => sel.has(id))
+  const someSel = ids.some((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(s => { const n=new Set(s); n.has(id)?n.delete(id):n.add(id); return n })
+  const toggleAll = () => setSel(s => { const n=new Set(s); allSel?ids.forEach((id: string)=>n.delete(id)):ids.forEach((id: string)=>n.add(id)); return n })
+
+  const autoBasic = (parseFloat(form.qty)||0) * (parseFloat(form.rate)||0)
+  const autoGst   = autoBasic * (parseFloat(form.gst_pct)||0) / 100
+  const autoTotal = autoBasic + autoGst
+
+  const stockFiltered = (stock??[]).filter((r: any) => !filterMed || r.medicine_id === filterMed)
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Medicine Purchases"
+        subtitle="Track medicine & vaccine purchases, GRN and stock balance"
+        action={
+          <Button icon={<Plus size={16}/>} onClick={() => { setEditId(null); setForm(emptyForm()); setShowForm(true) }}>Add Purchase</Button>
+        }
+      />
+
+      <div className="flex gap-3 flex-wrap items-end">
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+          {(['stock','purchases'] as const).map(t => (
+            <button key={t} onClick={() => setActiveTab(t)}
+              className={`px-4 py-1.5 text-sm font-medium capitalize transition-colors ${activeTab===t?'bg-brand-600 text-white':'text-gray-600 hover:bg-gray-50'}`}>
+              {t === 'stock' ? 'Stock Balance' : 'Purchase History'}
+            </button>
+          ))}
+        </div>
+        <Select label="" placeholder="All Medicines" options={medOptions}
+          value={filterMed} onChange={e => setFilterMed(e.target.value)} className="w-52" />
+        {activeTab === 'purchases' && <>
+          <label className="flex items-center gap-1.5 text-sm text-gray-600">From
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm" />
+          </label>
+          <label className="flex items-center gap-1.5 text-sm text-gray-600">To
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm" />
+          </label>
+        </>}
+        {(filterMed||fromDate||toDate) && <button onClick={() => { setFilterMed(''); setFromDate(''); setToDate('') }} className="text-xs text-brand-600 hover:underline">Clear</button>}
+      </div>
+
+      {activeTab === 'stock' ? (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Medicine / Vaccine</Th><Th>Type</Th><Th right>Purchased</Th>
+              <Th right>Used</Th><Th right>Balance</Th><Th>Last Purchase</Th><Th>Batch / Expiry</Th>
+            </tr></thead>
+            <tbody>
+              {stockFiltered.map((r: any) => {
+                const low = r.balance_qty < 0
+                const warn = r.balance_qty >= 0 && r.purchased_qty > 0 && r.balance_qty < (r.purchased_qty * 0.1)
+                return (
+                  <tr key={r.medicine_id} className="hover:bg-gray-50">
+                    <Td className="font-medium">{r.name}</Td>
+                    <Td><span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{r.type}</span></Td>
+                    <Td right className="text-xs">{r.purchased_qty} {r.unit}</Td>
+                    <Td right className="text-xs">{r.used_qty} {r.unit}</Td>
+                    <Td right className={`font-semibold text-sm ${low ? 'text-red-600' : warn ? 'text-amber-600' : 'text-green-700'}`}>
+                      {r.balance_qty} {r.unit}
+                      {low && ' ⚠'}
+                    </Td>
+                    <Td className="text-xs text-gray-500">{r.last_purchase_date ? fmtDate(r.last_purchase_date) : '—'}</Td>
+                    <Td className="text-xs text-gray-500">
+                      {r.last_batch_no ?? '—'}
+                      {r.last_expiry_date && <span className="ml-1 text-amber-600">exp {r.last_expiry_date}</span>}
+                    </Td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </Table>
+          {stockFiltered.length === 0 && <EmptyState icon={<Package size={32}/>} title="No medicines found" action={<Button onClick={() => { setEditId(null); setForm(emptyForm()); setShowForm(true) }} icon={<Plus size={16}/>}>Add Purchase</Button>} />}
+        </Card>
+      ) : (
+        <>
+          <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          {isLoading ? <Spinner /> : (
+            <Card padding={false}>
+              <Table>
+                <thead><tr>
+                  <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
+                  <Th>Date</Th><Th>Medicine</Th><Th>Supplier</Th><Th>Invoice</Th>
+                  <Th right>Qty</Th><Th right>Rate</Th><Th right>GST%</Th><Th right>Total</Th>
+                  <Th>Batch</Th><Th>Expiry</Th><Th></Th>
+                </tr></thead>
+                <tbody>
+                  {(purchases??[]).map((p: any) => (
+                    <tr key={p.id} className={`hover:bg-gray-50 ${sel.has(p.id)?'bg-red-50':''}`}>
+                      <Td><CB checked={sel.has(p.id)} onChange={() => toggle(p.id)}/></Td>
+                      <Td className="text-xs font-medium">{fmtDate(p.purchase_date)}</Td>
+                      <Td className="text-sm">{p.medicines_master?.name ?? '—'}</Td>
+                      <Td className="text-xs text-gray-500">{p.parties?.name ?? '—'}</Td>
+                      <Td className="text-xs text-gray-500">{p.invoice_no ?? '—'}</Td>
+                      <Td right className="text-xs">{p.qty} {p.medicines_master?.unit ?? p.unit}</Td>
+                      <Td right className="text-xs">{p.rate ? `₹${p.rate}` : '—'}</Td>
+                      <Td right className="text-xs">{p.gst_pct ?? 0}%</Td>
+                      <Td right className="font-semibold text-sm">{inr(p.total_amount)}</Td>
+                      <Td className="text-xs text-gray-500">{p.batch_no ?? '—'}</Td>
+                      <Td className="text-xs text-gray-500">{p.expiry_date ?? '—'}</Td>
+                      <Td>
+                        <div className="flex gap-1">
+                          <button onClick={() => openEdit(p)} className="p-1 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                          <button onClick={() => { setSel(new Set([p.id])); setBulkConfirm(true) }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+                {(purchases??[]).length > 0 && (
+                  <tfoot><tr className="bg-gray-50">
+                    <td colSpan={8} className="px-3 py-2 text-xs font-semibold text-gray-600">TOTAL</td>
+                    <Td right><strong>{inr((purchases??[]).reduce((s: number, p: any) => s + (p.total_amount ?? 0), 0))}</strong></Td>
+                    <td colSpan={3}/>
+                  </tr></tfoot>
+                )}
+              </Table>
+              {(purchases??[]).length === 0 && <EmptyState icon={<Package size={32}/>} title="No purchases found" />}
+            </Card>
+          )}
+          {bulkConfirm && (
+            <ConfirmBulkDelete label={`Delete ${sel.size} purchase record(s)? This cannot be undone.`}
+              onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+          )}
+        </>
+      )}
+
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditId(null) }}
+        title={editId ? 'Edit Purchase' : 'Add Medicine Purchase'} size="lg"
+        footer={<><Button variant="secondary" onClick={() => { setShowForm(false); setEditId(null) }}>Cancel</Button>
+          <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
+        <div className="space-y-4">
+          <FormRow>
+            <Input label="Purchase Date" required type="date" value={form.purchase_date} onChange={e => s('purchase_date', e.target.value)} />
+            <Select label="Medicine / Vaccine" required placeholder="— Select —" options={medOptions}
+              value={form.medicine_id} onChange={e => {
+                const med = (medicines??[]).find((m: any) => m.id === e.target.value)
+                setForm(f => ({ ...f, medicine_id: e.target.value, unit: med?.unit ?? f.unit, rate: med?.rate?.toString() ?? f.rate }))
+              }} />
+          </FormRow>
+          <FormRow>
+            <Select label="Farm / Site" placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
+            <Select label="Supplier" placeholder="— Select —" options={supplierOptions} value={form.supplier_id} onChange={e => s('supplier_id', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="Invoice No" value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
+            <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />
+          </FormRow>
+          <FormRow cols={4}>
+            <Input label="Qty" required type="number" step="0.001" value={form.qty} onChange={e => s('qty', e.target.value)} />
+            <Input label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} />
+            <Input label="Rate (₹)" type="number" step="0.01" value={form.rate} onChange={e => s('rate', e.target.value)} />
+            <Input label="GST %" type="number" step="0.01" value={form.gst_pct} onChange={e => s('gst_pct', e.target.value)} />
+          </FormRow>
+          {(autoBasic > 0) && (
+            <div className="text-xs text-gray-500 bg-gray-50 rounded px-3 py-2 flex gap-6">
+              <span>Basic: <strong>{inr(autoBasic)}</strong></span>
+              <span>GST: <strong>{inr(autoGst)}</strong></span>
+              <span className="text-gray-800 font-semibold">Total: <strong>{inr(autoTotal)}</strong></span>
+            </div>
+          )}
+          <FormRow>
+            <Input label="Batch No" value={form.batch_no} onChange={e => s('batch_no', e.target.value)} />
+            <Input label="Expiry Date" type="date" value={form.expiry_date} onChange={e => s('expiry_date', e.target.value)} />
+          </FormRow>
+          <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
+        </div>
       </Modal>
     </div>
   )

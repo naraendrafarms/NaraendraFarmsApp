@@ -9,7 +9,7 @@ import {
   SectionHeader, Spinner, Badge
 } from '@/components/ui'
 import toast from 'react-hot-toast'
-import { Save, ChevronLeft, ChevronRight, Download, Upload } from 'lucide-react'
+import { Save, ChevronLeft, ChevronRight, Download, Upload, Plus, Trash2 } from 'lucide-react'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -119,6 +119,23 @@ export const DailyEntry: React.FC = () => {
     enabled: !!selectedFlock && !!date
   })
 
+  const [medRows, setMedRows] = useState<Array<{ medicine_id: string; qty: string; unit: string; rate: string; remarks: string }>>([])
+
+  const { data: medicines } = useQuery({
+    queryKey: ['medicines_active'],
+    queryFn: async () => { const{data}=await supabase.from('medicines_master').select('id,name,unit,rate').eq('is_active',true).order('name'); return data??[] }
+  })
+
+  const { data: existingMedUsage } = useQuery({
+    queryKey: ['daily_med_usage', selectedFlock, date],
+    queryFn: async () => {
+      if (!selectedFlock || !date) return []
+      const{data}=await supabase.from('medicine_usage').select('*').eq('flock_id', selectedFlock).eq('usage_date', date)
+      return data??[]
+    },
+    enabled: !!selectedFlock && !!date
+  })
+
   const [form, setForm] = useState({
     opening_female: '', opening_male: '',
     feed_female_kg: '', feed_male_kg: '',
@@ -204,6 +221,21 @@ export const DailyEntry: React.FC = () => {
   const isLayingPhase = selectedFlockData?.status === 'laying' ||
     !!(selectedFlockData?.laying_start_date && date >= selectedFlockData.laying_start_date)
 
+  // Populate medicine rows from existing usage records
+  React.useEffect(() => {
+    if (existingMedUsage && existingMedUsage.length > 0) {
+      setMedRows(existingMedUsage.map((u: any) => ({
+        medicine_id: u.medicine_id ?? '',
+        qty: u.quantity?.toString() ?? '',
+        unit: u.unit ?? '',
+        rate: u.rate?.toString() ?? '',
+        remarks: u.remarks ?? ''
+      })))
+    } else if (!existingMedUsage || existingMedUsage.length === 0) {
+      setMedRows([])
+    }
+  }, [existingMedUsage])
+
   // Auto-fill age_weeks from placement_date when no existing record
   React.useEffect(() => {
     if (existing || !selectedFlockData?.placement_date || !date) return
@@ -259,12 +291,31 @@ export const DailyEntry: React.FC = () => {
         const { error } = await supabase.from('daily_records').insert({ ...payload })
         if (error) throw error
       }
+      // Save medicine usage rows — delete existing then re-insert
+      await supabase.from('medicine_usage').delete().eq('flock_id', selectedFlock).eq('usage_date', date)
+      const validMedRows = medRows.filter(r => r.medicine_id && r.qty)
+      if (validMedRows.length > 0) {
+        const medPayload = validMedRows.map(r => ({
+          flock_id:    selectedFlock,
+          usage_date:  date,
+          medicine_id: r.medicine_id,
+          quantity:    parseFloat(r.qty) || null,
+          unit:        r.unit || null,
+          rate:        parseFloat(r.rate) || null,
+          amount:      (parseFloat(r.qty)||0) * (parseFloat(r.rate)||0) || null,
+          remarks:     r.remarks || null,
+        }))
+        const { error } = await supabase.from('medicine_usage').insert(medPayload)
+        if (error) throw error
+      }
     },
     onSuccess: () => {
       toast.success(existing ? '✅ Record updated' : 'Record saved!')
       qc.invalidateQueries({ queryKey: ['daily_record', selectedFlock, date] })
+      qc.invalidateQueries({ queryKey: ['daily_med_usage', selectedFlock, date] })
       qc.invalidateQueries({ queryKey: ['recent_records', selectedFlock] })
       qc.invalidateQueries({ queryKey: ['flock_summary'] })
+      qc.invalidateQueries({ queryKey: ['v_medicine_stock'] })
     },
     onError: (e: any) => toast.error(e.message)
   })
@@ -573,6 +624,71 @@ export const DailyEntry: React.FC = () => {
               <Input label="Remarks"
                 value={form.remarks} onChange={e => set('remarks', e.target.value)} />
             </div>
+          </Card>
+
+          {/* Medicine / Vaccine Usage */}
+          <Card>
+            <CardHeader title="Medicine & Vaccine Used Today"
+              action={
+                <Button size="sm" variant="outline" icon={<Plus size={14}/>}
+                  onClick={() => setMedRows(r => [...r, { medicine_id: '', qty: '', unit: '', rate: '', remarks: '' }])}>
+                  Add Row
+                </Button>
+              }
+            />
+            {medRows.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-3">No medicine/vaccine recorded for today — click Add Row to record usage</p>
+            ) : (
+              <div className="space-y-2">
+                {medRows.map((row, i) => {
+                  const autoAmt = (parseFloat(row.qty)||0) * (parseFloat(row.rate)||0)
+                  return (
+                    <div key={i} className="flex gap-2 items-end flex-wrap bg-gray-50 rounded-lg px-3 py-2">
+                      <div className="w-44">
+                        <label className="text-xs text-gray-500 mb-1 block">Medicine / Vaccine</label>
+                        <select className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                          value={row.medicine_id}
+                          onChange={e => {
+                            const med = (medicines??[]).find((m: any) => m.id === e.target.value)
+                            setMedRows(rows => rows.map((r, j) => j===i ? { ...r, medicine_id: e.target.value, unit: med?.unit??r.unit, rate: med?.rate?.toString()??r.rate } : r))
+                          }}>
+                          <option value="">— Select —</option>
+                          {(medicines??[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="w-20">
+                        <label className="text-xs text-gray-500 mb-1 block">Qty</label>
+                        <input type="number" step="0.001" className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                          value={row.qty} onChange={e => setMedRows(rows => rows.map((r,j) => j===i?{...r,qty:e.target.value}:r))} />
+                      </div>
+                      <div className="w-16">
+                        <label className="text-xs text-gray-500 mb-1 block">Unit</label>
+                        <input type="text" className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                          value={row.unit} onChange={e => setMedRows(rows => rows.map((r,j) => j===i?{...r,unit:e.target.value}:r))} />
+                      </div>
+                      <div className="w-20">
+                        <label className="text-xs text-gray-500 mb-1 block">Rate ₹</label>
+                        <input type="number" step="0.01" className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                          value={row.rate} onChange={e => setMedRows(rows => rows.map((r,j) => j===i?{...r,rate:e.target.value}:r))} />
+                      </div>
+                      {autoAmt > 0 && <span className="text-xs text-gray-500 pb-2">= ₹{autoAmt.toFixed(2)}</span>}
+                      <div className="flex-1 min-w-28">
+                        <label className="text-xs text-gray-500 mb-1 block">Remarks</label>
+                        <input type="text" className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                          value={row.remarks} onChange={e => setMedRows(rows => rows.map((r,j) => j===i?{...r,remarks:e.target.value}:r))} />
+                      </div>
+                      <button onClick={() => setMedRows(rows => rows.filter((_,j) => j!==i))}
+                        className="p-1.5 text-gray-400 hover:text-red-600 mb-0.5"><Trash2 size={14}/></button>
+                    </div>
+                  )
+                })}
+                {medRows.some(r => r.qty && r.rate) && (
+                  <div className="text-right text-xs text-gray-600 pr-8 pt-1">
+                    Total medicine cost today: <strong>₹{medRows.reduce((s,r) => s + (parseFloat(r.qty)||0)*(parseFloat(r.rate)||0), 0).toFixed(2)}</strong>
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
 
           <div className="flex justify-end gap-3">
