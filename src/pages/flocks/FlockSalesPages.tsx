@@ -1587,6 +1587,13 @@ export const MedicinePurchases: React.FC = () => {
   const saveMut = useMutation({
     mutationFn: async () => {
       if (!form.medicine_id || !form.qty || !form.purchase_date) throw new Error('Medicine, Qty and Date required')
+      const qty  = parseFloat(form.qty)
+      const rate = parseFloat(form.rate) || 0
+      const gst  = parseFloat(form.gst_pct) || 0
+      const basicAmt = Math.round(qty * rate * 100) / 100
+      const gstAmt   = Math.round(qty * rate * gst / 100 * 100) / 100
+      const totalAmt = Math.round(qty * rate * (1 + gst / 100) * 100) / 100
+
       const payload: any = {
         purchase_date: form.purchase_date,
         medicine_id:   form.medicine_id,
@@ -1594,20 +1601,45 @@ export const MedicinePurchases: React.FC = () => {
         supplier_id:   form.supplier_id || null,
         invoice_no:    form.invoice_no || null,
         invoice_date:  form.invoice_date || null,
-        qty:           parseFloat(form.qty),
+        qty,
         unit:          form.unit || null,
-        rate:          parseFloat(form.rate) || 0,
-        gst_pct:       parseFloat(form.gst_pct) || 0,
+        rate,
+        gst_pct:       gst,
         batch_no:      form.batch_no || null,
         expiry_date:   form.expiry_date || null,
         remarks:       form.remarks || null,
       }
+
+      let mpId = editId
       if (editId) {
         const{error}=await supabase.from('medicine_purchases').update(payload).eq('id', editId)
         if(error) throw error
       } else {
-        const{error}=await supabase.from('medicine_purchases').insert(payload)
+        const{data,error}=await supabase.from('medicine_purchases').insert(payload).select('id').single()
         if(error) throw error
+        mpId = data.id
+      }
+
+      // Sync to supplier_invoices if invoice_no is provided
+      if (form.invoice_no && mpId) {
+        const invPayload: any = {
+          invoice_no:           form.invoice_no,
+          invoice_date:         form.invoice_date || form.purchase_date,
+          party_id:             form.supplier_id || null,
+          source_type:          'medicine',
+          farm_id:              form.farm_id || null,
+          basic_amount:         basicAmt,
+          gst_pct:              gst,
+          gst_amount:           gstAmt,
+          total_amount:         totalAmt,
+          medicine_purchase_id: mpId,
+          remarks:              form.remarks || null,
+        }
+        // upsert on medicine_purchase_id so edit updates the existing invoice row
+        const { error: invErr } = await supabase
+          .from('supplier_invoices')
+          .upsert(invPayload, { onConflict: 'medicine_purchase_id', ignoreDuplicates: false })
+        if (invErr) throw invErr
       }
     },
     onSuccess: () => {
