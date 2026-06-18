@@ -2898,7 +2898,23 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
             if (error) console.warn('Payment upsert warning:', error.message)
           }
         }
-        toast.success(`Imported ${preview.rows.length} PO records`)
+        // Auto-create vendor parties from all imported PO rows (name only, no GST in Excel)
+        const uniqueVendorNames = [...new Set(preview.rows.map((r:any) => r.vendor_name?.trim()).filter(Boolean))]
+        if (uniqueVendorNames.length > 0) {
+          const vendorRecords = uniqueVendorNames.map(name => ({ name, type: 'supplier' }))
+          await supabase.from('parties').upsert(vendorRecords, { onConflict: 'name,type', ignoreDuplicates: true })
+        }
+        // Auto-create feed ingredients from all imported PO rows
+        const uniqueItemNames = [...new Set(preview.rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
+        if (uniqueItemNames.length > 0) {
+          const itemRecords = uniqueItemNames.map((name:string) => ({
+            name,
+            code: name.replace(/[^A-Z0-9]/gi,'').toUpperCase().slice(0,8) || name.slice(0,8).toUpperCase(),
+            unit: 'Kg',
+          }))
+          await supabase.from('feed_ingredients').upsert(itemRecords, { onConflict: 'code', ignoreDuplicates: true })
+        }
+        toast.success(`Imported ${preview.rows.length} PO records · ${uniqueVendorNames.length} vendors · ${uniqueItemNames.length} items added to masters`)
       } else {
         // PDF import
         if (preview.isAmendment && preview.poNo) {
@@ -2929,11 +2945,31 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           const cleanRows = preview.rows.map(({ credit_limit_days, delivery_date, is_amendment, ...r }: any) => r)
           const { error } = await supabase.from('purchase_orders').upsert(cleanRows, { onConflict:'po_no,item_name' })
           if (error) throw error
-          toast.success(`PO imported — ${preview.rows.length} items`)
+          // Auto-create vendor party with GST + address from PDF
+          if (preview.rows[0]?.vendor_name) {
+            const { vendor_name, vendor_gstin, vendor_address } = preview.rows[0]
+            await supabase.from('parties').upsert(
+              { name: vendor_name.trim(), type: 'supplier', gstin: vendor_gstin ?? null, address: vendor_address ?? null },
+              { onConflict: 'name,type', ignoreDuplicates: false }
+            )
+          }
+          // Auto-create feed ingredients
+          const uniquePdfItems = [...new Set(preview.rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
+          if (uniquePdfItems.length > 0) {
+            const pdfItemRecords = uniquePdfItems.map((name:string) => ({
+              name,
+              code: name.replace(/[^A-Z0-9]/gi,'').toUpperCase().slice(0,8) || name.slice(0,8).toUpperCase(),
+              unit: 'Kg',
+            }))
+            await supabase.from('feed_ingredients').upsert(pdfItemRecords, { onConflict: 'code', ignoreDuplicates: true })
+          }
+          toast.success(`PO imported — ${preview.rows.length} items · vendor & items added to masters`)
         }
       }
       qc.invalidateQueries({ queryKey: ['purchase_orders'] })
       qc.invalidateQueries({ queryKey: ['po_rate_analysis'] })
+      qc.invalidateQueries({ queryKey: ['parties'] })
+      qc.invalidateQueries({ queryKey: ['ingredients'] })
       setSaving(false); reset(); onClose()
     } catch(e:any) { toast.error(e.message); setSaving(false) }
   }
