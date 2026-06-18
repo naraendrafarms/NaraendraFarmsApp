@@ -1372,6 +1372,7 @@ export const VaccinationSchedulePage: React.FC = () => {
   const [form, setForm] = useState<any>(EMPTY_VACC)
   const [delId, setDelId] = useState<string|null>(null)
   const [bulkDel, setBulkDel] = useState(false)
+  const [clearAll, setClearAll] = useState(false)
 
   const ids = rows.map((r: any) => r.id)
   const allSel = ids.length > 0 && ids.every((id: string) => sel.has(id))
@@ -1391,8 +1392,21 @@ export const VaccinationSchedulePage: React.FC = () => {
   })
 
   const delMut = useMutation({
-    mutationFn: async (id: string) => { await supabase.from('vaccination_schedule').delete().eq('id', id) },
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('vaccination_schedule').delete().eq('id', id)
+      if (error) throw error
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); setDelId(null); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const clearAllMut = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('vaccination_schedule').delete().gte('created_at', '2000-01-01')
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); setClearAll(false); toast.success('All records cleared') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const bulkDelMut = useMutation({
@@ -1421,6 +1435,9 @@ export const VaccinationSchedulePage: React.FC = () => {
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={handleExport}>
             {sel.size > 0 ? `Export ${sel.size}` : 'Export CSV'}
           </Button>
+          {rows.length > 0 && (
+            <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setClearAll(true)}>Clear All</Button>
+          )}
           <Button size="sm" icon={<Plus size={14}/>} onClick={openNew}>Add Entry</Button>
         </div>
       } />
@@ -1490,6 +1507,10 @@ export const VaccinationSchedulePage: React.FC = () => {
       <Modal open={bulkDel} onClose={() => setBulkDel(false)} title="Delete Selected Entries"
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkDel(false)}>Cancel</Button><Button variant="danger" onClick={() => bulkDelMut.mutate(Array.from(sel))} loading={bulkDelMut.isPending}>Delete {sel.size} entries</Button></div>}>
         <p className="text-sm text-gray-600">Delete {sel.size} selected vaccination schedule entries?</p>
+      </Modal>
+      <Modal open={clearAll} onClose={() => setClearAll(false)} title="Clear All Schedule Entries"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setClearAll(false)}>Cancel</Button><Button variant="danger" onClick={() => clearAllMut.mutate()} loading={clearAllMut.isPending}>Yes, Delete All {rows.length} Entries</Button></div>}>
+        <p className="text-sm text-gray-600">This will permanently delete all <strong>{rows.length}</strong> vaccination schedule entries. You can re-enter the correct data after. This cannot be undone.</p>
       </Modal>
     </div>
   )

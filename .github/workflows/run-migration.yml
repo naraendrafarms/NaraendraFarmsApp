@@ -17,6 +17,9 @@ jobs:
         run: pip install openpyxl -q
       # ── Add new migrations below this line ──────────────────────────────────
       # Migrations 024–071 already applied to production. Do not re-add them.
+      - name: Run migration 072
+        run: python3 scripts/run_sql.py supabase/migrations/072_truncate_vaccination_schedule.sql
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
       - name: Reload PostgREST schema cache
         run: |
           curl -s -X POST "https://api.supabase.com/v1/projects/kjliulgpipqqwptinrrd/database/query" \
