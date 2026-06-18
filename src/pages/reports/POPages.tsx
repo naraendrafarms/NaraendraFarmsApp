@@ -14,7 +14,7 @@ import {
 import {
   ShoppingCart, Clock, CheckCircle, AlertCircle, Plus, Pencil, Trash2,
   Building2, Landmark, CreditCard, TrendingUp, TrendingDown, AlertTriangle,
-  Download, PackageCheck, User, BarChart3, Lock, Upload, LineChart,
+  Download, PackageCheck, User, Users, BarChart3, Lock, Upload, LineChart,
   ChevronDown, ChevronUp
 } from 'lucide-react'
 import {
@@ -78,7 +78,7 @@ const exportCSV = (filename: string, rows: any[], cols: { key: string; label: st
 }
 
 // ── TABS ──────────────────────────────────────────────────────────
-type Tab = 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Bank Ledger' | 'Rate Analysis'
+type Tab = 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Vendors Master' | 'Bank Ledger' | 'Rate Analysis'
 
 // ── MAIN EXPORT ───────────────────────────────────────────────────
 export const PurchaseOrdersPage: React.FC = () => {
@@ -92,6 +92,7 @@ export const PurchaseOrdersPage: React.FC = () => {
     { id: 'Aging Report',    icon: <BarChart3 size={14}/> },
     { id: 'Vendor Statement',icon: <User size={14}/> },
     { id: 'Vendor Banks',    icon: <Building2 size={14}/> },
+    { id: 'Vendors Master',  icon: <Users size={14}/> },
     { id: 'Bank Ledger',     icon: <Landmark size={14}/>, locked: !can.viewBankLedger(role) },
     { id: 'Rate Analysis',   icon: <LineChart size={14}/> },
   ]
@@ -114,6 +115,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       {tab === 'Aging Report'     && <AgingReportTab />}
       {tab === 'Vendor Statement' && <VendorStatementTab />}
       {tab === 'Vendor Banks'     && <VendorBanksTab />}
+      {tab === 'Vendors Master'   && <VendorsMasterTab />}
       {tab === 'Bank Ledger'      && (can.viewBankLedger(role) ? <BankLedgerTab /> : (
         <div className="flex flex-col items-center justify-center py-20 gap-3 text-gray-400">
           <Lock size={32}/><p className="text-sm">Bank Ledger is restricted to Admin and Accounts roles.</p>
@@ -1503,6 +1505,140 @@ const VendorBanksTab: React.FC = () => {
       <Modal open={!!delId} onClose={() => setDelId(null)} title="Delete Vendor Bank"
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelId(null)}>Cancel</Button><Button variant="danger" onClick={() => delId && delMut.mutate(delId)} loading={delMut.isPending}>Delete</Button></div>}>
         <p className="text-sm text-gray-600">Delete this vendor bank record?</p>
+      </Modal>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VENDORS MASTER TAB
+// ══════════════════════════════════════════════════════════════════
+const VendorsMasterTab: React.FC = () => {
+  const qc = useQueryClient()
+  const [search, setSearch] = useState('')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [confirmVendor, setConfirmVendor] = useState<string|null>(null)
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+
+  const { data: pos=[], isLoading: posLoading } = useQuery({
+    queryKey: ['vm_pos'],
+    queryFn: async () => { const { data } = await supabase.from('purchase_orders').select('vendor_name'); return data ?? [] }
+  })
+  const { data: pays=[], isLoading: paysLoading } = useQuery({
+    queryKey: ['vm_pays'],
+    queryFn: async () => { const { data } = await supabase.from('pending_payments').select('vendor_name'); return data ?? [] }
+  })
+  const { data: banks=[], isLoading: banksLoading } = useQuery({
+    queryKey: ['vm_banks'],
+    queryFn: async () => { const { data } = await supabase.from('vendor_bank_details').select('vendor_name'); return data ?? [] }
+  })
+
+  const vendors = useMemo(() => {
+    const map = new Map<string, { poCount: number; payCount: number; hasBank: boolean }>()
+    pos.forEach((r: any) => { if (!r.vendor_name) return; const e = map.get(r.vendor_name) ?? { poCount:0, payCount:0, hasBank:false }; e.poCount++; map.set(r.vendor_name, e) })
+    pays.forEach((r: any) => { if (!r.vendor_name) return; const e = map.get(r.vendor_name) ?? { poCount:0, payCount:0, hasBank:false }; e.payCount++; map.set(r.vendor_name, e) })
+    banks.forEach((r: any) => { if (!r.vendor_name) return; const e = map.get(r.vendor_name) ?? { poCount:0, payCount:0, hasBank:false }; e.hasBank = true; map.set(r.vendor_name, e) })
+    return Array.from(map.entries()).map(([name, counts]) => ({ name, ...counts })).sort((a,b) => a.name.localeCompare(b.name))
+  }, [pos, pays, banks])
+
+  const filtered = useMemo(() => {
+    if (!search) return vendors
+    const q = search.toLowerCase()
+    return vendors.filter(v => v.name.toLowerCase().includes(q))
+  }, [vendors, search])
+
+  const deleteVendorData = async (names: string[]) => {
+    for (const name of names) {
+      const { error: e1 } = await supabase.from('purchase_orders').delete().eq('vendor_name', name)
+      if (e1) throw e1
+      const { error: e2 } = await supabase.from('pending_payments').delete().eq('vendor_name', name)
+      if (e2) throw e2
+      const { error: e3 } = await supabase.from('vendor_bank_details').delete().eq('vendor_name', name)
+      if (e3) throw e3
+    }
+  }
+
+  const singleDelMut = useMutation({
+    mutationFn: (name: string) => deleteVendorData([name]),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vm_pos'] }); qc.invalidateQueries({ queryKey: ['vm_pays'] }); qc.invalidateQueries({ queryKey: ['vm_banks'] })
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['pending_payments'] }); qc.invalidateQueries({ queryKey: ['vendor_bank_details'] })
+      qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); qc.invalidateQueries({ queryKey: ['po_rate_analysis'] })
+      setConfirmVendor(null); toast.success('Vendor data deleted')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const bulkDelMut = useMutation({
+    mutationFn: () => deleteVendorData(Array.from(sel)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vm_pos'] }); qc.invalidateQueries({ queryKey: ['vm_pays'] }); qc.invalidateQueries({ queryKey: ['vm_banks'] })
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['pending_payments'] }); qc.invalidateQueries({ queryKey: ['vendor_bank_details'] })
+      qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); qc.invalidateQueries({ queryKey: ['po_rate_analysis'] })
+      setSel(new Set()); setBulkConfirm(false); toast.success('Deleted')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const allSelected = filtered.length > 0 && filtered.every(v => sel.has(v.name))
+  const toggleAll = () => setSel(allSelected ? new Set() : new Set(filtered.map(v => v.name)))
+  const toggleOne = (name: string) => setSel(prev => { const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n })
+
+  if (posLoading || paysLoading || banksLoading) return <Spinner />
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 text-sm text-amber-800">
+        <strong>Vendors Master</strong> — lists all unique vendor names across Purchase Orders, Payments, and Vendor Banks.
+        Deleting a vendor here permanently removes <strong>all their POs, payments, and bank details</strong>.
+      </div>
+
+      <div className="flex gap-2 items-center">
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor..."
+          className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-72" />
+        <span className="text-sm text-gray-500">{vendors.length} vendors</span>
+      </div>
+
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-md px-4 py-2 text-sm">
+          <span className="font-medium text-red-700">{sel.size} selected</span>
+          <Button size="sm" variant="danger" onClick={() => setBulkConfirm(true)} icon={<Trash2 size={13}/>}>Delete All Data for Selected</Button>
+          <button onClick={() => setSel(new Set())} className="text-gray-500 hover:text-gray-700 text-xs">Clear</button>
+        </div>
+      )}
+
+      <Card padding={false}>
+        <Table>
+          <thead><tr>
+            <Th><input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded" /></Th>
+            <Th>Vendor Name</Th><Th>Purchase Orders</Th><Th>Payments</Th><Th>Bank Details</Th><Th></Th>
+          </tr></thead>
+          <tbody>
+            {filtered.map(v => (
+              <tr key={v.name} className={`hover:bg-gray-50 text-sm ${sel.has(v.name) ? 'bg-red-50' : ''}`}>
+                <Td><input type="checkbox" checked={sel.has(v.name)} onChange={() => toggleOne(v.name)} className="rounded" /></Td>
+                <Td className="font-medium">{v.name}</Td>
+                <Td>{v.poCount > 0 ? <span className="text-blue-600 font-medium">{v.poCount}</span> : <span className="text-gray-400">0</span>}</Td>
+                <Td>{v.payCount > 0 ? <span className="text-orange-600 font-medium">{v.payCount}</span> : <span className="text-gray-400">0</span>}</Td>
+                <Td>{v.hasBank ? <CheckCircle size={14} className="text-green-500"/> : <span className="text-gray-400">—</span>}</Td>
+                <Td>
+                  <button onClick={() => setConfirmVendor(v.name)} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={13}/></button>
+                </Td>
+              </tr>
+            ))}
+            {filtered.length === 0 && <tr><td colSpan={6}><EmptyState icon={<Users size={32}/>} title="No vendors found" /></td></tr>}
+          </tbody>
+        </Table>
+      </Card>
+
+      <Modal open={!!confirmVendor} onClose={() => setConfirmVendor(null)} title="Delete Vendor Data"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setConfirmVendor(null)}>Cancel</Button><Button variant="danger" onClick={() => confirmVendor && singleDelMut.mutate(confirmVendor)} loading={singleDelMut.isPending}>Delete All Data</Button></div>}>
+        <p className="text-sm text-gray-600">This will permanently delete <strong>all Purchase Orders, Payments, and Bank Details</strong> for vendor <strong>"{confirmVendor}"</strong>. This cannot be undone.</p>
+      </Modal>
+
+      <Modal open={bulkConfirm} onClose={() => setBulkConfirm(false)} title="Delete Vendor Data"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkConfirm(false)}>Cancel</Button><Button variant="danger" onClick={() => bulkDelMut.mutate()} loading={bulkDelMut.isPending}>Delete All Data for {sel.size} Vendors</Button></div>}>
+        <p className="text-sm text-gray-600">This will permanently delete <strong>all Purchase Orders, Payments, and Bank Details</strong> for {sel.size} selected vendor{sel.size > 1 ? 's' : ''}. This cannot be undone.</p>
       </Modal>
     </div>
   )
