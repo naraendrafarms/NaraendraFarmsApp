@@ -181,8 +181,10 @@ export const GRNEntry: React.FC = () => {
 
   const bulkDeleteMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      const { error } = await supabase.from('grn').delete().in('id', ids)
-      if (error) throw error
+      for (let i = 0; i < ids.length; i += 50) {
+        const { error } = await supabase.from('grn').delete().in('id', ids.slice(i, i + 50))
+        if (error) throw error
+      }
     },
     onSuccess: () => {
       toast.success('Deleted'); setSel(new Set()); setBulkDelConfirm(false)

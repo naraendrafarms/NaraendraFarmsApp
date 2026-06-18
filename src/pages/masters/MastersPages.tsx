@@ -414,7 +414,14 @@ export const PartiesMaster: React.FC = () => {
   })
 
   const bulkDelMut=useMutation({
-    mutationFn:async(ids:string[])=>{ const{error}=await supabase.from('parties').delete().in('id',ids); if(error)throw error },
+    mutationFn:async(ids:string[])=>{
+      // Delete in chunks of 50 to avoid URL length limits
+      for (let i = 0; i < ids.length; i += 50) {
+        const chunk = ids.slice(i, i + 50)
+        const{error}=await supabase.from('parties').delete().in('id',chunk)
+        if(error)throw error
+      }
+    },
     onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['parties']});setSel(new Set());setBulkConfirm(false)},
     onError:(e:any)=>{
       if(e.message?.includes('foreign key')||e.code==='23503')
