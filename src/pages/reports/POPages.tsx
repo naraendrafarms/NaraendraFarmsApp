@@ -286,7 +286,8 @@ const POTab: React.FC = () => {
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      await supabase.from('purchase_orders').delete().in('id', ids)
+      const { error } = await supabase.from('purchase_orders').delete().in('id', ids)
+      if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setSelected(new Set()); setBulkDelOpen(false); toast.success('Deleted selected POs') },
     onError: (e: any) => toast.error(e.message),
