@@ -466,14 +466,16 @@ export const PartiesMaster: React.FC = () => {
     const { headers: hdrs, rows } = await parseFile(file)
     const records = rows.map(vals => { const obj: Record<string,string> = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
     const toUpsert = records.filter(r=>r.name).map(r=>({
-      name: r.name, type: r.type||'supplier',
+      name: r.name.trim(), type: r.type||'supplier',
       category: r.category||null, contact: r.contact||null,
       address: r.address||null, gstin: r.gstin||null,
+      bank_name: r.bank_name||null, account_no: r.account_no||null, ifsc: r.ifsc||null,
     }))
     if (!toUpsert.length) { toast.error('No valid rows'); return }
-    const { error } = await supabase.from('parties').upsert(toUpsert, { onConflict: 'name,type', ignoreDuplicates: true })
+    // ignoreDuplicates:false = UPDATE existing records with new GST/address/bank details
+    const { error } = await supabase.from('parties').upsert(toUpsert, { onConflict: 'name,type', ignoreDuplicates: false })
     if (error) { toast.error(error.message); return }
-    toast.success(`Imported ${toUpsert.length} parties`)
+    toast.success(`Imported / updated ${toUpsert.length} parties`)
     qc.invalidateQueries({ queryKey: ['parties'] })
     if (importRef.current) importRef.current.value = ''
   }
@@ -484,7 +486,7 @@ export const PartiesMaster: React.FC = () => {
         <SectionHeader title="Parties" subtitle="Buyers and suppliers"
           action={
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('parties_template.csv',['name','type','category','contact','address','gstin'],[['NBF Feeds Ltd','supplier','Feed','9876543210','Chennai','29ABCDE1234F1Z5']])}>Template</Button>
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('parties_template.csv',['name','type','category','contact','address','gstin','bank_name','account_no','ifsc'],[['NBF Feeds Ltd','supplier','Feed Supplier','9876543210','Chennai','29ABCDE1234F1Z5','SBI','1234567890','SBIN0001234']])}>Template</Button>
               <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
               <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportParties(f)}}/>
               <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportParties}>Export CSV</Button>
