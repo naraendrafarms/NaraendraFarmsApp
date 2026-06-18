@@ -112,7 +112,7 @@ const FormulasTab: React.FC = () => {
   const filtered = formulas.filter((f: any) => {
     const q = fSearch.toLowerCase()
     const matchQ = !q || f.formula_code?.toLowerCase().includes(q) || f.formula_name?.toLowerCase().includes(q)
-    const matchT = !fType || f.flock_type === fType
+    const matchT = !fType || f.feed_type_id === fType
     return matchQ && matchT
   })
 
@@ -265,10 +265,8 @@ const FormulasTab: React.FC = () => {
       <Card>
         <div className="flex flex-wrap gap-3 p-3 items-center">
           <Input placeholder="Search code or name…" value={fSearch} onChange={e => setFSearch(e.target.value)} className="w-48 text-sm" />
-          <Sel value={fType} onChange={e => setFType(e.target.value)} className="w-36 text-sm" placeholder="All Types">
-            <option value="Breeder">Breeder</option>
-            <option value="Broiler">Broiler</option>
-            <option value="Layer">Layer</option>
+          <Sel value={fType} onChange={e => setFType(e.target.value)} className="w-48 text-sm" placeholder="All Feed Types">
+            {feedTypes.map((ft: any) => <option key={ft.id} value={ft.id}>{ft.code} — {ft.name}</option>)}
           </Sel>
           {(fSearch || fType) && <Button size="sm" variant="ghost" onClick={() => { setFSearch(''); setFType('') }}>Clear</Button>}
           <span className="text-xs text-gray-400 ml-auto">{filtered.length} formula(s)</span>
@@ -371,6 +369,14 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
     : [{ ...BLANK_ING }]
   )
   const s = (k: string) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement>) => setForm((f: any) => ({...f, [k]: e.target.value}))
+
+  const handleFeedTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const ftId = e.target.value
+    const ft = feedTypes.find((x: any) => x.id === ftId)
+    const name = ft?.name?.toLowerCase() ?? ''
+    const flock_type = name.includes('broiler') ? 'Broiler' : name.includes('layer') ? 'Layer' : 'Breeder'
+    setForm((f: any) => ({ ...f, feed_type_id: ftId, flock_type }))
+  }
   const si = (idx: number, k: keyof typeof BLANK_ING) => (e: React.ChangeEvent<HTMLInputElement>) => setIngs(prev => prev.map((r, i) => i === idx ? {...r, [k]: e.target.value} : r))
   const addRow = () => setIngs(prev => [...prev, { ...BLANK_ING }])
   const removeRow = (idx: number) => setIngs(prev => prev.filter((_, i) => i !== idx))
@@ -395,21 +401,16 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
         <Field label="Version"><Input type="number" value={form.version} onChange={s('version')} /></Field>
       </div>
       <Field label="Formula Name *"><Input value={form.formula_name} onChange={s('formula_name')} required /></Field>
-      <div className="grid grid-cols-3 gap-3">
-        <Field label="Flock Type">
-          <Sel value={form.flock_type} onChange={s('flock_type')}>
-            <option>Breeder</option><option>Broiler</option><option>Layer</option>
-          </Sel>
-        </Field>
+      <Field label="Feed Type *">
+        <Sel value={form.feed_type_id} onChange={handleFeedTypeChange} placeholder="— Select Feed Type from Master —" required>
+          {feedTypes.map((ft: any) => <option key={ft.id} value={ft.id}>{ft.code} — {ft.name}</option>)}
+        </Sel>
+        {form.feed_type_id && <p className="text-xs text-gray-400 mt-0.5">Flock Type: <strong>{form.flock_type}</strong></p>}
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
         <Field label="Week From"><Input type="number" step="0.1" value={form.age_week_from} onChange={s('age_week_from')} /></Field>
         <Field label="Week To"><Input type="number" step="0.1" value={form.age_week_to} onChange={s('age_week_to')} /></Field>
       </div>
-      <Field label="Feed Type (Master Code)">
-        <Sel value={form.feed_type_id} onChange={s('feed_type_id')} placeholder="— Link to Feed Type Master —">
-          {feedTypes.map((ft: any) => <option key={ft.id} value={ft.id}>{ft.code} — {ft.name}</option>)}
-        </Sel>
-        <p className="text-xs text-gray-400 mt-0.5">Links this formula to a feed type code (BCM, L1, etc.) used in daily flock feeding</p>
-      </Field>
       <Field label="Notes"><Input value={form.notes||''} onChange={s('notes')} /></Field>
 
       {/* Inline ingredient entry */}
