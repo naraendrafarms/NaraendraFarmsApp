@@ -2832,9 +2832,10 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
   const [step, setStep]       = useState<'idle'|'preview'>('idle')
   const [saving, setSaving]   = useState(false)
   const [preview, setPreview] = useState<{type:'excel'|'pdf'; rows: any[]; payRows?: any[]; summary: string; isAmendment?: boolean; poNo?: string} | null>(null)
+  const [editableRows, setEditableRows] = useState<any[]>([])
   const [parsing, setParsing] = useState(false)
 
-  const reset = () => { setStep('idle'); setPreview(null); setParsing(false) }
+  const reset = () => { setStep('idle'); setPreview(null); setEditableRows([]); setParsing(false) }
 
   const handleExcel = async (file: File) => {
     setParsing(true)
@@ -2845,6 +2846,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
       const payRows = parseNBFAccountDetails(wb)
       setPreview({ type:'excel', rows, payRows,
         summary: `${rows.length} PO line items from ${wb.SheetNames.filter((s:string)=>s.toLowerCase().includes('order details')).length} sheets · ${payRows.length} payment records` })
+      setEditableRows(rows.map(r => ({...r})))
       setStep('preview')
     } catch(e:any) { toast.error('Excel parse error: ' + e.message) }
     setParsing(false)
@@ -2860,6 +2862,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
       }
       setPreview({ type:'pdf', rows: result.records, summary: result.summary,
         isAmendment: result.isAmendment, poNo: result.poNo })
+      setEditableRows(result.records.map((r:any) => ({...r})))
       setStep('preview')
     } catch(e:any) { toast.error('PDF parse error: ' + e.message) }
     setParsing(false)
@@ -2868,12 +2871,13 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
   const handleSave = async () => {
     if (!preview) return
     setSaving(true)
+    const rows = editableRows.length ? editableRows : preview.rows
     try {
       if (preview.type === 'excel') {
         // Upsert PO lines
-        if (preview.rows.length > 0) {
+        if (rows.length > 0) {
           const chunks = []
-          for (let i=0;i<preview.rows.length;i+=200) chunks.push(preview.rows.slice(i,i+200))
+          for (let i=0;i<rows.length;i+=200) chunks.push(rows.slice(i,i+200))
           for (const chunk of chunks) {
             const { error } = await supabase.from('purchase_orders').upsert(chunk, { onConflict:'po_no,item_name' })
             if (error) throw error
@@ -2899,13 +2903,13 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           }
         }
         // Auto-create vendor parties from all imported PO rows (name only, no GST in Excel)
-        const uniqueVendorNames = [...new Set(preview.rows.map((r:any) => r.vendor_name?.trim()).filter(Boolean))]
+        const uniqueVendorNames = [...new Set(rows.map((r:any) => r.vendor_name?.trim()).filter(Boolean))]
         if (uniqueVendorNames.length > 0) {
           const vendorRecords = uniqueVendorNames.map(name => ({ name, type: 'supplier' }))
           await supabase.from('parties').upsert(vendorRecords, { onConflict: 'name,type', ignoreDuplicates: true })
         }
         // Auto-create feed ingredients from all imported PO rows
-        const uniqueItemNames = [...new Set(preview.rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
+        const uniqueItemNames = [...new Set(rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
         if (uniqueItemNames.length > 0) {
           const itemRecords = uniqueItemNames.map((name:string) => ({
             name,
@@ -2914,14 +2918,13 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           }))
           await supabase.from('feed_ingredients').upsert(itemRecords, { onConflict: 'code', ignoreDuplicates: true })
         }
-        toast.success(`Imported ${preview.rows.length} PO records · ${uniqueVendorNames.length} vendors · ${uniqueItemNames.length} items added to masters`)
+        toast.success(`Imported ${rows.length} PO records · ${uniqueVendorNames.length} vendors · ${uniqueItemNames.length} items added to masters`)
       } else {
         // PDF import
         if (preview.isAmendment && preview.poNo) {
           // Update existing PO lines with amended data
-          for (const rec of preview.rows) {
+          for (const rec of rows) {
             const { credit_limit_days, delivery_date, is_amendment, ...poFields } = rec
-            // Try to update existing row first
             const { data: existing } = await supabase.from('purchase_orders')
               .select('id').eq('po_no', rec.po_no).eq('item_name', rec.item_name).single()
             if (existing) {
@@ -2933,28 +2936,27 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
               await supabase.from('purchase_orders').insert(poFields)
             }
           }
-          // Update pending_payments credit limit for this PO
-          if (preview.rows[0]?.credit_limit_days) {
+          if (rows[0]?.credit_limit_days) {
             await supabase.from('pending_payments')
-              .update({ credit_limit_days: preview.rows[0].credit_limit_days })
+              .update({ credit_limit_days: rows[0].credit_limit_days })
               .eq('po_id', (await supabase.from('purchase_orders').select('id').eq('po_no', preview.poNo).limit(1).single())?.data?.id ?? '')
           }
-          toast.success(`Amendment applied — ${preview.rows.length} items updated`)
+          toast.success(`Amendment applied — ${rows.length} items updated`)
         } else {
           // New PO — insert
-          const cleanRows = preview.rows.map(({ credit_limit_days, delivery_date, is_amendment, ...r }: any) => r)
+          const cleanRows = rows.map(({ credit_limit_days, delivery_date, is_amendment, ...r }: any) => r)
           const { error } = await supabase.from('purchase_orders').upsert(cleanRows, { onConflict:'po_no,item_name' })
           if (error) throw error
           // Auto-create vendor party with GST + address from PDF
-          if (preview.rows[0]?.vendor_name) {
-            const { vendor_name, vendor_gstin, vendor_address } = preview.rows[0]
+          if (rows[0]?.vendor_name) {
+            const { vendor_name, vendor_gstin, vendor_address } = rows[0]
             await supabase.from('parties').upsert(
               { name: vendor_name.trim(), type: 'supplier', gstin: vendor_gstin ?? null, address: vendor_address ?? null },
               { onConflict: 'name,type', ignoreDuplicates: false }
             )
           }
           // Auto-create feed ingredients
-          const uniquePdfItems = [...new Set(preview.rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
+          const uniquePdfItems = [...new Set(rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
           if (uniquePdfItems.length > 0) {
             const pdfItemRecords = uniquePdfItems.map((name:string) => ({
               name,
@@ -2963,7 +2965,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
             }))
             await supabase.from('feed_ingredients').upsert(pdfItemRecords, { onConflict: 'code', ignoreDuplicates: true })
           }
-          toast.success(`PO imported — ${preview.rows.length} items · vendor & items added to masters`)
+          toast.success(`PO imported — ${rows.length} items · vendor & items added to masters`)
         }
       }
       qc.invalidateQueries({ queryKey: ['purchase_orders'] })
@@ -3025,13 +3027,18 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
 
               {/* PO items preview table */}
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">PO Lines ({preview.rows.length})</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase">PO Lines ({editableRows.length})</p>
+                  {preview.type === 'pdf' && editableRows.some(r => /^Item \d+$/.test(r.item_name)) && (
+                    <p className="text-xs text-orange-600 font-medium">⚠ Some item names were not detected — click the orange cells to correct them</p>
+                  )}
+                </div>
                 <div className="overflow-x-auto rounded-lg border border-gray-200">
                   <table className="text-xs w-full">
                     <thead className="bg-gray-50"><tr>
                       <th className="px-2 py-1.5 text-left text-gray-500">PO No</th>
                       <th className="px-2 py-1.5 text-left text-gray-500">Vendor</th>
-                      <th className="px-2 py-1.5 text-left text-gray-500">Item</th>
+                      <th className="px-2 py-1.5 text-left text-gray-500">Item {preview.type==='pdf' && <span className="text-brand-500">(editable)</span>}</th>
                       <th className="px-2 py-1.5 text-right text-gray-500">Qty</th>
                       <th className="px-2 py-1.5 text-left text-gray-500">UOM</th>
                       <th className="px-2 py-1.5 text-right text-gray-500">Rate</th>
@@ -3040,11 +3047,21 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
                       <th className="px-2 py-1.5 text-left text-gray-500">FY</th>
                     </tr></thead>
                     <tbody>
-                      {preview.rows.slice(0,30).map((r,i)=>(
+                      {editableRows.slice(0,30).map((r,i)=>{
+                        const isAutoName = /^Item \d+$/.test(r.item_name)
+                        return (
                         <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
                           <td className="px-2 py-1 text-gray-600 whitespace-nowrap">{r.po_no}</td>
                           <td className="px-2 py-1 max-w-[140px] truncate text-gray-700">{r.vendor_name}</td>
-                          <td className="px-2 py-1 max-w-[150px] truncate font-medium">{r.item_name}</td>
+                          <td className={`px-2 py-1 font-medium ${isAutoName ? 'bg-orange-50' : ''}`}>
+                            {preview.type === 'pdf' ? (
+                              <input
+                                className={`w-full min-w-[120px] text-xs rounded px-1 py-0.5 border focus:outline-none focus:ring-1 focus:ring-brand-400 ${isAutoName ? 'border-orange-300 bg-orange-50 text-orange-700' : 'border-transparent bg-transparent hover:border-gray-300'}`}
+                                value={r.item_name}
+                                onChange={e => setEditableRows(prev => prev.map((row, idx) => idx===i ? {...row, item_name: e.target.value} : row))}
+                              />
+                            ) : <span className="max-w-[150px] truncate block">{r.item_name}</span>}
+                          </td>
                           <td className="px-2 py-1 text-right text-gray-700">{r.quantity?.toLocaleString('en-IN')}</td>
                           <td className="px-2 py-1 text-gray-500">{r.unit}</td>
                           <td className="px-2 py-1 text-right font-medium">{r.rate ? `₹${r.rate.toLocaleString('en-IN')}` : '—'}</td>
@@ -3052,9 +3069,9 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
                           <td className="px-2 py-1 text-right text-green-700 font-semibold">{r.total_amount ? `₹${r.total_amount.toLocaleString('en-IN')}` : '—'}</td>
                           <td className="px-2 py-1 text-gray-400">{r.fiscal_year}</td>
                         </tr>
-                      ))}
-                      {preview.rows.length > 30 && (
-                        <tr><td colSpan={9} className="px-2 py-1 text-gray-400 text-center">…and {preview.rows.length-30} more rows</td></tr>
+                      )})}
+                      {editableRows.length > 30 && (
+                        <tr><td colSpan={9} className="px-2 py-1 text-gray-400 text-center">…and {editableRows.length-30} more rows</td></tr>
                       )}
                     </tbody>
                   </table>
