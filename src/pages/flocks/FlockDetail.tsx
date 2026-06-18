@@ -157,7 +157,7 @@ export const FlockDetail: React.FC = () => {
     queryKey: ['flock_placements', id],
     queryFn: async () => {
       const { data } = await supabase.from('shed_allocations')
-        .select('*,shed:sheds(shed_no,shed_name)')
+        .select('*,shed:sheds(shed_no,shed_name,capacity_female,capacity_male,total_boxes,birds_per_box)')
         .eq('flock_id', id!).order('allocated_date')
       return data ?? []
     }
@@ -856,13 +856,26 @@ export const FlockDetail: React.FC = () => {
                       <th className="px-3 py-2">Shed</th>
                       <th className="px-3 py-2 text-right">Female</th>
                       <th className="px-3 py-2 text-right">Male</th>
-                      <th className="px-3 py-2 text-right">Total</th>
+                      <th className="px-3 py-2 text-right">Total Birds</th>
+                      <th className="px-3 py-2 text-right">Shed Capacity</th>
+                      <th className="px-3 py-2 text-right">Box Usage</th>
+                      <th className="px-3 py-2 text-right">Utilization</th>
                       <th className="px-3 py-2">Notes</th>
                       <th className="px-3 py-2"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(placements ?? []).map((p: any) => (
+                    {(placements ?? []).map((p: any) => {
+                      const total = (p.female_count ?? 0) + (p.male_count ?? 0)
+                      const capF = p.shed?.capacity_female ?? 0
+                      const capM = p.shed?.capacity_male ?? 0
+                      const totalCap = capF + capM
+                      const birdsPerBox = p.shed?.birds_per_box ?? 0
+                      const totalBoxes = p.shed?.total_boxes ?? 0
+                      const usedBoxes = birdsPerBox > 0 ? Math.ceil(total / birdsPerBox) : null
+                      const utilPct = totalCap > 0 ? Math.round(total / totalCap * 100) : null
+                      const utilColor = utilPct == null ? '' : utilPct > 100 ? 'text-red-600 font-bold' : utilPct > 85 ? 'text-orange-500 font-semibold' : 'text-green-600'
+                      return (
                       <tr key={p.id} className={`border-b border-gray-50 hover:bg-gray-50 ${selPlacements.has(p.id) ? 'bg-red-50' : ''}`}>
                         <td className="px-3 py-2">
                           <CB checked={selPlacements.has(p.id)} onChange={() => setSelPlacements(prev => { const n = new Set(prev); n.has(p.id) ? n.delete(p.id) : n.add(p.id); return n })} />
@@ -871,7 +884,10 @@ export const FlockDetail: React.FC = () => {
                         <td className="px-3 py-2">{p.shed ? `${p.shed.shed_no}${p.shed.shed_name ? ' — ' + p.shed.shed_name : ''}` : <span className="text-gray-400">—</span>}</td>
                         <td className="px-3 py-2 text-right">{p.female_count?.toLocaleString('en-IN')}</td>
                         <td className="px-3 py-2 text-right">{p.male_count?.toLocaleString('en-IN')}</td>
-                        <td className="px-3 py-2 text-right font-medium">{((p.female_count ?? 0) + (p.male_count ?? 0)).toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-2 text-right font-medium">{total.toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-2 text-right text-xs text-gray-500">{totalCap > 0 ? `${capF}F + ${capM}M = ${totalCap}` : '—'}</td>
+                        <td className="px-3 py-2 text-right text-xs text-gray-500">{usedBoxes != null ? `${usedBoxes} / ${totalBoxes}` : '—'}</td>
+                        <td className={`px-3 py-2 text-right text-xs ${utilColor}`}>{utilPct != null ? `${utilPct}%` : '—'}</td>
                         <td className="px-3 py-2 text-gray-400 text-xs">{p.notes ?? '—'}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-2 justify-end">
@@ -883,7 +899,7 @@ export const FlockDetail: React.FC = () => {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                   <tfoot>
                     <tr className="bg-gray-50 font-semibold text-sm">
@@ -891,7 +907,7 @@ export const FlockDetail: React.FC = () => {
                       <td className="px-3 py-2 text-right">{(placements ?? []).reduce((s: number, p: any) => s + (p.female_count ?? 0), 0).toLocaleString('en-IN')} F</td>
                       <td className="px-3 py-2 text-right">{(placements ?? []).reduce((s: number, p: any) => s + (p.male_count ?? 0), 0).toLocaleString('en-IN')} M</td>
                       <td className="px-3 py-2 text-right text-brand-700">{(placements ?? []).reduce((s: number, p: any) => s + (p.female_count ?? 0) + (p.male_count ?? 0), 0).toLocaleString('en-IN')}</td>
-                      <td colSpan={2}></td>
+                      <td colSpan={4}></td>
                     </tr>
                   </tfoot>
                 </table>

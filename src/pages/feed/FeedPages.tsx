@@ -23,6 +23,9 @@ export const GRNEntry: React.FC = () => {
   const [editing, setEditing] = useState<any>(null)
   const [importing, setImporting] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkDelConfirm, setBulkDelConfirm] = useState(false)
+  const [delId, setDelId] = useState<string|null>(null)
 
   // PO alert state
   const [openPOs, setOpenPOs] = useState<any[]>([])
@@ -172,7 +175,19 @@ export const GRNEntry: React.FC = () => {
       const { error } = await supabase.from('grn').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('GRN deleted'); qc.invalidateQueries({ queryKey: ['grns'] }) },
+    onSuccess: () => { toast.success('GRN deleted'); setDelId(null); qc.invalidateQueries({ queryKey: ['grns'] }) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const bulkDeleteMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('grn').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Deleted'); setSel(new Set()); setBulkDelConfirm(false)
+      qc.invalidateQueries({ queryKey: ['grns'] })
+    },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -298,17 +313,35 @@ export const GRNEntry: React.FC = () => {
         )}
       </div>
 
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-blue-700">{sel.size} selected</span>
+          <button onClick={() => setBulkDelConfirm(true)} className="text-sm text-red-600 hover:underline font-medium">Delete selected</button>
+          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline ml-auto">Clear</button>
+        </div>
+      )}
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
+              <Th><input type="checkbox" className="rounded border-gray-300 text-brand-600"
+                checked={grns.length > 0 && grns.every((g: any) => sel.has(g.id))}
+                onChange={e => {
+                  const n = new Set(sel)
+                  grns.forEach((g: any) => e.target.checked ? n.add(g.id) : n.delete(g.id))
+                  setSel(n)
+                }} /></Th>
               <Th>GRN No</Th><Th>Date</Th><Th>Site</Th><Th>Party</Th>
               <Th>Item</Th><Th>Invoice No</Th>
               <Th right>Qty</Th><Th right>Unit Price</Th><Th right>Amount</Th><Th></Th>
             </tr></thead>
             <tbody>
               {grns.map((g: any) => (
-                <tr key={g.id} className="hover:bg-gray-50">
+                <tr key={g.id} className={`hover:bg-gray-50 ${sel.has(g.id) ? 'bg-blue-50' : ''}`}>
+                  <Td><input type="checkbox" className="rounded border-gray-300 text-brand-600"
+                    checked={sel.has(g.id)}
+                    onChange={() => { const n = new Set(sel); n.has(g.id) ? n.delete(g.id) : n.add(g.id); setSel(n) }} /></Td>
                   <Td><span className="font-mono text-xs font-bold">{g.grn_no}</span></Td>
                   <Td className="text-xs">{fmtDate(g.grn_date)}</Td>
                   <Td className="text-xs">{g.farms?.name}</Td>
@@ -321,7 +354,7 @@ export const GRNEntry: React.FC = () => {
                   <Td>
                     <div className="flex gap-1">
                       <button onClick={() => openEdit(g)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors" title="Edit"><Edit2 size={13}/></button>
-                      <button onClick={() => { if(confirm('Delete this GRN record?')) deleteMut.mutate(g.id) }} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={13}/></button>
+                      <button onClick={() => setDelId(g.id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={13}/></button>
                     </div>
                   </Td>
                 </tr>
@@ -329,7 +362,7 @@ export const GRNEntry: React.FC = () => {
             </tbody>
             {grns.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={6}>TOTAL ({grns.length} records)</Td>
+                <Td colSpan={7}>TOTAL ({grns.length} records)</Td>
                 <Td right>{totalQty.toLocaleString('en-IN')} kg</Td>
                 <Td right>—</Td>
                 <Td right>{inr(totalVal)}</Td>
@@ -340,6 +373,15 @@ export const GRNEntry: React.FC = () => {
           {grns.length === 0 && <EmptyState icon={<Package size={32}/>} title={hasFilter ? 'No records match filters' : 'No GRN records'} action={!hasFilter ? <Button onClick={openAdd} icon={<Plus size={16}/>}>Add GRN</Button> : undefined} />}
         </Card>
       )}
+
+      <Modal open={!!delId} onClose={() => setDelId(null)} title="Delete GRN Record"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelId(null)}>Cancel</Button><Button variant="danger" onClick={() => delId && deleteMut.mutate(delId)} loading={deleteMut.isPending}>Delete</Button></div>}>
+        <p className="text-sm text-gray-600">Delete this GRN record? This cannot be undone.</p>
+      </Modal>
+      <Modal open={bulkDelConfirm} onClose={() => setBulkDelConfirm(false)} title="Delete Selected GRN Records"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setBulkDelConfirm(false)}>Cancel</Button><Button variant="danger" onClick={() => bulkDeleteMut.mutate(Array.from(sel))} loading={bulkDeleteMut.isPending}>Delete {sel.size} records</Button></div>}>
+        <p className="text-sm text-gray-600">Delete <strong>{sel.size}</strong> selected GRN records? This cannot be undone.</p>
+      </Modal>
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit GRN' : 'Add GRN'} size="lg"
         footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
