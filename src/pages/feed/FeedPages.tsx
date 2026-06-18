@@ -181,8 +181,9 @@ export const GRNEntry: React.FC = () => {
 
   const bulkDeleteMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      for (let i = 0; i < ids.length; i += 50) {
-        const { error } = await supabase.from('grn').delete().in('id', ids.slice(i, i + 50))
+      const validIds = ids.filter((id): id is string => !!id && id !== 'undefined')
+      for (let i = 0; i < validIds.length; i += 50) {
+        const { error } = await supabase.from('grn').delete().in('id', validIds.slice(i, i + 50))
         if (error) throw error
       }
     },
@@ -331,7 +332,7 @@ export const GRNEntry: React.FC = () => {
                 checked={grns.length > 0 && grns.every((g: any) => sel.has(g.id))}
                 onChange={e => {
                   const n = new Set(sel)
-                  grns.forEach((g: any) => e.target.checked ? n.add(g.id) : n.delete(g.id))
+                  grns.forEach((g: any) => { if (g.id) { e.target.checked ? n.add(g.id) : n.delete(g.id) } })
                   setSel(n)
                 }} /></Th>
               <Th>GRN No</Th><Th>Date</Th><Th>Site</Th><Th>Party</Th>
