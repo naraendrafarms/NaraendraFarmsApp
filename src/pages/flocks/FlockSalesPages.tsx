@@ -12,6 +12,109 @@ import { QuickAddParty } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 
+// ── Receive Payment Modal ─────────────────────────────────────────
+const ReceivePaymentModal: React.FC<{
+  open: boolean; sale: any; bankAccounts: any[]; table: string;
+  onClose: () => void; onSaved: () => void
+}> = ({ open, sale, bankAccounts, table, onClose, onSaved }) => {
+  const [mode, setMode] = useState('Cash')
+  const [bankId, setBankId] = useState('')
+  const [date, setDate] = useState(today())
+  const [amtReceived, setAmtReceived] = useState('')
+  const [utr, setUtr] = useState('')
+  const [status, setStatus] = useState('Received')
+  const [saving, setSaving] = useState(false)
+
+  React.useEffect(() => {
+    if (sale) {
+      setMode(sale.payment_mode ?? 'Cash')
+      setBankId(sale.bank_account_id ?? '')
+      setDate(sale.received_date ?? today())
+      setAmtReceived(sale.amount_received?.toString() ?? sale.amount?.toString() ?? '')
+      setUtr(sale.utr_ref ?? '')
+      setStatus(sale.payment_status === 'Pending' || !sale.payment_status ? 'Received' : sale.payment_status)
+    }
+  }, [sale])
+
+  const handleSave = async () => {
+    if (!sale) return
+    setSaving(true)
+    try {
+      const update: any = {
+        payment_status: status,
+        payment_mode: mode,
+        received_date: date || null,
+        amount_received: parseFloat(amtReceived) || null,
+        bank_account_id: (mode !== 'Cash' && bankId) ? bankId : null,
+        utr_ref: utr || null,
+      }
+      const { error } = await supabase.from(table).update(update).eq('id', sale.id)
+      if (error) throw error
+
+      // Auto-create bank credit entry if mode is not Cash
+      if (mode !== 'Cash' && bankId && parseFloat(amtReceived) > 0) {
+        await supabase.from('bank_transactions').insert({
+          bank_account_id: bankId,
+          txn_date: date,
+          txn_type: 'Credit',
+          category: 'Sale Receipt',
+          reference_no: utr || sale.dc_no || sale.invoice_no || null,
+          description: `Sale receipt — ${sale.flocks?.flock_no ? `F-${sale.flocks.flock_no}` : ''} ${sale.sale_type ?? ''} ${sale.dispatch_date ?? sale.sale_date ?? ''}`.trim(),
+          amount: parseFloat(amtReceived),
+        })
+      }
+      toast.success('Payment recorded')
+      onSaved()
+    } catch (e: any) { toast.error(e.message) }
+    setSaving(false)
+  }
+
+  if (!open || !sale) return null
+  const bankOptions = bankAccounts.map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — '+b.account_name : ''}` }))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-900">Receive Payment</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Sale: {sale.sale_type ?? 'HE Dispatch'} · Invoice: {inr(sale.amount)}
+              {sale.parties?.name ? ` · ${sale.parties.name}` : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Select label="Status" value={status} onChange={e => setStatus(e.target.value)}
+              options={[{value:'Received',label:'Fully Received'},{value:'Partial',label:'Partial'},{value:'Pending',label:'Pending'}]} />
+            <Input label="Amount Received (₹)" type="number" step="0.01" value={amtReceived} onChange={e => setAmtReceived(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Select label="Payment Mode" value={mode} onChange={e => setMode(e.target.value)}
+              options={['Cash','Bank Transfer','Cheque','UPI']} />
+            <Input label="Date Received" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          {mode !== 'Cash' && (
+            <Select label="Bank Account" placeholder="— Select bank —" value={bankId} onChange={e => setBankId(e.target.value)}
+              options={bankOptions} />
+          )}
+          {(mode === 'Bank Transfer' || mode === 'UPI' || mode === 'Cheque') && (
+            <Input label={mode === 'Cheque' ? 'Cheque No' : 'UTR / Reference No'} value={utr} onChange={e => setUtr(e.target.value)} placeholder="Transaction reference" />
+          )}
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          <Button onClick={handleSave} loading={saving} className="flex-1">Save Receipt</Button>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── CSV helper ────────────────────────────────────────────────────
 function exportFlatCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -63,6 +166,12 @@ export const HEDispatch: React.FC = () => {
   const [noInvoiceOnly, setNoInvoiceOnly] = useState(false)
   const [tab, setTab] = useState<'dispatch'|'stock'>('dispatch')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [receiptSale, setReceiptSale] = useState<any>(null)
+
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts'],
+    queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name'); return data ?? [] }
+  })
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
@@ -452,7 +561,7 @@ export const HEDispatch: React.FC = () => {
               <Th>Flock</Th><Th>Dispatch Date</Th><Th>Prod Date</Th>
               <Th right>DC No</Th><Th>Invoice No</Th><Th>Party</Th><Th>Hatchery</Th>
               <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice Qty</Th>
-              <Th right>Rate</Th><Th right>Amount</Th><Th></Th>
+              <Th right>Rate</Th><Th right>Amount</Th><Th>Payment</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((d: any) => (
@@ -474,11 +583,19 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="text-xs">{d.invoice_eggs?.toLocaleString('en-IN') ?? '—'}</Td>
                   <Td right className="text-xs">{d.rate ? `Rs ${d.rate}` : '—'}</Td>
                   <Td right className="font-semibold text-green-700 text-xs">{d.amount ? inr(d.amount) : '—'}</Td>
+                  <Td className="text-xs">
+                    {d.payment_status === 'Received'
+                      ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ {d.payment_mode ?? 'Paid'}</span>
+                      : d.payment_status === 'Partial'
+                        ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">◑ Partial</span>
+                        : d.amount ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200 text-xs hover:bg-orange-100">⊕ Receive</button> : null}
+                  </Td>
                   <Td>
-                    <button onClick={() => openForm(d)}
-                      className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600">
-                      <Edit2 size={13}/>
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {(d.payment_status === 'Received' || d.payment_status === 'Partial') &&
+                        <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="p-1 text-green-400 hover:text-green-600" title="Edit payment"><Edit2 size={11}/></button>}
+                      <button onClick={() => openForm(d)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                    </div>
                   </Td>
                 </tr>
               ))}
@@ -557,6 +674,15 @@ export const HEDispatch: React.FC = () => {
         <ConfirmBulkDelete label={`Delete ${sel.size} HE dispatch records? This cannot be undone.`}
           onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
+
+      <ReceivePaymentModal
+        open={!!receiptSale}
+        sale={receiptSale}
+        bankAccounts={bankAccounts ?? []}
+        table={receiptSale?._table ?? 'he_dispatch'}
+        onClose={() => setReceiptSale(null)}
+        onSaved={() => { setReceiptSale(null); qc.invalidateQueries({ queryKey: ['he_dispatch'] }) }}
+      />
 
       <Modal open={showForm} onClose={() => setShowForm(false)}
         title={editing ? 'Edit HE Dispatch' : 'New HE Dispatch'} size="xl"
@@ -730,6 +856,12 @@ export const NHESales: React.FC = () => {
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [receiptSale, setReceiptSale] = useState<any>(null)
+
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts'],
+    queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name'); return data ?? [] }
+  })
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
@@ -749,7 +881,7 @@ export const NHESales: React.FC = () => {
   const { data: sales, isLoading } = useQuery({
     queryKey: ['nhe_sales', flockFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name)')
+      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name), bank_accounts(bank_name,account_name)')
         .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (fromDate) q = q.gte('sale_date', fromDate)
@@ -1115,7 +1247,7 @@ export const NHESales: React.FC = () => {
               <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Date</Th><Th>Type</Th><Th>Party</Th>
               <Th right>Qty</Th><Th right>Wt (kg)</Th><Th right>₹/kg</Th><Th right>Amount</Th>
-              <Th>Vehicle/DC</Th><Th>Remarks</Th><Th></Th>
+              <Th>Payment</Th><Th>Vehicle/DC</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((s: any) => (
@@ -1143,10 +1275,20 @@ export const NHESales: React.FC = () => {
                       </div>
                     )}
                   </Td>
+                  <Td className="text-xs">
+                    {s.payment_status === 'Received'
+                      ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ {s.payment_mode ?? 'Paid'}{s.bank_accounts ? ` · ${s.bank_accounts.bank_name}` : ''}</span>
+                      : s.payment_status === 'Partial'
+                        ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">◑ Partial {s.amount_received ? `· ${inr(s.amount_received)}` : ''}</span>
+                        : <button onClick={() => setReceiptSale(s)} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200 text-xs hover:bg-orange-100">⊕ Receive</button>}
+                  </Td>
                   <Td className="text-xs text-gray-400">{s.vehicle_no ?? s.dc_no ?? '—'}</Td>
-                  <Td className="text-xs text-gray-400 max-w-[120px] truncate">{s.remarks ?? ''}</Td>
                   <Td>
-                    <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600"><Edit2 size={13}/></button>
+                    <div className="flex items-center gap-1">
+                      {(s.payment_status === 'Received' || s.payment_status === 'Partial') &&
+                        <button onClick={() => setReceiptSale(s)} className="p-1 text-green-400 hover:text-green-600" title="Edit payment"><Edit2 size={11}/></button>}
+                      <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600"><Edit2 size={13}/></button>
+                    </div>
                   </Td>
                 </tr>
               ))}
@@ -1167,6 +1309,15 @@ export const NHESales: React.FC = () => {
         <ConfirmBulkDelete label={`Delete ${sel.size} NHE/bird sale records? This cannot be undone.`}
           onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
+
+      <ReceivePaymentModal
+        open={!!receiptSale}
+        sale={receiptSale}
+        bankAccounts={bankAccounts ?? []}
+        table="nhe_sales"
+        onClose={() => setReceiptSale(null)}
+        onSaved={() => { setReceiptSale(null); qc.invalidateQueries({ queryKey: ['nhe_sales'] }) }}
+      />
 
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }}
         title={editing ? 'Edit NHE / Bird Sale' : 'Record NHE / Bird Sale'} size="lg"
