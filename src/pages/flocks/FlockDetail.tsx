@@ -497,7 +497,7 @@ export const FlockDetail: React.FC = () => {
             </Badge>
           </div>
           <p className="text-sm text-gray-500 mt-0.5">
-            {flock.breed} • {flock.rearing_farm?.name} → {flock.laying_farm?.name} • Age: {ageWeeks} weeks
+            {flock.breed} • {flock.rearing_farm?.name ?? '—'}{flock.laying_farm?.name ? ` → ${flock.laying_farm.name}` : ''} • Age: {ageWeeks} weeks
           </p>
         </div>
         <div className="ml-auto flex gap-2">
