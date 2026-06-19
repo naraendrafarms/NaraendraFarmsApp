@@ -14,11 +14,12 @@ import { parseFile } from '@/lib/parseFile'
 
 // ── Receive Payment Modal ─────────────────────────────────────────
 const ReceivePaymentModal: React.FC<{
-  open: boolean; sale: any; bankAccounts: any[]; table: string;
+  open: boolean; sale: any; bankAccounts: any[]; farms: any[]; table: string;
   onClose: () => void; onSaved: () => void
-}> = ({ open, sale, bankAccounts, table, onClose, onSaved }) => {
+}> = ({ open, sale, bankAccounts, farms, table, onClose, onSaved }) => {
   const [mode, setMode] = useState('Cash')
   const [bankId, setBankId] = useState('')
+  const [cashFarmId, setCashFarmId] = useState('ho') // 'ho' = Head Office, or a farm UUID
   const [date, setDate] = useState(today())
   const [amtReceived, setAmtReceived] = useState('')
   const [utr, setUtr] = useState('')
@@ -40,27 +41,45 @@ const ReceivePaymentModal: React.FC<{
     if (!sale) return
     setSaving(true)
     try {
+      const amt = parseFloat(amtReceived) || 0
       const update: any = {
         payment_status: status,
         payment_mode: mode,
         received_date: date || null,
-        amount_received: parseFloat(amtReceived) || null,
+        amount_received: amt || null,
         bank_account_id: (mode !== 'Cash' && bankId) ? bankId : null,
         utr_ref: utr || null,
       }
       const { error } = await supabase.from(table).update(update).eq('id', sale.id)
       if (error) throw error
 
-      // Auto-create bank credit entry if mode is not Cash
-      if (mode !== 'Cash' && bankId && parseFloat(amtReceived) > 0) {
+      const description = `Sale receipt — ${sale.flocks?.flock_no ? `F-${sale.flocks.flock_no}` : ''} ${sale.sale_type ?? 'HE Dispatch'} ${sale.dispatch_date ?? sale.sale_date ?? ''}`.trim()
+
+      if (mode === 'Cash' && amt > 0 && status !== 'Pending') {
+        // Create cash_book receipt entry
+        await supabase.from('cash_book').insert({
+          txn_date: date,
+          txn_type: 'receipt',
+          category: 'sales_collection',
+          description,
+          party_name: sale.parties?.name ?? null,
+          farm_id: cashFarmId === 'ho' ? null : cashFarmId,
+          flock_id: sale.flock_id ?? null,
+          reference_no: sale.dc_no ?? sale.invoice_no ?? null,
+          amount_in: amt,
+          amount_out: 0,
+          payment_mode: 'cash',
+        })
+      } else if (mode !== 'Cash' && bankId && amt > 0) {
+        // Create bank_transactions credit entry
         await supabase.from('bank_transactions').insert({
           bank_account_id: bankId,
           txn_date: date,
           txn_type: 'Credit',
           category: 'Sale Receipt',
           reference_no: utr || sale.dc_no || sale.invoice_no || null,
-          description: `Sale receipt — ${sale.flocks?.flock_no ? `F-${sale.flocks.flock_no}` : ''} ${sale.sale_type ?? ''} ${sale.dispatch_date ?? sale.sale_date ?? ''}`.trim(),
-          amount: parseFloat(amtReceived),
+          description,
+          amount: amt,
         })
       }
       toast.success('Payment recorded')
@@ -71,6 +90,10 @@ const ReceivePaymentModal: React.FC<{
 
   if (!open || !sale) return null
   const bankOptions = bankAccounts.map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — '+b.account_name : ''}` }))
+  const cashLocationOptions = [
+    { value: 'ho', label: 'Head Office' },
+    ...farms.map((f: any) => ({ value: f.id, label: `${f.name} (Site)` })),
+  ]
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -97,6 +120,10 @@ const ReceivePaymentModal: React.FC<{
               options={['Cash','Bank Transfer','Cheque','UPI']} />
             <Input label="Date Received" type="date" value={date} onChange={e => setDate(e.target.value)} />
           </div>
+          {mode === 'Cash' && (
+            <Select label="Cash Location" value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
+              options={cashLocationOptions} />
+          )}
           {mode !== 'Cash' && (
             <Select label="Bank Account" placeholder="— Select bank —" value={bankId} onChange={e => setBankId(e.target.value)}
               options={bankOptions} />
@@ -171,6 +198,11 @@ export const HEDispatch: React.FC = () => {
   const { data: bankAccounts } = useQuery({
     queryKey: ['bank_accounts'],
     queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name'); return data ?? [] }
+  })
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
   })
 
   const { data: flocks } = useQuery({
@@ -679,6 +711,7 @@ export const HEDispatch: React.FC = () => {
         open={!!receiptSale}
         sale={receiptSale}
         bankAccounts={bankAccounts ?? []}
+        farms={farms ?? []}
         table={receiptSale?._table ?? 'he_dispatch'}
         onClose={() => setReceiptSale(null)}
         onSaved={() => { setReceiptSale(null); qc.invalidateQueries({ queryKey: ['he_dispatch'] }) }}
@@ -861,6 +894,11 @@ export const NHESales: React.FC = () => {
   const { data: bankAccounts } = useQuery({
     queryKey: ['bank_accounts'],
     queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name'); return data ?? [] }
+  })
+
+  const { data: farmsNhe } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
   })
 
   const { data: flocks } = useQuery({
@@ -1314,6 +1352,7 @@ export const NHESales: React.FC = () => {
         open={!!receiptSale}
         sale={receiptSale}
         bankAccounts={bankAccounts ?? []}
+        farms={farmsNhe ?? []}
         table="nhe_sales"
         onClose={() => setReceiptSale(null)}
         onSaved={() => { setReceiptSale(null); qc.invalidateQueries({ queryKey: ['nhe_sales'] }) }}

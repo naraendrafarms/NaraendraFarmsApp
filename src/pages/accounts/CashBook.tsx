@@ -7,7 +7,7 @@ import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
 } from '@/components/ui'
-import { Plus, Trash2, Download, Upload, Pencil } from 'lucide-react'
+import { Plus, Trash2, Download, Upload, Pencil, ArrowLeftRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import { parseFile } from '@/lib/parseFile'
@@ -47,7 +47,7 @@ const TYPE_ROW_STYLE: Record<string, string> = {
   contra:  'border-l-4 border-l-blue-400',
 }
 
-const OPENING_BALANCE_KEY = 'cash_opening_balance'
+const obKey = (loc: string) => loc ? `cash_opening_balance_${loc}` : 'cash_opening_balance'
 
 // ── Checkbox component ────────────────────────────────────────────────────────
 
@@ -93,18 +93,34 @@ export const CashBookPage: React.FC = () => {
   const qc = useQueryClient()
   const importRef = useRef<HTMLInputElement>(null)
 
-  // Opening balance (localStorage)
+  // Date range filter — default current month
+  const defaultRange = currentMonthRange()
+  const [filterFrom, setFilterFrom] = useState(defaultRange.from)
+  const [filterTo,   setFilterTo]   = useState(defaultRange.to)
+
+  // Location filter: '' = all, 'ho' = Head Office (farm_id IS NULL), or a farm UUID
+  const [filterLocation, setFilterLocation] = useState('')
+
+  // Opening balance (localStorage, per-location)
   const [openingBalance, setOpeningBalance] = useState<number>(() => {
-    const v = localStorage.getItem(OPENING_BALANCE_KEY)
+    const v = localStorage.getItem(obKey(''))
     return v ? parseFloat(v) : 0
   })
   const [editingOB, setEditingOB] = useState(false)
   const [obInput, setObInput] = useState('')
 
-  // Date range filter — default current month
-  const defaultRange = currentMonthRange()
-  const [filterFrom, setFilterFrom] = useState(defaultRange.from)
-  const [filterTo,   setFilterTo]   = useState(defaultRange.to)
+  // Reload opening balance when location changes
+  React.useEffect(() => {
+    const v = localStorage.getItem(obKey(filterLocation))
+    setOpeningBalance(v ? parseFloat(v) : 0)
+  }, [filterLocation])
+
+  // Internal Transfer modal
+  const [showTransfer, setShowTransfer] = useState(false)
+  const [xferForm, setXferForm] = useState({
+    date: today(), amount: '', description: '', fromLocation: 'ho', toLocation: '',
+  })
+  const [xferSaving, setXferSaving] = useState(false)
 
   // Form / modal state
   const [showForm,    setShowForm]    = useState(false)
@@ -137,7 +153,7 @@ export const CashBookPage: React.FC = () => {
   })
 
   const { data: txns, isLoading } = useQuery({
-    queryKey: ['cash_book', filterFrom, filterTo],
+    queryKey: ['cash_book', filterFrom, filterTo, filterLocation],
     queryFn: async () => {
       let q = supabase
         .from('cash_book')
@@ -147,6 +163,8 @@ export const CashBookPage: React.FC = () => {
         .limit(1000)
       if (filterFrom) q = q.gte('txn_date', filterFrom)
       if (filterTo)   q = q.lte('txn_date', filterTo)
+      if (filterLocation === 'ho') q = q.is('farm_id', null)
+      else if (filterLocation) q = q.eq('farm_id', filterLocation)
       const { data } = await q
       return data ?? []
     }
@@ -181,6 +199,15 @@ export const CashBookPage: React.FC = () => {
 
   const farmOptions  = (farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))
   const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))
+  const locationOptions = [
+    { value: '', label: 'All Locations' },
+    { value: 'ho', label: 'Head Office' },
+    ...(farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` })),
+  ]
+  const xferLocationOptions = [
+    { value: 'ho', label: 'Head Office' },
+    ...(farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` })),
+  ]
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
@@ -266,10 +293,40 @@ export const CashBookPage: React.FC = () => {
   const saveOpeningBalance = () => {
     const v = parseFloat(obInput)
     if (isNaN(v)) { toast.error('Enter a valid number'); return }
-    localStorage.setItem(OPENING_BALANCE_KEY, String(v))
+    localStorage.setItem(obKey(filterLocation), String(v))
     setOpeningBalance(v)
     setEditingOB(false)
     toast.success('Opening balance saved')
+  }
+
+  const handleTransfer = async () => {
+    const amt = parseFloat(xferForm.amount)
+    if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return }
+    if (xferForm.fromLocation === xferForm.toLocation) { toast.error('From and To locations must differ'); return }
+    if (!xferForm.description) { toast.error('Enter a description'); return }
+    setXferSaving(true)
+    try {
+      const fromFarmId = xferForm.fromLocation === 'ho' ? null : xferForm.fromLocation
+      const toFarmId   = xferForm.toLocation   === 'ho' ? null : xferForm.toLocation
+      const desc = xferForm.description
+      // Payment at source
+      await supabase.from('cash_book').insert({
+        txn_date: xferForm.date, txn_type: 'contra', category: 'transfer',
+        description: desc, farm_id: fromFarmId,
+        amount_in: 0, amount_out: amt, payment_mode: 'cash',
+      })
+      // Receipt at destination
+      await supabase.from('cash_book').insert({
+        txn_date: xferForm.date, txn_type: 'contra', category: 'transfer',
+        description: desc, farm_id: toFarmId,
+        amount_in: amt, amount_out: 0, payment_mode: 'cash',
+      })
+      toast.success('Internal transfer recorded')
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      setShowTransfer(false)
+      setXferForm({ date: today(), amount: '', description: '', fromLocation: 'ho', toLocation: '' })
+    } catch (e: any) { toast.error(e.message) }
+    setXferSaving(false)
   }
 
   const handleExport = () => {
@@ -354,6 +411,7 @@ export const CashBookPage: React.FC = () => {
             <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export</Button>
+            <Button variant="outline" size="sm" icon={<ArrowLeftRight size={14}/>} onClick={() => setShowTransfer(true)}>Transfer</Button>
             <Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Transaction</Button>
           </div>
         }
@@ -363,7 +421,9 @@ export const CashBookPage: React.FC = () => {
       <Card>
         <div className="flex items-center gap-4 flex-wrap">
           <div>
-            <p className="text-xs text-gray-500 font-medium">Opening Balance</p>
+            <p className="text-xs text-gray-500 font-medium">
+              Opening Balance {filterLocation === 'ho' ? '(Head Office)' : filterLocation ? `(${(farms ?? []).find((f: any) => f.id === filterLocation)?.name ?? 'Site'})` : '(All)'}
+            </p>
             {editingOB ? (
               <div className="flex items-center gap-2 mt-1">
                 <input
@@ -403,6 +463,7 @@ export const CashBookPage: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
           <Input label="From Date" type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
           <Input label="To Date"   type="date" value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
+          <Select label="Location" options={locationOptions} value={filterLocation} onChange={e => setFilterLocation(e.target.value)} />
           <div className="flex gap-2">
             <button className="text-xs text-brand-600 hover:underline mt-5"
               onClick={() => { const r = currentMonthRange(); setFilterFrom(r.from); setFilterTo(r.to) }}>
@@ -441,6 +502,7 @@ export const CashBookPage: React.FC = () => {
                 <Th>Category</Th>
                 <Th>Description</Th>
                 <Th>Party</Th>
+                <Th>Location</Th>
                 <Th className="text-right">Receipt (₹)</Th>
                 <Th className="text-right">Payment (₹)</Th>
                 <Th className="text-right">Balance (₹)</Th>
@@ -459,6 +521,7 @@ export const CashBookPage: React.FC = () => {
                   </Td>
                   <Td className="text-xs max-w-xs truncate">{t.description}</Td>
                   <Td className="text-xs text-gray-500">{t.party_name ?? '—'}</Td>
+                  <Td className="text-xs text-gray-500">{t.farms?.name ?? <span className="text-purple-600 font-medium">HO</span>}</Td>
                   <Td className="text-right text-sm font-semibold text-green-700">
                     {(t.amount_in ?? 0) > 0 ? inr(t.amount_in) : <span className="text-gray-300">—</span>}
                   </Td>
@@ -487,7 +550,7 @@ export const CashBookPage: React.FC = () => {
             {displayRows.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-50 font-semibold">
-                  <Td colSpan={6}>TOTAL ({displayRows.length} transactions)</Td>
+                  <Td colSpan={7}>TOTAL ({displayRows.length} transactions)</Td>
                   <Td className="text-right text-green-700">{inr(totalReceipts)}</Td>
                   <Td className="text-right text-red-700">{inr(totalPayments)}</Td>
                   <Td className={`text-right ${closingBalance >= 0 ? 'text-blue-700' : 'text-red-700'}`}>{inr(closingBalance)}</Td>
@@ -565,6 +628,35 @@ export const CashBookPage: React.FC = () => {
             <Select label="Flock (optional)" placeholder="— Select Flock —" options={flockOptions} value={form.flock_id} onChange={e => sf('flock_id', e.target.value)} />
           </FormRow>
           <Input label="Remarks" placeholder="Optional notes" value={form.remarks} onChange={e => sf('remarks', e.target.value)} />
+        </div>
+      </Modal>
+
+      {/* Internal Transfer Modal */}
+      <Modal
+        open={showTransfer}
+        onClose={() => setShowTransfer(false)}
+        title="Internal Cash Transfer"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowTransfer(false)}>Cancel</Button>
+            <Button loading={xferSaving} onClick={handleTransfer}>Record Transfer</Button>
+          </>
+        }
+      >
+        <div className="space-y-4 text-sm text-gray-600 mb-2">
+          Transfer cash between a farm site and Head Office. Two contra entries will be created automatically.
+        </div>
+        <div className="space-y-3">
+          <FormRow>
+            <Input label="Date" type="date" value={xferForm.date} onChange={e => setXferForm(f => ({ ...f, date: e.target.value }))} />
+            <Input label="Amount (₹)" type="number" step="0.01" placeholder="0.00" value={xferForm.amount} onChange={e => setXferForm(f => ({ ...f, amount: e.target.value }))} />
+          </FormRow>
+          <FormRow>
+            <Select label="From" options={xferLocationOptions} value={xferForm.fromLocation} onChange={e => setXferForm(f => ({ ...f, fromLocation: e.target.value }))} />
+            <Select label="To" options={xferLocationOptions} value={xferForm.toLocation} onChange={e => setXferForm(f => ({ ...f, toLocation: e.target.value }))} />
+          </FormRow>
+          <Input label="Description" placeholder="e.g. Cash transfer from Kethireddypally to HO" value={xferForm.description} onChange={e => setXferForm(f => ({ ...f, description: e.target.value }))} />
         </div>
       </Modal>
 
