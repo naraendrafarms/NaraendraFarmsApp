@@ -5,9 +5,7 @@ import { Card, Button, Spinner } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Copy, CheckCircle } from 'lucide-react'
 
-function fmtDate(d: string) {
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-}
+import { fmtDate } from '@/lib/utils'
 function num(n: number) { return n.toLocaleString('en-IN') }
 
 export const DailySummaryPage: React.FC = () => {

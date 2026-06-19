@@ -44,8 +44,10 @@ function daysSince(dateStr: string): number {
 }
 
 function fmtChartDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  // DD MMM for chart axis labels e.g. "19 Jun"
+  const parts = dateStr.split('-')
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  return `${parseInt(parts[2])} ${months[parseInt(parts[1])-1]}`
 }
 
 // ── SHARED: Bulk select helpers ───────────────────────────────────────────────

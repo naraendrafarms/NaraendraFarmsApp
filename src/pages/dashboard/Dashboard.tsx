@@ -170,7 +170,7 @@ export const Dashboard: React.FC = () => {
     return Object.values(byDate)
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-14)
-      .map(r => ({ ...r, date: new Date(r.date).toLocaleDateString('en-IN', { day:'2-digit', month:'short' }) }))
+      .map(r => { const p=r.date.split('-'); const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return { ...r, date: `${p[2]} ${mn[parseInt(p[1])-1]}` } })
   }, [recentDaily])
 
   if (loadingFlocks) return <Spinner />

@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { fmtDateTime } from '@/lib/utils'
 import { Card, SectionHeader, Spinner, Badge } from '@/components/ui'
 import { Shield, Search, RefreshCw, Download, User, Clock } from 'lucide-react'
 
@@ -28,13 +29,7 @@ const ACTION_COLOR: Record<string, string> = {
   DELETE: 'bg-red-100 text-red-700',
 }
 
-function fmtDT(ts: string) {
-  const d = new Date(ts)
-  return d.toLocaleString('en-IN', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: true,
-  })
-}
+const fmtDT = (ts: string) => fmtDateTime(ts)
 
 export const AuditLogPage: React.FC = () => {
   const [search, setSearch]       = useState('')

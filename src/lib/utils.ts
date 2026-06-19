@@ -34,21 +34,51 @@ export const pct = (v: number | null | undefined, decimals = 2): string => {
   return `${(v * 100).toFixed(decimals)}%`
 }
 
-// Date format DD-MMM-YYYY
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+// Date format DD/MM/YYYY — parses YYYY-MM-DD directly to avoid timezone shift
 export const fmtDate = (d: string | null | undefined): string => {
   if (!d) return '—'
-  const dt = new Date(d)
-  return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  const parts = d.split('T')[0].split('-')        // handle ISO timestamps too
+  if (parts.length === 3) {
+    const [y, m, day] = parts
+    return `${day}/${m}/${y}`
+  }
+  return d
 }
 
-// Month label
+// Short date: DD MMM YYYY  e.g. 19 Jun 2026
+export const fmtDateShort = (d: string | null | undefined): string => {
+  if (!d) return '—'
+  const parts = d.split('T')[0].split('-')
+  if (parts.length === 3) {
+    const [y, m, day] = parts
+    return `${day} ${MONTHS[parseInt(m) - 1]} ${y}`
+  }
+  return d
+}
+
+// Month label: Jun 2026
 export const fmtMonth = (d: string): string => {
-  const dt = new Date(d)
-  return dt.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+  const parts = d.split('-')
+  if (parts.length >= 2) return `${MONTHS[parseInt(parts[1]) - 1]} ${parts[0]}`
+  return d
 }
 
-// Today as YYYY-MM-DD
-export const today = (): string => new Date().toISOString().split('T')[0]
+// Date + time in IST: 19/06/2026 02:30 PM IST
+export const fmtDateTime = (ts: string | null | undefined): string => {
+  if (!ts) return '—'
+  return new Date(ts).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  }).replace(',', '')   // "19/06/2026 02:30 pm" → clean
+}
+
+// Today as YYYY-MM-DD in IST
+export const today = (): string => {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) // en-CA gives YYYY-MM-DD
+}
 
 // First day of month
 export const firstOfMonth = (d: Date = new Date()): string => {

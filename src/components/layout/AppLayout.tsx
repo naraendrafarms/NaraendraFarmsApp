@@ -407,7 +407,7 @@ export const AppLayout: React.FC = () => {
           </button>
           <div className="flex-1" />
           <span className="text-xs text-gray-400 hidden sm:block">
-            {new Date().toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}
+            {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday:'long', day:'2-digit', month:'long', year:'numeric' })}
           </span>
         </header>
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
