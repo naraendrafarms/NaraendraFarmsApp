@@ -856,6 +856,7 @@ const isBirdSale = (t: string) => t === 'bird_sale' || LEGACY_BIRD_TYPES.include
 function nheCashCategory(saleType: string): { category: string; label: string } {
   if (isBirdSale(saleType)) return { category: 'bird_sale',   label: 'Bird Sale' }
   if (saleType === 'manure') return { category: 'litter_sale', label: 'Litter / Manure Sale' }
+  if (saleType === 'he_sale') return { category: 'he_sale',   label: 'HE Egg Sale' }
   if (['je','te','be'].includes(saleType)) return { category: 'egg_sale', label: NHE_TYPES.find(t=>t.value===saleType)?.label ?? saleType }
   return { category: 'sales_collection', label: NHE_TYPES.find(t=>t.value===saleType)?.label ?? saleType }
 }
