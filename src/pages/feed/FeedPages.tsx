@@ -8,6 +8,7 @@ import {
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 } from '@/components/ui'
 import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2, Download, Upload } from 'lucide-react'
+import { QuickAddParty, QuickAddIngredient } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
 
 // ── CSV helper ────────────────────────────────────────────────────
@@ -397,13 +398,27 @@ export const GRNEntry: React.FC = () => {
               value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Select label="Supplier / Party" placeholder="— Select —" options={partyOptions}
-              value={form.party_id} onChange={e => s('party_id', e.target.value)} />
+            <div className="relative">
+              <div className="flex items-end gap-1">
+                <div className="flex-1">
+                  <Select label="Supplier / Party" placeholder="— Select —" options={partyOptions}
+                    value={form.party_id} onChange={e => s('party_id', e.target.value)} />
+                </div>
+                <QuickAddParty defaultType="supplier" onCreated={p => s('party_id', p.id)} />
+              </div>
+            </div>
             <Input label="Invoice No" value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Select label="Ingredient" placeholder="— Select from master —" options={ingrOptions}
-              value={form.ingredient_id} onChange={e => { s('ingredient_id', e.target.value); fetchOpenPOs(e.target.value) }} />
+            <div className="relative">
+              <div className="flex items-end gap-1">
+                <div className="flex-1">
+                  <Select label="Ingredient" placeholder="— Select from master —" options={ingrOptions}
+                    value={form.ingredient_id} onChange={e => { s('ingredient_id', e.target.value); fetchOpenPOs(e.target.value) }} />
+                </div>
+                <QuickAddIngredient onCreated={i => { s('ingredient_id', i.id); fetchOpenPOs(i.id) }} />
+              </div>
+            </div>
             <Input label="Item Name (if not in master)" value={form.item_name}
               onChange={e => s('item_name', e.target.value)} hint="Use if ingredient not in master" />
           </FormRow>

@@ -8,6 +8,7 @@ import {
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 } from '@/components/ui'
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle } from 'lucide-react'
+import { QuickAddParty } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 
@@ -577,8 +578,15 @@ export const HEDispatch: React.FC = () => {
               onChange={e => s('invoice_no', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Select label="Party" placeholder="— Select —" options={partyOptions}
-              value={form.party_id} onChange={e => s('party_id', e.target.value)} />
+            <div className="relative">
+              <div className="flex items-end gap-1">
+                <div className="flex-1">
+                  <Select label="Party" placeholder="— Select —" options={partyOptions}
+                    value={form.party_id} onChange={e => s('party_id', e.target.value)} />
+                </div>
+                <QuickAddParty defaultType="buyer" onCreated={p => s('party_id', p.id)} />
+              </div>
+            </div>
             <Select label="Hatchery" placeholder="— Select —" options={hatchOptions}
               value={form.hatchery_id} onChange={e => s('hatchery_id', e.target.value)} />
           </FormRow>
@@ -1216,8 +1224,15 @@ export const NHESales: React.FC = () => {
                 </FormRow>
                 <FormRow cols={3}>
                   <Input label="Vehicle No" value={form.vehicle_no} onChange={e => sv('vehicle_no', e.target.value)} />
-                  <Select label="Party / Buyer" placeholder="— Select —" options={partyOptions}
-                    value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
+                  <div className="relative">
+                    <div className="flex items-end gap-1">
+                      <div className="flex-1">
+                        <Select label="Party / Buyer" placeholder="— Select —" options={partyOptions}
+                          value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
+                      </div>
+                      <QuickAddParty defaultType="buyer" onCreated={p => sv('party_id', p.id)} />
+                    </div>
+                  </div>
                   <Input label="DC No" value={form.dc_no} onChange={e => sv('dc_no', e.target.value)} />
                 </FormRow>
               </div>
@@ -1228,8 +1243,15 @@ export const NHESales: React.FC = () => {
           {!isBirdSale(form.sale_type) && (
             <>
               <FormRow>
-                <Select label="Party" placeholder="— Select —" options={partyOptions}
-                  value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
+                <div className="relative">
+                  <div className="flex items-end gap-1">
+                    <div className="flex-1">
+                      <Select label="Party" placeholder="— Select —" options={partyOptions}
+                        value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
+                    </div>
+                    <QuickAddParty defaultType="buyer" onCreated={p => sv('party_id', p.id)} />
+                  </div>
+                </div>
                 <Input label="DC No" value={form.dc_no} onChange={e => sv('dc_no', e.target.value)} />
               </FormRow>
               <FormRow cols={4}>
@@ -1817,7 +1839,14 @@ export const MedicinePurchases: React.FC = () => {
           </FormRow>
           <FormRow>
             <Select label="Farm / Site" placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
-            <Select label="Supplier" placeholder="— Select —" options={supplierOptions} value={form.supplier_id} onChange={e => s('supplier_id', e.target.value)} />
+            <div className="relative">
+              <div className="flex items-end gap-1">
+                <div className="flex-1">
+                  <Select label="Supplier" placeholder="— Select —" options={supplierOptions} value={form.supplier_id} onChange={e => s('supplier_id', e.target.value)} />
+                </div>
+                <QuickAddParty defaultType="supplier" onCreated={p => s('supplier_id', p.id)} />
+              </div>
+            </div>
           </FormRow>
           <FormRow>
             <Input label="Invoice No" value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
