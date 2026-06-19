@@ -57,7 +57,7 @@ const ReceivePaymentModal: React.FC<{
 
       if (mode === 'Cash' && amt > 0 && status !== 'Pending') {
         // Create cash_book receipt entry
-        await supabase.from('cash_book').insert({
+        const { error: cbErr } = await supabase.from('cash_book').insert({
           txn_date: date,
           txn_type: 'receipt',
           category: 'sales_collection',
@@ -70,6 +70,7 @@ const ReceivePaymentModal: React.FC<{
           amount_out: 0,
           payment_mode: 'cash',
         })
+        if (cbErr) throw new Error('Payment saved but Cash Book entry failed: ' + cbErr.message)
       } else if (mode !== 'Cash' && bankId && amt > 0) {
         // Create bank_transactions credit entry
         await supabase.from('bank_transactions').insert({
@@ -872,7 +873,7 @@ const EMPTY_NHE_FORM = {
   quantity: '', unit: 'nos', rate: '', amount: '',
   bird_sex: 'female', bird_category: 'cull',
   avg_weight_kg: '', total_weight_kg: '', rate_per_kg: '',
-  payment_cash: '', payment_online: '',
+  payment_cash: '', payment_online: '', cash_farm_id: 'ho',
   remarks: ''
 }
 
@@ -977,21 +978,54 @@ export const NHESales: React.FC = () => {
         remarks: form.remarks || null,
         vehicle_no: form.vehicle_no || null,
       }
+      const cashAmt   = parseFloat(form.payment_cash)   || 0
+      const onlineAmt = parseFloat(form.payment_online) || 0
       if (bird) {
         payload.bird_sex       = form.bird_sex || null
         payload.bird_category  = form.bird_category || null
         payload.avg_weight_kg  = parseFloat(form.avg_weight_kg)  || null
         payload.total_weight_kg= parseFloat(form.total_weight_kg)|| null
         payload.rate_per_kg    = parseFloat(form.rate_per_kg)    || null
-        payload.payment_cash   = parseFloat(form.payment_cash)   || 0
-        payload.payment_online = parseFloat(form.payment_online) || 0
+        payload.payment_cash   = cashAmt
+        payload.payment_online = onlineAmt
       }
+      // Auto-set payment receipt fields when cash/online is filled
+      if (cashAmt > 0 || onlineAmt > 0) {
+        payload.payment_status  = 'Received'
+        payload.amount_received = cashAmt + onlineAmt
+        payload.received_date   = form.sale_date
+        payload.payment_mode    = cashAmt > 0 && onlineAmt === 0 ? 'Cash'
+          : cashAmt === 0 ? 'Bank Transfer' : 'Cash'
+      }
+      let savedId: string | null = null
       if (editing) {
         const { error } = await supabase.from('nhe_sales').update(payload).eq('id', editing.id)
         if (error) throw error
+        savedId = editing.id
       } else {
-        const { error } = await supabase.from('nhe_sales').insert(payload)
+        const { data: ins, error } = await supabase.from('nhe_sales').insert(payload).select('id').single()
         if (error) throw error
+        savedId = ins?.id ?? null
+      }
+
+      // Auto-create cash_book entry when cash received
+      if (cashAmt > 0 && !editing) {
+        const party = parties?.find((p: any) => p.id === form.party_id)
+        const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
+        const { error: cbErr } = await supabase.from('cash_book').insert({
+          txn_date:    form.sale_date,
+          txn_type:    'receipt',
+          category:    'sales_collection',
+          description: `Sale receipt — ${flockNo ? `F-${flockNo}` : ''} ${bird ? 'Bird Sale' : form.sale_type} ${form.dc_no || ''}`.trim(),
+          party_name:  party?.name ?? null,
+          farm_id:     form.cash_farm_id === 'ho' ? null : (form.cash_farm_id || null),
+          flock_id:    form.flock_id || null,
+          reference_no: form.dc_no || null,
+          amount_in:   cashAmt,
+          amount_out:  0,
+          payment_mode: 'cash',
+        })
+        if (cbErr) throw new Error('Sale saved, but Cash Book entry failed: ' + cbErr.message)
       }
 
       // Auto-deduct bird sale qty from daily record cull counts
@@ -1077,6 +1111,7 @@ export const NHESales: React.FC = () => {
       rate_per_kg:     row.rate_per_kg ?? '',
       payment_cash:    row.payment_cash ?? '',
       payment_online:  row.payment_online ?? '',
+      cash_farm_id:    row.cash_farm_id ?? 'ho',
       remarks: row.remarks ?? ''
     })
     setShowForm(true)
@@ -1400,7 +1435,7 @@ export const NHESales: React.FC = () => {
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
                 <p className="text-xs font-semibold text-blue-700 uppercase">Payment & Logistics</p>
                 <FormRow cols={3}>
-                  <Input label="Cash (₹)" type="number" step="0.01"
+                  <Input label="Cash Received (₹)" type="number" step="0.01"
                     value={form.payment_cash} onChange={e => sv('payment_cash', e.target.value)} />
                   <Input label="Online / NEFT (₹)" type="number" step="0.01"
                     value={form.payment_online} onChange={e => sv('payment_online', e.target.value)} />
@@ -1412,6 +1447,17 @@ export const NHESales: React.FC = () => {
                     )}
                   </div>
                 </FormRow>
+                {(parseFloat(form.payment_cash)||0) > 0 && (
+                  <div>
+                    <Select label="Cash Received At (Location)" value={form.cash_farm_id}
+                      onChange={e => sv('cash_farm_id', e.target.value)}
+                      options={[
+                        { value: 'ho', label: 'Head Office' },
+                        ...(farmsNhe ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` }))
+                      ]} />
+                    <p className="text-[10px] text-blue-600 mt-0.5">Cash Book entry will be created automatically</p>
+                  </div>
+                )}
                 <FormRow cols={3}>
                   <Input label="Vehicle No" value={form.vehicle_no} onChange={e => sv('vehicle_no', e.target.value)} />
                   <div className="relative">
@@ -1452,6 +1498,26 @@ export const NHESales: React.FC = () => {
                   onChange={e => sv('amount', e.target.value)}
                   hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : undefined} />
               </FormRow>
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                <p className="text-xs font-semibold text-blue-700 uppercase">Payment</p>
+                <FormRow cols={2}>
+                  <Input label="Cash Received (₹)" type="number" step="0.01"
+                    value={form.payment_cash} onChange={e => sv('payment_cash', e.target.value)} />
+                  <Input label="Online / NEFT (₹)" type="number" step="0.01"
+                    value={form.payment_online} onChange={e => sv('payment_online', e.target.value)} />
+                </FormRow>
+                {(parseFloat(form.payment_cash)||0) > 0 && (
+                  <div>
+                    <Select label="Cash Received At (Location)" value={form.cash_farm_id}
+                      onChange={e => sv('cash_farm_id', e.target.value)}
+                      options={[
+                        { value: 'ho', label: 'Head Office' },
+                        ...(farmsNhe ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` }))
+                      ]} />
+                    <p className="text-[10px] text-blue-600 mt-0.5">Cash Book entry will be created automatically</p>
+                  </div>
+                )}
+              </div>
             </>
           )}
 
