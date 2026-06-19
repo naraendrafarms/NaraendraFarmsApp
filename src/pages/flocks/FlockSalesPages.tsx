@@ -76,8 +76,7 @@ export const HEDispatch: React.FC = () => {
   const { data: parties } = useQuery({
     queryKey: ['parties_buyers'],
     queryFn: async () => {
-      const { data } = await supabase.from('parties').select('id,name')
-        .in('type', ['buyer','both']).order('name')
+      const { data } = await supabase.from('parties').select('id,name').order('name')
       return data ?? []
     }
   })
@@ -734,7 +733,7 @@ export const NHESales: React.FC = () => {
   })
   const { data: parties } = useQuery({
     queryKey: ['parties_buyers'],
-    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type',['buyer','both']).order('name'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').order('name'); return data ?? [] }
   })
 
   const hasFilter = !!(flockFilter || fromDate || toDate)
