@@ -101,19 +101,21 @@ export const DailyEntry: React.FC = () => {
     enabled: !!selectedFlock && !!selectedShed && !!date
   })
 
-  // Get previous day to pre-fill opening birds
+  // Get previous day to pre-fill opening birds — must match same shed
   const { data: prevRecord } = useQuery({
-    queryKey: ['prev_daily', selectedFlock, date],
+    queryKey: ['prev_daily', selectedFlock, date, selectedShed],
     queryFn: async () => {
       if (!selectedFlock) return null
-      const { data } = await supabase
+      let q = supabase
         .from('daily_records')
         .select('closing_female, closing_male, record_date')
         .eq('flock_id', selectedFlock)
         .lt('record_date', date)
         .order('record_date', { ascending: false })
         .limit(1)
-        .single()
+      if (selectedShed) q = q.eq('shed_id', selectedShed)
+      else q = q.is('shed_id', null)
+      const { data } = await q.single()
       return data
     },
     enabled: !!selectedFlock && !!date
