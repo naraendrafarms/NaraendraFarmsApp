@@ -618,17 +618,13 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="font-semibold text-green-700 text-xs">{d.amount ? inr(d.amount) : '—'}</Td>
                   <Td className="text-xs">
                     {d.payment_status === 'Received'
-                      ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ {d.payment_mode ?? 'Paid'}</span>
+                      ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200">✓ {d.payment_mode ?? 'Paid'}</button>
                       : d.payment_status === 'Partial'
-                        ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">◑ Partial</span>
+                        ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium hover:bg-yellow-200">◑ Partial</button>
                         : d.amount ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200 text-xs hover:bg-orange-100">⊕ Receive</button> : null}
                   </Td>
                   <Td>
-                    <div className="flex items-center gap-1">
-                      {(d.payment_status === 'Received' || d.payment_status === 'Partial') &&
-                        <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="p-1 text-green-400 hover:text-green-600" title="Edit payment"><Edit2 size={11}/></button>}
-                      <button onClick={() => openForm(d)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
-                    </div>
+                    <button onClick={() => openForm(d)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit dispatch"><Edit2 size={13}/></button>
                   </Td>
                 </tr>
               ))}
@@ -1350,18 +1346,14 @@ export const NHESales: React.FC = () => {
                   </Td>
                   <Td className="text-xs">
                     {s.payment_status === 'Received'
-                      ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ {s.payment_mode ?? 'Paid'}{s.bank_accounts ? ` · ${s.bank_accounts.bank_name}` : ''}</span>
+                      ? <button onClick={() => setReceiptSale(s)} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200">✓ {s.payment_mode ?? 'Paid'}{s.bank_accounts ? ` · ${s.bank_accounts.bank_name}` : ''}</button>
                       : s.payment_status === 'Partial'
-                        ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">◑ Partial {s.amount_received ? `· ${inr(s.amount_received)}` : ''}</span>
+                        ? <button onClick={() => setReceiptSale(s)} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium hover:bg-yellow-200">◑ Partial {s.amount_received ? `· ${inr(s.amount_received)}` : ''}</button>
                         : <button onClick={() => setReceiptSale(s)} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200 text-xs hover:bg-orange-100">⊕ Receive</button>}
                   </Td>
                   <Td className="text-xs text-gray-400">{s.vehicle_no ?? s.dc_no ?? '—'}</Td>
                   <Td>
-                    <div className="flex items-center gap-1">
-                      {(s.payment_status === 'Received' || s.payment_status === 'Partial') &&
-                        <button onClick={() => setReceiptSale(s)} className="p-1 text-green-400 hover:text-green-600" title="Edit payment"><Edit2 size={11}/></button>}
-                      <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600"><Edit2 size={13}/></button>
-                    </div>
+                    <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit sale"><Edit2 size={13}/></button>
                   </Td>
                 </tr>
               ))}
