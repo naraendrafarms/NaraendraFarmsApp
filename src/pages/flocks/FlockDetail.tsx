@@ -340,26 +340,72 @@ export const FlockDetail: React.FC = () => {
   })
 
   const bulkDelMut = useMutation({
-    mutationFn: async (ids: string[]) => { const{error}=await supabase.from('daily_records').delete().in('id', ids); if(error) throw error },
+    mutationFn: async (dates: string[]) => {
+      // collect all raw record IDs for the selected dates (handles multi-shed)
+      const allIds = dailyAggregated
+        .filter((d: any) => dates.includes(d.record_date))
+        .flatMap((d: any) => d._ids as string[])
+      const { error } = await supabase.from('daily_records').delete().in('id', allIds)
+      if (error) throw error
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily', id] }); setSel(new Set()); setBulkConfirm(false) },
     onError: (e: any) => toast.error(e.message),
   })
 
-  // dailyIndexMap: maps record id → original ascending index (for week number)
+  // dailyIndexMap: maps record_date → ascending day index (for week number)
   // MUST be before early returns — useMemo is a hook
   const dailyIndexMap = useMemo<Map<string, number>>(() => {
     const m = new Map<string, number>()
-    ;(daily ?? []).forEach((d, i) => m.set(d.id, i))
+    const dates = [...new Set((daily ?? []).map(d => d.record_date))].sort()
+    dates.forEach((date, i) => m.set(date, i))
     return m
   }, [daily])
 
-  // displayDaily: reversed + date filtered
+  // dailyAggregated: group by date, sum all shed values into one row per day
+  const dailyAggregated = useMemo(() => {
+    const map = new Map<string, any>()
+    for (const d of daily ?? []) {
+      const ex = map.get(d.record_date)
+      if (!ex) {
+        map.set(d.record_date, {
+          ...d,
+          _ids: [d.id],
+          _sheds: 1,
+        })
+      } else {
+        ex._ids.push(d.id)
+        ex._sheds += 1
+        ex.opening_female   = (ex.opening_female   ?? 0) + (d.opening_female   ?? 0)
+        ex.opening_male     = (ex.opening_male     ?? 0) + (d.opening_male     ?? 0)
+        ex.feed_female_kg   = (ex.feed_female_kg   ?? 0) + (d.feed_female_kg   ?? 0)
+        ex.feed_male_kg     = (ex.feed_male_kg     ?? 0) + (d.feed_male_kg     ?? 0)
+        ex.total_eggs       = (ex.total_eggs       ?? 0) + (d.total_eggs       ?? 0)
+        ex.he_eggs          = (ex.he_eggs          ?? 0) + (d.he_eggs          ?? 0)
+        ex.mortality_female = (ex.mortality_female ?? 0) + (d.mortality_female ?? 0)
+        ex.mortality_male   = (ex.mortality_male   ?? 0) + (d.mortality_male   ?? 0)
+        ex.cull_female      = (ex.cull_female      ?? 0) + (d.cull_female      ?? 0)
+        ex.cull_male        = (ex.cull_male        ?? 0) + (d.cull_male        ?? 0)
+        ex.transfer_female  = (ex.transfer_female  ?? 0) + (d.transfer_female  ?? 0)
+        ex.trcull_female    = (ex.trcull_female    ?? 0) + (d.trcull_female    ?? 0)
+        ex.closing_female   = (ex.closing_female   ?? 0) + (d.closing_female   ?? 0)
+        ex.closing_male     = (ex.closing_male     ?? 0) + (d.closing_male     ?? 0)
+        const openF = ex.opening_female ?? 0
+        ex.hd_pct = openF > 0 ? (ex.total_eggs ?? 0) / openF : null
+        ex.he_pct = (ex.total_eggs ?? 0) > 0 ? (ex.he_eggs ?? 0) / (ex.total_eggs ?? 0) : null
+      }
+    }
+    return Array.from(map.values()) // ascending by date (Map preserves insertion order and daily is ordered asc)
+  }, [daily])
+
+  // displayDaily: reversed + date filtered (one row per date, aggregated across sheds)
   const displayDaily = useMemo(() => {
-    let arr = [...(daily ?? [])].reverse()
+    let arr = [...dailyAggregated].reverse()
     if (fromDate) arr = arr.filter(d => d.record_date >= fromDate)
     if (toDate) arr = arr.filter(d => d.record_date <= toDate)
     return arr
-  }, [daily, fromDate, toDate])
+  }, [dailyAggregated, fromDate, toDate])
+
+  const uniqueDates = dailyAggregated.length
 
   // heDispatch filtered for financial tab
   const displayHeDispatch = useMemo(() => {
@@ -385,12 +431,12 @@ export const FlockDetail: React.FC = () => {
   const totalFeedM = daily?.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0) ?? 0
   const hePct = totalEggs > 0 ? totalHE / totalEggs : 0
 
-  // Bulk selection helpers for daily tab
-  const dailyIds = (daily ?? []).map((d: any) => d.id)
-  const allDailySel = dailyIds.length > 0 && dailyIds.every((id: string) => sel.has(id))
-  const someDailySel = dailyIds.some((id: string) => sel.has(id))
-  const toggleDaily = (rowId: string) => setSel(s => { const n = new Set(s); n.has(rowId) ? n.delete(rowId) : n.add(rowId); return n })
-  const toggleAllDaily = () => setSel(s => { const n = new Set(s); allDailySel ? dailyIds.forEach((rowId: string) => n.delete(rowId)) : dailyIds.forEach((rowId: string) => n.add(rowId)); return n })
+  // Bulk selection helpers for daily tab (select by date, delete all shed rows for that date)
+  const dailyDates = dailyAggregated.map((d: any) => d.record_date)
+  const allDailySel = dailyDates.length > 0 && dailyDates.every((dt: string) => sel.has(dt))
+  const someDailySel = dailyDates.some((dt: string) => sel.has(dt))
+  const toggleDaily = (dt: string) => setSel(s => { const n = new Set(s); n.has(dt) ? n.delete(dt) : n.add(dt); return n })
+  const toggleAllDaily = () => setSel(s => { const n = new Set(s); allDailySel ? dailyDates.forEach((dt: string) => n.delete(dt)) : dailyDates.forEach((dt: string) => n.add(dt)); return n })
 
   const heRevenue  = heDispatch?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
   const nheRevenue = nheSales?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
@@ -648,7 +694,8 @@ export const FlockDetail: React.FC = () => {
                 className="text-xs text-brand-600 hover:text-brand-800 underline">Clear</button>
             )}
             <span className="text-xs text-gray-500 ml-auto">
-              Showing {displayDaily.length} of {daily?.length ?? 0} days
+              Showing {displayDaily.length} of {uniqueDates} days
+              {daily && daily.length > uniqueDates ? ` (${daily.length} records across ${uniqueDates} days, multi-shed aggregated)` : ''}
             </span>
           </div>
 
@@ -682,16 +729,16 @@ export const FlockDetail: React.FC = () => {
                     const isLayingPeriod = flock.laying_start_date && d.record_date >= flock.laying_start_date
                     const dayAge = flock.placement_date
                       ? Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
-                      : (dailyIndexMap.get(d.id) ?? 0)
+                      : (dailyIndexMap.get(d.record_date) ?? 0)
                     const weekNum = Math.floor(dayAge / 7) + 1
                     const dayInWeek = (dayAge % 7) + 1
                     return (
-                      <tr key={d.id} className={`border-b border-gray-50 hover:bg-gray-50
-                        ${sel.has(d.id) ? 'bg-red-50' : isLayingPeriod ? 'bg-green-50/30' : 'bg-yellow-50/30'}`}>
-                        <td className="px-2 py-1.5"><CB checked={sel.has(d.id)} onChange={() => toggleDaily(d.id)}/></td>
+                      <tr key={d.record_date} className={`border-b border-gray-50 hover:bg-gray-50
+                        ${sel.has(d.record_date) ? 'bg-red-50' : isLayingPeriod ? 'bg-green-50/30' : 'bg-yellow-50/30'}`}>
+                        <td className="px-2 py-1.5"><CB checked={sel.has(d.record_date)} onChange={() => toggleDaily(d.record_date)}/></td>
                         <td className="px-2 py-1.5 sticky left-0 font-medium"
-                          style={{ backgroundColor: sel.has(d.id) ? '#fef2f2' : isLayingPeriod ? '#f0fdf4' : '#fefce8' }}>
-                          {fmtDate(d.record_date)}
+                          style={{ backgroundColor: sel.has(d.record_date) ? '#fef2f2' : isLayingPeriod ? '#f0fdf4' : '#fefce8' }}>
+                          {fmtDate(d.record_date)}{d._sheds > 1 ? <span className="ml-1 text-blue-400 text-[10px]">{d._sheds} sheds</span> : ''}
                         </td>
                         <td className="px-2 py-1.5 text-gray-400 text-xs whitespace-nowrap">W{weekNum} D{dayInWeek}</td>
                         <td className="px-2 py-1.5 text-right">{d.opening_female?.toLocaleString('en-IN')}</td>
@@ -721,7 +768,7 @@ export const FlockDetail: React.FC = () => {
                   <tfoot>
                     <tr className="bg-yellow-50 font-bold text-xs">
                       <td className="px-2 py-2"></td>
-                      <td className="px-2 py-2 sticky left-0 bg-yellow-50" colSpan={2}>TOTAL ({daily.length} days)</td>
+                      <td className="px-2 py-2 sticky left-0 bg-yellow-50" colSpan={2}>TOTAL ({uniqueDates} days)</td>
                       <td className="px-2 py-2 text-right">—</td>
                       <td className="px-2 py-2 text-right">—</td>
                       <td className="px-2 py-2 text-right">{totalFeedF.toLocaleString('en-IN')}</td>
