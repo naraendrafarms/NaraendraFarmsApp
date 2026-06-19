@@ -414,8 +414,20 @@ export const FlockDetail: React.FC = () => {
     return acc
   }, []) ?? []
 
-  // lastRecord = last in ascending order = most recent
-  const lastRecord = daily?.[daily.length - 1]
+  // Aggregate the most recent date's records across all sheds
+  const lastDate = daily?.length ? daily[daily.length - 1].record_date : null
+  const lastDateRecords = daily?.filter(d => d.record_date === lastDate) ?? []
+  const lastRecord = lastDate ? {
+    ...lastDateRecords[0],
+    closing_female: lastDateRecords.reduce((s, d) => s + (d.closing_female ?? 0), 0),
+    closing_male:   lastDateRecords.reduce((s, d) => s + (d.closing_male   ?? 0), 0),
+    opening_female: lastDateRecords.reduce((s, d) => s + (d.opening_female ?? 0), 0),
+    opening_male:   lastDateRecords.reduce((s, d) => s + (d.opening_male   ?? 0), 0),
+    total_eggs:     lastDateRecords.reduce((s, d) => s + (d.total_eggs     ?? 0), 0),
+    he_eggs:        lastDateRecords.reduce((s, d) => s + (d.he_eggs        ?? 0), 0),
+    feed_female_kg: lastDateRecords.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0),
+    feed_male_kg:   lastDateRecords.reduce((s, d) => s + (d.feed_male_kg   ?? 0), 0),
+  } : null
   const ageWeeks = flockAgeWeeks(flock.placement_date)
 
   // CSV template download

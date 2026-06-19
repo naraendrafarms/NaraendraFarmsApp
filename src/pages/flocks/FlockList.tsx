@@ -281,7 +281,7 @@ export const FlockList: React.FC = () => {
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [delTarget, setDelTarget] = useState<string|null>(null)
   const qc = useQueryClient()
-  const { applyFarmFilter, farmId } = useFarmScope()
+  const { applyFarmFilter, applyFlockFarmFilter, farmId } = useFarmScope()
 
   const { data: flocks, isLoading } = useQuery({
     queryKey: ['flocks', farmId],
@@ -290,7 +290,7 @@ export const FlockList: React.FC = () => {
         .from('v_flock_summary')
         .select('*')
         .order('flock_no')
-      q = applyFarmFilter(q, 'laying_farm_id')
+      q = applyFlockFarmFilter(q)
       const { data } = await q
       return data ?? []
     }
