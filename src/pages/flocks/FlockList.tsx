@@ -429,7 +429,13 @@ export const FlockList: React.FC = () => {
                       {f.status}
                     </Badge>
                   </Td>
-                  <Td className="text-xs">{f.laying_farm}</Td>
+                  <Td className="text-xs">
+                    {f.laying_farm
+                      ? f.laying_farm
+                      : f.rearing_farm
+                        ? <span className="text-gray-400 italic">{f.rearing_farm} (rearing)</span>
+                        : <span className="text-red-400 italic">Not set</span>}
+                  </Td>
                   <Td className="text-xs">{fmtDate(f.placement_date)}</Td>
                   <Td right className="text-xs">
                     {(f.total_placed_f??0).toLocaleString('en-IN')} + {(f.total_placed_m??0).toLocaleString('en-IN')}
