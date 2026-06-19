@@ -53,14 +53,17 @@ const ReceivePaymentModal: React.FC<{
       const { error } = await supabase.from(table).update(update).eq('id', sale.id)
       if (error) throw error
 
-      const description = `Sale receipt — ${sale.flocks?.flock_no ? `F-${sale.flocks.flock_no}` : ''} ${sale.sale_type ?? 'HE Dispatch'} ${sale.dispatch_date ?? sale.sale_date ?? ''}`.trim()
+      const saleType = sale.sale_type ?? (table === 'he_dispatch' ? 'he_sale' : 'je')
+      const { category: cbCategory, label: typeLabel } = nheCashCategory(saleType)
+      const flockLabel = sale.flocks?.flock_no ? `F-${sale.flocks.flock_no}` : ''
+      const description = [typeLabel, flockLabel, sale.dc_no ?? sale.invoice_no ?? ''].filter(Boolean).join(' — ')
 
       if (mode === 'Cash' && amt > 0 && status !== 'Pending') {
         // Create cash_book receipt entry
         const { error: cbErr } = await supabase.from('cash_book').insert({
           txn_date: date,
           txn_type: 'receipt',
-          category: 'sales_collection',
+          category: cbCategory,
           description,
           party_name: sale.parties?.name ?? null,
           farm_id: cashFarmId === 'ho' ? null : cashFarmId,
@@ -850,6 +853,13 @@ const NHE_TYPES = [
 const LEGACY_BIRD_TYPES = ['bird_cull','bird_lame','bird_weak','bird_sex_error']
 const isBirdSale = (t: string) => t === 'bird_sale' || LEGACY_BIRD_TYPES.includes(t)
 
+function nheCashCategory(saleType: string): { category: string; label: string } {
+  if (isBirdSale(saleType)) return { category: 'bird_sale',   label: 'Bird Sale' }
+  if (saleType === 'manure') return { category: 'litter_sale', label: 'Litter / Manure Sale' }
+  if (['je','te','be'].includes(saleType)) return { category: 'egg_sale', label: NHE_TYPES.find(t=>t.value===saleType)?.label ?? saleType }
+  return { category: 'sales_collection', label: NHE_TYPES.find(t=>t.value===saleType)?.label ?? saleType }
+}
+
 const BIRD_SEX_OPTS = [
   { value: 'female',    label: 'Female' },
   { value: 'male',      label: 'Male' },
@@ -1008,11 +1018,13 @@ export const NHESales: React.FC = () => {
       if (cashAmt > 0 && !editing) {
         const party = parties?.find((p: any) => p.id === form.party_id)
         const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
+        const { category: cbCategory, label: typeLabel } = nheCashCategory(form.sale_type)
+        const cbDesc = [typeLabel, flockNo ? `F-${flockNo}` : '', form.dc_no || ''].filter(Boolean).join(' — ')
         const { error: cbErr } = await supabase.from('cash_book').insert({
           txn_date:    form.sale_date,
           txn_type:    'receipt',
-          category:    'sales_collection',
-          description: `Sale receipt — ${flockNo ? `F-${flockNo}` : ''} ${bird ? 'Bird Sale' : form.sale_type} ${form.dc_no || ''}`.trim(),
+          category:    cbCategory,
+          description: cbDesc,
           party_name:  party?.name ?? null,
           farm_id:     form.cash_farm_id === 'ho' ? null : (form.cash_farm_id || null),
           flock_id:    form.flock_id || null,

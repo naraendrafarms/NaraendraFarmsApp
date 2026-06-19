@@ -21,7 +21,11 @@ const TXN_TYPES = [
 ]
 
 const CATEGORIES = [
-  { value: 'sales_collection', label: 'Sales Collection' },
+  { value: 'sales_collection', label: 'Sales Collection (General)' },
+  { value: 'he_sale',          label: 'HE Egg Sale' },
+  { value: 'egg_sale',         label: 'Egg Sale (JE / TE / BE)' },
+  { value: 'bird_sale',        label: 'Bird Sale' },
+  { value: 'litter_sale',      label: 'Litter / Manure Sale' },
   { value: 'expense',          label: 'Expense' },
   { value: 'salary',           label: 'Salary' },
   { value: 'advance',          label: 'Advance' },
