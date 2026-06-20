@@ -192,13 +192,13 @@ const POTab: React.FC = () => {
       if (editing) await supabase.from('purchase_orders').update(payload).eq('id', editing.id)
       else await supabase.from('purchase_orders').insert(payload)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setOpen(false); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); setOpen(false); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
 
   const delMut = useMutation({
     mutationFn: async (id: string) => { const{error}=await supabase.from('purchase_orders').delete().eq('id', id); if(error) throw error },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setDelId(null); toast.success('Deleted') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); setDelId(null); toast.success('Deleted') },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -277,6 +277,7 @@ const POTab: React.FC = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase_orders'] })
+      qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['parties'] })
       qc.invalidateQueries({ queryKey: ['feed_ingredients'] })
@@ -293,7 +294,7 @@ const POTab: React.FC = () => {
         if (error) throw error
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setSelected(new Set()); setBulkDelOpen(false); toast.success('Deleted selected POs') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); setSelected(new Set()); setBulkDelOpen(false); toast.success('Deleted selected POs') },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -301,7 +302,7 @@ const POTab: React.FC = () => {
     mutationFn: async ({ ids, status }: { ids: string[]; status: string }) => {
       await supabase.from('purchase_orders').update({ material_status: status }).in('id', ids)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); setSelected(new Set()); setBulkStatusOpen(false); toast.success('Status updated') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); setSelected(new Set()); setBulkStatusOpen(false); toast.success('Status updated') },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -997,7 +998,7 @@ const PaymentsTab: React.FC = () => {
             <select value={form.po_id} onChange={handlePoSelect}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
               <option value="">— No PO link —</option>
-              {orders.map((o:any) => <option key={o.id} value={o.id}>{o.po_no} · {o.vendor_name} · {o.total_amount ? inr(o.total_amount) : ''}</option>)}
+              {orders.map((o:any) => <option key={o.id} value={o.id}>{o.po_no || '(No PO#)'} · {o.vendor_name} · {o.total_amount ? inr(o.total_amount) : ''}</option>)}
             </select>
           </div>
           <Input label="Vendor Name *" value={form.vendor_name} onChange={f('vendor_name')} required />
