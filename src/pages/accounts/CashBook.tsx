@@ -106,6 +106,10 @@ export const CashBookPage: React.FC = () => {
 
   // Location filter: '' = all, 'ho' = Head Office (farm_id IS NULL), or a farm UUID
   const [filterLocation, setFilterLocation] = useState('')
+  // Flock filter (DB-level via flock_id on cash_book)
+  const [filterFlock, setFilterFlock] = useState('')
+  // Party name search (client-side text search)
+  const [filterParty, setFilterParty] = useState('')
 
   // Opening balance (localStorage, per-location)
   const [openingBalance, setOpeningBalance] = useState<number>(() => {
@@ -159,18 +163,19 @@ export const CashBookPage: React.FC = () => {
   })
 
   const { data: txns, isLoading } = useQuery({
-    queryKey: ['cash_book', filterFrom, filterTo, filterLocation],
+    queryKey: ['cash_book', filterFrom, filterTo, filterLocation, filterFlock],
     queryFn: async () => {
       let q = supabase
         .from('cash_book')
         .select('*, farms(name,code), flocks(flock_no)')
         .order('txn_date', { ascending: true })
         .order('created_at', { ascending: true })
-        .limit(1000)
+        .limit(2000)
       if (filterFrom) q = q.gte('txn_date', filterFrom)
       if (filterTo)   q = q.lte('txn_date', filterTo)
       if (filterLocation === 'ho') q = q.is('farm_id', null)
       else if (filterLocation) q = q.eq('farm_id', filterLocation)
+      if (filterFlock) q = q.eq('flock_id', filterFlock)
       const { data } = await q
       return data ?? []
     }
@@ -188,8 +193,16 @@ export const CashBookPage: React.FC = () => {
     })
   }, [txns, openingBalance])
 
-  // Display in reverse order (newest first)
-  const displayRows = useMemo(() => [...rowsWithBalance].reverse(), [rowsWithBalance])
+  // Display in reverse order (newest first), with optional party name search
+  const displayRows = useMemo(() => {
+    const reversed = [...rowsWithBalance].reverse()
+    if (!filterParty.trim()) return reversed
+    const q = filterParty.trim().toLowerCase()
+    return reversed.filter((t: any) =>
+      (t.party_name ?? '').toLowerCase().includes(q) ||
+      (t.description ?? '').toLowerCase().includes(q)
+    )
+  }, [rowsWithBalance, filterParty])
 
   const totalReceipts = useMemo(() =>
     (txns ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [txns])
@@ -203,8 +216,12 @@ export const CashBookPage: React.FC = () => {
   const toggle  = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAll = () => setSel(allSel ? new Set() : new Set(ids))
 
-  const farmOptions  = (farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))
-  const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))
+  const farmOptions       = (farms  ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))
+  const flockOptions      = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))
+  const flockFilterOptions = [
+    { value: '', label: 'All Flocks' },
+    ...(flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })),
+  ]
   const locationOptions = [
     { value: '', label: 'All Locations' },
     { value: 'ho', label: 'Head Office' },
@@ -469,16 +486,37 @@ export const CashBookPage: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
           <DateInput label="From Date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
           <DateInput label="To Date"   value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
-          <Select label="Location" options={locationOptions} value={filterLocation} onChange={e => setFilterLocation(e.target.value)} />
-          <div className="flex gap-2">
-            <button className="text-xs text-brand-600 hover:underline mt-5"
+          <Select label="Location (Cash at)"
+            options={locationOptions} value={filterLocation}
+            onChange={e => setFilterLocation(e.target.value)} />
+          <Select label="Flock"
+            options={flockFilterOptions} value={filterFlock}
+            onChange={e => setFilterFlock(e.target.value)} />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end mt-3">
+          <div className="md:col-span-2">
+            <Input
+              label="Party / Description search"
+              placeholder="Search by party name or description…"
+              value={filterParty}
+              onChange={e => setFilterParty(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-3 items-end pb-0.5">
+            <button className="text-xs text-brand-600 hover:underline"
               onClick={() => { const r = currentMonthRange(); setFilterFrom(r.from); setFilterTo(r.to) }}>
               This Month
             </button>
-            <button className="text-xs text-gray-500 hover:underline mt-5"
+            <button className="text-xs text-gray-500 hover:underline"
               onClick={() => { setFilterFrom(''); setFilterTo('') }}>
               All Time
             </button>
+            {(filterLocation || filterFlock || filterParty) && (
+              <button className="text-xs text-red-500 hover:underline"
+                onClick={() => { setFilterLocation(''); setFilterFlock(''); setFilterParty('') }}>
+                Clear Filters
+              </button>
+            )}
           </div>
         </div>
       </Card>
