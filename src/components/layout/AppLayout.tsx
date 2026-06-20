@@ -119,6 +119,8 @@ const NAV: NavItem[] = [
     children: [
       { label: 'New Purchase',         to: '/purchases/new' },
       { label: 'Purchase Orders',      to: '/purchase-orders' },
+      { label: 'Vendor Statements',    to: '/purchases/vendors' },
+      { label: 'PO vs GRN Rate',       to: '/purchases/rate-compare' },
       { label: 'Farm Expenses',        to: '/expenses' },
     ]
   },
