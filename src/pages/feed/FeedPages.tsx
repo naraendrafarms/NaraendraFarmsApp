@@ -11,6 +11,29 @@ import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2, Download
 import { QuickAddParty, QuickAddIngredient } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
 
+// ── import value cleaners ─────────────────────────────────────────
+// Strip ₹ / ? / commas / spaces from money & number cells before parsing.
+function cleanNum(v: any): number | null {
+  if (v == null || v === '') return null
+  const n = parseFloat(String(v).replace(/[₹?,\s]/g, '').trim())
+  return isNaN(n) ? null : n
+}
+const MONTHS: Record<string,string> = { jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12' }
+// Normalise DD-Mon-YY / DD-Mon-YYYY / DD-MM-YYYY → YYYY-MM-DD (keeps ISO as-is).
+function cleanDate(v: any): string | null {
+  if (!v) return null
+  const s = String(v).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s                       // already ISO
+  let m = s.match(/^(\d{1,2})[-/]([A-Za-z]{3})[A-Za-z]*[-/](\d{2,4})$/) // 01-Apr-26
+  if (m) {
+    const mon = MONTHS[m[2].toLowerCase()]
+    if (mon) { const y = m[3].length === 2 ? '20'+m[3] : m[3]; return `${y}-${mon}-${m[1].padStart(2,'0')}` }
+  }
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/)              // 01-04-2026
+  if (m) { const y = m[3].length === 2 ? '20'+m[3] : m[3]; return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}` }
+  return s
+}
+
 // ── CSV helper ────────────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -235,25 +258,31 @@ export const GRNEntry: React.FC = () => {
       for (const f of (allFarms??[])) farmMap[f.code.toLowerCase()] = f.id
       for (const p of (allParties??[])) partyMap[p.name.toLowerCase()] = p.id
       for (const i of (allIngr??[])) ingrMap[i.name.toLowerCase()] = i.id
-      const toInsert = records.filter(r => r.grn_no && r.grn_date).map(r => ({
-        grn_no: r.grn_no,
-        grn_date: r.grn_date,
-        farm_id: farmMap[r.site_code?.toLowerCase()] || null,
-        party_id: partyMap[r.party_name?.toLowerCase()] || null,
-        invoice_no: r.invoice_no || null,
-        invoice_date: r.invoice_date || null,
-        ingredient_id: ingrMap[r.item_name?.toLowerCase()] || null,
-        item_name: r.item_name || null,
-        qty: parseFloat(r.qty) || null,
-        unit: r.unit || 'kg',
-        bags: parseInt(r.bags) || null,
-        price_per_unit: parseFloat(r.price_per_unit) || null,
-        basic_amount: parseFloat(r.qty) && parseFloat(r.price_per_unit) ? parseFloat(r.qty)*parseFloat(r.price_per_unit) : null,
-        gst_pct: parseFloat(r.gst_pct) || 0,
-        total_amount: parseFloat(r.qty) && parseFloat(r.price_per_unit) ? parseFloat(r.qty)*parseFloat(r.price_per_unit)*(1+(parseFloat(r.gst_pct)||0)/100) : null,
-        vehicle_no: r.vehicle_no || null,
-        remarks: r.remarks || null,
-      }))
+      const toInsert = records.filter(r => r.grn_no && r.grn_date).map(r => {
+        const qty   = cleanNum(r.qty)
+        const price = cleanNum(r.price_per_unit)
+        const gst   = cleanNum(r.gst_pct) ?? 0
+        const basic = qty != null && price != null ? qty * price : null
+        return {
+          grn_no: r.grn_no,
+          grn_date: cleanDate(r.grn_date),
+          farm_id: farmMap[r.site_code?.toLowerCase()] || null,
+          party_id: partyMap[r.party_name?.toLowerCase()] || null,
+          invoice_no: r.invoice_no || null,
+          invoice_date: cleanDate(r.invoice_date),
+          ingredient_id: ingrMap[r.item_name?.toLowerCase()] || null,
+          item_name: r.item_name || null,
+          qty,
+          unit: r.unit || 'kg',
+          bags: cleanNum(r.bags) || null,
+          price_per_unit: price,
+          basic_amount: basic,
+          gst_pct: gst,
+          total_amount: basic != null ? basic * (1 + gst / 100) : null,
+          vehicle_no: r.vehicle_no || null,
+          remarks: r.remarks || null,
+        }
+      })
       if (!toInsert.length) { toast.error('No valid rows'); return }
       const { error } = await supabase.from('grn').insert(toInsert)
       if (error) throw error

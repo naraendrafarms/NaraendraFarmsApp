@@ -1,12 +1,33 @@
 import * as XLSX from 'xlsx'
 
+/** Split a single CSV line respecting double-quoted fields (which may contain commas). */
+function splitCsvLine(line: string): string[] {
+  const out: string[] = []
+  let cur = '', inQ = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++ }   // escaped quote ""
+        else inQ = false
+      } else cur += c
+    } else {
+      if (c === '"') inQ = true
+      else if (c === ',') { out.push(cur); cur = '' }
+      else cur += c
+    }
+  }
+  out.push(cur)
+  return out.map(v => v.trim())
+}
+
 /** Parse CSV or Excel file → { headers (lowercase), rows (string[][]) } */
 export async function parseFile(file: File): Promise<{ headers: string[]; rows: string[][] }> {
   if (file.name.toLowerCase().endsWith('.csv')) {
     const text = await file.text()
-    const lines = text.split('\n').filter(l => l.trim())
-    const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim().toLowerCase())
-    const rows = lines.slice(1).map(l => l.split(',').map(v => v.replace(/^"|"$/g, '').trim()))
+    const lines = text.split(/\r?\n/).filter(l => l.trim())
+    const headers = splitCsvLine(lines[0]).map(h => h.toLowerCase())
+    const rows = lines.slice(1).map(l => splitCsvLine(l))
     return { headers, rows }
   }
   const buffer = await file.arrayBuffer()
