@@ -314,7 +314,24 @@ export const HEDispatch: React.FC = () => {
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
+      const { data: dispatches } = await supabase
+        .from('he_dispatch')
+        .select('id, flock_id, dispatch_date, invoice_no, amount')
+        .in('id', ids)
+      // By FK CASCADE; also explicit for safety
       await supabase.from('cash_book').delete().in('he_dispatch_id', ids)
+      // Fallback for old unlinked entries
+      if (dispatches && dispatches.length > 0) {
+        for (const d of dispatches) {
+          await supabase.from('cash_book').delete()
+            .is('he_dispatch_id', null)
+            .eq('flock_id', d.flock_id)
+            .eq('txn_date', d.dispatch_date)
+            .eq('amount_in', d.amount)
+            .eq('txn_type', 'receipt')
+            .eq('payment_mode', 'cash')
+        }
+      }
       const { error } = await supabase.from('he_dispatch').delete().in('id', ids)
       if (error) throw error
     },
@@ -979,8 +996,40 @@ export const NHESales: React.FC = () => {
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      // Delete linked cash_book entries first (those without nhe_sale_id won't be affected)
+      // Fetch sale details BEFORE deleting so we can clean up unlinked cash_book entries
+      const { data: sales } = await supabase
+        .from('nhe_sales')
+        .select('id, flock_id, sale_date, dc_no, amount, payment_cash')
+        .in('id', ids)
+
+      // 1. Delete cash_book rows linked by nhe_sale_id (FK CASCADE handles this automatically,
+      //    but also do it explicitly to cover rows where nhe_sale_id may be NULL from old data)
       await supabase.from('cash_book').delete().in('nhe_sale_id', ids)
+
+      // 2. Fallback: delete unlinked cash_book entries that match by flock+date+reference or amount
+      if (sales && sales.length > 0) {
+        for (const s of sales) {
+          if (s.dc_no) {
+            await supabase.from('cash_book').delete()
+              .is('nhe_sale_id', null)
+              .eq('flock_id', s.flock_id)
+              .eq('txn_date', s.sale_date)
+              .eq('reference_no', s.dc_no)
+              .eq('txn_type', 'receipt')
+              .eq('payment_mode', 'cash')
+          } else {
+            const cashAmt = s.payment_cash ?? s.amount
+            await supabase.from('cash_book').delete()
+              .is('nhe_sale_id', null)
+              .eq('flock_id', s.flock_id)
+              .eq('txn_date', s.sale_date)
+              .eq('amount_in', cashAmt)
+              .eq('txn_type', 'receipt')
+              .eq('payment_mode', 'cash')
+          }
+        }
+      }
+
       const { error } = await supabase.from('nhe_sales').delete().in('id', ids)
       if (error) throw error
     },
