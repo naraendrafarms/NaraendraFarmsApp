@@ -24,9 +24,13 @@ const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK']
 export const DailyEntry: React.FC = () => {
   const qc = useQueryClient()
   const { applyFlockFarmFilter, farmId } = useFarmScope()
-  const [selectedFlock, setSelectedFlock] = useState('')
-  const [selectedShed, setSelectedShed] = useState('')
-  const [date, setDate] = useState(today())
+  const [selectedFlock, setSelectedFlock] = useState(() => localStorage.getItem('de_flock') ?? '')
+  const [selectedShed, setSelectedShed] = useState(() => localStorage.getItem('de_shed') ?? '')
+  const [date, setDate] = useState(() => localStorage.getItem('de_date') ?? today())
+  useEffect(() => { localStorage.setItem('de_flock', selectedFlock) }, [selectedFlock])
+  useEffect(() => { localStorage.setItem('de_shed', selectedShed) }, [selectedShed])
+  useEffect(() => { localStorage.setItem('de_date', date) }, [date])
+
   const [quickEntry, setQuickEntry] = useState(false)
   const [heQuickTotal, setHeQuickTotal] = useState('')
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null)
