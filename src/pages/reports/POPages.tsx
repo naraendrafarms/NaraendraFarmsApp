@@ -2189,7 +2189,8 @@ const RateAnalysisTab: React.FC = () => {
   const [onlyMismatch, setOnlyMismatch] = useState(true)
   const [grnSearch, setGrnSearch] = useState('')
   const grnFiltered = useMemo(() => (grnRates as any[]).filter((r: any) => {
-    if (grnSearch && !(`${r.item_name} ${r.vendor_name ?? ''}`.toLowerCase().includes(grnSearch.toLowerCase()))) return false
+    const itemName = r.grn_item_name ?? r.item_name ?? ''
+    if (grnSearch && !(`${itemName} ${r.vendor_name ?? ''}`.toLowerCase().includes(grnSearch.toLowerCase()))) return false
     if (onlyMismatch && (r.po_rate == null || Math.abs(Number(r.rate_diff ?? 0)) < 0.005)) return false
     return true
   }), [grnRates, grnSearch, onlyMismatch])
@@ -2595,21 +2596,27 @@ const RateAnalysisTab: React.FC = () => {
               <div className="overflow-x-auto">
                 <Table>
                   <thead><tr>
-                    <Th>GRN</Th><Th>Date</Th><Th>Item</Th><Th>Vendor</Th>
+                    <Th>GRN No</Th><Th>PO No</Th><Th>Date</Th><Th>GRN Item</Th><Th>PO Item</Th><Th>Vendor</Th>
                     <Th right>PO Rate</Th><Th right>GRN Rate</Th><Th right>Diff</Th>
                   </tr></thead>
                   <tbody>
                     {grnFiltered.length === 0
-                      ? <tr><td colSpan={7} className="text-center py-8 text-gray-400 text-sm">No rate differences found</td></tr>
+                      ? <tr><td colSpan={9} className="text-center py-8 text-gray-400 text-sm">No rate differences found</td></tr>
                       : grnFiltered.map((r: any, i: number) => {
                         const diff = Number(r.rate_diff ?? 0)
+                        const itemMismatch = r.po_item_name && r.po_item_name.toLowerCase().trim() !== (r.grn_item_name ?? r.item_name ?? '').toLowerCase().trim()
                         return (
                           <tr key={i} className="text-sm hover:bg-gray-50 border-t border-gray-100">
                             <Td className="text-xs font-mono">{r.grn_no}</Td>
+                            <Td className="text-xs font-mono text-brand-700">{r.po_no ?? <span className="text-red-400">no PO</span>}</Td>
                             <Td className="text-xs">{r.grn_date ? fmtDate(r.grn_date) : '—'}</Td>
-                            <Td className="font-medium">{r.item_name}</Td>
+                            <Td className="font-medium text-xs">{r.grn_item_name ?? r.item_name}</Td>
+                            <Td className={`text-xs ${itemMismatch ? 'text-orange-600 font-semibold' : 'text-gray-400'}`}>
+                              {r.po_item_name ?? '—'}
+                              {itemMismatch && <span className="ml-1 text-orange-400" title="Item name differs">⚠</span>}
+                            </Td>
                             <Td className="text-xs text-gray-500">{r.vendor_name ?? '—'}</Td>
-                            <Td right>{r.po_rate != null ? `₹${Number(r.po_rate).toLocaleString('en-IN')}` : '— no PO'}</Td>
+                            <Td right>{r.po_rate != null ? `₹${Number(r.po_rate).toLocaleString('en-IN')}` : <span className="text-red-400 text-xs">no PO</span>}</Td>
                             <Td right>{r.grn_rate != null ? `₹${Number(r.grn_rate).toLocaleString('en-IN')}` : '—'}</Td>
                             <Td right>
                               {r.po_rate == null ? '—' : (
