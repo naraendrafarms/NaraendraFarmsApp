@@ -680,28 +680,79 @@ export const ImportGRN: React.FC = () => {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false })
     const rows: any[] = []
 
+    // Strip rupee symbol / currency chars before parsing numbers
+    const numStr = (v: any): number | null => {
+      if (v == null) return null
+      const s = String(v).replace(/[₹??,\s]/g, '').trim()
+      const n = parseFloat(s)
+      return isNaN(n) ? null : n
+    }
+
     for (const sheetName of wb.SheetNames) {
       const ws = wb.Sheets[sheetName]
       const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null }) as any[][]
-      for (const row of data) {
-        if (!row || row.length < 6) continue
-        const d = parseDate(row[0]); if (!d) continue
-        const qty = num(row[6]); if (!qty) continue
+
+      // Detect header row by looking for known column names
+      let headerRow = -1
+      const colIdx: Record<string,number> = {}
+      for (let i = 0; i < Math.min(10, data.length); i++) {
+        const r = data[i] ?? []
+        const norm = r.map((v:any) => String(v??'').toLowerCase().replace(/[_\s/]+/g,''))
+        if (norm.some(v=>v.includes('grn')) || norm.some(v=>v.includes('item'))) {
+          headerRow = i
+          const aliases: Record<string,string[]> = {
+            grn_no:         ['grn_no','grnno','grn','grnnumber'],
+            grn_date:       ['grn_date','grndate','date','receiveddate'],
+            farm_name:      ['farm','site','site_code','sitecode','farmcode','farm_name'],
+            party_name:     ['party','supplier','vendor','party_name','partyname'],
+            invoice_no:     ['invoice_no','invoiceno','invoicenumber','bill_no','billno'],
+            invoice_date:   ['invoice_date','invoicedate','billdate','bill_date'],
+            item_name:      ['item','item_name','itemname','ingredient','material','description'],
+            qty:            ['qty','quantity'],
+            unit:           ['unit','uom'],
+            bags:           ['bags','packs','packets'],
+            price_per_unit: ['price_per_unit','price','rate','priceperunit','priceperkg'],
+            gst_pct:        ['gst_pct','gst','gst%','tax%','taxrate'],
+            vehicle_no:     ['vehicle_no','vehicleno','vehicle','truckno'],
+            remarks:        ['remarks','notes','comment'],
+          }
+          for (let ci = 0; ci < norm.length; ci++) {
+            for (const [field, alts] of Object.entries(aliases)) {
+              if (!(field in colIdx) && alts.includes(norm[ci])) colIdx[field] = ci
+            }
+          }
+          break
+        }
+      }
+
+      const dataRows = headerRow >= 0 ? data.slice(headerRow + 1) : data
+      const get = (row: any[], field: string, fallbackIdx: number) => {
+        const idx = field in colIdx ? colIdx[field] : fallbackIdx
+        return row[idx] ?? null
+      }
+
+      for (const row of dataRows) {
+        if (!row || row.length < 4) continue
+        const rawDate = get(row, 'grn_date', 0)
+        const d = parseDate(rawDate)
+        const rawQty = get(row, 'qty', 7)
+        const qty = numStr(rawQty); if (!qty) continue
+        const rawGrnNo = get(row, 'grn_no', 1)
         rows.push({
-          grn_date: d,
-          grn_no: row[1] ? String(row[1]).trim() : `GRN-${d}`,
-          farm_name: row[2] ? String(row[2]).trim() : null,
-          party_name: row[3] ? String(row[3]).trim() : null,
-          item_name: row[4] ? String(row[4]).trim() : null,
-          invoice_no: row[5] ? String(row[5]).trim() : null,
-          qty, unit: row[7] ? String(row[7]).trim() : 'kg',
-          bags: parseInt(String(row[8])) || null,
-          price_per_unit: num(row[9]),
-          basic_amount: num(row[10]),
-          gst_pct: num(row[11]),
-          total_amount: num(row[12]) || num(row[10]),
-          vehicle_no: row[13] ? String(row[13]).trim() : null,
-          remarks: row[14] ? String(row[14]).trim() : null,
+          grn_date: d ?? String(rawDate??'').trim(),
+          grn_no: rawGrnNo ? String(rawGrnNo).trim() : `GRN-${d}`,
+          farm_name: get(row, 'farm_name', 2) ? String(get(row,'farm_name',2)).trim() : null,
+          party_name: get(row, 'party_name', 3) ? String(get(row,'party_name',3)).trim() : null,
+          item_name: get(row, 'item_name', 4) ? String(get(row,'item_name',4)).trim() : null,
+          invoice_no: get(row, 'invoice_no', 5) ? String(get(row,'invoice_no',5)).trim() : null,
+          qty,
+          unit: get(row, 'unit', 8) ? String(get(row,'unit',8)).trim() : 'kg',
+          bags: parseInt(String(get(row,'bags',9)??'')) || null,
+          price_per_unit: numStr(get(row, 'price_per_unit', 10)),
+          gst_pct: numStr(get(row, 'gst_pct', 11)),
+          vehicle_no: get(row, 'vehicle_no', 12) ? String(get(row,'vehicle_no',12)).trim() : null,
+          remarks: get(row, 'remarks', 13) ? String(get(row,'remarks',13)).trim() : null,
+          total_amount: null,
         })
       }
     }
@@ -744,13 +795,13 @@ export const ImportGRN: React.FC = () => {
       <Card>
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
-            <p className="font-medium mb-1">Expected columns:</p>
-            <p>Date | GRN No | Farm/Site | Party/Supplier | Item/Ingredient | Invoice No | Qty | Unit | Bags | Price/Unit | Basic Amount | GST% | Total Amount | Vehicle No | Remarks</p>
+            <p className="font-medium mb-1">Accepted columns (header names detected automatically):</p>
+            <p>grn_no | grn_date | site_code | party_name | invoice_no | invoice_date | item_name | qty | unit | bags | price_per_unit | gst_pct | vehicle_no | remarks</p>
           </div>
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 transition-all" onClick={()=>fileRef.current?.click()}>
             <FileSpreadsheet size={32} className="mx-auto text-gray-300 mb-2"/>
-            <p className="text-sm text-gray-500">Click to upload GRN Excel</p>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile}/>
+            <p className="text-sm text-gray-500">Click to upload GRN CSV / Excel</p>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile}/>
           </div>
           {preview.length > 0 && (
             <div className="overflow-x-auto text-xs bg-gray-50 rounded-lg p-3">

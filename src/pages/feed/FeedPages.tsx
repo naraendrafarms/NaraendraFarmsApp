@@ -446,7 +446,9 @@ export const GRNEntry: React.FC = () => {
           <Divider label="Quantity & Price" />
           <FormRow cols={4}>
             <Input label="Qty" type="number" step="0.001" value={form.qty} onChange={e => s('qty', e.target.value)} />
-            <Input label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} />
+            <Select label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)}
+              options={[{value:'',label:'Select unit'},{value:'kg',label:'kg'},{value:'MT',label:'MT'},{value:'Quintal',label:'Quintal'},{value:'Ltr',label:'Ltr'},{value:'ML',label:'ML'},{value:'Gms',label:'Gms'},{value:'Dose',label:'Dose'},{value:'Nos',label:'Nos'},{value:'Box',label:'Box'},{value:'Mtrs',label:'Mtrs'}]}
+            />
             <Input label="Bags / Packs" type="number" value={form.bags} onChange={e => s('bags', e.target.value)} />
             <Input label="Price/Unit (₹)" type="number" step="0.001" value={form.price_per_unit}
               onChange={e => s('price_per_unit', e.target.value)} />
