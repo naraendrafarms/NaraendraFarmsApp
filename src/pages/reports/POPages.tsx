@@ -2711,21 +2711,45 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
     ?? fullText.match(/(\d{1,2}[-\/][A-Za-z]{3}[-\/]\d{2,4})/)
   const poDate = fmtISODate(dateMatch?.[1] ?? null)
 
-  // Vendor name extraction — try multiple strategies in order:
-  // 1. "Seller :" / "Vendor :" label in full text
-  // 2. Company-name pattern (with any common suffix) in right-column text
-  // 3. Same pattern in full text
-  const CO_SUFFIX = '(?:PVT\\.?\\s*LTD\\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS|CORPORATION|COMPANY|FOODS|FEEDS|AGENCIES|EXPORTS|IMPORTS|INTERNATIONAL|SERVICES|TECHNOLOGIES|LABS|LABORATORIES)'
-  const coRx = new RegExp(`([A-Z][A-Z0-9\\s&\\.\\-]{2,60}${CO_SUFFIX})`, 'i')
-  const sellerLabelMatch = fullText.match(/(?:Seller\s*:|Vendor\s*:|Consignee\s*:|To\s*:)\s*([A-Z][A-Z0-9\s&\.\-]{4,70})/i)
-  const vendorNameMatch = sellerLabelMatch ?? sellerText.match(coRx) ?? fullText.match(coRx)
-  const vendor = vendorNameMatch ? vendorNameMatch[1].replace(/\s+/g,' ').trim() : 'Unknown'
-
-  // Vendor GSTIN: first GSTIN found in the seller column
+  // Vendor GSTIN: first GSTIN found in the seller (right) column
   const vendorGSTINMatch = sellerText.match(/\b(\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d])\b/)
   const vendorGSTIN = vendorGSTINMatch?.[1] ?? null
 
-  // Vendor address: seller column text between company name and GSTIN number
+  // Vendor name extraction — seller column (right half) only to avoid mixing buyer text.
+  // Strategy 1: "Seller :" label in right-column text — take words until first digit (address starts with digits)
+  // Strategy 2: GSTIN anchor — text before GSTIN in right column
+  // Strategy 3: company-suffix pattern in right column or full text
+  function takeNameWords(text: string): string {
+    const words = text.trim().split(/\s+/)
+    const name: string[] = []
+    for (const w of words) {
+      if (/\d/.test(w)) break  // stop at first word containing a digit (house number etc.)
+      if (/^(Seller|Vendor|Buyer|Consignee|Supplier):?$/i.test(w)) continue  // skip labels
+      if (w === ':') continue
+      name.push(w)
+    }
+    return name.join(' ').trim()
+  }
+
+  let vendor = 'Unknown'
+  const sellerLabelM = sellerText.match(/\bSeller\s*:\s*(.+)/i)
+  if (sellerLabelM) {
+    const name = takeNameWords(sellerLabelM[1])
+    if (name) vendor = name
+  }
+  if (vendor === 'Unknown' && vendorGSTIN) {
+    const beforeGSTIN = sellerText.slice(0, sellerText.indexOf(vendorGSTIN)).replace(/\bSeller\s*:\s*/i, '')
+    const name = takeNameWords(beforeGSTIN)
+    if (name) vendor = name
+  }
+  if (vendor === 'Unknown') {
+    const CO_SUFFIX = '(?:PVT\\.?\\s*LTD\\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS|CORPORATION|COMPANY|FOODS|FEEDS|AGENCIES|EXPORTS|IMPORTS|INTERNATIONAL|SERVICES|TECHNOLOGIES|LABS|LABORATORIES)'
+    const coRx = new RegExp(`([A-Z][A-Z0-9\\s&\\.\\-]{2,60}${CO_SUFFIX})`, 'i')
+    const m = sellerText.match(coRx) ?? fullText.match(coRx)
+    if (m) vendor = m[1].replace(/\s+/g,' ').trim()
+  }
+
+  // Vendor address: seller column text between company name and GSTIN
   let vendorAddress: string | null = null
   if (vendor !== 'Unknown') {
     const idx = sellerText.indexOf(vendor)
