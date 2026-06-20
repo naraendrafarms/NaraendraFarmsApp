@@ -34,6 +34,28 @@ function cleanDate(v: any): string | null {
   return s
 }
 
+// Derive the three invoice amounts (Taxable + Tax = Total) from whatever the
+// file provides. Any blank value is back-filled from the others.
+export function deriveAmounts(opts: {
+  qty: number|null; price: number|null; gstPct: number|null;
+  taxable: number|null; tax: number|null; total: number|null;
+}): { basic_amount: number|null; gst_amount: number|null; gst_pct: number; total_amount: number|null } {
+  const r2 = (n: number) => +n.toFixed(2)
+  let basic = opts.taxable ?? (opts.qty != null && opts.price != null ? r2(opts.qty * opts.price) : null)
+  let tax   = opts.tax
+  let total = opts.total
+  let gst   = opts.gstPct
+
+  if (tax == null) {
+    if (total != null && basic != null) tax = r2(total - basic)          // Total − Taxable
+    else if (basic != null && gst != null) tax = r2(basic * gst / 100)   // from %
+  }
+  if (total == null && basic != null) total = r2(basic + (tax ?? 0))     // Taxable + Tax
+  if (gst == null) gst = basic && basic > 0 && tax != null ? r2(tax / basic * 100) : 0
+
+  return { basic_amount: basic, gst_amount: tax, gst_pct: gst, total_amount: total }
+}
+
 // ── CSV helper ────────────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -228,15 +250,15 @@ export const GRNEntry: React.FC = () => {
 
   const handleExport = () => {
     exportCSV(`grn_export.csv`,
-      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','basic_amount','gst_pct','total_amount','vehicle_no','remarks'],
-      grns.map((g: any) => [g.grn_no, g.grn_date, g.farms?.code, g.parties?.name, g.invoice_no, g.invoice_date, g.feed_ingredients?.name??g.item_name, g.qty, g.unit, g.bags, g.price_per_unit, g.basic_amount, g.gst_pct, g.total_amount, g.vehicle_no, g.remarks])
+      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','taxable_amount','gst_pct','tax_amount','total_amount','vehicle_no','remarks'],
+      grns.map((g: any) => [g.grn_no, g.grn_date, g.farms?.code, g.parties?.name, g.invoice_no, g.invoice_date, g.feed_ingredients?.name??g.item_name, g.qty, g.unit, g.bags, g.price_per_unit, g.basic_amount, g.gst_pct, g.gst_amount, g.total_amount, g.vehicle_no, g.remarks])
     )
   }
 
   const handleTemplate = () => {
     exportCSV('grn_template.csv',
-      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','gst_pct','total_amount','vehicle_no','remarks'],
-      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize',10000,'kg',200,22.5,5,'','TN01AB1234','']]
+      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','gst_pct','taxable_amount','tax_amount','total_amount','vehicle_no','remarks'],
+      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize',10000,'kg',200,22.5,5,225000,11250,236250,'TN01AB1234','']]
     )
   }
 
@@ -261,9 +283,13 @@ export const GRNEntry: React.FC = () => {
       const toInsert = records.filter(r => r.grn_no && r.grn_date).map(r => {
         const qty   = cleanNum(r.qty)
         const price = cleanNum(r.price_per_unit)
-        const gst   = cleanNum(r.gst_pct) ?? 0
-        const basic = qty != null && price != null ? qty * price : null
-        const fileTotal = cleanNum(r.total_amount)   // exact invoice total if supplied
+        const amt = deriveAmounts({
+          qty, price,
+          gstPct:  cleanNum(r.gst_pct),
+          taxable: cleanNum(r.taxable_amount ?? r.basic_amount),
+          tax:     cleanNum(r.tax_amount ?? r.gst_amount),
+          total:   cleanNum(r.total_amount),
+        })
         return {
           grn_no: r.grn_no,
           grn_date: cleanDate(r.grn_date),
@@ -277,9 +303,10 @@ export const GRNEntry: React.FC = () => {
           unit: r.unit || 'kg',
           bags: cleanNum(r.bags) || null,
           price_per_unit: price,
-          basic_amount: basic,
-          gst_pct: gst,
-          total_amount: fileTotal != null ? fileTotal : (basic != null ? +(basic * (1 + gst / 100)).toFixed(2) : null),
+          basic_amount: amt.basic_amount,
+          gst_pct: amt.gst_pct,
+          gst_amount: amt.gst_amount,
+          total_amount: amt.total_amount,
           vehicle_no: r.vehicle_no || null,
           remarks: r.remarks || null,
         }

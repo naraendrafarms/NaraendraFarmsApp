@@ -809,6 +809,8 @@ export const ImportGRN: React.FC = () => {
             bags:           ['bags','packs','packets'],
             price_per_unit: ['price_per_unit','price','rate','priceperunit','priceperkg'],
             gst_pct:        ['gst_pct','gst','gst%','tax%','taxrate'],
+            taxable_amount: ['taxable_amount','taxableamount','taxable','taxablevalue','basic_amount','basicamount','basic'],
+            tax_amount:     ['tax_amount','taxamount','gst_amount','gstamount','taxvalue'],
             total_amount:   ['total_amount','totalamount','total','invoice_amount','invoiceamount','grandtotal','netamount','amount'],
             vehicle_no:     ['vehicle_no','vehicleno','vehicle','truckno'],
             remarks:        ['remarks','notes','comment'],
@@ -847,19 +849,23 @@ export const ImportGRN: React.FC = () => {
           unit: get(row, 'unit', 8) ? String(get(row,'unit',8)).trim() : 'kg',
           bags: parseInt(String(get(row,'bags',9)??'')) || null,
           price_per_unit: numStr(get(row, 'price_per_unit', 10)),
-          gst_pct: numStr(get(row, 'gst_pct', 11)),
           vehicle_no: get(row, 'vehicle_no', 12) ? String(get(row,'vehicle_no',12)).trim() : null,
           remarks: get(row, 'remarks', 13) ? String(get(row,'remarks',13)).trim() : null,
-          // Use the invoice total from the file if given; else compute qty*price*(1+gst%)
+          // Taxable + Tax = Total; any blank value is back-filled from the others
           ...(() => {
+            const r2 = (n: number) => +n.toFixed(2)
             const price = numStr(get(row, 'price_per_unit', 10))
-            const gst   = numStr(get(row, 'gst_pct', 11)) ?? 0
-            const basic = qty != null && price != null ? qty * price : null
-            const fileTotal = numStr(get(row, 'total_amount', -1))
-            return {
-              basic_amount: basic,
-              total_amount: fileTotal != null ? fileTotal : (basic != null ? +(basic * (1 + gst / 100)).toFixed(2) : null),
+            let gst   = numStr(get(row, 'gst_pct', 11))
+            let basic = numStr(get(row, 'taxable_amount', -1)) ?? (qty != null && price != null ? r2(qty * price) : null)
+            let tax   = numStr(get(row, 'tax_amount', -1))
+            let total = numStr(get(row, 'total_amount', -1))
+            if (tax == null) {
+              if (total != null && basic != null) tax = r2(total - basic)
+              else if (basic != null && gst != null) tax = r2(basic * gst / 100)
             }
+            if (total == null && basic != null) total = r2(basic + (tax ?? 0))
+            if (gst == null) gst = basic && basic > 0 && tax != null ? r2(tax / basic * 100) : 0
+            return { basic_amount: basic, gst_amount: tax, total_amount: total, gst_pct: gst }
           })(),
         })
       }
@@ -918,9 +924,10 @@ export const ImportGRN: React.FC = () => {
           invoice_date: r.invoice_date,
           qty: r.qty, unit: r.unit, bags: r.bags,
           price_per_unit: r.price_per_unit || null,
-          basic_amount: r.basic_amount || null,
-          gst_pct: r.gst_pct || null,
-          total_amount: r.total_amount || null,
+          basic_amount: r.basic_amount ?? null,
+          gst_pct: r.gst_pct ?? null,
+          gst_amount: r.gst_amount ?? null,
+          total_amount: r.total_amount ?? null,
           vehicle_no: r.vehicle_no, remarks: r.remarks,
         })
         if (error) { errors++; messages.push(`${r.grn_no}: ${error.message}`) } else success++
@@ -948,8 +955,8 @@ export const ImportGRN: React.FC = () => {
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
             <p className="font-medium mb-1">Accepted columns (header names detected automatically):</p>
-            <p>grn_no | grn_date | site_code | party_name | invoice_no | invoice_date | item_name | qty | unit | bags | price_per_unit | gst_pct | total_amount | vehicle_no | remarks</p>
-            <p className="text-xs text-blue-500 mt-1">total_amount is optional — leave it blank to auto-calculate (qty × price + GST), or enter the exact invoice total to avoid edits.</p>
+            <p>grn_no | grn_date | site_code | party_name | invoice_no | invoice_date | item_name | qty | unit | bags | price_per_unit | gst_pct | taxable_amount | tax_amount | total_amount | vehicle_no | remarks</p>
+            <p className="text-xs text-blue-500 mt-1">Amounts follow your invoice: taxable_amount + tax_amount = total_amount. All three are optional — fill what your invoice shows and the rest is calculated. Leave them blank to auto-calculate from qty × price + GST%.</p>
           </div>
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 transition-all" onClick={()=>fileRef.current?.click()}>
             <FileSpreadsheet size={32} className="mx-auto text-gray-300 mb-2"/>
@@ -960,7 +967,7 @@ export const ImportGRN: React.FC = () => {
             <div className="overflow-x-auto text-xs bg-gray-50 rounded-lg p-3">
               <p className="font-medium text-sm text-gray-700 mb-2">{parsedRows.length} parsed — full preview (first {preview.length}):</p>
               <table className="w-full whitespace-nowrap">
-                <thead><tr>{['GRN No','Date','Site','Party','Invoice No','Inv Date','Item','Qty','Unit','Bags','Price/Unit','GST%','Total','Vehicle','Remarks'].map(h=><th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>)}</tr></thead>
+                <thead><tr>{['GRN No','Date','Site','Party','Invoice No','Inv Date','Item','Qty','Unit','Bags','Price/Unit','GST%','Taxable','Tax','Total','Vehicle','Remarks'].map(h=><th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>)}</tr></thead>
                 <tbody>{preview.map((r:any,i:number)=>(
                   <tr key={i} className="border-t border-gray-200">
                     <td className="px-2 py-1">{r.grn_no}</td>
@@ -975,6 +982,8 @@ export const ImportGRN: React.FC = () => {
                     <td className="px-2 py-1">{r.bags??'—'}</td>
                     <td className="px-2 py-1">{r.price_per_unit??'—'}</td>
                     <td className="px-2 py-1">{r.gst_pct??'—'}</td>
+                    <td className="px-2 py-1">{r.basic_amount!=null?r.basic_amount.toLocaleString('en-IN'):'—'}</td>
+                    <td className="px-2 py-1">{r.gst_amount!=null?r.gst_amount.toLocaleString('en-IN'):'—'}</td>
                     <td className="px-2 py-1 font-semibold">{r.total_amount!=null?r.total_amount.toLocaleString('en-IN'):'—'}</td>
                     <td className="px-2 py-1">{r.vehicle_no??'—'}</td>
                     <td className="px-2 py-1">{r.remarks??'—'}</td>
