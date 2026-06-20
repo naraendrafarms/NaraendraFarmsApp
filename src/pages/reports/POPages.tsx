@@ -420,7 +420,7 @@ const POTab: React.FC = () => {
                     <div className="flex gap-1">
                       {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
                       {canEdit && o.material_status !== 'Received' && (
-                        <button onClick={() => { setReceiptPO(o); setReceiptForm(f => ({...f, unit: o.unit||'', qty_received: o.quantity||''})); setReceiptOpen(true) }}
+                        <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', remarks: '' }); setReceiptOpen(true) }}
                           className="p-1 text-green-500 hover:text-green-700" title="Record Stock Receipt"><PackageCheck size={13}/></button>
                       )}
                       {canDel && <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600" title="Delete"><Trash2 size={13}/></button>}
@@ -493,7 +493,7 @@ const POTab: React.FC = () => {
                             <div className="flex gap-1">
                               {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
                               {canEdit && o.material_status !== 'Received' && (
-                                <button onClick={() => { setReceiptPO(o); setReceiptForm((fv: any) => ({...fv, unit: o.unit||'', qty_received: o.quantity||''})); setReceiptOpen(true) }}
+                                <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', remarks: '' }); setReceiptOpen(true) }}
                                   className="p-1 text-green-500 hover:text-green-700" title="Record Stock Receipt"><PackageCheck size={13}/></button>
                               )}
                               {canDel && <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600" title="Delete"><Trash2 size={13}/></button>}
@@ -562,27 +562,49 @@ const POTab: React.FC = () => {
       {/* Stock Receipt Modal */}
       <Modal open={receiptOpen} onClose={() => setReceiptOpen(false)} title={`Record Stock Receipt — PO ${receiptPO?.po_no}`}
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setReceiptOpen(false)}>Cancel</Button><Button onClick={() => receiptMut.mutate()} loading={receiptMut.isPending}>Save Receipt</Button></div>}>
-        {receiptPO && (
-          <div className="space-y-3">
-            <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700">
-              <strong>{receiptPO.vendor_name}</strong> · {receiptPO.item_name} · Ordered: {receiptPO.quantity} {receiptPO.unit}
+        {receiptPO && (() => {
+          // auto-compute pay_before when receipt date changes
+          const onReceiptDateChange = (e: any) => {
+            const d = e.target.value
+            rf('receipt_date')(e)
+            // update pay_before in pending_payment via receiptMut — just track locally for display
+          }
+          const creditDays = receiptPO.credit_limit_days ? Number(receiptPO.credit_limit_days) : 0
+          const payBefore = (() => {
+            if (!receiptForm.receipt_date || !creditDays) return null
+            const d = new Date(receiptForm.receipt_date + 'T00:00:00')
+            d.setDate(d.getDate() + creditDays)
+            return d.toISOString().slice(0, 10)
+          })()
+          return (
+            <div className="space-y-3">
+              <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700 space-y-0.5">
+                <div><strong>{receiptPO.vendor_name}</strong> · {receiptPO.item_name} · Ordered: {receiptPO.quantity} {receiptPO.unit}</div>
+                {receiptPO.grn_no && <div>GRN No: <strong>{receiptPO.grn_no}</strong> (auto-linked from PO)</div>}
+                {receiptPO.po_no  && <div>PO No: <strong>{receiptPO.po_no}</strong></div>}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <DateInput label="Receipt Date (today by default)" value={receiptForm.receipt_date} onChange={rf('receipt_date')} />
+                <Input label="Qty Received" type="number" value={receiptForm.qty_received} onChange={rf('qty_received')} />
+              </div>
+              {payBefore && (
+                <div className="bg-green-50 rounded px-3 py-2 text-xs text-green-700">
+                  ✓ Pay Before Date will be set to <strong>{fmtDate(payBefore)}</strong> (GRN date + {creditDays} credit days)
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Unit" value={receiptForm.unit} onChange={rf('unit')} />
+                <Sel label="Condition" value={receiptForm.condition} onChange={rf('condition')} options={['Good','Partial','Damaged'].map(c=>({value:c,label:c}))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Vehicle No" value={receiptForm.vehicle_no} onChange={rf('vehicle_no')} />
+                <Input label="Received By" value={receiptForm.received_by} onChange={rf('received_by')} />
+              </div>
+              <Input label="Remarks" value={receiptForm.remarks} onChange={rf('remarks')} />
+              <p className="text-xs text-green-600">✓ PO status → Received · GRN date set · Payment due date auto-calculated</p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <DateInput label="Receipt Date *" value={receiptForm.receipt_date} onChange={rf('receipt_date')} />
-              <Input label="Qty Received" type="number" value={receiptForm.qty_received} onChange={rf('qty_received')} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Unit" value={receiptForm.unit} onChange={rf('unit')} />
-              <Sel label="Condition" value={receiptForm.condition} onChange={rf('condition')} options={['Good','Partial','Damaged'].map(c=>({value:c,label:c}))} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Vehicle No" value={receiptForm.vehicle_no} onChange={rf('vehicle_no')} />
-              <Input label="Received By" value={receiptForm.received_by} onChange={rf('received_by')} />
-            </div>
-            <Input label="Remarks" value={receiptForm.remarks} onChange={rf('remarks')} />
-            <p className="text-xs text-green-600">✓ PO will be automatically marked as Received</p>
-          </div>
-        )}
+          )
+        })()}
       </Modal>
     </div>
   )
@@ -741,7 +763,7 @@ const PaymentsTab: React.FC = () => {
 
   const { data: orders=[] } = useQuery({
     queryKey: ['purchase_orders_all'],
-    queryFn: async () => { const { data } = await supabase.from('purchase_orders').select('id,po_no,vendor_name,total_amount').order('po_date',{ascending:false}); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('purchase_orders').select('id,po_no,vendor_name,total_amount,grn_date,grn_no,credit_limit_days').order('po_date',{ascending:false}); return data ?? [] }
   })
 
   const { data: bankAccounts=[] } = useQuery({
@@ -749,16 +771,17 @@ const PaymentsTab: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('*').eq('is_active',true).order('bank_name'); return data ?? [] }
   })
 
-  // Credit limit warning
+  // Credit limit warning — based on GRN received date (not invoice date)
   const creditWarning = useMemo(() => {
-    if (!form.invoice_date || !form.credit_limit) return null
-    const due = new Date(form.invoice_date)
+    const base = form.grn_date || form.invoice_date
+    if (!base || !form.credit_limit) return null
+    const due = new Date(base)
     due.setDate(due.getDate() + Number(form.credit_limit))
     const days = Math.ceil((due.getTime() - Date.now()) / 86400000)
     if (days < 0) return `⚠️ Credit limit exceeded by ${Math.abs(days)} days!`
     if (days <= 3) return `⚠️ Payment due in ${days} day(s) — within credit limit`
     return null
-  }, [form.invoice_date, form.credit_limit])
+  }, [form.grn_date, form.invoice_date, form.credit_limit])
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -856,12 +879,31 @@ const PaymentsTab: React.FC = () => {
     setOpen(true)
   }
 
-  // When PO is selected in form, auto-fill fields
+  // When PO is selected, auto-fill vendor, GRN date/no, and compute pay_before_date
   const handlePoSelect = (e: any) => {
     const poId = e.target.value
     const po = orders.find((o:any) => o.id === poId)
-    if (po) setForm((p:any) => ({...p, po_id: poId, po_no: po.po_no, vendor_name: po.vendor_name, invoice_amount: po.total_amount ?? p.invoice_amount }))
-    else setForm((p:any) => ({...p, po_id: poId}))
+    if (po) {
+      const grnDate = po.grn_date || ''
+      const creditDays = po.credit_limit_days ? Number(po.credit_limit_days) : 0
+      let payBefore = ''
+      if (grnDate && creditDays > 0) {
+        const d = new Date(grnDate + 'T00:00:00')
+        d.setDate(d.getDate() + creditDays)
+        payBefore = d.toISOString().slice(0, 10)
+      }
+      setForm((p: any) => ({
+        ...p,
+        po_id: poId,
+        po_no: po.po_no,
+        vendor_name: po.vendor_name,
+        invoice_amount: po.total_amount ?? p.invoice_amount,
+        grn_date: grnDate || p.grn_date,
+        grn_no: po.grn_no || p.grn_no,
+        credit_limit: creditDays > 0 ? String(creditDays) : p.credit_limit,
+        pay_before_date: payBefore || p.pay_before_date,
+      }))
+    } else setForm((p:any) => ({...p, po_id: poId}))
   }
 
   if (isLoading) return <Spinner />
@@ -1008,7 +1050,17 @@ const PaymentsTab: React.FC = () => {
             <Input label="Invoice No" value={form.invoice_no} onChange={f('invoice_no')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <DateInput label="GRN Date" value={form.grn_date} onChange={f('grn_date')} />
+            <DateInput label="GRN Date (received date)" value={form.grn_date} onChange={(e: any) => {
+              const grnDate = e.target.value
+              const days = Number(form.credit_limit) || 0
+              let payBefore = ''
+              if (grnDate && days > 0) {
+                const d = new Date(grnDate + 'T00:00:00')
+                d.setDate(d.getDate() + days)
+                payBefore = d.toISOString().slice(0, 10)
+              }
+              setForm((p: any) => ({...p, grn_date: grnDate, pay_before_date: payBefore || p.pay_before_date}))
+            }} />
             <DateInput label="Invoice Date" value={form.invoice_date} onChange={f('invoice_date')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -1042,8 +1094,18 @@ const PaymentsTab: React.FC = () => {
             <Input label="Net Payable (₹)" type="number" value={form.net_payable} onChange={f('net_payable')} />
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <Input label="Credit Limit (days)" type="number" value={form.credit_limit} onChange={f('credit_limit')} />
-            <DateInput label="Pay Before Date" value={form.pay_before_date} onChange={f('pay_before_date')} />
+            <Input label="Credit Limit (days)" type="number" value={form.credit_limit} onChange={(e: any) => {
+              const days = Number(e.target.value) || 0
+              const base = form.grn_date || form.invoice_date
+              let payBefore = ''
+              if (base && days > 0) {
+                const d = new Date(base + 'T00:00:00')
+                d.setDate(d.getDate() + days)
+                payBefore = d.toISOString().slice(0, 10)
+              }
+              setForm((p: any) => ({...p, credit_limit: e.target.value, pay_before_date: payBefore || p.pay_before_date}))
+            }} />
+            <DateInput label="Pay Before Date (auto: GRN date + credit days)" value={form.pay_before_date} onChange={f('pay_before_date')} />
             <Sel label="Account Type" value={form.account_type} onChange={f('account_type')} options={[{value:'',label:'Select'},...ACCT_TYPES.map(a=>({value:a,label:a}))]} />
           </div>
           {creditWarning && <div className="bg-yellow-50 border border-yellow-200 rounded px-3 py-2 text-xs text-yellow-700">{creditWarning}</div>}
