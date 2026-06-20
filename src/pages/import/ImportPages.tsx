@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
-import { Card, CardHeader, Button, Select, SectionHeader, Badge } from '@/components/ui'
+import { Card, CardHeader, Button, Select, SectionHeader, Badge, Table, Th, Td } from '@/components/ui'
 import { Upload, CheckCircle, XCircle, AlertTriangle, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
@@ -276,43 +276,97 @@ export const ImportElectricity: React.FC = () => {
     return null
   }
 
+  // exact name / usc map for the clean template format
+  const meterByText = (text: string): { id: string; name: string } | null => {
+    const nl = text.toLowerCase().trim()
+    const m = meters?.find((x: any) => x.meter_name?.toLowerCase() === nl || x.usc_no?.toLowerCase() === nl)
+    if (m) return { id: m.id, name: m.meter_name }
+    const id = findMeter(text)
+    if (id) return { id, name: meters?.find((x: any) => x.id === id)?.meter_name ?? text }
+    return null
+  }
+
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
     const rows: any[] = []
 
-    for (const sheetName of wb.SheetNames) {
-      // Skip non-month sheets
-      if (['sheet1','sheet2','sheet3','all months'].includes(sheetName.toLowerCase())) continue
-      // Try to parse month from sheet name
-      const monthParsed = new Date(sheetName + ' 1')
-      if (isNaN(monthParsed.getTime())) continue
-      const monthStr = monthParsed.toISOString().slice(0, 7) + '-01'
+    // ── Format A: clean template with a header row (meter_name | bill_month | … )
+    const first = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null }) as any[][]
+    const hdr = (first[0] ?? []).map((v: any) => String(v ?? '').toLowerCase().replace(/\s+/g, '_'))
+    const isTemplate = hdr.some(h => h === 'meter_name' || h === 'usc_no') && hdr.some(h => h.includes('bill_month') || h.includes('month'))
 
-      const ws = wb.Sheets[sheetName]
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null }) as any[][]
-      for (const row of data) {
-        if (!row || row.length < 4) continue
-        const nameCell = String(row[2] ?? row[1] ?? '').trim()
-        if (!nameCell || nameCell.toLowerCase() === 'unit name') continue
-        const amount = num(row[3])
-        if (!amount) continue
-        const meterId = findMeter(nameCell)
-        if (!meterId) continue
-        const units = num(row[6]) || null
-        rows.push({ meter_id: meterId, bill_month: monthStr, units_consumed: units || null, amount })
+    if (isTemplate) {
+      const col = (name: string) => hdr.findIndex(h => h === name || h.includes(name))
+      const ci = {
+        meter: col('meter_name') >= 0 ? col('meter_name') : col('usc_no'),
+        month: col('bill_month') >= 0 ? col('bill_month') : col('month'),
+        units: col('units'), amount: col('amount'), acd: col('acd'),
+        deposit: col('deposit'), paid: col('paid'), remarks: col('remarks'),
+      }
+      for (const r of first.slice(1)) {
+        if (!r) continue
+        const mt = meterByText(String(r[ci.meter] ?? ''))
+        const amount = num(r[ci.amount])
+        if (!mt || !amount) continue
+        let month = String(r[ci.month] ?? '').trim()
+        if (month.length === 7) month += '-01'
+        else { const p = parseDate(r[ci.month]); if (p) month = p.slice(0, 8) + '01' }
+        rows.push({
+          meter_id: mt.id, _meter: mt.name, bill_month: month,
+          units_consumed: ci.units >= 0 ? (num(r[ci.units]) || null) : null,
+          amount,
+          acd_dc_due: ci.acd >= 0 ? num(r[ci.acd]) : 0,
+          deposit_amount: ci.deposit >= 0 ? num(r[ci.deposit]) : 0,
+          paid_date: ci.paid >= 0 && r[ci.paid] ? (parseDate(r[ci.paid]) ?? null) : null,
+          remarks: ci.remarks >= 0 ? (r[ci.remarks] ? String(r[ci.remarks]) : null) : null,
+        })
+      }
+    } else {
+      // ── Format B: official utility workbook — one sheet per month
+      for (const sheetName of wb.SheetNames) {
+        if (['sheet1','sheet2','sheet3','all months'].includes(sheetName.toLowerCase())) continue
+        const monthParsed = new Date(sheetName + ' 1')
+        if (isNaN(monthParsed.getTime())) continue
+        const monthStr = monthParsed.toISOString().slice(0, 7) + '-01'
+
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: null }) as any[][]
+        for (const row of data) {
+          if (!row || row.length < 4) continue
+          const nameCell = String(row[2] ?? row[1] ?? '').trim()
+          if (!nameCell || nameCell.toLowerCase() === 'unit name') continue
+          const amount = num(row[3])
+          if (!amount) continue
+          const meterId = findMeter(nameCell)
+          if (!meterId) continue
+          rows.push({
+            meter_id: meterId, _meter: meters?.find((m:any)=>m.id===meterId)?.meter_name ?? nameCell,
+            bill_month: monthStr, units_consumed: num(row[6]) || null, amount,
+            acd_dc_due: num(row[4]) || 0, deposit_amount: 0, paid_date: null, remarks: null,
+          })
+        }
       }
     }
     setParsedRows(rows)
     toast.success(`Parsed ${rows.length} bill records`)
   }
 
+  const downloadTemplate = () => {
+    const headers = ['meter_name','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','paid_date','remarks']
+    const sample = ['Bodjanampet - 1','2026-04','1200','18500','0','0','2026-04-15','']
+    const csv = headers.join(',') + '\n' + sample.join(',')
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    a.download = 'electricity_bills_template.csv'; a.click()
+  }
+
   const mut = useMutation({
     mutationFn: async () => {
       let success = 0, errors = 0; const messages: string[] = []
       for (const row of parsedRows) {
+        const { _meter, ...clean } = row
         const { error } = await supabase.from('electricity_bills')
-          .upsert(row, { onConflict: 'meter_id,bill_month' })
+          .upsert(clean, { onConflict: 'meter_id,bill_month' })
         if (error) { errors++; messages.push(error.message) } else success++
       }
       return { success, errors, messages }
@@ -328,24 +382,39 @@ export const ImportElectricity: React.FC = () => {
       <Card>
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
-            <p className="font-medium mb-1">Expected format (any sheet named after a month):</p>
-            <p>Row headers: Sl.No | Service No | Unit Name | Amount | ACD/DC Due | No Of Units</p>
+            <p className="font-medium mb-1">Two formats accepted — same as the Electricity page Import:</p>
+            <p><strong>1. Template (recommended):</strong> meter_name | bill_month | units_consumed | amount | acd_dc_due | deposit_amount | paid_date | remarks</p>
+            <p className="mt-1"><strong>2. Utility workbook:</strong> one sheet per month with Sl.No | Service No | Unit Name | Amount | ACD/DC Due | … | No Of Units</p>
             <p className="mt-1">Site names auto-matched: Bodjanampet-1, Bodjanampet-2, Feedmill, Kethireddypally, Potlapally</p>
+            <button onClick={downloadTemplate} className="mt-2 text-brand-600 hover:underline font-medium">↓ Download template (CSV)</button>
           </div>
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 transition-all"
             onClick={() => fileRef.current?.click()}>
             <FileSpreadsheet size={32} className="mx-auto text-gray-300 mb-2" />
-            <p className="text-sm text-gray-500">Click to upload electricity bills Excel</p>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile} />
+            <p className="text-sm text-gray-500">Click to upload electricity bills CSV / Excel</p>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile} />
           </div>
           {parsedRows.length > 0 && (
-            <div className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
-              <p className="font-medium mb-1">{parsedRows.length} bill records parsed</p>
-              {parsedRows.slice(0, 3).map((r, i) => (
-                <p key={i} className="text-xs text-gray-400">
-                  {r.bill_month} | Meter: {meters?.find((m:any) => m.id === r.meter_id)?.meter_name} | Rs {r.amount.toLocaleString('en-IN')}
-                </p>
-              ))}
+            <div className="overflow-x-auto">
+              <p className="font-medium text-sm text-gray-700 mb-2">{parsedRows.length} records parsed — full preview:</p>
+              <Table>
+                <thead><tr>{['Meter','Bill Month','Units','Amount','ACD/DC','Deposit','Paid Date','Remarks'].map(h=><Th key={h}>{h}</Th>)}</tr></thead>
+                <tbody>
+                  {parsedRows.slice(0, 20).map((r:any, i:number) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <Td className="font-medium">{r._meter}</Td>
+                      <Td>{r.bill_month}</Td>
+                      <Td>{r.units_consumed ?? '—'}</Td>
+                      <Td>{r.amount?.toLocaleString('en-IN')}</Td>
+                      <Td>{r.acd_dc_due ?? 0}</Td>
+                      <Td>{r.deposit_amount ?? 0}</Td>
+                      <Td>{r.paid_date ?? '—'}</Td>
+                      <Td>{r.remarks ?? '—'}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+              {parsedRows.length > 20 && <p className="text-xs text-gray-400 mt-1">…and {parsedRows.length - 20} more</p>}
             </div>
           )}
           <Button icon={<Upload size={16}/>} loading={mut.isPending}
@@ -757,7 +826,7 @@ export const ImportGRN: React.FC = () => {
       }
     }
     setParsedRows(rows)
-    setPreview(rows.slice(0, 5))
+    setPreview(rows.slice(0, 20))
     toast.success(`Parsed ${rows.length} GRN records`)
   }
 
@@ -848,18 +917,25 @@ export const ImportGRN: React.FC = () => {
           </div>
           {preview.length > 0 && (
             <div className="overflow-x-auto text-xs bg-gray-50 rounded-lg p-3">
-              <table className="w-full">
-                <thead><tr>{['Date','GRN No','Farm','Party','Item','Qty','Unit','Amount'].map(h=><th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>)}</tr></thead>
+              <p className="font-medium text-sm text-gray-700 mb-2">{parsedRows.length} parsed — full preview (first {preview.length}):</p>
+              <table className="w-full whitespace-nowrap">
+                <thead><tr>{['GRN No','Date','Site','Party','Invoice No','Inv Date','Item','Qty','Unit','Bags','Price/Unit','GST%','Vehicle','Remarks'].map(h=><th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>)}</tr></thead>
                 <tbody>{preview.map((r:any,i:number)=>(
                   <tr key={i} className="border-t border-gray-200">
-                    <td className="px-2 py-1 font-medium">{r.grn_date}</td>
                     <td className="px-2 py-1">{r.grn_no}</td>
+                    <td className="px-2 py-1 font-medium">{r.grn_date}</td>
                     <td className="px-2 py-1">{r.farm_name??'—'}</td>
                     <td className="px-2 py-1">{r.party_name??'—'}</td>
+                    <td className="px-2 py-1">{r.invoice_no??'—'}</td>
+                    <td className="px-2 py-1">{r.invoice_date??'—'}</td>
                     <td className="px-2 py-1">{r.item_name??'—'}</td>
                     <td className="px-2 py-1 font-semibold">{r.qty?.toLocaleString('en-IN')}</td>
                     <td className="px-2 py-1">{r.unit}</td>
-                    <td className="px-2 py-1">{r.total_amount?.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-1">{r.bags??'—'}</td>
+                    <td className="px-2 py-1">{r.price_per_unit??'—'}</td>
+                    <td className="px-2 py-1">{r.gst_pct??'—'}</td>
+                    <td className="px-2 py-1">{r.vehicle_no??'—'}</td>
+                    <td className="px-2 py-1">{r.remarks??'—'}</td>
                   </tr>
                 ))}</tbody>
               </table>
