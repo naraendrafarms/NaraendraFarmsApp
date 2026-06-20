@@ -117,7 +117,8 @@ const NAV: NavItem[] = [
   {
     label: 'Purchase & Payments', icon: <ShoppingCart size={18}/>,
     children: [
-      { label: 'Purchase & Payments', to: '/purchase-orders' },
+      { label: 'New Purchase',         to: '/purchases/new' },
+      { label: 'Purchase Orders',      to: '/purchase-orders' },
       { label: 'Farm Expenses',        to: '/expenses' },
     ]
   },
