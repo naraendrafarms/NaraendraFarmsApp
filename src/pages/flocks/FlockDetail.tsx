@@ -559,7 +559,10 @@ export const FlockDetail: React.FC = () => {
           subtitle="Lifetime production" icon={<Egg size={18}/>} color="text-yellow-600" />
         <StatCard title="HE Eggs" value={(totalHE/100000).toFixed(2)+'L'}
           subtitle={pct(hePct)+' of eggs'} icon={<Egg size={18}/>} color="text-brand-600" />
-        <StatCard title="Alive ♀" value={(lastRecord?.closing_female ?? flock.total_placed_f)?.toLocaleString('en-IN')}
+        <StatCard title="Alive ♀" value={(lastRecord
+            ? (lastRecord.closing_female > 0 ? lastRecord.closing_female : (lastRecord.opening_female > 0 ? lastRecord.opening_female : 0))
+            : flock.total_placed_f
+          )?.toLocaleString('en-IN')}
           subtitle={'Mortality: '+totalMortF.toLocaleString('en-IN')} icon={<Bird size={18}/>} color="text-green-600" />
         <StatCard title="HE Revenue" value={inr(heRevenue)}
           subtitle="From HE Dispatch records" icon={<DollarSign size={18}/>} color="text-green-700" />
