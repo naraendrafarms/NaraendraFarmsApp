@@ -2925,23 +2925,23 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
             if (error) throw error
           }
         }
-        // Upsert payment records linked by po_no lookup
+        // Upsert payment records — skip po_id FK lookup (too many POs for a single .in() query)
+        // po_no text is already stored; po_id can be backfilled later if needed
         if (preview.payRows && preview.payRows.length > 0) {
-          // fetch po_ids for po_no mapping
-          const poNos = [...new Set(preview.payRows.map((r:any)=>r.po_no))]
-          const { data: poData } = await supabase.from('purchase_orders').select('id,po_no').in('po_no', poNos)
-          const poMap: Record<string,string> = {}
-          for (const p of poData??[]) poMap[p.po_no] = p.id
           const payments = preview.payRows.filter((r:any)=>r.amount>0).map((r:any)=>({
             vendor_name: r.vendor_name, invoice_date: r.grn_date ?? r.paid_date ?? null,
             amount: r.amount, status: r.status ?? 'Pending',
             paid_date: r.paid_date ?? null, grn_no: r.grn_no ?? null,
-            po_id: poMap[r.po_no] ?? null,
+            po_no: r.po_no ?? null,
             credit_limit_days: r.credit_limit_days ?? null,
           }))
           if (payments.length > 0) {
-            const { error } = await supabase.from('pending_payments').upsert(payments, { onConflict:'vendor_name,invoice_date,amount', ignoreDuplicates:true })
-            if (error) console.warn('Payment upsert warning:', error.message)
+            // Chunk into 200 to avoid payload limits; use vendor_name+grn_no unique key
+            for (let i=0;i<payments.length;i+=200) {
+              const chunk = payments.slice(i,i+200)
+              const { error } = await supabase.from('pending_payments').upsert(chunk, { onConflict:'vendor_name,grn_no', ignoreDuplicates:true })
+              if (error) console.warn('Payment upsert warning:', error.message)
+            }
           }
         }
         // Auto-create vendor parties from all imported PO rows (name only, no GST in Excel)
@@ -3015,7 +3015,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
       qc.invalidateQueries({ queryKey: ['parties'] })
       qc.invalidateQueries({ queryKey: ['ingredients'] })
       setSaving(false); reset(); onClose()
-    } catch(e:any) { toast.error(e.message); setSaving(false) }
+    } catch(e:any) { toast.error(e.message) } finally { setSaving(false) }
   }
 
   if (!open) return null
