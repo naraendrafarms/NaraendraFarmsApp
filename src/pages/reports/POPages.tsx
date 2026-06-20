@@ -2903,10 +2903,16 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
     const rows = editableRows.length ? editableRows : preview.rows
     try {
       if (preview.type === 'excel') {
-        // Upsert PO lines
+        // Upsert PO lines — deduplicate by po_no+item_name first (Excel may have duplicate rows)
         if (rows.length > 0) {
+          const seen = new Set<string>()
+          const deduped = rows.filter((r: any) => {
+            const key = `${r.po_no}||${r.item_name}`
+            if (seen.has(key)) return false
+            seen.add(key); return true
+          })
           const chunks = []
-          for (let i=0;i<rows.length;i+=200) chunks.push(rows.slice(i,i+200))
+          for (let i=0;i<deduped.length;i+=200) chunks.push(deduped.slice(i,i+200))
           for (const chunk of chunks) {
             const { error } = await supabase.from('purchase_orders').upsert(chunk, { onConflict:'po_no,item_name' })
             if (error) throw error
