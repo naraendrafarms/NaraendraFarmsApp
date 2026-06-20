@@ -131,20 +131,24 @@ export const PurchaseEntry: React.FC = () => {
       }
       // Equipment / Other: no stock table — tracked via Pending Payments below.
 
-      // 2. ALWAYS log to Pending Payments so the accountant sees every bill in one place
-      const { error: payErr } = await supabase.from('pending_payments').insert({
-        vendor_name: supplierName,
-        grn_no: form.grn_no || null,
-        grn_date: form.purchase_date,
-        invoice_date: form.invoice_date || form.purchase_date,
-        invoice_amount: total || null,
-        payment_status: form.payment_status,
-        paid_date: form.payment_status === 'Paid' ? form.purchase_date : null,
-        credit_limit: form.credit_limit ? Number(form.credit_limit) : null,
-        pay_before_date: payBefore,
-        account_type: form.account_type || null,
-      })
-      if (payErr) throw payErr
+      // 2. Log to Pending Payments so every bill is in one place.
+      //    Feed goes through the grn -> pending_payments DB trigger, so only
+      //    raise the bill manually for non-Feed categories to avoid duplicates.
+      if (form.category !== 'Feed') {
+        const { error: payErr } = await supabase.from('pending_payments').insert({
+          vendor_name: supplierName,
+          grn_no: form.grn_no || `${form.category.toUpperCase()}-${form.invoice_no || Date.now()}`,
+          grn_date: form.purchase_date,
+          invoice_date: form.invoice_date || form.purchase_date,
+          invoice_amount: total || null,
+          payment_status: form.payment_status,
+          paid_date: form.payment_status === 'Paid' ? form.purchase_date : null,
+          credit_limit: form.credit_limit ? Number(form.credit_limit) : null,
+          pay_before_date: payBefore,
+          account_type: form.account_type || null,
+        })
+        if (payErr) throw payErr
+      }
 
       // 3. If paid in cash, mirror to Cash Book
       if (form.payment_status === 'Paid' && form.account_type === 'Cash' && total > 0) {
