@@ -23,6 +23,13 @@
 > missing table/column fails SILENTLY. Verify schema changes with a diagnostic
 > SELECT against information_schema and read "OK rows=N" in the job log.
 
+### 1a. NEVER put a double-dollar marker in a migration COMMENT
+run_sql.py toggles its dollar-quote state on ANY line containing the `$`+`$`
+marker — including comments. A marker in a comment desyncs the toggle so the
+runner splits a plpgsql function body on internal semicolons → syntax errors
+(`END IF;` / `RETURN OLD;` as separate statements). Keep markers only on the
+real `AS` open line and the closing line.
+
 ### 1b. Prefer DELETE TRIGGERS over FK CASCADE for cross-table cleanup
 ALTER TABLE ADD CONSTRAINT can fail silently through run_sql.py (see above), and
 multiple ADD CONSTRAINTs in one statement are atomic — one failure loses all.

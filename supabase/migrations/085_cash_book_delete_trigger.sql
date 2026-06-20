@@ -1,11 +1,11 @@
 -- Migration 085: DB-level trigger to delete linked cash_book rows when an
 -- nhe_sale or he_dispatch is deleted. Replaces the FK CASCADE from migration
--- 083, which silently failed to create (run_sql.py swallows "does not exist"
--- errors and the two ADD CONSTRAINTs were one atomic statement).
---
--- A trigger is more robust through this migration runner because the function
--- body is a single $$-quoted block. It guarantees cash_book stays in sync no
--- matter how the delete is initiated (UI bulk delete, import, manual SQL).
+-- 083, which silently failed to create.
+-- NOTE: no dollar-quote markers appear in these comments on purpose, because
+-- the migration runner toggles its dollar-block state on any line containing
+-- the double-dollar marker (even inside a comment), which corrupts splitting.
+-- A trigger guarantees cash_book stays in sync no matter how the delete is
+-- initiated (UI bulk delete, import, manual SQL).
 
 CREATE OR REPLACE FUNCTION public.fn_delete_linked_cash_book()
 RETURNS TRIGGER
