@@ -59,7 +59,8 @@ export const fmtDateShort = (d: string | null | undefined): string => {
 }
 
 // Month label: Jun 2026
-export const fmtMonth = (d: string): string => {
+export const fmtMonth = (d: string | null | undefined): string => {
+  if (!d) return '—'
   const parts = d.split('-')
   if (parts.length >= 2) return `${MONTHS[parseInt(parts[1]) - 1]} ${parts[0]}`
   return d

@@ -401,7 +401,7 @@ const AllocationTab: React.FC = () => {
         </Card>
       )}
       <Modal open={!!allocModal} onClose={()=>setAllocModal(null)}
-        title={`Allocate — ${allocModal?.electricity_meters?.meter_name} ${fmtMonth(allocModal?.bill_month)} — ${inr(allocModal?.amount??0)}`} size="md"
+        title={allocModal ? `Allocate — ${allocModal.electricity_meters?.meter_name} ${fmtMonth(allocModal.bill_month)} — ${inr(allocModal.amount??0)}` : ''} size="md"
         footer={<><Button variant="secondary" onClick={()=>setAllocModal(null)}>Cancel</Button><Button loading={allocMut.isPending} onClick={()=>allocMut.mutate()}>Save Allocation</Button></>}>
         <div className="space-y-3">
           {allocForm.map((row,i)=>(
