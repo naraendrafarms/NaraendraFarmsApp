@@ -2565,11 +2565,18 @@ function parseNBFExcel(wb: any): any[] {
       sheetFY = `${y1}-${y2.slice(2)}`
     }
 
-    // Find actual header row (contains DATE OF INDENT or similar)
+    // Find the actual column header row — look for the row that has "ITEM" (as in "NAME OF ITEM"
+    // or "ITEM DESCRIPTION") together with "PRICE" and a PO/SUPPLIER column.
+    // The title rows contain "INDENT" inside longer phrases like "ORDER DETAILS AS PER INDENT OF..."
+    // and do NOT contain "ITEM" as a substring, so they are safely skipped.
     let headerRow = -1
-    for (let i=0;i<20;i++) {
+    for (let i=0;i<25;i++) {
       const r = rows[i] ?? []
-      if (r.some(v=>v&&String(v).toUpperCase().includes('INDENT'))) { headerRow=i; break }
+      const vals = r.map((v:any) => String(v??'').toUpperCase())
+      const hasItem     = vals.some(v => v.includes('ITEM'))
+      const hasPrice    = vals.some(v => v.includes('PRICE') || v.includes('RATE'))
+      const hasSupplier = vals.some(v => v.includes('SUPPLIER') || v.includes('VENDOR') || v.includes('PO'))
+      if (hasItem && hasPrice && hasSupplier) { headerRow = i; break }
     }
     if (headerRow<0) continue
 
