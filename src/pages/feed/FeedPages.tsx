@@ -235,8 +235,8 @@ export const GRNEntry: React.FC = () => {
 
   const handleTemplate = () => {
     exportCSV('grn_template.csv',
-      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','gst_pct','vehicle_no','remarks'],
-      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize',10000,'kg',200,22.5,5,'TN01AB1234','']]
+      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','gst_pct','total_amount','vehicle_no','remarks'],
+      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize',10000,'kg',200,22.5,5,'','TN01AB1234','']]
     )
   }
 
@@ -263,6 +263,7 @@ export const GRNEntry: React.FC = () => {
         const price = cleanNum(r.price_per_unit)
         const gst   = cleanNum(r.gst_pct) ?? 0
         const basic = qty != null && price != null ? qty * price : null
+        const fileTotal = cleanNum(r.total_amount)   // exact invoice total if supplied
         return {
           grn_no: r.grn_no,
           grn_date: cleanDate(r.grn_date),
@@ -278,7 +279,7 @@ export const GRNEntry: React.FC = () => {
           price_per_unit: price,
           basic_amount: basic,
           gst_pct: gst,
-          total_amount: basic != null ? basic * (1 + gst / 100) : null,
+          total_amount: fileTotal != null ? fileTotal : (basic != null ? +(basic * (1 + gst / 100)).toFixed(2) : null),
           vehicle_no: r.vehicle_no || null,
           remarks: r.remarks || null,
         }
