@@ -1017,12 +1017,22 @@ export const NHESales: React.FC = () => {
         savedId = ins?.id ?? null
       }
 
-      // Auto-create cash_book entry when cash received
-      if (cashAmt > 0 && !editing) {
+      // Auto-create cash_book entry when cash received (new sales and edits)
+      if (cashAmt > 0) {
         const party = parties?.find((p: any) => p.id === form.party_id)
         const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
         const { category: cbCategory, label: typeLabel } = nheCashCategory(form.sale_type)
         const cbDesc = [typeLabel, flockNo ? `F-${flockNo}` : '', form.dc_no || ''].filter(Boolean).join(' — ')
+        // On edit, remove any existing cash_book entry for this sale to avoid duplicates
+        if (editing && savedId) {
+          await supabase.from('cash_book')
+            .delete()
+            .eq('flock_id', form.flock_id)
+            .eq('txn_type', 'receipt')
+            .eq('payment_mode', 'cash')
+            .eq('amount_in', editing.payment_cash ?? editing.amount ?? 0)
+            .eq('txn_date', editing.sale_date ?? form.sale_date)
+        }
         const { error: cbErr } = await supabase.from('cash_book').insert({
           txn_date:    form.sale_date,
           txn_type:    'receipt',
