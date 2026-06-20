@@ -135,7 +135,7 @@ export const PendingPaymentsPage = PurchaseOrdersPage
 const EMPTY_PO = {
   po_no:'', po_date:'', fiscal_year:currentFY(), vendor_name:'', item_name:'',
   material_type:'', quantity:'', unit:'', rate:'', gst_pct:'', total_amount:'',
-  grn_no:'', grn_date:'', material_status:'Pending',
+  grn_no:'', grn_date:'', material_status:'Pending', credit_limit_days:'',
 }
 
 const POTab: React.FC = () => {
@@ -188,6 +188,7 @@ const POTab: React.FC = () => {
         total_amount: form.total_amount ? Number(form.total_amount) : null,
         grn_no: form.grn_no || null, grn_date: form.grn_date || null,
         material_status: form.material_status,
+        credit_limit_days: form.credit_limit_days ? Number(form.credit_limit_days) : null,
       }
       if (editing) await supabase.from('purchase_orders').update(payload).eq('id', editing.id)
       else await supabase.from('purchase_orders').insert(payload)
@@ -535,7 +536,10 @@ const POTab: React.FC = () => {
             <Input label="GRN No" value={form.grn_no} onChange={f('grn_no')} />
             <DateInput label="GRN Date" value={form.grn_date} onChange={f('grn_date')} />
           </div>
-          <Sel label="Material Status" value={form.material_status} onChange={f('material_status')} options={MAT_STATUS.map(s=>({value:s,label:s}))} />
+          <div className="grid grid-cols-2 gap-3">
+            <Sel label="Material Status" value={form.material_status} onChange={f('material_status')} options={MAT_STATUS.map(s=>({value:s,label:s}))} />
+            <Input label="Credit Limit (days)" type="number" value={form.credit_limit_days} onChange={f('credit_limit_days')} placeholder="e.g. 30" />
+          </div>
         </div>
       </Modal>
 
