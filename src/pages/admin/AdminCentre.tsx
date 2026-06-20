@@ -8,13 +8,15 @@ import {
 } from '@/components/ui'
 import {
   Shield, Users, Bird, Factory, Zap, IndianRupee,
-  CheckCircle, AlertCircle, Plus, Edit2, ChevronRight
+  CheckCircle, AlertCircle, Plus, Edit2, ChevronRight,
+  BookOpen, Trash2, Package, FlaskConical, Syringe,
+  Boxes, Gauge, Building2, Calendar
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 // ── TAB IDs ──────────────────────────────────────────────────────
-type Tab = 'overview' | 'users' | 'flocks' | 'elec' | 'salary'
+type Tab = 'overview' | 'users' | 'flocks' | 'elec' | 'salary' | 'masters'
 
 // ── OVERVIEW TAB ─────────────────────────────────────────────────
 const Overview: React.FC = () => {
@@ -381,6 +383,145 @@ const SalaryAllocation: React.FC = () => {
   )
 }
 
+// ── MASTERS HUB ─────────────────────────────────────────────────
+const MASTER_LINKS = [
+  { label: 'Farms / Sites',     link: '/masters/farms',       icon: <Building2 size={20}/>,    color: 'bg-blue-50 text-blue-600' },
+  { label: 'Sheds',             link: '/masters/sheds',       icon: <Factory size={20}/>,      color: 'bg-indigo-50 text-indigo-600' },
+  { label: 'Parties / Vendors', link: '/masters/parties',     icon: <Users size={20}/>,        color: 'bg-green-50 text-green-600' },
+  { label: 'Ingredients',       link: '/masters/ingredients', icon: <Package size={20}/>,      color: 'bg-yellow-50 text-yellow-700' },
+  { label: 'Feed Types',        link: '/masters/feedtypes',   icon: <Boxes size={20}/>,        color: 'bg-orange-50 text-orange-600' },
+  { label: 'Medicines',         link: '/masters/medicines',   icon: <FlaskConical size={20}/>, color: 'bg-pink-50 text-pink-600' },
+  { label: 'Electricity Meters',link: '/masters/meters',      icon: <Gauge size={20}/>,        color: 'bg-purple-50 text-purple-600' },
+  { label: 'Hatcheries',        link: '/masters/hatcheries',  icon: <Bird size={20}/>,         color: 'bg-teal-50 text-teal-600' },
+  { label: 'Vaccination Schedule',link:'/masters/vaccination',icon: <Syringe size={20}/>,      color: 'bg-red-50 text-red-500' },
+  { label: 'Employees',         link: '/employees',           icon: <Users size={20}/>,        color: 'bg-gray-100 text-gray-600' },
+  { label: 'Vaccination Events',link: '/vaccination',         icon: <Calendar size={20}/>,     color: 'bg-lime-50 text-lime-700' },
+]
+
+const InlineMaster: React.FC<{
+  title: string
+  queryKey: string
+  table: string
+  placeholder: string
+}> = ({ title, queryKey, table, placeholder }) => {
+  const qc = useQueryClient()
+  const [newName, setNewName] = useState('')
+  const [editId, setEditId] = useState<number|null>(null)
+  const [editName, setEditName] = useState('')
+
+  const { data: rows, isLoading } = useQuery({
+    queryKey: [queryKey],
+    queryFn: async () => {
+      const { data } = await supabase.from(table).select('id,name,sort_order').order('sort_order').order('name')
+      return data ?? []
+    }
+  })
+
+  const addMut = useMutation({
+    mutationFn: async () => {
+      if (!newName.trim()) throw new Error('Name required')
+      const maxOrder = (rows as any[])?.reduce((m: number, r: any) => Math.max(m, r.sort_order ?? 0), 0) ?? 0
+      const { error } = await supabase.from(table).insert({ name: newName.trim(), sort_order: maxOrder + 1 })
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Added!'); qc.invalidateQueries({ queryKey: [queryKey] }); setNewName('') },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const saveMut = useMutation({
+    mutationFn: async ({ id, name }: { id: number; name: string }) => {
+      if (!name.trim()) throw new Error('Name required')
+      const { error } = await supabase.from(table).update({ name: name.trim() }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Saved!'); qc.invalidateQueries({ queryKey: [queryKey] }); setEditId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: number) => {
+      const { error } = await supabase.from(table).delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Deleted!'); qc.invalidateQueries({ queryKey: [queryKey] }) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  return (
+    <Card className="space-y-3">
+      <p className="font-semibold text-gray-700 text-sm">{title}</p>
+      {isLoading ? <Spinner /> : (
+        <div className="space-y-1.5">
+          {(rows as any[])?.map((r: any) => (
+            <div key={r.id} className="flex items-center gap-2">
+              {editId === r.id ? (
+                <>
+                  <Input label="" value={editName} onChange={e => setEditName(e.target.value)}
+                    className="flex-1 text-sm" placeholder={placeholder} />
+                  <Button size="sm" onClick={() => saveMut.mutate({ id: r.id, name: editName })} loading={saveMut.isPending}>Save</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditId(null)}>Cancel</Button>
+                </>
+              ) : (
+                <>
+                  <span className="flex-1 text-sm text-gray-700 bg-gray-50 rounded px-2 py-1">{r.name}</span>
+                  <button onClick={() => { setEditId(r.id); setEditName(r.name) }}
+                    className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                  <button onClick={() => { if (confirm(`Delete "${r.name}"?`)) delMut.mutate(r.id) }}
+                    className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 pt-1">
+        <Input label="" value={newName} onChange={e => setNewName(e.target.value)}
+          placeholder={`New ${placeholder.toLowerCase()}…`} className="flex-1 text-sm" />
+        <Button size="sm" icon={<Plus size={14}/>} onClick={() => addMut.mutate()} loading={addMut.isPending}>Add</Button>
+      </div>
+    </Card>
+  )
+}
+
+const MastersHub: React.FC = () => (
+  <div className="space-y-6">
+    <p className="text-sm text-gray-500">Navigate to any master list to add or edit records. Category and Unit masters can be edited here directly.</p>
+
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Master Pages</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {MASTER_LINKS.map(m => (
+          <Link key={m.label} to={m.link}
+            className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl p-3 hover:shadow-sm transition-shadow">
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${m.color}`}>
+              {m.icon}
+            </div>
+            <span className="text-sm font-medium text-gray-700 leading-tight">{m.label}</span>
+            <ChevronRight size={13} className="text-gray-300 ml-auto flex-shrink-0"/>
+          </Link>
+        ))}
+      </div>
+    </div>
+
+    <Divider label="Editable Masters" />
+
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <InlineMaster
+        title="Inventory Categories"
+        queryKey="categories_master"
+        table="categories_master"
+        placeholder="Category name"
+      />
+      <InlineMaster
+        title="Units of Measure"
+        queryKey="units_master"
+        table="units_master"
+        placeholder="Unit name"
+      />
+    </div>
+  </div>
+)
+
 // ── MAIN ADMIN CENTRE ────────────────────────────────────────────
 const TAB_PARAM_MAP: Record<string, Tab> = {
   overview: 'overview',
@@ -389,6 +530,7 @@ const TAB_PARAM_MAP: Record<string, Tab> = {
   elec: 'elec',
   salary: 'salary',
   users: 'users',
+  masters: 'masters',
 }
 
 export const AdminCentre: React.FC = () => {
@@ -406,6 +548,7 @@ export const AdminCentre: React.FC = () => {
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id:'overview', label:'Setup Overview',       icon:<CheckCircle size={15}/> },
+    { id:'masters',  label:'Masters',              icon:<BookOpen size={15}/> },
     { id:'flocks',   label:'Flock–Shed Assignment', icon:<Bird size={15}/> },
     { id:'elec',     label:'Electricity Allocation', icon:<Zap size={15}/> },
     { id:'salary',   label:'Salary Allocation',     icon:<IndianRupee size={15}/> },
@@ -428,6 +571,7 @@ export const AdminCentre: React.FC = () => {
       </div>
 
       {tab === 'overview' && <Overview />}
+      {tab === 'masters'  && <MastersHub />}
       {tab === 'flocks'   && <FlockShedAssign />}
       {tab === 'elec'     && <ElecAllocation />}
       {tab === 'salary'   && <SalaryAllocation />}
