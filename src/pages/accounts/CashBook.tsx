@@ -204,11 +204,18 @@ export const CashBookPage: React.FC = () => {
     )
   }, [rowsWithBalance, filterParty])
 
+  // Totals reflect the currently filtered/visible rows (Excel-style subtotal).
+  // displayRows already accounts for location, flock and party/description filters.
   const totalReceipts = useMemo(() =>
-    (txns ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [txns])
+    displayRows.reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [displayRows])
   const totalPayments = useMemo(() =>
-    (txns ?? []).reduce((s: number, t: any) => s + (t.amount_out ?? 0), 0), [txns])
-  const closingBalance = openingBalance + totalReceipts - totalPayments
+    displayRows.reduce((s: number, t: any) => s + (t.amount_out ?? 0), 0), [displayRows])
+  // Net of the filtered rows. Opening balance is only meaningful for the full
+  // (unfiltered-by-party) ledger, so only add it when no party search is active.
+  const isFiltered = !!filterParty.trim()
+  const closingBalance = isFiltered
+    ? totalReceipts - totalPayments
+    : openingBalance + totalReceipts - totalPayments
 
   const ids     = displayRows.map((r: any) => r.id)
   const allSel  = ids.length > 0 && ids.every((id: string) => sel.has(id))
@@ -476,9 +483,9 @@ export const CashBookPage: React.FC = () => {
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard title="Opening Balance" value={inr(openingBalance)} color="text-gray-700" />
-        <StatCard title="Total Receipts" value={inr(totalReceipts)} color="text-green-600" />
-        <StatCard title="Total Payments" value={inr(totalPayments)} color="text-red-600" />
-        <StatCard title="Closing Balance" value={inr(closingBalance)} color={closingBalance >= 0 ? 'text-blue-700' : 'text-red-700'} />
+        <StatCard title={isFiltered ? 'Receipts (filtered)' : 'Total Receipts'} value={inr(totalReceipts)} color="text-green-600" />
+        <StatCard title={isFiltered ? 'Payments (filtered)' : 'Total Payments'} value={inr(totalPayments)} color="text-red-600" />
+        <StatCard title={isFiltered ? 'Net (filtered)' : 'Closing Balance'} value={inr(closingBalance)} color={closingBalance >= 0 ? 'text-blue-700' : 'text-red-700'} />
       </div>
 
       {/* Filters */}
