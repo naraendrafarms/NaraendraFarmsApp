@@ -44,6 +44,7 @@ const NAV: NavItem[] = [
       { label: 'GRN Entry',            to: '/feed/grn' },
       { label: 'Feed Transfer',        to: '/feed/transfer' },
       { label: 'Stock Status',         to: '/feed/stock' },
+      { label: 'Inventory (All Items)', to: '/inventory' },
       { label: 'Formula & Production', to: '/feed/mill' },
     ]
   },

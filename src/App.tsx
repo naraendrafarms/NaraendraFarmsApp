@@ -15,6 +15,7 @@ import { EggConversions } from '@/pages/flocks/EggConversions'
 import { HatchBatches } from '@/pages/flocks/HatchBatches'
 import { FeedDashboard, GRNEntry, FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
 import { StockPage } from '@/pages/feed/StockPage'
+import { InventoryPage } from '@/pages/inventory/InventoryPages'
 import { FeedMillPage } from '@/pages/feed/FeedMillPages'
 import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
 import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage, PayslipGeneratorPage } from '@/pages/employees/EmployeePages'
@@ -121,6 +122,7 @@ export const App: React.FC = () => {
             <Route path="feed/production" element={<FeedProduction />} />
             <Route path="feed/transfer" element={<FeedTransfer />} />
             <Route path="feed/stock" element={<StockPage />} />
+            <Route path="inventory" element={<InventoryPage />} />
             <Route path="feed/mill" element={<FeedMillPage />} />
 
             {/* Electricity */}
