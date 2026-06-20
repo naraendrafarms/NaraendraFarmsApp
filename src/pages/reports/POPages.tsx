@@ -5,7 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 if (typeof window !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs`
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate } from '@/lib/utils'
+import { inr, fmtDate, currentFY } from '@/lib/utils'
 import { useAuth, can } from '@/lib/auth'
 import {
   Card, SectionHeader, Spinner, Table, Th, Td,
@@ -133,7 +133,7 @@ export const PendingPaymentsPage = PurchaseOrdersPage
 // PO TAB
 // ══════════════════════════════════════════════════════════════════
 const EMPTY_PO = {
-  po_no:'', po_date:'', fiscal_year:'2025-26', vendor_name:'', item_name:'',
+  po_no:'', po_date:'', fiscal_year:currentFY(), vendor_name:'', item_name:'',
   material_type:'', quantity:'', unit:'', rate:'', gst_pct:'', total_amount:'',
   grn_no:'', grn_date:'', material_status:'Pending',
 }
@@ -144,7 +144,7 @@ const POTab: React.FC = () => {
   const canEdit = can.editPurchase(profile?.role)
   const canDel  = can.delete(profile?.role)
   const [importOpen, setImportOpen] = useState(false)
-  const [fy, setFy]           = useState('2025-26')
+  const [fy, setFy]           = useState(currentFY)
   const [typeF, setTypeF]     = useState('')
   const [statusF, setStatusF] = useState('')
   const [payStatusF, setPayStatusF] = useState('')
@@ -2711,9 +2711,14 @@ async function parsePOPdf(file: File): Promise<{ records: any[]; isAmendment: bo
     ?? fullText.match(/(\d{1,2}[-\/][A-Za-z]{3}[-\/]\d{2,4})/)
   const poDate = fmtISODate(dateMatch?.[1] ?? null)
 
-  // Use seller (right) column text to avoid mixing with buyer address
-  // Vendor name: first company with PVT LTD/etc in the seller column
-  const vendorNameMatch = sellerText.match(/([A-Z][A-Z0-9\s&\.\-]{2,50}(?:PVT\.?\s*LTD\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS))/i)
+  // Vendor name extraction — try multiple strategies in order:
+  // 1. "Seller :" / "Vendor :" label in full text
+  // 2. Company-name pattern (with any common suffix) in right-column text
+  // 3. Same pattern in full text
+  const CO_SUFFIX = '(?:PVT\\.?\\s*LTD\\.?|LIMITED|SOLUTIONS|ENTERPRISES|TRADERS|INDUSTRIES|CHEMICALS|AGRO|BIO|PHARMA|SUPPLIERS|DISTRIBUTORS|CORPORATION|COMPANY|FOODS|FEEDS|AGENCIES|EXPORTS|IMPORTS|INTERNATIONAL|SERVICES|TECHNOLOGIES|LABS|LABORATORIES)'
+  const coRx = new RegExp(`([A-Z][A-Z0-9\\s&\\.\\-]{2,60}${CO_SUFFIX})`, 'i')
+  const sellerLabelMatch = fullText.match(/(?:Seller\s*:|Vendor\s*:|Consignee\s*:|To\s*:)\s*([A-Z][A-Z0-9\s&\.\-]{4,70})/i)
+  const vendorNameMatch = sellerLabelMatch ?? sellerText.match(coRx) ?? fullText.match(coRx)
   const vendor = vendorNameMatch ? vendorNameMatch[1].replace(/\s+/g,' ').trim() : 'Unknown'
 
   // Vendor GSTIN: first GSTIN found in the seller column

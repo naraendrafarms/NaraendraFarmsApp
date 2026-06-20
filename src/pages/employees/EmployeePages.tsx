@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate } from '@/lib/utils'
+import { inr, fmtDate, currentFY } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
@@ -494,7 +494,7 @@ export const SalaryEntryPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string|null>(null)
   const [filterFarm, setFilterFarm] = useState('')
-  const [selectedFY, setSelectedFY] = useState('2025-26')
+  const [selectedFY, setSelectedFY] = useState(currentFY)
   const [selectedMonth, setSelectedMonth] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
 
@@ -1368,7 +1368,7 @@ export const ESIPFReportPage: React.FC = () => {
 
 // ── PAYROLL SUMMARY ───────────────────────────────────────────────
 export const PayrollSummaryPage: React.FC = () => {
-  const [selectedFY, setSelectedFY] = useState('2025-26')
+  const [selectedFY, setSelectedFY] = useState(currentFY)
   const months = fyMonths(selectedFY)
   const [startM, endM] = [months[0], months[months.length-1]]
 
@@ -1515,7 +1515,7 @@ export const PayrollSummaryPage: React.FC = () => {
 // ── ATTENDANCE REGISTER (yearly working days grid) ────────────────
 export const AttendanceRegisterPage: React.FC = () => {
   const qc = useQueryClient()
-  const [selectedFY, setSelectedFY] = useState('2025-26')
+  const [selectedFY, setSelectedFY] = useState(currentFY)
   const [filterFarm, setFilterFarm] = useState('')
   const months = fyMonths(selectedFY)
 

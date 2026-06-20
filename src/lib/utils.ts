@@ -81,6 +81,14 @@ export const today = (): string => {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) // en-CA gives YYYY-MM-DD
 }
 
+// Current Indian financial year string e.g. "2026-27"
+export const currentFY = (): string => {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }))
+  const y = now.getFullYear(), m = now.getMonth() + 1
+  const startYear = m >= 4 ? y : y - 1
+  return `${startYear}-${String(startYear + 1).slice(-2)}`
+}
+
 // First day of month
 export const firstOfMonth = (d: Date = new Date()): string => {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0')

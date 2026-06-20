@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtMonth } from '@/lib/utils'
+import { inr, fmtMonth, currentFY } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
@@ -520,7 +520,7 @@ const HistoryTab: React.FC = () => {
 // ── ANALYSIS TAB ──────────────────────────────────────────────────────────────
 
 const AnalysisTab: React.FC = () => {
-  const [selectedFY, setSelectedFY] = useState('2025-26')
+  const [selectedFY, setSelectedFY] = useState(currentFY)
   const [compareFY, setCompareFY] = useState('')
 
   const months = fyMonths(selectedFY)
