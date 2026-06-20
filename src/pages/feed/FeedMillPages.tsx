@@ -7,7 +7,7 @@ import { parseFile } from '@/lib/parseFile'
 import {
   Card, Button, Input, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Edit2, Trash2, Download, Upload, ChevronDown, ChevronUp } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -572,11 +572,11 @@ const ProductionTab: React.FC = () => {
         <div className="flex flex-wrap gap-3 p-3">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500">From</span>
-            <Input type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} className="w-36 text-sm" />
+            <DateInput value={fFrom} onChange={e => setFFrom(e.target.value)} className="w-36 text-sm" />
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500">To</span>
-            <Input type="date" value={fTo} onChange={e => setFTo(e.target.value)} className="w-36 text-sm" />
+            <DateInput value={fTo} onChange={e => setFTo(e.target.value)} className="w-36 text-sm" />
           </div>
           <Sel value={fFarm} onChange={e => setFFarm(e.target.value)} className="w-44 text-sm" placeholder="All Farms">
             {farms.map((f:any) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -683,7 +683,7 @@ const ProductionForm: React.FC<{
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Date *"><Input type="date" value={form.production_date} onChange={e => setForm((f:any) => ({...f,production_date:e.target.value}))} required /></Field>
+        <Field label="Date *"><DateInput value={form.production_date} onChange={e => setForm((f:any) => ({...f,production_date:e.target.value}))} required /></Field>
         <Field label="Farm">
           <Sel value={form.farm_id} onChange={e => setForm((f:any) => ({...f,farm_id:e.target.value}))} placeholder="Select Farm">
             {farms.map((f:any) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -902,11 +902,11 @@ const StockTab: React.FC = () => {
       <div className="flex flex-wrap gap-3 p-3">
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">From</span>
-          <Input type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} className="w-36 text-sm" />
+          <DateInput value={fFrom} onChange={e => setFFrom(e.target.value)} className="w-36 text-sm" />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">To</span>
-          <Input type="date" value={fTo} onChange={e => setFTo(e.target.value)} className="w-36 text-sm" />
+          <DateInput value={fTo} onChange={e => setFTo(e.target.value)} className="w-36 text-sm" />
         </div>
         <Sel value={fFarm} onChange={e => setFFarm(e.target.value)} className="w-44 text-sm" placeholder="All Farms">
           {farms.map((f:any) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -1061,7 +1061,7 @@ const StockAdjForm: React.FC<{ initial: any; farms: any[]; onSave: (d:any)=>void
   return (
     <form onSubmit={submit} className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Date *"><Input type="date" value={form.adjustment_date} onChange={s('adjustment_date')} required /></Field>
+        <Field label="Date *"><DateInput value={form.adjustment_date} onChange={s('adjustment_date')} required /></Field>
         <Field label="Type">
           <Sel value={form.adjustment_type} onChange={s('adjustment_type')}>
             {ADJ_TYPES.map(t => <option key={t}>{t}</option>)}
@@ -1201,11 +1201,11 @@ const ExpensesTab: React.FC = () => {
           </Sel>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500">From</span>
-            <Input type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} className="w-36 text-sm" />
+            <DateInput value={fFrom} onChange={e => setFFrom(e.target.value)} className="w-36 text-sm" />
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500">To</span>
-            <Input type="date" value={fTo} onChange={e => setFTo(e.target.value)} className="w-36 text-sm" />
+            <DateInput value={fTo} onChange={e => setFTo(e.target.value)} className="w-36 text-sm" />
           </div>
           <Button size="sm" variant="ghost" onClick={() => { setFCat(''); setFFrom(''); setFTo(''); setFFarm('') }}>Clear</Button>
         </div>
@@ -1266,7 +1266,7 @@ const ExpenseForm: React.FC<{ initial: any; farms: any[]; onSave: (d:any) => voi
   return (
     <form onSubmit={submit} className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Date *"><Input type="date" value={form.expense_date} onChange={s('expense_date')} required /></Field>
+        <Field label="Date *"><DateInput value={form.expense_date} onChange={s('expense_date')} required /></Field>
         <Field label="Category">
           <Sel value={form.category} onChange={s('category')}>
             {EXPENSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}

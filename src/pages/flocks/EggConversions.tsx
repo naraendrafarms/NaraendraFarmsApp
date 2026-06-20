@@ -6,7 +6,7 @@ import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, ArrowRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -139,7 +139,7 @@ export const EggConversions: React.FC = () => {
           <FormRow>
             <Select label="Flock" required placeholder="— Select —" options={flockOptions}
               value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
-            <Input label="Date" required type="date" value={form.conversion_date}
+            <DateInput label="Date" required value={form.conversion_date}
               onChange={e => s('conversion_date', e.target.value)} />
           </FormRow>
           <div className="grid grid-cols-5 gap-3 items-end">

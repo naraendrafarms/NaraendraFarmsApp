@@ -5,7 +5,7 @@ import { fmtDate } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
@@ -775,7 +775,7 @@ export const MedicinesMaster: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Batch No" value={form.batch_no} onChange={e=>s('batch_no',e.target.value)} hint="e.g. BT2024001" />
-            <Input label="Expiry Date" type="date" value={form.expiry_date} onChange={e=>s('expiry_date',e.target.value)} />
+            <DateInput label="Expiry Date" value={form.expiry_date} onChange={e=>s('expiry_date',e.target.value)} />
           </FormRow>
         </div>
       </Modal>

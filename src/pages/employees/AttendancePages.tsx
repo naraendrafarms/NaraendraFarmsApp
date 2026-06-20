@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td } from '@/components/ui'
+import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 
@@ -134,7 +134,7 @@ export const DailyAttendancePage: React.FC = () => {
           value={farmId} onChange={e => setFarmId(e.target.value)} className="w-56" />
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+          <DateInput value={date} onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
         </div>
       </div>
@@ -503,7 +503,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
             <Select label="Employee *" placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={e => s('employee_id', e.target.value)} />
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Date *</label>
-              <input type="date" value={form.advance_date} onChange={e => s('advance_date', e.target.value)}
+              <DateInput value={form.advance_date} onChange={e => s('advance_date', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
             </div>
             <Select label="Type" options={ADVANCE_TYPES} value={form.advance_type} onChange={e => s('advance_type', e.target.value)} />

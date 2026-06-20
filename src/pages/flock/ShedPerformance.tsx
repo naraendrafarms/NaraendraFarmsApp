@@ -5,7 +5,7 @@ import { fmtDate, inr } from '@/lib/utils'
 import {
   Card, Button, Select, Input, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Bird, Egg, TrendingUp, Building2, ChevronDown, ChevronRight } from 'lucide-react'
 
 function numFmt(v: number | null | undefined) {
@@ -189,8 +189,8 @@ export const ShedPerformancePage: React.FC = () => {
       {/* Filters */}
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
-          <Input label="From Date" type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
-          <Input label="To Date"   type="date" value={toDate}   onChange={e => setToDate(e.target.value)} />
+          <DateInput label="From Date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <DateInput label="To Date"   value={toDate}   onChange={e => setToDate(e.target.value)} />
           <Select label="Site" placeholder="All Sites" options={farmOptions}
             value={filterFarm} onChange={e => setFilterFarm(e.target.value)} />
           <div className="flex items-end gap-2">

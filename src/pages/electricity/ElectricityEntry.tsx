@@ -6,7 +6,7 @@ import { inr, fmtMonth } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Zap, Edit2, Trash2, Download, Upload, BarChart2, Settings } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -278,7 +278,7 @@ const BillsTab: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Meter Rent (₹)" type="number" step="0.01" value={form.meter_rent} onChange={e=>set('meter_rent',e.target.value)}/>
-            <Input label="Paid Date" type="date" value={form.paid_date} onChange={e=>set('paid_date',e.target.value)}/>
+            <DateInput label="Paid Date" value={form.paid_date} onChange={e=>set('paid_date',e.target.value)}/>
           </FormRow>
           {(parseFloat(form.deposit_interest)||0) > 0 && (
             <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-800">

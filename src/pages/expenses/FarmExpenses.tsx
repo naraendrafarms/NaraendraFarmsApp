@@ -6,7 +6,7 @@ import { today } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Trash2, Download, Upload, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
@@ -269,8 +269,8 @@ export const FarmExpensesPage: React.FC = () => {
           <Select label="Site" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e => setFilterFarm(e.target.value)} />
           <Select label="Flock" placeholder="All Flocks" options={flockOptions} value={filterFlock} onChange={e => setFilterFlock(e.target.value)} />
           <Select label="Category" placeholder="All Categories" options={catOptions} value={filterCat} onChange={e => setFilterCat(e.target.value)} />
-          <Input label="From" type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
-          <Input label="To"   type="date" value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
+          <DateInput label="From" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
+          <DateInput label="To"   value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
         </div>
         {hasFilter && <button className="text-xs text-brand-600 hover:underline mt-2"
           onClick={() => { setFilterFarm(''); setFilterFlock(''); setFilterCat(''); setFilterFrom(''); setFilterTo('') }}>Clear filters</button>}
@@ -372,7 +372,7 @@ export const FarmExpensesPage: React.FC = () => {
         }>
         <div className="space-y-4">
           <FormRow>
-            <Input label="Date" required type="date" value={form.expense_date} onChange={e => s('expense_date', e.target.value)} />
+            <DateInput label="Date" required value={form.expense_date} onChange={e => s('expense_date', e.target.value)} />
             <Select label="Category" required options={CATEGORIES} value={form.category} onChange={e => s('category', e.target.value)} />
           </FormRow>
           <FormRow>

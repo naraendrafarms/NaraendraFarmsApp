@@ -6,7 +6,7 @@ import { today } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -113,7 +113,7 @@ export const EggOpeningStockPage: React.FC = () => {
             <FormRow>
               <Select label="Flock" required placeholder="— Select Flock —" options={flockOptions}
                 value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
-              <Input label="As of Date" required type="date" value={form.as_of_date} onChange={e => s('as_of_date', e.target.value)} />
+              <DateInput label="As of Date" required value={form.as_of_date} onChange={e => s('as_of_date', e.target.value)} />
             </FormRow>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">HE Eggs (Hatching)</p>
             <div className="grid grid-cols-3 gap-3">

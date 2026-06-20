@@ -10,7 +10,7 @@ import { useAuth, can } from '@/lib/auth'
 import {
   Card, SectionHeader, Spinner, Table, Th, Td,
   Button, Input, Modal, Badge, StatCard, EmptyState
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import {
   ShoppingCart, Clock, CheckCircle, AlertCircle, Plus, Pencil, Trash2,
   Building2, Landmark, CreditCard, TrendingUp, TrendingDown, AlertTriangle,
@@ -515,7 +515,7 @@ const POTab: React.FC = () => {
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-3">
             <Input label="PO No *" value={form.po_no} onChange={f('po_no')} required />
-            <Input label="PO Date" type="date" value={form.po_date} onChange={f('po_date')} />
+            <DateInput label="PO Date" value={form.po_date} onChange={f('po_date')} />
             <Sel label="Fiscal Year" value={form.fiscal_year} onChange={f('fiscal_year')} options={FY_OPTIONS} />
           </div>
           <Input label="Vendor Name *" value={form.vendor_name} onChange={f('vendor_name')} required />
@@ -532,7 +532,7 @@ const POTab: React.FC = () => {
           <div className="grid grid-cols-3 gap-3">
             <Input label="Total Amount (₹)" type="number" value={form.total_amount} onChange={f('total_amount')} />
             <Input label="GRN No" value={form.grn_no} onChange={f('grn_no')} />
-            <Input label="GRN Date" type="date" value={form.grn_date} onChange={f('grn_date')} />
+            <DateInput label="GRN Date" value={form.grn_date} onChange={f('grn_date')} />
           </div>
           <Sel label="Material Status" value={form.material_status} onChange={f('material_status')} options={MAT_STATUS.map(s=>({value:s,label:s}))} />
         </div>
@@ -567,7 +567,7 @@ const POTab: React.FC = () => {
               <strong>{receiptPO.vendor_name}</strong> · {receiptPO.item_name} · Ordered: {receiptPO.quantity} {receiptPO.unit}
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Input label="Receipt Date *" type="date" value={receiptForm.receipt_date} onChange={rf('receipt_date')} />
+              <DateInput label="Receipt Date *" value={receiptForm.receipt_date} onChange={rf('receipt_date')} />
               <Input label="Qty Received" type="number" value={receiptForm.qty_received} onChange={rf('qty_received')} />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -1007,8 +1007,8 @@ const PaymentsTab: React.FC = () => {
             <Input label="Invoice No" value={form.invoice_no} onChange={f('invoice_no')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="GRN Date" type="date" value={form.grn_date} onChange={f('grn_date')} />
-            <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={f('invoice_date')} />
+            <DateInput label="GRN Date" value={form.grn_date} onChange={f('grn_date')} />
+            <DateInput label="Invoice Date" value={form.invoice_date} onChange={f('invoice_date')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Input label="Invoice Amount (₹)" type="number" value={form.invoice_amount} onChange={(e:any) => {
@@ -1042,7 +1042,7 @@ const PaymentsTab: React.FC = () => {
           </div>
           <div className="grid grid-cols-3 gap-3">
             <Input label="Credit Limit (days)" type="number" value={form.credit_limit} onChange={f('credit_limit')} />
-            <Input label="Pay Before Date" type="date" value={form.pay_before_date} onChange={f('pay_before_date')} />
+            <DateInput label="Pay Before Date" value={form.pay_before_date} onChange={f('pay_before_date')} />
             <Sel label="Account Type" value={form.account_type} onChange={f('account_type')} options={[{value:'',label:'Select'},...ACCT_TYPES.map(a=>({value:a,label:a}))]} />
           </div>
           {creditWarning && <div className="bg-yellow-50 border border-yellow-200 rounded px-3 py-2 text-xs text-yellow-700">{creditWarning}</div>}
@@ -1059,7 +1059,7 @@ const PaymentsTab: React.FC = () => {
           )}
           <div className="grid grid-cols-3 gap-3">
             <Sel label="Payment Status" value={form.payment_status} onChange={f('payment_status')} options={PAY_STATUS.map(s=>({value:s,label:s}))} />
-            <Input label="Paid Date" type="date" value={form.paid_date} onChange={f('paid_date')} />
+            <DateInput label="Paid Date" value={form.paid_date} onChange={f('paid_date')} />
             <Input label="UTR No" value={form.utr_no} onChange={f('utr_no')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -1931,7 +1931,7 @@ const BankLedgerTab: React.FC = () => {
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setTxnOpen(false)}>Cancel</Button><Button onClick={() => saveTxnMut.mutate()} loading={saveTxnMut.isPending}>Save</Button></div>}>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Date *" type="date" value={txnForm.txn_date} onChange={ft('txn_date')} required />
+            <DateInput label="Date *" value={txnForm.txn_date} onChange={ft('txn_date')} required />
             <Sel label="Type *" value={txnForm.txn_type} onChange={ft('txn_type')} options={[{value:'Debit',label:'Debit (Payment Out)'},{value:'Credit',label:'Credit (Money In)'}]} />
           </div>
           <div className="grid grid-cols-2 gap-3">

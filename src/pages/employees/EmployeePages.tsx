@@ -5,7 +5,7 @@ import { inr, fmtDate } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
@@ -349,13 +349,13 @@ export const EmployeeList: React.FC = () => {
           </FormRow>
           <Divider label="Personal Details" />
           <FormRow>
-            <Input label="Date of Birth" type="date" value={form.dob} onChange={e=>s('dob',e.target.value)} />
+            <DateInput label="Date of Birth" value={form.dob} onChange={e=>s('dob',e.target.value)} />
             <Select label="Gender" placeholder="— Select —" options={['Male','Female','Other']} value={form.gender} onChange={e=>s('gender',e.target.value)} />
             <Input label="Mobile" value={form.mobile} onChange={e=>s('mobile',e.target.value)} />
           </FormRow>
           <FormRow>
-            <Input label="Joining Date" type="date" value={form.joining_date} onChange={e=>s('joining_date',e.target.value)} />
-            <Input label="Leaving Date" type="date" value={form.leaving_date} onChange={e=>s('leaving_date',e.target.value)} />
+            <DateInput label="Joining Date" value={form.joining_date} onChange={e=>s('joining_date',e.target.value)} />
+            <DateInput label="Leaving Date" value={form.leaving_date} onChange={e=>s('leaving_date',e.target.value)} />
             <Select label="Status" options={[{value:'true',label:'Active'},{value:'false',label:'Left / Inactive'}]} value={form.is_active} onChange={e=>s('is_active',e.target.value)} />
           </FormRow>
           <Divider label="Bank Details" />
@@ -1169,7 +1169,7 @@ export const BonusPage: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Amount" required type="number" value={form.amount} onChange={e=>s('amount',e.target.value)}/>
-            <Input label="Paid Date" type="date" value={form.paid_date} onChange={e=>s('paid_date',e.target.value)}/>
+            <DateInput label="Paid Date" value={form.paid_date} onChange={e=>s('paid_date',e.target.value)}/>
           </FormRow>
           <Input label="Remarks" value={form.remarks} onChange={e=>s('remarks',e.target.value)}/>
         </div>

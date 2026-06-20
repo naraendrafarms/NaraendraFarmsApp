@@ -5,7 +5,7 @@ import { fmtDate, today } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -186,8 +186,8 @@ export const VaccinationRecordsPage: React.FC = () => {
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Select label="Flock" placeholder="All Flocks" options={flockOptions} value={filterFlock} onChange={e => setFilterFlock(e.target.value)} />
-          <Input label="From Date" type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
-          <Input label="To Date" type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} />
+          <DateInput label="From Date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
+          <DateInput label="To Date" value={filterTo} onChange={e => setFilterTo(e.target.value)} />
           <div className="flex items-end">
             <Button variant="secondary" onClick={() => { setFilterFlock(''); setFilterFrom(''); setFilterTo('') }}>Clear</Button>
           </div>
@@ -200,7 +200,7 @@ export const VaccinationRecordsPage: React.FC = () => {
           <div className="space-y-4">
             <FormRow>
               <Select label="Flock" required placeholder="— Select Flock —" options={flockOptions} value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
-              <Input label="Vaccine Date" required type="date" value={form.vaccine_date} onChange={e => s('vaccine_date', e.target.value)} />
+              <DateInput label="Vaccine Date" required value={form.vaccine_date} onChange={e => s('vaccine_date', e.target.value)} />
             </FormRow>
             <FormRow>
               <Select label="Site" placeholder="— All Sites —" options={farmOptions} value={form.farm_id} onChange={e => { s('farm_id', e.target.value); s('shed_id', '') }} />
@@ -217,7 +217,7 @@ export const VaccinationRecordsPage: React.FC = () => {
             </FormRow>
             <FormRow>
               <Input label="Cost (₹)" type="number" value={form.cost} onChange={e => s('cost', e.target.value)} />
-              <Input label="Next Due Date" type="date" value={form.next_due_date} onChange={e => s('next_due_date', e.target.value)} />
+              <DateInput label="Next Due Date" value={form.next_due_date} onChange={e => s('next_due_date', e.target.value)} />
               <Input label="Administered By" value={form.administered_by} onChange={e => s('administered_by', e.target.value)} />
             </FormRow>
             <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />

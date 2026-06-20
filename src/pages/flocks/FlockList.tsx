@@ -6,7 +6,7 @@ import { inr, pct, fmtDate, statusColor } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Modal, Input, Select, FormRow, Divider,
   Table, Th, Td, Badge, Spinner, SectionHeader, EmptyState
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Bird, Eye, Trash2, CheckSquare, Edit2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Link } from 'react-router-dom'
@@ -256,8 +256,8 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
         <Select label="Laying Farm (transfer site)" placeholder="— Select —" options={farmOptions} value={form.laying_farm_id} onChange={e=>s('laying_farm_id',e.target.value)}/>
       </FormRow>
       <FormRow>
-        <Input label="Placement Date" type="date" value={form.placement_date} onChange={e=>s('placement_date',e.target.value)}/>
-        <Input label="Laying Start Date" type="date" value={form.laying_start_date} onChange={e=>s('laying_start_date',e.target.value)}/>
+        <DateInput label="Placement Date" value={form.placement_date} onChange={e=>s('placement_date',e.target.value)}/>
+        <DateInput label="Laying Start Date" value={form.laying_start_date} onChange={e=>s('laying_start_date',e.target.value)}/>
         <Input label="Chick Rate (₹)" type="number" value={form.chick_rate} onChange={e=>s('chick_rate',e.target.value)}/>
       </FormRow>
       <FormRow>

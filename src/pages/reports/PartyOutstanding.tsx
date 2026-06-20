@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
 import {
   Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Download, ChevronDown, ChevronRight } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
@@ -126,8 +126,8 @@ const DebtorsTab: React.FC = () => {
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
-        <Input label="From" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-40"/>
-        <Input label="To" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40"/>
+        <DateInput label="From" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-40"/>
+        <DateInput label="To" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40"/>
         <Select label="Flock" placeholder="All Flocks" options={flockOptions} value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-40"/>
         <Input label="Party search" placeholder="Search party..." value={partyFilter} onChange={e => setPartyFilter(e.target.value)} className="w-48"/>
         {(dateFrom || dateTo || flockFilter || partyFilter) && (

@@ -6,7 +6,7 @@ import { parseFile } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2, Download, Upload } from 'lucide-react'
 import { QuickAddParty, QuickAddIngredient } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
@@ -295,8 +295,8 @@ export const GRNEntry: React.FC = () => {
           </div>
           <Input label="Item / Ingredient" placeholder="Search…" value={fItem}
             onChange={e => setFItem(e.target.value)} />
-          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
-          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <DateInput label="Date From" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <DateInput label="Date To"   value={fTo}   onChange={e => setFTo(e.target.value)} />
         </div>
         {hasFilter && (
           <button onClick={() => { setFFarm(''); setFParties([]); setFItem(''); setFFrom(''); setFTo('') }}
@@ -393,7 +393,7 @@ export const GRNEntry: React.FC = () => {
         <div className="space-y-4">
           <FormRow cols={3}>
             <Input label="GRN No" required value={form.grn_no} onChange={e => s('grn_no', e.target.value)} />
-            <Input label="GRN Date" required type="date" value={form.grn_date} onChange={e => s('grn_date', e.target.value)} />
+            <DateInput label="GRN Date" required value={form.grn_date} onChange={e => s('grn_date', e.target.value)} />
             <Select label="Received At" required placeholder="— Select Site —" options={farmOptions}
               value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
           </FormRow>
@@ -462,7 +462,7 @@ export const GRNEntry: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Vehicle No" value={form.vehicle_no} onChange={e => s('vehicle_no', e.target.value)} />
-            <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />
+            <DateInput label="Invoice Date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />
           </FormRow>
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
         </div>
@@ -558,7 +558,7 @@ export const FeedProduction: React.FC = () => {
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <FormRow>
-            <Input label="Production Date" required type="date" value={form.production_date} onChange={e => s('production_date', e.target.value)} />
+            <DateInput label="Production Date" required value={form.production_date} onChange={e => s('production_date', e.target.value)} />
             <Select label="Feed Type" required placeholder="— Select —" options={ftOptions}
               value={form.feed_type_id} onChange={e => s('feed_type_id', e.target.value)} />
           </FormRow>
@@ -653,7 +653,7 @@ export const FeedTransfer: React.FC = () => {
         footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
-          <Input label="Transfer Date" required type="date" value={form.transfer_date} onChange={e => s('transfer_date', e.target.value)} />
+          <DateInput label="Transfer Date" required value={form.transfer_date} onChange={e => s('transfer_date', e.target.value)} />
           <FormRow>
             <Select label="From (Feed Mill)" required placeholder="— Select —" options={farmOptions}
               value={form.from_farm_id} onChange={e => s('from_farm_id', e.target.value)} />

@@ -6,7 +6,7 @@ import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle } from 'lucide-react'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
@@ -122,7 +122,7 @@ const ReceivePaymentModal: React.FC<{
           <div className="grid grid-cols-2 gap-3">
             <Select label="Payment Mode" value={mode} onChange={e => setMode(e.target.value)}
               options={['Cash','Bank Transfer','Cheque','UPI']} />
-            <Input label="Date Received" type="date" value={date} onChange={e => setDate(e.target.value)} />
+            <DateInput label="Date Received" value={date} onChange={e => setDate(e.target.value)} />
           </div>
           {mode === 'Cash' && (
             <Select label="Cash Location" value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
@@ -540,12 +540,12 @@ export const HEDispatch: React.FC = () => {
         {tab === 'dispatch' && <>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           From
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+          <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           To
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+          <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
@@ -728,7 +728,7 @@ export const HEDispatch: React.FC = () => {
           <FormRow>
             <Select label="Flock *" required placeholder="— Select —" options={flockOptions}
               value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
-            <Input label="Dispatch Date *" required type="date" value={form.dispatch_date}
+            <DateInput label="Dispatch Date *" required value={form.dispatch_date}
               onChange={e => s('dispatch_date', e.target.value)} />
           </FormRow>
           <FormRow>
@@ -771,7 +771,7 @@ export const HEDispatch: React.FC = () => {
                   return (
                     <tr key={i} className="border-t border-gray-100">
                       <td className="px-2 py-1.5">
-                        <input type="date" value={l.prod_date} onChange={e => setLine(i,'prod_date',e.target.value)}
+                        <DateInput value={l.prod_date} onChange={e => setLine(i,'prod_date',e.target.value)}
                           className="border border-gray-300 rounded px-2 py-1 text-xs w-36"/>
                       </td>
                       <td className="px-2 py-1.5">
@@ -1252,11 +1252,11 @@ export const NHESales: React.FC = () => {
           {NHE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
-          From <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+          From <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
-          To <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+          To <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         {(hasFilter||typeFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setTypeFilter('') }}>Clear</Button>}
@@ -1406,7 +1406,7 @@ export const NHESales: React.FC = () => {
           <FormRow>
             <Select label="Flock" required placeholder="— Select —" options={flockOptions}
               value={form.flock_id} onChange={e => sv('flock_id', e.target.value)} />
-            <Input label="Sale Date" required type="date" value={form.sale_date} onChange={e => sv('sale_date', e.target.value)} />
+            <DateInput label="Sale Date" required value={form.sale_date} onChange={e => sv('sale_date', e.target.value)} />
             <Select label="Sale Type" required options={NHE_TYPES} value={form.sale_type} onChange={e => sv('sale_type', e.target.value)} />
           </FormRow>
 
@@ -1686,12 +1686,12 @@ export const MedicineEntry: React.FC = () => {
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           From
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+          <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           To
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+          <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>}
@@ -1792,7 +1792,7 @@ export const MedicineEntry: React.FC = () => {
             <FormRow>
               <Select label="Flock" required placeholder="— Select —" options={flockOptions}
                 value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
-              <Input label="Date" required type="date" value={form.usage_date} onChange={e => s('usage_date', e.target.value)} />
+              <DateInput label="Date" required value={form.usage_date} onChange={e => s('usage_date', e.target.value)} />
             </FormRow>
             <Select label="Medicine / Vaccine" placeholder="— Select —" options={medOptions}
               value={form.medicine_id} onChange={e => {
@@ -1990,10 +1990,10 @@ export const MedicinePurchases: React.FC = () => {
           value={filterMed} onChange={e => setFilterMed(e.target.value)} className="w-52" />
         {activeTab === 'purchases' && <>
           <label className="flex items-center gap-1.5 text-sm text-gray-600">From
-            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm" />
+            <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm" />
           </label>
           <label className="flex items-center gap-1.5 text-sm text-gray-600">To
-            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm" />
+            <DateInput value={toDate} onChange={e => setToDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm" />
           </label>
         </>}
         {(filterMed||fromDate||toDate) && <button onClick={() => { setFilterMed(''); setFromDate(''); setToDate('') }} className="text-xs text-brand-600 hover:underline">Clear</button>}
@@ -2091,7 +2091,7 @@ export const MedicinePurchases: React.FC = () => {
           <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <FormRow>
-            <Input label="Purchase Date" required type="date" value={form.purchase_date} onChange={e => s('purchase_date', e.target.value)} />
+            <DateInput label="Purchase Date" required value={form.purchase_date} onChange={e => s('purchase_date', e.target.value)} />
             <Select label="Medicine / Vaccine" required placeholder="— Select —" options={medOptions}
               value={form.medicine_id} onChange={e => {
                 const med = (medicines??[]).find((m: any) => m.id === e.target.value)
@@ -2111,7 +2111,7 @@ export const MedicinePurchases: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Invoice No" value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
-            <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />
+            <DateInput label="Invoice Date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />
           </FormRow>
           <FormRow cols={4}>
             <Input label="Qty" required type="number" step="0.001" value={form.qty} onChange={e => s('qty', e.target.value)} />
@@ -2128,7 +2128,7 @@ export const MedicinePurchases: React.FC = () => {
           )}
           <FormRow>
             <Input label="Batch No" value={form.batch_no} onChange={e => s('batch_no', e.target.value)} />
-            <Input label="Expiry Date" type="date" value={form.expiry_date} onChange={e => s('expiry_date', e.target.value)} />
+            <DateInput label="Expiry Date" value={form.expiry_date} onChange={e => s('expiry_date', e.target.value)} />
           </FormRow>
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
         </div>

@@ -6,7 +6,7 @@ import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard, Divider
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Edit2, Egg } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -279,9 +279,9 @@ export const HatchBatches: React.FC = () => {
               value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Input label="Setting Date" required type="date" value={form.setting_date}
+            <DateInput label="Setting Date" required value={form.setting_date}
               onChange={e => s('setting_date', e.target.value)} />
-            <Input label="Hatch Date" type="date" value={form.hatch_date}
+            <DateInput label="Hatch Date" value={form.hatch_date}
               onChange={e => s('hatch_date', e.target.value)} />
           </FormRow>
           <FormRow>

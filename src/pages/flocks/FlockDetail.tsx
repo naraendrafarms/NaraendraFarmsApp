@@ -6,7 +6,7 @@ import { inr, pct, fmtDate, flockAgeWeeks } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Badge, Table, Th, Td,
   SectionHeader, Spinner, StatCard, Divider, Input, Select
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, Calendar,
   BarChart2, DollarSign, Package, Trash2, Upload, Download
@@ -681,12 +681,12 @@ export const FlockDetail: React.FC = () => {
             <span className="text-sm font-medium text-gray-600">Filter:</span>
             <label className="flex items-center gap-1.5 text-sm text-gray-600">
               From
-              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+              <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
                 className="border border-gray-300 rounded px-2 py-1 text-sm" />
             </label>
             <label className="flex items-center gap-1.5 text-sm text-gray-600">
               To
-              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+              <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
                 className="border border-gray-300 rounded px-2 py-1 text-sm" />
             </label>
             {(fromDate || toDate) && (
@@ -853,7 +853,7 @@ export const FlockDetail: React.FC = () => {
               <CardHeader title={editPlacementId ? 'Edit Placement' : 'Record Chick Intake'} />
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <Input label="Date Received" type="date" required value={placementForm.allocated_date}
+                  <DateInput label="Date Received" required value={placementForm.allocated_date}
                     onChange={e => setPlacementForm(f => ({ ...f, allocated_date: e.target.value }))} />
                   <Select label="Shed" placeholder="— Select shed —"
                     options={(allSheds ?? []).map((s: any) => ({ value: s.id, label: `${s.shed_no}${s.shed_name ? ' — ' + s.shed_name : ''}` }))}
@@ -1014,7 +1014,7 @@ export const FlockDetail: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">Transfer Date *</label>
-                    <input type="date" value={transferForm.transfer_date}
+                    <DateInput value={transferForm.transfer_date}
                       onChange={e => setTransferForm(f => ({ ...f, transfer_date: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
                   </div>
@@ -1271,12 +1271,12 @@ export const FlockDetail: React.FC = () => {
               <span className="text-sm font-medium text-gray-600">Filter:</span>
               <label className="flex items-center gap-1.5 text-sm text-gray-600">
                 From
-                <input type="date" value={heFromDate} onChange={e => setHeFromDate(e.target.value)}
+                <DateInput value={heFromDate} onChange={e => setHeFromDate(e.target.value)}
                   className="border border-gray-300 rounded px-2 py-1 text-sm" />
               </label>
               <label className="flex items-center gap-1.5 text-sm text-gray-600">
                 To
-                <input type="date" value={heToDate} onChange={e => setHeToDate(e.target.value)}
+                <DateInput value={heToDate} onChange={e => setHeToDate(e.target.value)}
                   className="border border-gray-300 rounded px-2 py-1 text-sm" />
               </label>
               {(heFromDate || heToDate) && (

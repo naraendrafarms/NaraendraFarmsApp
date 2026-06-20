@@ -5,7 +5,7 @@ import { inr, fmtDate, today } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, Badge,
   SectionHeader, Spinner, Table, Th, Td, StatCard
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Download, Upload, Edit2, Trash2, CheckCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
@@ -344,8 +344,8 @@ export const InvoiceRegister: React.FC = () => {
               options={['unpaid','partial','paid'].map(v => ({ value: v, label: v.charAt(0).toUpperCase()+v.slice(1) }))}
               value={filterStatus} onChange={e => setFilterStatus(e.target.value)} />
           </div>
-          <Input label="From" type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
-          <Input label="To" type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} />
+          <DateInput label="From" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
+          <DateInput label="To" value={filterTo} onChange={e => setFilterTo(e.target.value)} />
           {(filterType || filterStatus || filterFrom || filterTo) && (
             <Button variant="outline" size="sm" onClick={() => { setFilterType(''); setFilterStatus(''); setFilterFrom(''); setFilterTo('') }}>
               Clear
@@ -362,7 +362,7 @@ export const InvoiceRegister: React.FC = () => {
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
               <Input label="Invoice No" required value={form.invoice_no}
                 onChange={e => s('invoice_no', e.target.value)} />
-              <Input label="Invoice Date" type="date" required value={form.invoice_date}
+              <DateInput label="Invoice Date" required value={form.invoice_date}
                 onChange={e => s('invoice_date', e.target.value)} />
               <Select label="Invoice Type" required
                 options={SOURCE_TYPES}
@@ -387,7 +387,7 @@ export const InvoiceRegister: React.FC = () => {
               <Select label="Farm" placeholder="— Select farm —"
                 options={(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))}
                 value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
-              <Input label="Due Date" type="date" value={form.due_date}
+              <DateInput label="Due Date" value={form.due_date}
                 onChange={e => s('due_date', e.target.value)} />
             </div>
 

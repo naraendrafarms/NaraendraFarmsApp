@@ -8,7 +8,7 @@ import { parseFile } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, ChevronLeft, ChevronRight,
   Package, Truck, FlaskConical, ShoppingCart, Pencil, Trash2, X, Check,
@@ -834,8 +834,8 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
           <Select label="Site" placeholder="All Sites" options={farmOptions}
             value={fFarm} onChange={e => { setFFarm(e.target.value); setPage(0) }} />
-          <Input label="Date From" type="date" value={fFrom} onChange={e => { setFFrom(e.target.value); setPage(0) }} />
-          <Input label="Date To"   type="date" value={fTo}   onChange={e => { setFTo(e.target.value); setPage(0) }} />
+          <DateInput label="Date From" value={fFrom} onChange={e => { setFFrom(e.target.value); setPage(0) }} />
+          <DateInput label="Date To"   value={fTo}   onChange={e => { setFTo(e.target.value); setPage(0) }} />
           <div className="flex items-end">
             {hasFilter && (
               <button onClick={() => { setFFarm(''); setFFrom(''); setFTo(''); setPage(0) }}
@@ -1034,8 +1034,8 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
-          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
-          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <DateInput label="Date From" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <DateInput label="Date To"   value={fTo}   onChange={e => setFTo(e.target.value)} />
           {(fFrom || fTo) && (
             <div className="flex items-end">
               <button onClick={() => { setFFrom(''); setFTo('') }} className="text-xs text-brand-600 hover:underline">Clear</button>
@@ -1191,8 +1191,8 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     <div className="space-y-4">
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
-          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
-          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <DateInput label="Date From" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <DateInput label="Date To"   value={fTo}   onChange={e => setFTo(e.target.value)} />
           {(fFrom || fTo) && (
             <div className="flex items-end">
               <button onClick={() => { setFFrom(''); setFTo('') }} className="text-xs text-brand-600 hover:underline">Clear</button>
@@ -1436,8 +1436,8 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     <div className="space-y-4">
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
-          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
-          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <DateInput label="Date From" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <DateInput label="Date To"   value={fTo}   onChange={e => setFTo(e.target.value)} />
           {(fFrom || fTo) && (
             <div className="flex items-end">
               <button onClick={() => { setFFrom(''); setFTo('') }} className="text-xs text-brand-600 hover:underline">Clear</button>
@@ -1635,8 +1635,8 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     <div className="space-y-4">
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
-          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
-          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <DateInput label="Date From" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <DateInput label="Date To"   value={fTo}   onChange={e => setFTo(e.target.value)} />
           {(fFrom || fTo) && (
             <div className="flex items-end">
               <button onClick={() => { setFFrom(''); setFTo('') }} className="text-xs text-brand-600 hover:underline">Clear</button>
@@ -1769,8 +1769,8 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
-          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
-          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <DateInput label="Date From" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <DateInput label="Date To"   value={fTo}   onChange={e => setFTo(e.target.value)} />
           <Select label="Type" placeholder="All Types" options={typeOptions} value={fType} onChange={e => setFType(e.target.value)} />
           {(fFrom || fTo || fType) && <div className="flex items-end"><button onClick={() => { setFFrom(''); setFTo(''); setFType('') }} className="text-xs text-brand-600 hover:underline">Clear</button></div>}
         </div>
@@ -1888,8 +1888,8 @@ const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
-          <Input label="Date From" type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} />
-          <Input label="Date To"   type="date" value={fTo}   onChange={e => setFTo(e.target.value)} />
+          <DateInput label="Date From" value={fFrom} onChange={e => setFFrom(e.target.value)} />
+          <DateInput label="Date To"   value={fTo}   onChange={e => setFTo(e.target.value)} />
           <Select label="Type" placeholder="All Types" options={typeOptions} value={fType} onChange={e => setFType(e.target.value)} />
           {(fFrom || fTo || fType) && (
             <div className="flex items-end">
@@ -2104,7 +2104,7 @@ const ShedAllocationTab: React.FC<{ flock: any }> = ({ flock }) => {
             <div className="grid grid-cols-2 gap-3">
               <Select label="Filter by Site" placeholder="All Sites" options={farmOptions}
                 value={filterFarm} onChange={e => { setFilterFarm(e.target.value); s('shed_id', '') }} />
-              <Input label="Date" required type="date" value={form.allocated_date} onChange={e => s('allocated_date', e.target.value)} />
+              <DateInput label="Date" required value={form.allocated_date} onChange={e => s('allocated_date', e.target.value)} />
             </div>
             <Select label="Shed" required placeholder="— Select shed —" options={shedOptions}
               value={form.shed_id} onChange={e => s('shed_id', e.target.value)} />

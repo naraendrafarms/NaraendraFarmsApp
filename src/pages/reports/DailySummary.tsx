@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { Card, Button, Spinner } from '@/components/ui'
+import { Card, Button, Spinner , DateInput } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Copy, CheckCircle } from 'lucide-react'
 
@@ -104,7 +104,7 @@ export const DailySummaryPage: React.FC = () => {
           <p className="text-sm text-gray-500">Copy and paste into WhatsApp</p>
         </div>
         <div className="flex items-center gap-2">
-          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+          <DateInput value={date} onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
           <Button onClick={copyText} variant={copied ? 'secondary' : 'primary'} size="sm">
             {copied

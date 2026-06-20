@@ -15,7 +15,7 @@ import {
   Input,
   FormRow,
   Modal,
-} from '@/components/ui'
+  DateInput } from '@/components/ui'
 import { pct, fmtDate, today } from '@/lib/utils'
 import { Plus, Edit2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -267,9 +267,9 @@ const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows,
             <Input label="Hatchery" value={form.hatchery} onChange={e => s('hatchery', e.target.value)} />
           </FormRow>
           <FormRow cols={3}>
-            <Input label="Invoice Date" type="date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />
-            <Input label="Setting Date" required type="date" value={form.setting_date} onChange={e => s('setting_date', e.target.value)} />
-            <Input label="Hatch Date" type="date" value={form.hatch_date} onChange={e => s('hatch_date', e.target.value)} />
+            <DateInput label="Invoice Date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />
+            <DateInput label="Setting Date" required value={form.setting_date} onChange={e => s('setting_date', e.target.value)} />
+            <DateInput label="Hatch Date" value={form.hatch_date} onChange={e => s('hatch_date', e.target.value)} />
           </FormRow>
           <FormRow>
             <Input label="DC No" value={form.dc_no} onChange={e => s('dc_no', e.target.value)} />
@@ -289,7 +289,7 @@ const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows,
           </FormRow>
           <FormRow>
             <Input label="Egg Weight (g)" type="number" step="0.01" value={form.eggs_weight} onChange={e => s('eggs_weight', e.target.value)} />
-            <Input label="Production Date" type="date" value={form.production_date} onChange={e => s('production_date', e.target.value)} />
+            <DateInput label="Production Date" value={form.production_date} onChange={e => s('production_date', e.target.value)} />
           </FormRow>
         </div>
       </Modal>

@@ -6,7 +6,7 @@ import { today } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import { Plus, Trash2, Download, Upload, Pencil, ArrowLeftRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
@@ -465,8 +465,8 @@ export const CashBookPage: React.FC = () => {
       {/* Filters */}
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
-          <Input label="From Date" type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
-          <Input label="To Date"   type="date" value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
+          <DateInput label="From Date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
+          <DateInput label="To Date"   value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
           <Select label="Location" options={locationOptions} value={filterLocation} onChange={e => setFilterLocation(e.target.value)} />
           <div className="flex gap-2">
             <button className="text-xs text-brand-600 hover:underline mt-5"
@@ -587,7 +587,7 @@ export const CashBookPage: React.FC = () => {
       >
         <div className="space-y-4">
           <FormRow>
-            <Input label="Date" required type="date" value={form.txn_date} onChange={e => sf('txn_date', e.target.value)} />
+            <DateInput label="Date" required value={form.txn_date} onChange={e => sf('txn_date', e.target.value)} />
             <Select label="Type" required options={TXN_TYPES} value={form.txn_type} onChange={e => {
               const t = e.target.value
               sf('txn_type', t)
@@ -653,7 +653,7 @@ export const CashBookPage: React.FC = () => {
         </div>
         <div className="space-y-3">
           <FormRow>
-            <Input label="Date" type="date" value={xferForm.date} onChange={e => setXferForm(f => ({ ...f, date: e.target.value }))} />
+            <DateInput label="Date" value={xferForm.date} onChange={e => setXferForm(f => ({ ...f, date: e.target.value }))} />
             <Input label="Amount (₹)" type="number" step="0.01" placeholder="0.00" value={xferForm.amount} onChange={e => setXferForm(f => ({ ...f, amount: e.target.value }))} />
           </FormRow>
           <FormRow>

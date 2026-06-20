@@ -44,7 +44,77 @@ export const Button: React.FC<ButtonProps> = ({
   </button>
 )
 
-// ── INPUT ────────────────────────────────────────────────────
+// ── DATE INPUT (DD/MM/YYYY display, YYYY-MM-DD storage) ─────────
+// Native <input type="date"> shows in browser/OS locale (MM/DD/YYYY on US Android).
+// This component uses a text input with DD/MM/YYYY mask that works everywhere.
+interface DateInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'type'> {
+  label?: string
+  error?: string
+  hint?: string
+  required?: boolean
+  value?: string   // YYYY-MM-DD
+  onChange?: (e: any) => void
+}
+
+function isoToDisplay(iso: string): string {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-')
+  if (!y || !m || !d) return ''
+  return `${d}/${m}/${y}`
+}
+
+function displayToISO(disp: string): string {
+  const m = disp.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  if (!m) return ''
+  return `${m[3]}-${m[2]}-${m[1]}`
+}
+
+export const DateInput: React.FC<DateInputProps> = ({
+  label, error, hint, required, value = '', onChange, className = '', id, ...rest
+}) => {
+  const [disp, setDisp] = React.useState(() => isoToDisplay(value))
+  React.useEffect(() => { setDisp(isoToDisplay(value)) }, [value])
+  const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '_')
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let raw = e.target.value.replace(/[^\d]/g, '').slice(0, 8)
+    let formatted = raw
+    if (raw.length > 4) formatted = raw.slice(0,2) + '/' + raw.slice(2,4) + '/' + raw.slice(4)
+    else if (raw.length > 2) formatted = raw.slice(0,2) + '/' + raw.slice(2)
+    setDisp(formatted)
+    const iso = displayToISO(formatted)
+    if (iso) onChange?.({ target: { value: iso } })
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {label && (
+        <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
+          {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+      )}
+      <input
+        id={inputId}
+        type="text"
+        inputMode="numeric"
+        placeholder="DD/MM/YYYY"
+        value={disp}
+        onChange={handleChange}
+        {...rest}
+        className={`w-full rounded-lg border px-3 py-2 text-sm text-gray-900
+          placeholder-gray-400 shadow-sm transition-colors
+          border-gray-300 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500
+          disabled:bg-gray-50 disabled:cursor-not-allowed
+          ${error ? 'border-red-400 focus:border-red-500 focus:ring-red-500' : ''}
+          ${className}`}
+      />
+      {hint && !error && <p className="text-xs text-gray-500">{hint}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
+
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string
   error?: string

@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fmtDateTime } from '@/lib/utils'
-import { Card, SectionHeader, Spinner, Badge } from '@/components/ui'
+import { Card, SectionHeader, Spinner, Badge , DateInput } from '@/components/ui'
 import { Shield, Search, RefreshCw, Download, User, Clock } from 'lucide-react'
 
 const TABLE_LABELS: Record<string, string> = {
@@ -159,11 +159,11 @@ export const AuditLogPage: React.FC = () => {
 
           {/* Date range */}
           <label className="flex items-center gap-1.5 text-sm text-gray-600">
-            From <input type="date" value={fromDate} onChange={e => { setFromDate(e.target.value); setPage(0) }}
+            From <DateInput value={fromDate} onChange={e => { setFromDate(e.target.value); setPage(0) }}
               className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"/>
           </label>
           <label className="flex items-center gap-1.5 text-sm text-gray-600">
-            To <input type="date" value={toDate} onChange={e => { setToDate(e.target.value); setPage(0) }}
+            To <DateInput value={toDate} onChange={e => { setToDate(e.target.value); setPage(0) }}
               className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"/>
           </label>
 

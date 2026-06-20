@@ -7,7 +7,7 @@ import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Divider,
   SectionHeader, Spinner, Badge
-} from '@/components/ui'
+, DateInput } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Save, ChevronLeft, ChevronRight, Download, Upload, Plus, Trash2 } from 'lucide-react'
 
@@ -464,7 +464,7 @@ export const DailyEntry: React.FC = () => {
             <button onClick={prevDay} className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
               <ChevronLeft size={16}/>
             </button>
-            <Input label="Date" type="date" value={date} onChange={e => setDate(e.target.value)} />
+            <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
             <button onClick={nextDay} className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
               <ChevronRight size={16}/>
             </button>
