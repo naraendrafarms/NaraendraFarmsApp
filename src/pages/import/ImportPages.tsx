@@ -764,11 +764,44 @@ export const ImportGRN: React.FC = () => {
   const mut = useMutation({
     mutationFn: async () => {
       if (!parsedRows.length) throw new Error('No data parsed')
-      let success = 0, errors = 0; const messages: string[] = []
+      let success = 0, errors = 0, newParties = 0, newItems = 0; const messages: string[] = []
+
+      // Local caches so names created during this import are reused, not duplicated
+      const partyCache: Record<string,string> = {}
+      ;(parties??[]).forEach((p:any) => { partyCache[p.name.trim().toLowerCase()] = p.id })
+      const itemCache: Record<string,string> = {}
+      ;(ingredients??[]).forEach((i:any) => { itemCache[i.name.trim().toLowerCase()] = i.id })
+
+      // Find an existing party or create it on the fly
+      const getOrCreateParty = async (name: string): Promise<string|null> => {
+        if (!name) return null
+        const key = name.trim().toLowerCase()
+        if (partyCache[key]) return partyCache[key]
+        const matched = findParty(name)
+        if (matched) { partyCache[key] = matched; return matched }
+        const { data, error } = await supabase.from('parties')
+          .insert({ name: name.trim(), type: 'supplier', is_active: true })
+          .select('id').single()
+        if (error || !data) return null
+        partyCache[key] = data.id; newParties++; return data.id
+      }
+      const getOrCreateIngredient = async (name: string): Promise<string|null> => {
+        if (!name) return null
+        const key = name.trim().toLowerCase()
+        if (itemCache[key]) return itemCache[key]
+        const matched = findIngredient(name)
+        if (matched) { itemCache[key] = matched; return matched }
+        const { data, error } = await supabase.from('feed_ingredients')
+          .insert({ name: name.trim(), is_active: true })
+          .select('id').single()
+        if (error || !data) return null
+        itemCache[key] = data.id; newItems++; return data.id
+      }
+
       for (const r of parsedRows) {
         const farm_id = findFarm(r.farm_name ?? '')
-        const party_id = findParty(r.party_name ?? '')
-        const ingredient_id = findIngredient(r.item_name ?? '')
+        const party_id = await getOrCreateParty(r.party_name ?? '')
+        const ingredient_id = await getOrCreateIngredient(r.item_name ?? '')
         const { error } = await supabase.from('grn').insert({
           grn_no: r.grn_no, grn_date: r.grn_date,
           farm_id, party_id, ingredient_id,
@@ -783,9 +816,19 @@ export const ImportGRN: React.FC = () => {
         })
         if (error) { errors++; messages.push(`${r.grn_no}: ${error.message}`) } else success++
       }
+      if (newParties) messages.unshift(`Auto-created ${newParties} new supplier(s)`)
+      if (newItems) messages.unshift(`Auto-created ${newItems} new item(s)`)
       return { success, errors, messages }
     },
-    onSuccess: (r) => { setResult(r); if(r.success>0){toast.success(`Imported ${r.success} GRN entries!`);qc.invalidateQueries({queryKey:['grn']})} },
+    onSuccess: (r) => {
+      setResult(r)
+      if(r.success>0){
+        toast.success(`Imported ${r.success} GRN entries!`)
+        qc.invalidateQueries({queryKey:['grn']})
+        qc.invalidateQueries({queryKey:['parties']})
+        qc.invalidateQueries({queryKey:['ingredients']})
+      }
+    },
     onError: (e:any) => toast.error(e.message)
   })
 
