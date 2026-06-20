@@ -10,8 +10,9 @@ import {
 } from '@/components/ui'
 import {
   Boxes, Package, ArrowDownCircle, ArrowUpCircle, SlidersHorizontal,
-  ListTree, Plus, Pencil, Trash2, Download, Upload, AlertTriangle, Search,
+  ListTree, Plus, Pencil, Trash2, Download, Upload, AlertTriangle, Search, BarChart3,
 } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 
 // ── constants ──────────────────────────────────────────────────────
@@ -26,7 +27,7 @@ const cleanNum = (v: any): number | null => {
   return isNaN(n) ? null : n
 }
 
-type Tab = 'Stock Status' | 'Opening Stock' | 'Adjustments' | 'Item Categories' | 'Stock Ledger'
+type Tab = 'Stock Status' | 'Opening Stock' | 'Adjustments' | 'Item Categories' | 'Stock Ledger' | 'Closing Stock Report'
 
 // ════════════════════════════════════════════════════════════════════
 // SHARED DATA HOOKS
@@ -88,11 +89,12 @@ function useItemMeta() {
 export const InventoryPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>('Stock Status')
   const TABS: { id: Tab; icon: any }[] = [
-    { id: 'Stock Status',    icon: <Boxes size={14}/> },
-    { id: 'Opening Stock',   icon: <ArrowDownCircle size={14}/> },
-    { id: 'Adjustments',     icon: <SlidersHorizontal size={14}/> },
-    { id: 'Item Categories', icon: <ListTree size={14}/> },
-    { id: 'Stock Ledger',    icon: <ListTree size={14}/> },
+    { id: 'Stock Status',        icon: <Boxes size={14}/> },
+    { id: 'Opening Stock',       icon: <ArrowDownCircle size={14}/> },
+    { id: 'Adjustments',         icon: <SlidersHorizontal size={14}/> },
+    { id: 'Item Categories',     icon: <ListTree size={14}/> },
+    { id: 'Stock Ledger',        icon: <ListTree size={14}/> },
+    { id: 'Closing Stock Report',icon: <BarChart3 size={14}/> },
   ]
   return (
     <div className="space-y-5">
@@ -106,11 +108,12 @@ export const InventoryPage: React.FC = () => {
           </button>
         ))}
       </div>
-      {tab === 'Stock Status'    && <StockStatusTab />}
-      {tab === 'Opening Stock'   && <MovementTab kind="Opening" />}
-      {tab === 'Adjustments'     && <MovementTab kind="Adjustment" />}
-      {tab === 'Item Categories' && <CategoriesTab />}
-      {tab === 'Stock Ledger'    && <LedgerTab />}
+      {tab === 'Stock Status'         && <StockStatusTab />}
+      {tab === 'Opening Stock'        && <MovementTab kind="Opening" />}
+      {tab === 'Adjustments'          && <MovementTab kind="Adjustment" />}
+      {tab === 'Item Categories'      && <CategoriesTab />}
+      {tab === 'Stock Ledger'         && <LedgerTab />}
+      {tab === 'Closing Stock Report' && <ClosingStockReportTab />}
     </div>
   )
 }
@@ -658,6 +661,155 @@ const LedgerTab: React.FC = () => {
           )}
         </Card>
       )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TAB 6: CLOSING STOCK REPORT (period-end accountant report)
+// ════════════════════════════════════════════════════════════════════
+const PERIOD_OPTIONS = (() => {
+  const opts: { value: string; label: string }[] = []
+  const now = new Date()
+  for (let y = 2023; y <= now.getFullYear() + 1; y++) {
+    // FY quarters: Apr, Jun, Sep, Dec, Mar
+    const fyStart = y
+    for (const [m, label] of [[6,'Q1 (Jun)'],[9,'Q2 (Sep)'],[12,'Q3 (Dec)']] as [number,string][]) {
+      const d = `${fyStart}-${String(m).padStart(2,'0')}-30`
+      if (d <= now.toISOString().slice(0,10)) opts.push({ value: d, label: `FY${fyStart}-${String(fyStart+1).slice(2)} ${label}` })
+    }
+    const marEnd = `${fyStart+1}-03-31`
+    if (marEnd <= now.toISOString().slice(0,10)) opts.push({ value: marEnd, label: `FY${fyStart}-${String(fyStart+1).slice(2)} Year End (Mar)` })
+  }
+  return opts.reverse()
+})()
+
+const ClosingStockReportTab: React.FC = () => {
+  const defaultDate = today()
+  const [asOf, setAsOf] = useState(defaultDate)
+  const [cat, setCat] = useState('')
+  const [q, setQ] = useState('')
+  const { rows, isLoading } = useStockRows(asOf)
+
+  const filtered = useMemo(() => rows.filter(r => {
+    if (cat && r.category !== cat) return false
+    if (q && !r.item_name.toLowerCase().includes(q.toLowerCase())) return false
+    return r.closing !== 0 || r.received > 0 // only show items that have had activity
+  }), [rows, cat, q])
+
+  const totalOpeningValue  = filtered.reduce((s, r) => s + r.opening * (r.rate || 0), 0)
+  const totalReceivedValue = filtered.reduce((s, r) => s + r.received * (r.rate || 0), 0)
+  const totalClosingValue  = filtered.reduce((s, r) => s + (r.closing > 0 ? r.closing * (r.rate || 0) : 0), 0)
+
+  const exportXlsx = () => {
+    const data = [
+      ['Item Name','Category','Unit','Opening Qty','Received','Used','Adjusted','Closing Qty','Rate (Rs)','Closing Value (Rs)'],
+      ...filtered.map(r => [
+        r.item_name, r.category || 'Other', r.unit,
+        Math.round(r.opening), Math.round(r.received), Math.round(r.used),
+        Math.round(r.adjusted), Math.round(r.closing), r.rate > 0 ? Number(r.rate.toFixed(2)) : '',
+        r.closing > 0 && r.rate > 0 ? Math.round(r.closing * r.rate) : 0,
+      ]),
+      ['','','','','','','','TOTAL','', Math.round(totalClosingValue)],
+    ]
+    const ws = XLSX.utils.aoa_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, `Stock_${asOf}`)
+    XLSX.writeFile(wb, `ClosingStock_${asOf}.xlsx`)
+  }
+
+  const byCategory = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const r of filtered) {
+      if (r.closing <= 0) continue
+      const cat = r.category || 'Other'
+      m[cat] = (m[cat] ?? 0) + r.closing * (r.rate || 0)
+    }
+    return Object.entries(m).sort((a, b) => b[1] - a[1])
+  }, [filtered])
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <Card>
+        <div className="flex flex-wrap gap-3 items-end">
+          <DateInput label="Stock as on (Period End)" value={asOf} onChange={e => setAsOf(e.target.value)} className="w-48" />
+          <Select label="Category" value={cat} onChange={e => setCat(e.target.value)}
+            options={[{value:'',label:'All Categories'}, ...CATEGORIES.map(c => ({value:c,label:c}))]} className="w-44" />
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Item name…"
+                className="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-2 text-sm focus:ring-1 focus:ring-brand-500" />
+            </div>
+          </div>
+          <Button size="sm" variant="secondary" icon={<Download size={14}/>} onClick={exportXlsx}>Export Excel</Button>
+        </div>
+      </Card>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard title="Items in Report" value={String(filtered.length)} icon={<Package size={18}/>} />
+        <StatCard title="Items with Stock" value={String(filtered.filter(r => r.closing > 0).length)} icon={<Boxes size={18}/>} color="text-green-600" />
+        <StatCard title="Closing Stock Value" value={inr(totalClosingValue)} icon={<BarChart3 size={18}/>} color="text-blue-600" />
+        <StatCard title="Categories" value={String(byCategory.length)} icon={<ListTree size={18}/>} />
+      </div>
+
+      {/* Category breakdown */}
+      {byCategory.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {byCategory.map(([cat, val]) => (
+            <Card key={cat} className="py-2">
+              <p className="text-xs text-gray-500">{cat}</p>
+              <p className="font-bold text-sm text-gray-800">{inr(val)}</p>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Main report table */}
+      <Card padding={false}>
+        {isLoading ? <Spinner /> : filtered.length === 0 ? (
+          <EmptyState icon={<Boxes size={28}/>} title="No stock data" subtitle="Import GRN data and set opening stock to generate this report" />
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Item Name</Th><Th>Category</Th><Th>Unit</Th>
+                  <Th right>Opening</Th><Th right>Received</Th><Th right>Used</Th><Th right>Adjusted</Th>
+                  <Th right>Closing Qty</Th><Th right>Rate (Rs)</Th><Th right>Closing Value</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.key} className={`text-sm ${r.closing <= 0 ? 'bg-red-50' : 'hover:bg-gray-50'}`}>
+                    <Td className="font-medium max-w-[240px] truncate">{r.item_name}</Td>
+                    <Td className="text-xs">{r.category ? <Badge color="blue">{r.category}</Badge> : <span className="text-gray-300">—</span>}</Td>
+                    <Td className="text-xs">{r.unit}</Td>
+                    <Td right className="text-xs text-gray-500">{Math.round(r.opening).toLocaleString('en-IN')}</Td>
+                    <Td right className="text-xs text-green-700">{Math.round(r.received).toLocaleString('en-IN')}</Td>
+                    <Td right className="text-xs text-orange-600">{Math.round(r.used).toLocaleString('en-IN')}</Td>
+                    <Td right className="text-xs text-gray-500">{r.adjusted ? Math.round(r.adjusted).toLocaleString('en-IN') : '—'}</Td>
+                    <Td right>
+                      <Badge color={r.closing > 0 ? 'green' : 'red'}>{Math.round(r.closing).toLocaleString('en-IN')}</Badge>
+                    </Td>
+                    <Td right className="text-xs">{r.rate > 0 ? r.rate.toFixed(2) : '—'}</Td>
+                    <Td right className="font-semibold text-blue-700">{r.closing > 0 && r.rate > 0 ? inr(r.closing * r.rate) : '—'}</Td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-blue-50 font-bold text-sm">
+                  <Td colSpan={9} className="text-blue-800">TOTAL CLOSING STOCK VALUE (as on {fmtDate(asOf)})</Td>
+                  <Td right className="text-blue-800 text-base">{inr(totalClosingValue)}</Td>
+                </tr>
+              </tfoot>
+            </Table>
+          </div>
+        )}
+      </Card>
     </div>
   )
 }

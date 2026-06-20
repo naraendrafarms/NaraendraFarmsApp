@@ -213,6 +213,40 @@ export const CompanyPL: React.FC = () => {
     }
   })
 
+  // Closing stock: all-time GRN, production usage, adjustments (cumulative up to FY end)
+  const { data: allGrnStock } = useQuery({
+    queryKey: ['cpl_stock_grn'],
+    queryFn: async () => {
+      let all: any[] = [], from = 0
+      while (true) {
+        const { data } = await supabase.from('grn')
+          .select('item_name,qty,price_per_unit,grn_date').order('grn_date', { ascending: true }).range(from, from + 999)
+        if (!data || !data.length) break
+        all = all.concat(data); if (data.length < 1000) break; from += 1000
+      }
+      return all
+    },
+  })
+  const { data: allProdUsage } = useQuery({
+    queryKey: ['cpl_stock_prod'],
+    queryFn: async () => {
+      const { data } = await supabase.from('feed_production_ingredients')
+        .select('ingredient_name,quantity_kg,feed_production_log(production_date)').limit(50000)
+      return (data ?? []).map((r: any) => ({
+        item_name: r.ingredient_name,
+        qty: Number(r.quantity_kg ?? 0),
+        date: r.feed_production_log?.production_date ?? null,
+      }))
+    },
+  })
+  const { data: allAdjustments } = useQuery({
+    queryKey: ['cpl_stock_adj'],
+    queryFn: async () => {
+      const { data } = await supabase.from('feed_stock_adjustments').select('ingredient_name,adjustment_kg,adjustment_type,adjustment_date,rate')
+      return data ?? []
+    },
+  })
+
   // ── COMPUTE MONTHLY MAPS ──────────────────────────────────────────────────
   const heByMonth      = useMemo(() => sumByMonth(heData ?? [], 'dispatch_date', 'amount'), [heData])
   const nheEggByMonth  = useMemo(() => sumByMonth(nheSalesEgg ?? [], 'sale_date', 'amount'), [nheSalesEgg])
@@ -261,6 +295,39 @@ export const CompanyPL: React.FC = () => {
   }, [salaryData])
   const farmExpByMonth = useMemo(() => sumByMonth(farmExpData ?? [], 'expense_date', 'amount'), [farmExpData])
 
+  // Closing stock value as of FY end date
+  const closingStockValue = useMemo(() => {
+    const m: Record<string, { received: number; used: number; opening: number; adjusted: number; rate: number; lastDate: string }> = {}
+    const norm = (s?: string | null) => (s ?? '').trim().toLowerCase()
+    const ensure = (name: string) => {
+      const k = norm(name)
+      if (!m[k]) m[k] = { received: 0, used: 0, opening: 0, adjusted: 0, rate: 0, lastDate: '' }
+      return m[k]
+    }
+    for (const g of allGrnStock ?? []) {
+      if (!g.item_name || g.grn_date > end) continue
+      const r = ensure(g.item_name)
+      r.received += Number(g.qty ?? 0)
+      if (g.grn_date >= r.lastDate) { r.rate = Number(g.price_per_unit ?? 0); r.lastDate = g.grn_date }
+    }
+    for (const u of allProdUsage ?? []) {
+      if (!u.item_name || (u.date && u.date > end)) continue
+      ensure(u.item_name).used += Number(u.qty ?? 0)
+    }
+    for (const a of allAdjustments ?? []) {
+      if (!a.ingredient_name || (a.adjustment_date && a.adjustment_date > end)) continue
+      const r = ensure(a.ingredient_name)
+      if (a.adjustment_type === 'Opening') r.opening += Number(a.adjustment_kg ?? 0)
+      else r.adjusted += Number(a.adjustment_kg ?? 0)
+    }
+    let total = 0
+    for (const r of Object.values(m)) {
+      const closing = r.opening + r.received + r.adjusted - r.used
+      if (closing > 0 && r.rate > 0) total += closing * r.rate
+    }
+    return total
+  }, [allGrnStock, allProdUsage, allAdjustments, end])
+
   // ── MONTHLY TABLE DATA ────────────────────────────────────────────────────
   const rows = useMemo(() => months.map(m => {
     const heAmt      = heByMonth[m] ?? 0
@@ -279,26 +346,30 @@ export const CompanyPL: React.FC = () => {
     const totalCost  = chickCost + feed + med + elec + salary + farmExp
     const net        = totalRev - totalCost
 
-    return { m, label: monthLabel(m), heAmt, nheEgg, chickSale, cull, otherInc, totalRev, chickCost, feed, med, elec, salary, farmExp, totalCost, net }
+    return { m, label: monthLabel(m), heAmt, nheEgg, chickSale, cull, otherInc, totalRev, chickCost, feed, med, elec, salary, farmExp, totalCost, net, closingStock: 0 }
   }), [months, heByMonth, nheEggByMonth, chickByMonth, cullByMonth, otherIncByMonth, chickCostByMonth, feedByMonth, medByMonth, elecByMonth, salaryByMonth, farmExpByMonth])
 
   // ── ANNUAL TOTALS ─────────────────────────────────────────────────────────
-  const totals = useMemo(() => rows.reduce((acc, r) => ({
-    heAmt: acc.heAmt + r.heAmt,
-    nheEgg: acc.nheEgg + r.nheEgg,
-    chickSale: acc.chickSale + r.chickSale,
-    cull: acc.cull + r.cull,
-    otherInc: acc.otherInc + r.otherInc,
-    totalRev: acc.totalRev + r.totalRev,
-    chickCost: acc.chickCost + r.chickCost,
-    feed: acc.feed + r.feed,
-    med: acc.med + r.med,
-    elec: acc.elec + r.elec,
-    salary: acc.salary + r.salary,
-    farmExp: acc.farmExp + r.farmExp,
-    totalCost: acc.totalCost + r.totalCost,
-    net: acc.net + r.net,
-  }), { heAmt: 0, nheEgg: 0, chickSale: 0, cull: 0, otherInc: 0, totalRev: 0, chickCost: 0, feed: 0, med: 0, elec: 0, salary: 0, farmExp: 0, totalCost: 0, net: 0 }), [rows])
+  const totals = useMemo(() => {
+    const base = rows.reduce((acc, r) => ({
+      heAmt: acc.heAmt + r.heAmt,
+      nheEgg: acc.nheEgg + r.nheEgg,
+      chickSale: acc.chickSale + r.chickSale,
+      cull: acc.cull + r.cull,
+      otherInc: acc.otherInc + r.otherInc,
+      totalRev: acc.totalRev + r.totalRev,
+      chickCost: acc.chickCost + r.chickCost,
+      feed: acc.feed + r.feed,
+      med: acc.med + r.med,
+      elec: acc.elec + r.elec,
+      salary: acc.salary + r.salary,
+      farmExp: acc.farmExp + r.farmExp,
+      totalCost: acc.totalCost + r.totalCost,
+      net: acc.net + r.net,
+    }), { heAmt: 0, nheEgg: 0, chickSale: 0, cull: 0, otherInc: 0, totalRev: 0, chickCost: 0, feed: 0, med: 0, elec: 0, salary: 0, farmExp: 0, totalCost: 0, net: 0 })
+    // Closing stock reduces effective cost; add it for annual totals display
+    return { ...base, closingStock: closingStockValue, netAfterStock: base.net + closingStockValue }
+  }, [rows, closingStockValue])
 
   const isLoading = heLoading
 
@@ -333,7 +404,8 @@ export const CompanyPL: React.FC = () => {
   type RowDef = {
     label: string
     key: keyof typeof totals
-    style: 'revenue' | 'cost' | 'total-rev' | 'total-cost' | 'net'
+    style: 'revenue' | 'cost' | 'total-rev' | 'total-cost' | 'net' | 'stock'
+    annualOnly?: boolean
   }
 
   const lineItemDefs: RowDef[] = [
@@ -350,7 +422,9 @@ export const CompanyPL: React.FC = () => {
     { label: 'Salary',         key: 'salary',    style: 'cost' },
     { label: 'Farm Expenses',  key: 'farmExp',   style: 'cost' },
     { label: 'TOTAL COST',     key: 'totalCost', style: 'total-cost' },
+    { label: 'Less: Closing Stock (Asset)', key: 'closingStock', style: 'stock', annualOnly: true },
     { label: 'NET PROFIT / LOSS', key: 'net',   style: 'net' },
+    { label: 'NET PROFIT (after stock adjustment)', key: 'netAfterStock', style: 'net', annualOnly: true },
   ]
 
   const getVal = (def: RowDef, col: string) => {
@@ -365,6 +439,7 @@ export const CompanyPL: React.FC = () => {
       case 'cost':       return 'text-right text-red-600'
       case 'total-rev':  return 'text-right font-bold text-green-800 bg-green-50'
       case 'total-cost': return 'text-right font-bold text-red-800 bg-red-50'
+      case 'stock':      return 'text-right font-medium text-purple-700 bg-purple-50'
       case 'net':        return `text-right font-bold text-lg ${val >= 0 ? 'text-blue-700 bg-blue-50' : 'text-red-700 bg-red-50'}`
       default:           return 'text-right'
     }
@@ -374,6 +449,7 @@ export const CompanyPL: React.FC = () => {
     switch (style) {
       case 'total-rev':  return 'font-bold text-green-800 bg-green-50'
       case 'total-cost': return 'font-bold text-red-800 bg-red-50'
+      case 'stock':      return 'font-medium text-purple-800 bg-purple-50 pl-2'
       case 'net':        return 'font-bold text-gray-900 bg-blue-50'
       case 'cost':       return 'text-gray-600 pl-2'
       case 'revenue':    return 'text-gray-600 pl-2'
@@ -387,12 +463,13 @@ export const CompanyPL: React.FC = () => {
   const margin = totals.totalRev > 0 ? (totals.net / totals.totalRev * 100).toFixed(1) : '0'
 
   const costItems = [
-    { label: 'Chick Cost',    value: totals.chickCost },
-    { label: 'Feed Cost',     value: totals.feed },
-    { label: 'Medicine',      value: totals.med },
-    { label: 'Electricity',   value: totals.elec },
-    { label: 'Salary',        value: totals.salary },
-    { label: 'Farm Expenses', value: totals.farmExp },
+    { label: 'Chick Cost',      value: totals.chickCost },
+    { label: 'Feed Cost',       value: totals.feed },
+    { label: 'Medicine',        value: totals.med },
+    { label: 'Electricity',     value: totals.elec },
+    { label: 'Salary',          value: totals.salary },
+    { label: 'Farm Expenses',   value: totals.farmExp },
+    { label: 'Less: Closing Stock', value: -closingStockValue },
   ]
 
   return (
@@ -421,24 +498,34 @@ export const CompanyPL: React.FC = () => {
       {isLoading ? <Spinner/> : (
         <>
           {/* Stat cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <Card className="bg-green-50">
               <p className="text-xs text-gray-500 mb-1">Total Revenue</p>
-              <p className="text-xl font-bold text-green-700">{inr(totals.totalRev)}</p>
+              <p className="text-lg font-bold text-green-700">{inr(totals.totalRev)}</p>
             </Card>
             <Card className="bg-red-50">
               <p className="text-xs text-gray-500 mb-1">Total Cost</p>
-              <p className="text-xl font-bold text-red-700">{inr(totals.totalCost)}</p>
+              <p className="text-lg font-bold text-red-700">{inr(totals.totalCost)}</p>
             </Card>
             <Card className={totals.net >= 0 ? 'bg-blue-50' : 'bg-orange-50'}>
               <p className="text-xs text-gray-500 mb-1">Net Profit / Loss</p>
-              <p className={`text-xl font-bold ${totals.net >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>
+              <p className={`text-lg font-bold ${totals.net >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>
                 {inr(totals.net)}
+              </p>
+            </Card>
+            <Card className="bg-purple-50">
+              <p className="text-xs text-gray-500 mb-1">Closing Stock (Asset)</p>
+              <p className="text-lg font-bold text-purple-700">{inr(closingStockValue)}</p>
+            </Card>
+            <Card className={totals.netAfterStock >= 0 ? 'bg-blue-50' : 'bg-orange-50'}>
+              <p className="text-xs text-gray-500 mb-1">Net + Stock Adj.</p>
+              <p className={`text-lg font-bold ${totals.netAfterStock >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>
+                {inr(totals.netAfterStock)}
               </p>
             </Card>
             <Card>
               <p className="text-xs text-gray-500 mb-1">Margin %</p>
-              <p className={`text-xl font-bold ${parseFloat(margin) >= 0 ? 'text-blue-700' : 'text-red-700'}`}>
+              <p className={`text-lg font-bold ${parseFloat(margin) >= 0 ? 'text-blue-700' : 'text-red-700'}`}>
                 {margin}%
               </p>
             </Card>
@@ -460,22 +547,23 @@ export const CompanyPL: React.FC = () => {
                 </thead>
                 <tbody>
                   {lineItemDefs.map((def, idx) => {
-                    const prevStyle = idx > 0 ? lineItemDefs[idx - 1].style : undefined
+                    if (def.annualOnly && view === 'monthly') return null
                     const isTotalRev = def.style === 'total-rev'
                     const isTotalCost = def.style === 'total-cost'
                     const isNet = def.style === 'net'
+                    const isStock = def.style === 'stock'
                     const annualVal = totals[def.key]
 
                     return (
                       <React.Fragment key={def.key}>
-                        {(isTotalRev || isTotalCost || isNet) && (
+                        {(isTotalRev || isTotalCost || isNet || isStock) && (
                           <tr><td colSpan={view === 'monthly' ? months.length + 2 : 2} className="h-1 bg-white p-0"></td></tr>
                         )}
-                        <tr className={`${isTotalRev || isTotalCost || isNet ? '' : 'hover:bg-gray-50'}`}>
-                          <Td className={`sticky left-0 z-10 bg-white ${labelClass(def.style)} ${isTotalRev || isTotalCost || isNet ? '' : ''}`}>
+                        <tr className={`${isTotalRev || isTotalCost || isNet || isStock ? '' : 'hover:bg-gray-50'}`}>
+                          <Td className={`sticky left-0 z-10 bg-white ${labelClass(def.style)}`}>
                             {def.label}
                           </Td>
-                          {displayCols.map(col => {
+                          {!def.annualOnly && displayCols.map(col => {
                             const val = getVal(def, col)
                             return (
                               <td key={col} className={`px-3 py-2 text-sm ${cellClass(def.style, val)}`}>
@@ -483,7 +571,12 @@ export const CompanyPL: React.FC = () => {
                               </td>
                             )
                           })}
-                          {view === 'monthly' && (
+                          {def.annualOnly && (
+                            <td colSpan={view === 'annual' ? 1 : months.length + 1} className={`px-3 py-2 text-sm ${cellClass(def.style, annualVal)}`}>
+                              {annualVal !== 0 ? inr(annualVal) : <span className="text-gray-300">—</span>}
+                            </td>
+                          )}
+                          {!def.annualOnly && view === 'monthly' && (
                             <td className={`px-3 py-2 text-sm ${cellClass(def.style, annualVal)}`}>
                               {annualVal !== 0 ? inr(annualVal) : <span className="text-gray-300">—</span>}
                             </td>
