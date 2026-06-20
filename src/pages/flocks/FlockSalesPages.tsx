@@ -203,6 +203,7 @@ export const HEDispatch: React.FC = () => {
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [importing, setImporting] = useState(false)
   const [noInvoiceOnly, setNoInvoiceOnly] = useState(false)
+  const [hePartyFilter, setHePartyFilter] = useState('')
   const [tab, setTab] = useState<'dispatch'|'stock'>('dispatch')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [receiptSale, setReceiptSale] = useState<any>(null)
@@ -394,7 +395,17 @@ export const HEDispatch: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
-  const filtered = (dispatches ?? []).filter((d: any) => !noInvoiceOnly || !d.invoice_no)
+  const filtered = (dispatches ?? []).filter((d: any) => {
+    if (noInvoiceOnly && d.invoice_no) return false
+    if (hePartyFilter.trim()) {
+      const q = hePartyFilter.trim().toLowerCase()
+      if (!(d.parties?.name ?? '').toLowerCase().includes(q) &&
+          !(d.hatcheries?.name ?? '').toLowerCase().includes(q) &&
+          !(d.dc_no ?? '').toLowerCase().includes(q) &&
+          !(d.invoice_no ?? '').toLowerCase().includes(q)) return false
+    }
+    return true
+  })
   const totalDisp = filtered.reduce((s: number, d: any) => s + d.total_dispatched, 0)
   const totalAmt  = filtered.reduce((s: number, d: any) => s + (d.amount ?? 0), 0)
   const totalFree = filtered.reduce((s: number, d: any) => s + (d.free_eggs ?? 0), 0)
@@ -585,7 +596,16 @@ export const HEDispatch: React.FC = () => {
           </span>
         </label>
         </>}
-        {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setNoInvoiceOnly(false) }}>Clear</Button>}
+        {tab === 'dispatch' && (
+          <input
+            type="text"
+            placeholder="Search party / DC / Invoice…"
+            value={hePartyFilter}
+            onChange={e => setHePartyFilter(e.target.value)}
+            className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-52"
+          />
+        )}
+        {(hasFilter || hePartyFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setNoInvoiceOnly(false); setHePartyFilter('') }}>Clear</Button>}
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Template</Button>
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportHE}>Export CSV</Button>
@@ -922,6 +942,7 @@ export const NHESales: React.FC = () => {
   const [editing, setEditing]     = useState<any>(null)
   const [flockFilter, setFlockFilter] = useState('')
   const [typeFilter, setTypeFilter]   = useState('')
+  const [partyFilter, setPartyFilter] = useState('')
   const [fromDate, setFromDate]   = useState('')
   const [toDate, setToDate]       = useState('')
   const [sel, setSel]             = useState<Set<string>>(new Set())
@@ -1274,9 +1295,14 @@ export const NHESales: React.FC = () => {
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
 
   const filtered = (sales ?? []).filter((s: any) => {
-    if (!typeFilter) return true
-    if (typeFilter === 'bird_sale') return isBirdSale(s.sale_type)
-    return s.sale_type === typeFilter
+    if (typeFilter === 'bird_sale' && !isBirdSale(s.sale_type)) return false
+    if (typeFilter && typeFilter !== 'bird_sale' && s.sale_type !== typeFilter) return false
+    if (partyFilter.trim()) {
+      const q = partyFilter.trim().toLowerCase()
+      if (!(s.parties?.name ?? '').toLowerCase().includes(q) &&
+          !(s.dc_no ?? '').toLowerCase().includes(q)) return false
+    }
+    return true
   })
 
   const saleIds = filtered.map((s: any) => s.id)
@@ -1285,8 +1311,8 @@ export const NHESales: React.FC = () => {
   const toggle    = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? saleIds.forEach((id: string) => n.delete(id)) : saleIds.forEach((id: string) => n.add(id)); return n })
 
-  // Summary by type
-  const byType = (sales ?? []).reduce((acc: any, s: any) => {
+  // Summary by type — follows all active filters (flock, date, type, party)
+  const byType = filtered.reduce((acc: any, s: any) => {
     if (!acc[s.sale_type]) acc[s.sale_type] = { amount: 0, qty: 0, count: 0 }
     acc[s.sale_type].amount += Number(s.amount ?? 0)
     acc[s.sale_type].qty   += Number(s.quantity ?? 0)
@@ -1294,8 +1320,8 @@ export const NHESales: React.FC = () => {
     return acc
   }, {})
 
-  // Bird sales summary: total birds + weight + value
-  const birdSales = (sales ?? []).filter((s: any) => isBirdSale(s.sale_type))
+  // Bird sales summary: total birds + weight + value (follows all active filters)
+  const birdSales = filtered.filter((s: any) => isBirdSale(s.sale_type))
   const birdTotalBirds  = birdSales.reduce((s: number, r: any) => s + (r.quantity ?? 0), 0)
   const birdTotalWeight = birdSales.reduce((s: number, r: any) => s + (r.total_weight_kg ?? 0), 0)
   const birdTotalAmt    = birdSales.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
@@ -1333,7 +1359,14 @@ export const NHESales: React.FC = () => {
           To <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
-        {(hasFilter||typeFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setTypeFilter('') }}>Clear</Button>}
+        <input
+          type="text"
+          placeholder="Search party / DC No…"
+          value={partyFilter}
+          onChange={e => setPartyFilter(e.target.value)}
+          className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-48"
+        />
+        {(hasFilter || typeFilter || partyFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setTypeFilter(''); setPartyFilter('') }}>Clear</Button>}
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Template</Button>
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
