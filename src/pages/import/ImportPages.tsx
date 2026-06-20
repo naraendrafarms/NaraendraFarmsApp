@@ -115,7 +115,7 @@ export const ImportDaily: React.FC = () => {
 
     // Deduplicate by date (keep last)
     const deduped = Object.values(rows.reduce((acc: any, r) => { acc[r.record_date] = r; return acc }, {}))
-    setPreview(deduped.slice(0, 5))
+    setPreview(deduped.slice(0, 20))
     toast.success(`Parsed ${deduped.length} daily records from ${file.name}`)
     return deduped
   }
@@ -183,11 +183,11 @@ export const ImportDaily: React.FC = () => {
 
           {preview.length > 0 && (
             <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">Preview (first 5 rows of {parsedRows.length} total):</p>
+              <p className="text-sm font-medium text-gray-700 mb-2">Full preview (first {preview.length} of {parsedRows.length} total):</p>
               <div className="overflow-x-auto text-xs bg-gray-50 rounded-lg p-3">
-                <table className="w-full">
+                <table className="w-full whitespace-nowrap">
                   <thead><tr>
-                    {['Date','Open ♀','Open ♂','Feed ♀','Feed ♂','Eggs','HE','TrCull ♀','Mort ♀','Mort ♂','Close ♀'].map(h =>
+                    {['Date','Open ♀','Open ♂','Feed ♀','Feed ♂','Eggs','HE','TrCull ♀','TrCull ♂','Mort ♀','Mort ♂','Close ♀','Close ♂'].map(h =>
                       <th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>
                     )}
                   </tr></thead>
@@ -201,9 +201,11 @@ export const ImportDaily: React.FC = () => {
                       <td className="px-2 py-1">{r.total_eggs}</td>
                       <td className="px-2 py-1">{r.he_eggs}</td>
                       <td className="px-2 py-1">{r.trcull_female}</td>
+                      <td className="px-2 py-1">{r.trcull_male}</td>
                       <td className="px-2 py-1">{r.mortality_female}</td>
                       <td className="px-2 py-1">{r.mortality_male}</td>
                       <td className="px-2 py-1">{r.closing_female}</td>
+                      <td className="px-2 py-1">{r.closing_male}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -542,12 +544,23 @@ export const ImportSalary: React.FC = () => {
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile} />
           </div>
           {parsedRows.length > 0 && (
-            <div className="text-sm bg-gray-50 rounded-lg p-3 space-y-1">
-              {parsedRows.map((r, i) => (
-                <p key={i} className="text-xs text-gray-600">
-                  {farms?.find((f:any)=>f.id===r.farm_id)?.name} | {r.month} | E.Sal: Rs {r.total_salary?.toLocaleString('en-IN')} | Net: Rs {r.net_salary?.toLocaleString('en-IN')}
-                </p>
-              ))}
+            <div className="overflow-x-auto">
+              <p className="font-medium text-sm text-gray-700 mb-2">{parsedRows.length} rows parsed — full preview:</p>
+              <Table>
+                <thead><tr>{['Farm','Month','Earned Salary','Advance','Net Salary','Employees'].map(h=><Th key={h}>{h}</Th>)}</tr></thead>
+                <tbody>
+                  {parsedRows.map((r:any, i:number) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <Td className="font-medium">{farms?.find((f:any)=>f.id===r.farm_id)?.name ?? '—'}</Td>
+                      <Td>{r.month}</Td>
+                      <Td>{r.total_salary?.toLocaleString('en-IN')}</Td>
+                      <Td>{r.total_advance?.toLocaleString('en-IN')}</Td>
+                      <Td>{r.net_salary?.toLocaleString('en-IN')}</Td>
+                      <Td>{r.employee_count ?? '—'}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
             </div>
           )}
           <Button icon={<Upload size={16}/>} loading={mut.isPending}
@@ -624,8 +637,16 @@ export const ImportHE: React.FC = () => {
       }
     }
     setParsedRows(rows)
-    setPreview(rows.slice(0, 5))
+    setPreview(rows.slice(0, 20))
     toast.success(`Parsed ${rows.length} HE dispatch records`)
+  }
+
+  const downloadTemplate = () => {
+    const headers = ['date','dc_no','hatchery_name','grade_a','grade_b','total','free_eggs','rate','amount','setting_date','hatch_date','chicks_sold','remarks']
+    const sample = ['2026-04-15','DC-101','Sri Hatchery','5000','300','5300','50','3.5','18375','','','','']
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([headers.join(',')+'\n'+sample.join(',')], { type:'text/csv' }))
+    a.download = 'he_dispatch_template.csv'; a.click()
   }
 
   const mut = useMutation({
@@ -664,18 +685,20 @@ export const ImportHE: React.FC = () => {
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
             <p className="font-medium mb-1">Expected columns (row by row):</p>
-            <p>Date | DC No | Hatchery Name | Grade A | Grade B | Total | Free Eggs | Rate | Amount | Setting Date | Hatch Date | Chicks Sold</p>
+            <p>Date | DC No | Hatchery Name | Grade A | Grade B | Total | Free Eggs | Rate | Amount | Setting Date | Hatch Date | Chicks Sold | Remarks</p>
+            <button onClick={downloadTemplate} className="mt-2 text-brand-600 hover:underline font-medium">↓ Download template (CSV)</button>
           </div>
           <Select label="Flock" required placeholder="— Select flock —" options={flockOptions} value={selectedFlock} onChange={e=>setSelectedFlock(e.target.value)}/>
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 transition-all" onClick={()=>fileRef.current?.click()}>
             <FileSpreadsheet size={32} className="mx-auto text-gray-300 mb-2"/>
-            <p className="text-sm text-gray-500">Click to upload HE Dispatch Excel</p>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile}/>
+            <p className="text-sm text-gray-500">Click to upload HE Dispatch CSV / Excel</p>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile}/>
           </div>
           {preview.length > 0 && (
             <div className="overflow-x-auto text-xs bg-gray-50 rounded-lg p-3">
-              <table className="w-full">
-                <thead><tr>{['Date','DC No','Hatchery','Gr A','Gr B','Total','Free','Rate','Amount'].map(h=><th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>)}</tr></thead>
+              <p className="font-medium text-sm text-gray-700 mb-2">{parsedRows.length} parsed — full preview (first {preview.length}):</p>
+              <table className="w-full whitespace-nowrap">
+                <thead><tr>{['Date','DC No','Hatchery','Gr A','Gr B','Total','Free','Rate','Amount','Setting','Hatch','Chicks','Remarks'].map(h=><th key={h} className="px-2 py-1 text-left text-gray-500">{h}</th>)}</tr></thead>
                 <tbody>{preview.map((r:any,i:number)=>(
                   <tr key={i} className="border-t border-gray-200">
                     <td className="px-2 py-1 font-medium">{r.dispatch_date}</td>
@@ -687,6 +710,10 @@ export const ImportHE: React.FC = () => {
                     <td className="px-2 py-1">{r.free_eggs}</td>
                     <td className="px-2 py-1">{r.rate}</td>
                     <td className="px-2 py-1">{r.amount?.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-1">{r.setting_date??'—'}</td>
+                    <td className="px-2 py-1">{r.hatch_date??'—'}</td>
+                    <td className="px-2 py-1">{r.chicks_sold??'—'}</td>
+                    <td className="px-2 py-1">{r.remarks??'—'}</td>
                   </tr>
                 ))}</tbody>
               </table>
