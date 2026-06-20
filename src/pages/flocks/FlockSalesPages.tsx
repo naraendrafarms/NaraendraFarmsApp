@@ -857,7 +857,9 @@ function nheCashCategory(saleType: string): { category: string; label: string } 
   if (isBirdSale(saleType)) return { category: 'bird_sale',   label: 'Bird Sale' }
   if (saleType === 'manure') return { category: 'litter_sale', label: 'Litter / Manure Sale' }
   if (saleType === 'he_sale') return { category: 'he_sale',   label: 'HE Egg Sale' }
-  if (['je','te','be'].includes(saleType)) return { category: 'egg_sale', label: NHE_TYPES.find(t=>t.value===saleType)?.label ?? saleType }
+  if (saleType === 'je') return { category: 'je_sale', label: 'Jumbo Egg Sale (JE)' }
+  if (saleType === 'te') return { category: 'te_sale', label: 'Table Egg Sale (TE)' }
+  if (saleType === 'be') return { category: 'be_sale', label: 'Broken/Crack Egg Sale (BE)' }
   return { category: 'sales_collection', label: NHE_TYPES.find(t=>t.value===saleType)?.label ?? saleType }
 }
 

@@ -23,7 +23,9 @@ const TXN_TYPES = [
 const CATEGORIES = [
   { value: 'sales_collection', label: 'Sales Collection (General)' },
   { value: 'he_sale',          label: 'HE Egg Sale' },
-  { value: 'egg_sale',         label: 'Egg Sale (JE / TE / BE)' },
+  { value: 'je_sale',          label: 'Jumbo Egg Sale (JE)' },
+  { value: 'te_sale',          label: 'Table Egg Sale (TE)' },
+  { value: 'be_sale',          label: 'Broken/Crack Egg Sale (BE)' },
   { value: 'bird_sale',        label: 'Bird Sale' },
   { value: 'litter_sale',      label: 'Litter / Manure Sale' },
   { value: 'expense',          label: 'Expense' },
