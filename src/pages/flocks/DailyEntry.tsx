@@ -217,6 +217,23 @@ export const DailyEntry: React.FC = () => {
     }))
   }
 
+  // Auto-compute closing whenever any bird movement field changes
+  useEffect(() => {
+    const of = parseInt(form.opening_female) || 0
+    const om = parseInt(form.opening_male) || 0
+    const trf = parseInt(form.transfer_female) || 0
+    const trm = parseInt(form.transfer_male) || 0
+    const cf = parseInt(form.cull_female) || 0
+    const cm = parseInt(form.cull_male) || 0
+    const mf = parseInt(form.mortality_female) || 0
+    const mm = parseInt(form.mortality_male) || 0
+    setForm(f => ({
+      ...f,
+      closing_female: Math.max(0, of - trf - cf - mf).toString(),
+      closing_male:   Math.max(0, om - trm - cm - mm).toString(),
+    }))
+  }, [form.opening_female, form.opening_male, form.transfer_female, form.transfer_male, form.cull_female, form.cull_male, form.mortality_female, form.mortality_male])
+
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const selectedFlockData = flocks?.find((f: any) => f.id === selectedFlock)
