@@ -1244,6 +1244,16 @@ const AgingReportTab: React.FC = () => {
 // ══════════════════════════════════════════════════════════════════
 const VendorStatementTab: React.FC = () => {
   const [vendor, setVendor] = useState('')
+  const [search, setSearch] = useState('')
+
+  // Summary per vendor from the view (GRN-sourced + manual bills)
+  const { data: summary=[], isLoading: summaryLoading } = useQuery({
+    queryKey: ['v_vendor_statement'],
+    queryFn: async () => {
+      const { data } = await supabase.from('v_vendor_statement').select('*').order('outstanding', { ascending: false })
+      return data ?? []
+    }
+  })
 
   const { data: payments=[], isLoading: payLoading } = useQuery({
     queryKey: ['pending_payments'],
@@ -1262,35 +1272,86 @@ const VendorStatementTab: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('purchase_orders').select('*').order('po_date',{ascending:false}); return data ?? [] }
   })
 
-  const vendors = useMemo(() => {
+  const allVendors = useMemo(() => {
     const s = new Set<string>()
+    summary.forEach((v: any) => v.vendor_name && s.add(v.vendor_name))
     payments.forEach((p: any) => p.vendor_name && s.add(p.vendor_name))
     orders.forEach((o: any) => o.vendor_name && s.add(o.vendor_name))
     return Array.from(s).sort()
-  }, [payments, orders])
+  }, [summary, payments, orders])
 
   const vendorPOs  = useMemo(() => vendor ? orders.filter((o: any) => o.vendor_name === vendor) : [], [orders, vendor])
   const vendorPays = useMemo(() => vendor ? payments.filter((p: any) => p.vendor_name === vendor) : [], [payments, vendor])
 
-  const totalOrdered = vendorPOs.reduce((s: number, o: any) => s + Number(o.total_amount ?? 0), 0)
+  const totalOrdered  = vendorPOs.reduce((s: number, o: any) => s + Number(o.total_amount ?? 0), 0)
   const totalInvoiced = vendorPays.reduce((s: number, p: any) => s + Number(p.invoice_amount ?? 0), 0)
-  const totalPaid  = vendorPays.filter((p: any) => p.payment_status === 'Paid').reduce((s: number, p: any) => s + Number(p.invoice_amount ?? 0), 0)
-  const outstanding = totalInvoiced - totalPaid
+  const totalPaid     = vendorPays.filter((p: any) => p.payment_status === 'Paid').reduce((s: number, p: any) => s + Number(p.invoice_amount ?? 0), 0)
+  const outstanding   = totalInvoiced - totalPaid
 
-  if (payLoading || poLoading) return <Spinner />
+  const grandTotals = useMemo(() => summary.reduce((a: any, v: any) => ({
+    billed: a.billed + Number(v.total_billed ?? 0),
+    paid:   a.paid   + Number(v.total_paid   ?? 0),
+    out:    a.out    + Number(v.outstanding   ?? 0),
+  }), { billed: 0, paid: 0, out: 0 }), [summary])
+
+  const filteredSummary = useMemo(() => summary.filter((v: any) =>
+    !search || v.vendor_name?.toLowerCase().includes(search.toLowerCase())
+  ), [summary, search])
+
+  if (summaryLoading || payLoading || poLoading) return <Spinner />
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-3 items-end">
-        <div className="flex-1 max-w-sm">
-          <label className="block text-xs font-medium text-gray-700 mb-1">Select Vendor</label>
-          <select value={vendor} onChange={e => setVendor(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-            <option value="">— Select a vendor —</option>
-            {vendors.map(v => <option key={v} value={v}>{v}</option>)}
-          </select>
-        </div>
-        {vendor && (
+      {/* Grand totals */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <StatCard title="Total Billed (All Vendors)" value={inr(grandTotals.billed)} icon={<TrendingUp size={18}/>} color="text-blue-600" />
+        <StatCard title="Total Paid" value={inr(grandTotals.paid)} icon={<CheckCircle size={18}/>} color="text-green-600" />
+        <StatCard title="Outstanding" value={inr(grandTotals.out)} icon={<AlertCircle size={18}/>} color="text-red-600" />
+      </div>
+
+      {/* All-vendors summary table */}
+      {!vendor && (
+        <Card padding={false}>
+          <div className="px-4 py-2 bg-gray-50 border-b flex items-center gap-3">
+            <span className="text-sm font-semibold text-gray-700 flex-1">All Vendors</span>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor…"
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-52" />
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr><Th>Vendor</Th><Th>Bills</Th><Th right>Billed</Th><Th right>Paid</Th><Th right>Outstanding</Th><Th>Last Bill</Th><Th></Th></tr></thead>
+              <tbody>
+                {filteredSummary.length === 0
+                  ? <tr><td colSpan={7} className="text-center py-6 text-gray-400 text-sm">No vendor bills yet</td></tr>
+                  : filteredSummary.map((v: any) => (
+                  <tr key={v.vendor_name} className="text-sm hover:bg-gray-50 cursor-pointer border-t border-gray-100"
+                    onClick={() => setVendor(v.vendor_name)}>
+                    <Td className="font-medium text-brand-700">{v.vendor_name}</Td>
+                    <Td>{v.bill_count}</Td>
+                    <Td right>{inr(v.total_billed)}</Td>
+                    <Td right className="text-green-600">{inr(v.total_paid)}</Td>
+                    <Td right className={Number(v.outstanding) > 0 ? 'text-red-600 font-semibold' : ''}>{inr(v.outstanding)}</Td>
+                    <Td>{v.last_bill_date ? fmtDate(v.last_bill_date) : '—'}</Td>
+                    <Td><span className="text-xs text-brand-600 hover:underline">View →</span></Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        </Card>
+      )}
+
+      {vendor && (
+        <div className="flex gap-3 items-end">
+          <div className="flex-1 max-w-sm">
+            <label className="block text-xs font-medium text-gray-700 mb-1">Select Vendor</label>
+            <select value={vendor} onChange={e => setVendor(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <option value="">— All Vendors —</option>
+              {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setVendor('')}>← All Vendors</Button>
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={() => {
             exportCSV(`vendor_statement_${vendor}.csv`, vendorPays, [
               {key:'invoice_no',label:'Invoice No'},{key:'invoice_date',label:'Invoice Date'},{key:'invoice_amount',label:'Amount'},
@@ -1298,8 +1359,8 @@ const VendorStatementTab: React.FC = () => {
               {key:'paid_date',label:'Paid Date'},{key:'utr_no',label:'UTR No'},{key:'cheque_no',label:'Cheque No'},{key:'remarks',label:'Remarks'}
             ])
           }}>Export Statement</Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {vendor && (
         <>
@@ -2035,7 +2096,7 @@ const RateAnalysisTab: React.FC = () => {
   const [preview, setPreview] = useState<{rows:any[], mapped:Record<string,string>, headers:string[]} | null>(null)
   const [selectedItem, setSelectedItem] = useState('')
   const [selectedVendor, setSelectedVendor] = useState('')
-  const [viewMode, setViewMode] = useState<'trend'|'vendor'|'table'>('trend')
+  const [viewMode, setViewMode] = useState<'trend'|'vendor'|'table'|'grn'>('trend')
 
   // All PO data for analysis
   const { data: pos, isLoading } = useQuery({
@@ -2049,6 +2110,22 @@ const RateAnalysisTab: React.FC = () => {
       return data ?? []
     }
   })
+
+  // GRN actual received rates vs PO ordered rates
+  const { data: grnRates=[] } = useQuery({
+    queryKey: ['v_po_grn_rate'],
+    queryFn: async () => {
+      const { data } = await supabase.from('v_po_grn_rate').select('*').order('grn_date', { ascending: false }).limit(500)
+      return data ?? []
+    }
+  })
+  const [onlyMismatch, setOnlyMismatch] = useState(true)
+  const [grnSearch, setGrnSearch] = useState('')
+  const grnFiltered = useMemo(() => (grnRates as any[]).filter((r: any) => {
+    if (grnSearch && !(`${r.item_name} ${r.vendor_name ?? ''}`.toLowerCase().includes(grnSearch.toLowerCase()))) return false
+    if (onlyMismatch && (r.po_rate == null || Math.abs(Number(r.rate_diff ?? 0)) < 0.005)) return false
+    return true
+  }), [grnRates, grnSearch, onlyMismatch])
 
   const importMut = useMutation({
     mutationFn: async (rows: any[]) => {
@@ -2302,15 +2379,15 @@ const RateAnalysisTab: React.FC = () => {
           {/* View mode switcher + item selector */}
           <div className="flex flex-wrap gap-3 items-end">
             <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-              {(['trend','vendor','table'] as const).map(m=>(
+              {(['trend','vendor','table','grn'] as const).map(m=>(
                 <button key={m} onClick={()=>setViewMode(m)}
                   className={`px-4 py-1.5 text-sm font-medium transition-colors capitalize
                     ${viewMode===m?'bg-brand-600 text-white':'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                  {m==='trend'?'Yearly Trend':m==='vendor'?'Vendor Compare':'Rate Table'}
+                  {m==='trend'?'Yearly Trend':m==='vendor'?'Vendor Compare':m==='table'?'Rate Table':'PO vs GRN'}
                 </button>
               ))}
             </div>
-            {viewMode !== 'table' && (
+            {viewMode !== 'table' && viewMode !== 'grn' && (
               <div className="flex-1 min-w-48">
                 <label className="block text-xs text-gray-500 mb-1">Select Item / Product</label>
                 <select value={selectedItem} onChange={e=>setSelectedItem(e.target.value)}
@@ -2434,6 +2511,54 @@ const RateAnalysisTab: React.FC = () => {
                 </>
               )}
             </div>
+          )}
+
+          {/* PO VS GRN RATE VIEW */}
+          {viewMode === 'grn' && (
+            <Card padding={false}>
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 flex-wrap">
+                <p className="font-semibold text-gray-800 flex-1">PO Rate vs GRN Received Rate</p>
+                <input value={grnSearch} onChange={e => setGrnSearch(e.target.value)} placeholder="Search item / vendor…"
+                  className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-52" />
+                <label className="flex items-center gap-2 text-sm text-gray-600">
+                  <input type="checkbox" checked={onlyMismatch} onChange={e => setOnlyMismatch(e.target.checked)} />
+                  Only mismatches
+                </label>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr>
+                    <Th>GRN</Th><Th>Date</Th><Th>Item</Th><Th>Vendor</Th>
+                    <Th right>PO Rate</Th><Th right>GRN Rate</Th><Th right>Diff</Th>
+                  </tr></thead>
+                  <tbody>
+                    {grnFiltered.length === 0
+                      ? <tr><td colSpan={7} className="text-center py-8 text-gray-400 text-sm">No rate differences found</td></tr>
+                      : grnFiltered.map((r: any, i: number) => {
+                        const diff = Number(r.rate_diff ?? 0)
+                        return (
+                          <tr key={i} className="text-sm hover:bg-gray-50 border-t border-gray-100">
+                            <Td className="text-xs font-mono">{r.grn_no}</Td>
+                            <Td className="text-xs">{r.grn_date ? fmtDate(r.grn_date) : '—'}</Td>
+                            <Td className="font-medium">{r.item_name}</Td>
+                            <Td className="text-xs text-gray-500">{r.vendor_name ?? '—'}</Td>
+                            <Td right>{r.po_rate != null ? `₹${Number(r.po_rate).toLocaleString('en-IN')}` : '— no PO'}</Td>
+                            <Td right>{r.grn_rate != null ? `₹${Number(r.grn_rate).toLocaleString('en-IN')}` : '—'}</Td>
+                            <Td right>
+                              {r.po_rate == null ? '—' : (
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${Math.abs(diff) < 0.005 ? 'bg-green-100 text-green-700' : diff > 0 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {diff > 0 ? '+' : ''}{diff.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </span>
+                              )}
+                            </Td>
+                          </tr>
+                        )
+                      })
+                    }
+                  </tbody>
+                </Table>
+              </div>
+            </Card>
           )}
 
           {/* RATE TABLE VIEW */}
