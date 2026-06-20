@@ -386,13 +386,21 @@ export const FlockDetail: React.FC = () => {
         ex.cull_female      = (ex.cull_female      ?? 0) + (d.cull_female      ?? 0)
         ex.cull_male        = (ex.cull_male        ?? 0) + (d.cull_male        ?? 0)
         ex.transfer_female  = (ex.transfer_female  ?? 0) + (d.transfer_female  ?? 0)
+        ex.transfer_male    = (ex.transfer_male    ?? 0) + (d.transfer_male    ?? 0)
         ex.trcull_female    = (ex.trcull_female    ?? 0) + (d.trcull_female    ?? 0)
-        ex.closing_female   = (ex.closing_female   ?? 0) + (d.closing_female   ?? 0)
-        ex.closing_male     = (ex.closing_male     ?? 0) + (d.closing_male     ?? 0)
+        ex.trcull_male      = (ex.trcull_male      ?? 0) + (d.trcull_male      ?? 0)
         const openF = ex.opening_female ?? 0
         ex.hd_pct = openF > 0 ? (ex.total_eggs ?? 0) / openF : null
         ex.he_pct = (ex.total_eggs ?? 0) > 0 ? (ex.he_eggs ?? 0) / (ex.total_eggs ?? 0) : null
       }
+    }
+    // Always derive closing from opening − transfer − cull − mortality so the
+    // table stays self-consistent even if a stored closing value is stale.
+    for (const row of map.values()) {
+      const trF = row.transfer_female ?? row.trcull_female ?? 0
+      const trM = row.transfer_male   ?? row.trcull_male   ?? 0
+      row.closing_female = Math.max(0, (row.opening_female ?? 0) - trF - (row.cull_female ?? 0) - (row.mortality_female ?? 0))
+      row.closing_male   = Math.max(0, (row.opening_male   ?? 0) - trM - (row.cull_male   ?? 0) - (row.mortality_male   ?? 0))
     }
     return Array.from(map.values()) // ascending by date (Map preserves insertion order and daily is ordered asc)
   }, [daily])
@@ -465,8 +473,10 @@ export const FlockDetail: React.FC = () => {
   const lastDateRecords = daily?.filter(d => d.record_date === lastDate) ?? []
   const lastRecord = lastDate ? {
     ...lastDateRecords[0],
-    closing_female: lastDateRecords.reduce((s, d) => s + (d.closing_female ?? 0), 0),
-    closing_male:   lastDateRecords.reduce((s, d) => s + (d.closing_male   ?? 0), 0),
+    // Derive closing from opening − transfer − cull − mortality (not the stored
+    // closing) so a stale stored value can't show a wrong alive count.
+    closing_female: Math.max(0, lastDateRecords.reduce((s, d) => s + ((d.opening_female ?? 0) - (d.transfer_female ?? d.trcull_female ?? 0) - (d.cull_female ?? 0) - (d.mortality_female ?? 0)), 0)),
+    closing_male:   Math.max(0, lastDateRecords.reduce((s, d) => s + ((d.opening_male   ?? 0) - (d.transfer_male   ?? d.trcull_male   ?? 0) - (d.cull_male   ?? 0) - (d.mortality_male   ?? 0)), 0)),
     opening_female: lastDateRecords.reduce((s, d) => s + (d.opening_female ?? 0), 0),
     opening_male:   lastDateRecords.reduce((s, d) => s + (d.opening_male   ?? 0), 0),
     total_eggs:     lastDateRecords.reduce((s, d) => s + (d.total_eggs     ?? 0), 0),
