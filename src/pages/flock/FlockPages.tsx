@@ -735,10 +735,14 @@ const DAILY_FIELDS: FieldDef[] = [
   { key: 'age_weeks',        label: 'Age (weeks)',     type: 'number', step: '0.1' },
   { key: 'opening_female',   label: 'Open Female',     type: 'number' },
   { key: 'opening_male',     label: 'Open Male',       type: 'number' },
+  { key: 'transfer_female',  label: 'Transfer F',      type: 'number' },
+  { key: 'transfer_male',    label: 'Transfer M',      type: 'number' },
+  { key: 'cull_female',      label: 'Cull F',          type: 'number' },
+  { key: 'cull_male',        label: 'Cull M',          type: 'number' },
   { key: 'mortality_female', label: 'Mortality F',     type: 'number' },
   { key: 'mortality_male',   label: 'Mortality M',     type: 'number' },
-  { key: 'closing_female',   label: 'Closing Female',  type: 'number' },
-  { key: 'closing_male',     label: 'Closing Male',    type: 'number' },
+  { key: 'closing_female',   label: 'Closing F (auto)', type: 'number' },
+  { key: 'closing_male',     label: 'Closing M (auto)', type: 'number' },
   { key: 'feed_female_kg',   label: 'Feed F (kg)',     type: 'number', step: '0.1' },
   { key: 'feed_male_kg',     label: 'Feed M (kg)',     type: 'number', step: '0.1' },
   { key: 'total_eggs',       label: 'Total Eggs',      type: 'number' },
@@ -777,7 +781,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       while (true) {
         const { data } = await supabase
           .from('daily_records')
-          .select('id,record_date,farm_id,shed_id,age_weeks,opening_female,opening_male,mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct,farms(name,code),sheds(shed_no,shed_name)')
+          .select('id,record_date,farm_id,shed_id,age_weeks,opening_female,opening_male,transfer_female,transfer_male,cull_female,cull_male,mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct,farms(name,code),sheds(shed_no,shed_name)')
           .eq('flock_id', flockId)
           .order('record_date', { ascending: false })
           .range(from, from + CHUNK - 1)
@@ -929,15 +933,31 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           data={editRow}
           saving={updateMut.isPending}
           onClose={() => setEditRow(null)}
-          onSave={form => updateMut.mutate({ id: editRow.id, data: {
+          onSave={form => {
+            // Auto-recompute closing = opening − transfer − cull − mortality
+            const oF = Number(form.opening_female) || 0
+            const oM = Number(form.opening_male)   || 0
+            const trF = Number(form.transfer_female) || 0
+            const trM = Number(form.transfer_male)   || 0
+            const cF = Number(form.cull_female) || 0
+            const cM = Number(form.cull_male)   || 0
+            const mF = Number(form.mortality_female) || 0
+            const mM = Number(form.mortality_male)   || 0
+            updateMut.mutate({ id: editRow.id, data: {
             record_date: form.record_date,
             age_weeks: form.age_weeks !== '' ? Number(form.age_weeks) : null,
-            opening_female: Number(form.opening_female) || 0,
-            opening_male:   Number(form.opening_male)   || 0,
-            mortality_female: Number(form.mortality_female) || 0,
-            mortality_male:   Number(form.mortality_male)   || 0,
-            closing_female: Number(form.closing_female) || 0,
-            closing_male:   Number(form.closing_male)   || 0,
+            opening_female: oF,
+            opening_male:   oM,
+            transfer_female: trF,
+            transfer_male:   trM,
+            cull_female: cF,
+            cull_male:   cM,
+            trcull_female: trF + cF,
+            trcull_male:   trM + cM,
+            mortality_female: mF,
+            mortality_male:   mM,
+            closing_female: Math.max(0, oF - trF - cF - mF),
+            closing_male:   Math.max(0, oM - trM - cM - mM),
             feed_female_kg: form.feed_female_kg !== '' ? Number(form.feed_female_kg) : null,
             feed_male_kg:   form.feed_male_kg   !== '' ? Number(form.feed_male_kg)   : null,
             total_eggs:  Number(form.total_eggs)  || 0,
@@ -946,7 +966,8 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             he_grade_b:  form.he_grade_b  !== '' ? Number(form.he_grade_b)  : null,
             he_grade_c:  form.he_grade_c  !== '' ? Number(form.he_grade_c)  : null,
             wastage_eggs: form.wastage_eggs !== '' ? Number(form.wastage_eggs) : null,
-          }})}
+          }})
+          }}
         />
       )}
 
