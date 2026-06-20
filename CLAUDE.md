@@ -18,6 +18,21 @@
 5. Test the feature in the app immediately after
 ```
 > NEVER trust workflow green status alone — run_sql.py exits 0 even on SQL errors.
+> WORSE: run_sql.py treats any error containing "does not exist", "already exists",
+> "already defined", or "duplicate" as SUCCESS (Errors: 0). So a FK referencing a
+> missing table/column fails SILENTLY. Verify schema changes with a diagnostic
+> SELECT against information_schema and read "OK rows=N" in the job log.
+
+### 1b. Prefer DELETE TRIGGERS over FK CASCADE for cross-table cleanup
+ALTER TABLE ADD CONSTRAINT can fail silently through run_sql.py (see above), and
+multiple ADD CONSTRAINTs in one statement are atomic — one failure loses all.
+Use a `$$`-quoted trigger function instead (the runner handles `$$` blocks).
+Split multi-constraint ALTERs into separate statements if you must use FKs.
+
+### 1c. cash_book stays in sync with sales via:
+- `cash_book.nhe_sale_id` / `he_dispatch_id` columns (migration 082)
+- `trg_del_cash_book` DELETE trigger on nhe_sales + he_dispatch (migration 085)
+- Frontend insert always sets nhe_sale_id/he_dispatch_id; edits delete-then-reinsert
 
 ### 2. View changes → always DROP first
 `CREATE OR REPLACE VIEW` silently fails when column names/order change.
