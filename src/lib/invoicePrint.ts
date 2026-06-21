@@ -88,6 +88,7 @@ export interface HEDispatchRecord {
   party_name: string
   party_address?: string
   hsn_code?: string
+  vehicle_type?: string | null
   lorry_no?: string | null
   driver_phone?: string | null
   out_time?: string | null
@@ -237,12 +238,13 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[], opts: HEPr
     </div>` : '<div></div>'}
   </div>
 
-  ${(d.lorry_no || d.out_time || d.driver_phone || d.boxes_20lb || d.boxes_23lb || d.extra_trays_20lb || d.extra_trays_23lb) ? `
+  ${(d.vehicle_type || d.lorry_no || d.out_time || d.driver_phone || d.boxes_20lb || d.boxes_23lb || d.extra_trays_20lb || d.extra_trays_23lb) ? `
   <div class="section two-col" style="margin-top:8px">
-    ${(d.lorry_no || d.out_time || d.driver_phone) ? `
+    ${(d.vehicle_type || d.lorry_no || d.out_time || d.driver_phone) ? `
     <div>
       <div class="label">Logistics</div>
       <div class="box">
+        ${d.vehicle_type ? `<div>Vehicle Type: <strong>${d.vehicle_type}</strong></div>` : ''}
         ${d.lorry_no ? `<div>Lorry No: <strong>${d.lorry_no}</strong></div>` : ''}
         ${d.out_time ? `<div>Out Time: <strong>${d.out_time}</strong></div>` : ''}
         ${d.driver_phone ? `<div>Driver Ph: ${d.driver_phone}</div>` : ''}

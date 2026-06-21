@@ -282,7 +282,7 @@ export const HEDispatch: React.FC = () => {
     flock_id: '', dispatch_date: today(),
     dc_no: '', invoice_no: '', party_id: '',
     free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
-    boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', lorry_no: '', driver_phone: '', out_time: '', remarks: ''
+    boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', vehicle_type: '', lorry_no: '', driver_phone: '', out_time: '', remarks: ''
   })
   const [invSeries, setInvSeries] = useState('HHF')
   const [genningInv, setGenningInv] = useState(false)
@@ -334,7 +334,7 @@ export const HEDispatch: React.FC = () => {
         tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0',
         boxes_20lb: row.boxes_20lb?.toString() ?? '', boxes_23lb: row.boxes_23lb?.toString() ?? '',
         extra_trays_20lb: row.extra_trays_20lb?.toString() ?? '', extra_trays_23lb: row.extra_trays_23lb?.toString() ?? '',
-        lorry_no: row.lorry_no ?? '',
+        vehicle_type: row.vehicle_type ?? '', lorry_no: row.lorry_no ?? '',
         driver_phone: row.driver_phone ?? '', out_time: row.out_time ?? '', remarks: row.remarks ?? ''
       })
       // Load existing lines for this dispatch
@@ -354,7 +354,7 @@ export const HEDispatch: React.FC = () => {
       setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
         party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
-        boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
+        boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', vehicle_type: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
       setLines([emptyLine()])
     }
     setShowForm(true)
@@ -428,6 +428,7 @@ export const HEDispatch: React.FC = () => {
         boxes_23lb: parseInt(form.boxes_23lb) || 0,
         extra_trays_20lb: parseInt(form.extra_trays_20lb) || 0,
         extra_trays_23lb: parseInt(form.extra_trays_23lb) || 0,
+        vehicle_type: form.vehicle_type || null,
         lorry_no: form.lorry_no || null,
         driver_phone: form.driver_phone || null,
         out_time: form.out_time || null,
@@ -715,7 +716,7 @@ export const HEDispatch: React.FC = () => {
               <Th>Flock</Th><Th>Dispatch Date</Th><Th>Prod Date</Th>
               <Th right>DC No</Th><Th>Invoice No</Th><Th>Party</Th>
               <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice Qty</Th>
-              <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Lorry</Th><Th>Out Time</Th><Th>Payment</Th><Th></Th>
+              <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Vehicle</Th><Th>Lorry</Th><Th>Out Time</Th><Th>Payment</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((d: any) => (<>
@@ -742,6 +743,7 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="text-xs">{d.rate ? `Rs ${d.rate}` : '—'}</Td>
                   <Td right className="font-semibold text-green-700 text-xs">{d.amount ? inr(d.amount) : '—'}</Td>
                   <Td right className="text-xs text-red-500">{d.tds_amount > 0 ? inr(d.tds_amount) : '—'}</Td>
+                  <Td className="text-xs"><span className={`font-medium ${d.vehicle_type === 'AC' ? 'text-blue-600' : d.vehicle_type === 'NON-AC' ? 'text-orange-500' : 'text-gray-400'}`}>{d.vehicle_type ?? '—'}</span></Td>
                   <Td className="text-xs text-gray-500">{d.lorry_no ?? '—'}</Td>
                   <Td className="text-xs text-gray-500">{d.out_time ?? '—'}</Td>
                   <Td className="text-xs">
@@ -810,7 +812,7 @@ export const HEDispatch: React.FC = () => {
             </tbody>
             {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50">
-                <Td colSpan={10}><strong>TOTAL ({filtered.length} records)</strong></Td>
+                <Td colSpan={11}><strong>TOTAL ({filtered.length} records)</strong></Td>
                 <Td right><strong>{totalDisp.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{totalFree.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{(totalDisp - totalFree).toLocaleString('en-IN')}</strong></Td>
@@ -908,6 +910,7 @@ export const HEDispatch: React.FC = () => {
               buyer_gstin: d.buyer_gstin, party_name: d.parties?.name ?? '—',
               party_address: [d.parties?.address, d.parties?.contact].filter(Boolean).join(' | '),
               hsn_code: d.hsn_code ?? '0407',
+              vehicle_type: d.vehicle_type ?? null,
               lorry_no: printOpts.lorry ? d.lorry_no : null,
               driver_phone: printOpts.driver ? d.driver_phone : null,
               out_time: printOpts.outTime ? d.out_time : null,
@@ -1143,7 +1146,10 @@ export const HEDispatch: React.FC = () => {
             <Input label="Extra Trays (23LB)" type="number" value={form.extra_trays_23lb}
               onChange={e => s('extra_trays_23lb', e.target.value)} />
           </FormRow>
-          <FormRow cols={3}>
+          <FormRow cols={4}>
+            <Select label="Vehicle Type" value={form.vehicle_type} onChange={e => s('vehicle_type', e.target.value)}
+              options={[{ value: 'AC', label: 'AC' }, { value: 'NON-AC', label: 'NON-AC' }]}
+              placeholder="— AC / NON-AC —" />
             <Input label="Lorry Number" value={form.lorry_no} onChange={e => s('lorry_no', e.target.value)} placeholder="e.g. TS09EA1234" />
             <Input label="Driver Phone" type="tel" value={form.driver_phone} onChange={e => s('driver_phone', e.target.value)} placeholder="+91 99999 99999" />
             <Input label="Out Time (HH:MM)" value={form.out_time} onChange={e => s('out_time', e.target.value)} placeholder="e.g. 14:30" />
