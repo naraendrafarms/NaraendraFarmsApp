@@ -387,6 +387,8 @@ export const HEDispatch: React.FC = () => {
       const prodDateTo = sortedDates.length > 1 ? sortedDates[sortedDates.length - 1] : null
       const inv = totalFromLines - (parseInt(form.free_eggs)||0)
       const heAmount = parseFloat(form.amount) || autoTotal || 0
+      // Effective rate: use header rate if typed; else weighted avg from lines (heAmount / invoiceEggs)
+      const effectiveRate = parseFloat(form.rate) || (inv > 0 && heAmount > 0 ? Math.round(heAmount / inv * 10000) / 10000 : null)
       const buyer = (parties ?? []).find((p: any) => p.id === form.party_id)
       const heSupply = supplyType(buyer?.state_code)   // HE eggs are 0% exempt → no tax
       // If user clicked Generate (preview), consume the real invoice number now at save time
@@ -404,7 +406,7 @@ export const HEDispatch: React.FC = () => {
         grade_a: gradeA, grade_b: gradeB,
         total_dispatched: totalFromLines,
         free_eggs: parseInt(form.free_eggs) || 0,
-        invoice_eggs: inv, rate: parseFloat(form.rate) || null,
+        invoice_eggs: inv, rate: effectiveRate,
         amount: heAmount || null,
         supply_type: heSupply, gst_pct: 0, taxable_value: heAmount || null,
         cgst_amount: 0, sgst_amount: 0, igst_amount: 0,
