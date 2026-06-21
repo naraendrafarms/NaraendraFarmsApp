@@ -276,7 +276,8 @@ export const HEDispatch: React.FC = () => {
   const [form, setForm] = useState({
     flock_id: '', dispatch_date: today(),
     dc_no: '', invoice_no: '', party_id: '',
-    free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0', remarks: ''
+    free_eggs: '0', rate: '', amount: '', round_off: '0', tds_pct: '0', tds_amount: '0',
+    boxes_20lb: '', boxes_23lb: '', extra_trays: '', lorry_no: '', driver_phone: '', out_time: '', remarks: ''
   })
   const [invSeries, setInvSeries] = useState('HHF')
   const [genningInv, setGenningInv] = useState(false)
@@ -311,7 +312,10 @@ export const HEDispatch: React.FC = () => {
   const autoAmount = headerRate > 0
     ? Math.round(invoiceEggs * headerRate * 100) / 100
     : (totalFromLines > 0 ? Math.round(grossTotal * invoiceEggs / totalFromLines * 100) / 100 : 0)
-  const effectiveAmount = parseFloat(form.amount) || autoAmount || 0
+  const roundOff = parseFloat(form.round_off) || 0
+  // Final amount = (form.amount if typed, else autoAmount) + round_off
+  const baseAmount = parseFloat(form.amount) || autoAmount || 0
+  const effectiveAmount = Math.round((baseAmount + roundOff) * 100) / 100
   const autoTds = parseFloat(form.tds_pct) > 0 ? Math.round(effectiveAmount * parseFloat(form.tds_pct) / 100 * 100) / 100 : 0
 
   const openForm = (row?: any) => {
@@ -322,7 +326,11 @@ export const HEDispatch: React.FC = () => {
         dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
         party_id: row.party_id ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
-        amount: row.amount?.toString() ?? '', tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
+        amount: row.amount?.toString() ?? '', round_off: '0',
+        tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0',
+        boxes_20lb: row.boxes_20lb?.toString() ?? '', boxes_23lb: row.boxes_23lb?.toString() ?? '',
+        extra_trays: row.extra_trays?.toString() ?? '', lorry_no: row.lorry_no ?? '',
+        driver_phone: row.driver_phone ?? '', out_time: row.out_time ?? '', remarks: row.remarks ?? ''
       })
       // Load existing lines for this dispatch
       supabase.from('he_dispatch_lines').select('*').eq('dispatch_id', row.id).order('prod_date')
@@ -340,7 +348,8 @@ export const HEDispatch: React.FC = () => {
       setEditing(null)
       setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
-        party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0', remarks: '' })
+        party_id: '', free_eggs: '0', rate: '', amount: '', round_off: '0', tds_pct: '0', tds_amount: '0',
+        boxes_20lb: '', boxes_23lb: '', extra_trays: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
       setLines([emptyLine()])
     }
     setShowForm(true)
@@ -383,7 +392,7 @@ export const HEDispatch: React.FC = () => {
       const prodDateFrom = sortedDates[0] || null
       const prodDateTo = sortedDates.length > 1 ? sortedDates[sortedDates.length - 1] : null
       const inv = totalFromLines - (parseInt(form.free_eggs)||0)
-      const heAmount = parseFloat(form.amount) || autoAmount || 0
+      const heAmount = effectiveAmount || 0
       // Effective rate: use header rate if typed; else weighted avg from lines (heAmount / invoiceEggs)
       const effectiveRate = parseFloat(form.rate) || (inv > 0 && heAmount > 0 ? Math.round(heAmount / inv * 10000) / 10000 : null)
       const buyer = (parties ?? []).find((p: any) => p.id === form.party_id)
@@ -410,6 +419,12 @@ export const HEDispatch: React.FC = () => {
         buyer_gstin: buyer?.gstin || null, hsn_code: '0407',
         tds_pct: parseFloat(form.tds_pct) || 0,
         tds_amount: parseFloat(form.tds_amount) || 0,
+        boxes_20lb: parseInt(form.boxes_20lb) || 0,
+        boxes_23lb: parseInt(form.boxes_23lb) || 0,
+        extra_trays: parseInt(form.extra_trays) || 0,
+        lorry_no: form.lorry_no || null,
+        driver_phone: form.driver_phone || null,
+        out_time: form.out_time || null,
         remarks: form.remarks || null
       }
       let dispatchId: string
@@ -694,7 +709,7 @@ export const HEDispatch: React.FC = () => {
               <Th>Flock</Th><Th>Dispatch Date</Th><Th>Prod Date</Th>
               <Th right>DC No</Th><Th>Invoice No</Th><Th>Party</Th>
               <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice Qty</Th>
-              <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Payment</Th><Th></Th>
+              <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Lorry</Th><Th>Out Time</Th><Th>Payment</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((d: any) => (<>
@@ -721,6 +736,8 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="text-xs">{d.rate ? `Rs ${d.rate}` : '—'}</Td>
                   <Td right className="font-semibold text-green-700 text-xs">{d.amount ? inr(d.amount) : '—'}</Td>
                   <Td right className="text-xs text-red-500">{d.tds_amount > 0 ? inr(d.tds_amount) : '—'}</Td>
+                  <Td className="text-xs text-gray-500">{d.lorry_no ?? '—'}</Td>
+                  <Td className="text-xs text-gray-500">{d.out_time ?? '—'}</Td>
                   <Td className="text-xs">
                     {d.payment_status === 'Received'
                       ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200">✓ {d.payment_mode ?? 'Paid'}</button>
@@ -798,13 +815,13 @@ export const HEDispatch: React.FC = () => {
             </tbody>
             {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50">
-                <Td colSpan={8}><strong>TOTAL ({filtered.length} records)</strong></Td>
+                <Td colSpan={10}><strong>TOTAL ({filtered.length} records)</strong></Td>
                 <Td right><strong>{totalDisp.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{totalFree.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{(totalDisp - totalFree).toLocaleString('en-IN')}</strong></Td>
                 <Td right>—</Td>
                 <Td right><strong className="text-green-700">{inr(totalAmt)}</strong></Td>
-                <Td> </Td>
+                <Td> </Td><Td> </Td><Td> </Td>
               </tr></tfoot>
             )}
           </Table>
@@ -995,6 +1012,9 @@ export const HEDispatch: React.FC = () => {
             <Input label="Invoice Amount (Rs)" type="number" step="0.01" value={form.amount}
               onChange={e => s('amount', e.target.value)}
               hint={autoAmount > 0 ? `Auto: ${inr(autoAmount)}` : undefined} />
+            <Input label="Round Off (±)" type="number" step="0.01" value={form.round_off}
+              onChange={e => s('round_off', e.target.value)}
+              hint={effectiveAmount > 0 ? `Final: ${inr(effectiveAmount)}` : undefined} />
           </FormRow>
           <FormRow cols={3}>
             <Select label="TDS Rate" value={form.tds_pct} onChange={e => {
@@ -1030,7 +1050,26 @@ export const HEDispatch: React.FC = () => {
             <span>Free: <strong>{parseInt(form.free_eggs)||0}</strong></span>
             <span>Invoice Eggs: <strong>{invoiceEggs.toLocaleString('en-IN')}</strong></span>
             {autoAmount > 0 && <span>Auto Amount: <strong>{inr(autoAmount)}</strong></span>}
+            <span className="text-blue-500">Total Boxes (auto): <strong>{Math.floor(totalFromLines/210)}</strong> boxes + <strong>{Math.floor((totalFromLines%210)/30)}</strong> extra trays</span>
           </div>
+
+          <Divider label="Loading Details" />
+          <FormRow cols={3}>
+            <Input label="20LB Boxes" type="number" value={form.boxes_20lb}
+              onChange={e => s('boxes_20lb', e.target.value)}
+              hint={`Total auto: ${Math.floor(totalFromLines/210)} boxes`} />
+            <Input label="23LB Boxes" type="number" value={form.boxes_23lb}
+              onChange={e => s('boxes_23lb', e.target.value)} />
+            <Input label="Extra Trays" type="number" value={form.extra_trays}
+              onChange={e => s('extra_trays', e.target.value)}
+              hint={`Auto: ${Math.floor((totalFromLines%210)/30)} trays`} />
+          </FormRow>
+          <FormRow cols={3}>
+            <Input label="Lorry Number" value={form.lorry_no} onChange={e => s('lorry_no', e.target.value)} placeholder="e.g. TS09EA1234" />
+            <Input label="Driver Phone" type="tel" value={form.driver_phone} onChange={e => s('driver_phone', e.target.value)} placeholder="+91 99999 99999" />
+            <Input label="Out Time (HH:MM)" value={form.out_time} onChange={e => s('out_time', e.target.value)} placeholder="e.g. 14:30" />
+          </FormRow>
+
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
         </div>
       </Modal>
