@@ -103,7 +103,17 @@ export const GSTReportPage: React.FC = () => {
     },
   })
 
-  const isLoading = l1 || l2 || l3
+  const { data: meds, isLoading: l4 } = useQuery({
+    queryKey: ['gstr_meds', fy],
+    queryFn: async () => {
+      const { data } = await supabase.from('medicine_purchases')
+        .select('purchase_date,invoice_no,medicine_name,basic_amount,total_amount,gst_amount,cgst_amount,sgst_amount,igst_amount,supply_type,nature,is_rcm,party_gstin,parties(name)')
+        .gte('purchase_date', start).lte('purchase_date', end)
+      return data ?? []
+    },
+  })
+
+  const isLoading = l1 || l2 || l3 || l4
 
   // ── Normalise sales ──
   const sales: SaleRow[] = useMemo(() => {
@@ -142,8 +152,20 @@ export const GSTReportPage: React.FC = () => {
         cgst: n(r.cgst_amount), sgst: n(r.sgst_amount), igst: n(r.igst_amount), item: r.item_name ?? '—',
       })
     }
+    for (const r of (meds ?? []) as any[]) {
+      if (!inMonth(r.purchase_date, month)) continue
+      const taxableAmt = n(r.basic_amount)
+      const cgst = n(r.cgst_amount); const sgst = n(r.sgst_amount); const igst = n(r.igst_amount)
+      const gstPct = taxableAmt > 0 ? Math.round(((cgst + sgst + igst) / taxableAmt) * 100) : 0
+      rows.push({
+        date: r.purchase_date, invoice_no: r.invoice_no, party_gstin: r.party_gstin,
+        vendor: r.parties?.name ?? '—', supply_type: r.supply_type, nature: r.nature ?? 'expense',
+        is_rcm: !!r.is_rcm, taxable: taxableAmt, gst_pct: gstPct,
+        cgst, sgst, igst, item: r.medicine_name ?? 'Medicine',
+      })
+    }
     return rows.sort((a, b) => a.date.localeCompare(b.date))
-  }, [grn, month])
+  }, [grn, meds, month])
 
   // ── GSTR-1 split ──
   const b2b = sales.filter(s => s.buyer_gstin && s.buyer_gstin.length === 15)

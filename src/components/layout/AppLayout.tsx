@@ -97,7 +97,6 @@ const NAV: NavItem[] = [
       { label: 'Company P&L',           to: '/reports/company-pl' },
       { label: 'Party Outstanding',     to: '/reports/party-outstanding' },
       { label: 'GST Reports',           to: '/reports/gst' },
-      { label: 'Hatchability (Legacy)', to: '/hatchability' },
       { label: 'Production Report',     to: '/reports/production' },
       { label: 'Feed Cost Report',      to: '/reports/feed' },
       { label: 'Salary Report',         to: '/reports/salary' },
@@ -113,6 +112,7 @@ const NAV: NavItem[] = [
       { label: 'Cash Book', to: '/accounts/cash-book' },
       { label: 'Sales Invoice Register', to: '/accounts/sales-invoices' },
       { label: 'Purchase Invoice Register', to: '/accounts/invoices' },
+      { label: 'Invoice Series / Counters', to: '/accounts/invoice-series' },
       { label: 'Pending Payments', to: '/pending-payments' },
     ]
   },
@@ -121,6 +121,8 @@ const NAV: NavItem[] = [
     children: [
       { label: 'New Purchase',         to: '/purchases/new' },
       { label: 'Purchase Orders',      to: '/purchase-orders' },
+      { label: 'Rate Comparison',      to: '/purchases/rate-compare' },
+      { label: 'Vendor Statement',     to: '/purchases/vendor-statement' },
       { label: 'Farm Expenses',        to: '/expenses' },
     ]
   },

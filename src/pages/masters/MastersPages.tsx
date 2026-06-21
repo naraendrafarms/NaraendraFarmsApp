@@ -168,7 +168,7 @@ export const IngredientsMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const [form, setForm] = useState({code:'',name:'',short_name:'',category:'grain',unit:'kg',protein_pct:'',moisture_pct:''})
+  const [form, setForm] = useState({code:'',name:'',short_name:'',category:'grain',unit:'kg',protein_pct:'',moisture_pct:'',hsn_code:'',gst_rate:'0'})
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -180,14 +180,14 @@ export const IngredientsMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
-    setForm(row?{code:row.code,name:row.name,short_name:row.short_name??'',category:row.category,unit:row.unit,protein_pct:row.protein_pct?.toString()??'',moisture_pct:row.moisture_pct?.toString()??''}:{code:'',name:'',short_name:'',category:'grain',unit:'kg',protein_pct:'',moisture_pct:''})
+    setForm(row?{code:row.code,name:row.name,short_name:row.short_name??'',category:row.category,unit:row.unit,protein_pct:row.protein_pct?.toString()??'',moisture_pct:row.moisture_pct?.toString()??'',hsn_code:row.hsn_code??'',gst_rate:row.gst_rate?.toString()??'0'}:{code:'',name:'',short_name:'',category:'grain',unit:'kg',protein_pct:'',moisture_pct:'',hsn_code:'',gst_rate:'0'})
     setShowForm(true)
   }
 
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.code||!form.name)throw new Error('Code and name required')
-      const p={code:form.code.toUpperCase(),name:form.name,short_name:form.short_name||null,category:form.category,unit:form.unit,protein_pct:parseFloat(form.protein_pct)||null,moisture_pct:parseFloat(form.moisture_pct)||null}
+      const p={code:form.code.toUpperCase(),name:form.name,short_name:form.short_name||null,category:form.category,unit:form.unit,protein_pct:parseFloat(form.protein_pct)||null,moisture_pct:parseFloat(form.moisture_pct)||null,hsn_code:form.hsn_code||null,gst_rate:parseFloat(form.gst_rate)||0}
       if(editing){const{error}=await supabase.from('feed_ingredients').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('feed_ingredients').insert(p);if(error)throw error}
     },
@@ -355,6 +355,10 @@ export const IngredientsMaster: React.FC = () => {
             <Input label="Unit" value={form.unit} onChange={e=>s('unit',e.target.value)} />
             <Input label="Protein %" type="number" step="0.01" value={form.protein_pct} onChange={e=>s('protein_pct',e.target.value)} />
             <Input label="Moisture %" type="number" step="0.01" value={form.moisture_pct} onChange={e=>s('moisture_pct',e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="HSN Code" value={form.hsn_code} onChange={e=>s('hsn_code',e.target.value)} placeholder="e.g. 10059090" hint="8-digit HSN for GST" />
+            <Select label="GST Rate %" options={GST_RATE_OPTIONS} value={form.gst_rate} onChange={e=>s('gst_rate',e.target.value)} />
           </FormRow>
         </div>
       </Modal>

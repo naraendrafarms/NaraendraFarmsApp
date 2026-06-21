@@ -143,6 +143,13 @@ export const PurchaseEntry: React.FC = () => {
           invoice_date: form.invoice_date || null,
           qty, unit: form.unit || null,
           rate, gst_pct: gst,
+          supply_type: sType,
+          nature: form.nature,
+          is_rcm: form.is_rcm,
+          cgst_amount: taxSplit.cgst,
+          sgst_amount: taxSplit.sgst,
+          igst_amount: taxSplit.igst,
+          party_gstin: supplier?.gstin || null,
           remarks: form.remarks || null,
         })
         if (error) throw error
