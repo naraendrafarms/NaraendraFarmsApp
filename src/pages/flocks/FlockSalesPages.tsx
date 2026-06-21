@@ -7,11 +7,12 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 , DateInput, SearchableSelect } from '@/components/ui'
-import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle } from 'lucide-react'
+import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle, Printer } from 'lucide-react'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 import { supplyType, splitTax, GST_RATE_OPTIONS } from '@/lib/gst'
+import { printHEDispatch, printNHESale } from '@/lib/invoicePrint'
 
 // ── Receive Payment Modal ─────────────────────────────────────────
 const ReceivePaymentModal: React.FC<{
@@ -715,7 +716,20 @@ export const HEDispatch: React.FC = () => {
                         : d.amount ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200 text-xs hover:bg-orange-100">⊕ Receive</button> : null}
                   </Td>
                   <Td>
-                    <button onClick={() => openForm(d)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit dispatch"><Edit2 size={13}/></button>
+                    <div className="flex gap-1">
+                      <button onClick={() => openForm(d)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit dispatch"><Edit2 size={13}/></button>
+                      <button onClick={async () => {
+                        const { data: ls } = await supabase.from('he_dispatch_lines').select('prod_date,grade_a,grade_b,grade_c,rate').eq('dispatch_id', d.id).order('prod_date')
+                        printHEDispatch({
+                          id: d.id, dispatch_date: d.dispatch_date, invoice_no: d.invoice_no,
+                          dc_no: d.dc_no, flock_no: d.flocks?.flock_no, total_dispatched: d.total_dispatched,
+                          free_eggs: d.free_eggs ?? 0, invoice_eggs: d.invoice_eggs ?? 0,
+                          rate: d.rate, amount: d.amount, tds_pct: d.tds_pct, tds_amount: d.tds_amount,
+                          buyer_gstin: d.buyer_gstin, party_name: d.parties?.name ?? '—',
+                          hsn_code: d.hsn_code ?? '0407'
+                        }, ls ?? [])
+                      }} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Print invoice"><Printer size={13}/></button>
+                    </div>
                   </Td>
                 </tr>
                 {expandedDispatch === d.id && (
@@ -1627,7 +1641,19 @@ export const NHESales: React.FC = () => {
                   </Td>
                   <Td className="text-xs text-gray-400">{s.vehicle_no ?? s.dc_no ?? '—'}</Td>
                   <Td>
-                    <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit sale"><Edit2 size={13}/></button>
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit sale"><Edit2 size={13}/></button>
+                      <button onClick={() => printNHESale({
+                        id: s.id, sale_date: s.sale_date, sale_type: s.sale_type,
+                        invoice_no: s.invoice_no, dc_no: s.dc_no, flock_no: s.flocks?.flock_no,
+                        quantity: s.quantity, unit: s.unit, rate: s.rate, amount: s.amount,
+                        taxable_value: s.taxable_value, gst_pct: s.gst_pct ?? 0,
+                        cgst_amount: s.cgst_amount, sgst_amount: s.sgst_amount, igst_amount: s.igst_amount,
+                        buyer_gstin: s.buyer_gstin, party_name: s.parties?.name ?? '—',
+                        vehicle_no: s.vehicle_no, bird_sex: s.bird_sex, bird_category: s.bird_category,
+                        avg_weight_kg: s.avg_weight_kg, total_weight_kg: s.total_weight_kg, rate_per_kg: s.rate_per_kg
+                      })} className="p-1 text-gray-400 hover:text-blue-600" title="Print invoice"><Printer size={13}/></button>
+                    </div>
                   </Td>
                 </tr>
               ))}

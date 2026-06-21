@@ -7,9 +7,10 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 , DateInput } from '@/components/ui'
-import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2, Download, Upload } from 'lucide-react'
+import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2, Download, Upload, Printer } from 'lucide-react'
 import { QuickAddParty, QuickAddIngredient } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
+import { printGRN } from '@/lib/invoicePrint'
 
 // ── import value cleaners ─────────────────────────────────────────
 // Strip ₹ / ? / commas / spaces from money & number cells before parsing.
@@ -415,6 +416,17 @@ export const GRNEntry: React.FC = () => {
                   <Td>
                     <div className="flex gap-1">
                       <button onClick={() => openEdit(g)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors" title="Edit"><Edit2 size={13}/></button>
+                      <button onClick={() => printGRN({
+                        id: g.id, grn_date: g.grn_date, grn_no: g.grn_no, invoice_no: g.invoice_no,
+                        invoice_date: g.invoice_date, party_name: g.parties?.name ?? '—',
+                        item_name: g.feed_ingredients?.name ?? g.item_name ?? '—',
+                        qty: g.qty, unit: g.unit, price_per_unit: g.price_per_unit,
+                        basic_amount: g.basic_amount, gst_pct: g.gst_pct, gst_amount: g.gst_amount,
+                        total_amount: g.total_amount, cgst_amount: g.cgst_amount,
+                        sgst_amount: g.sgst_amount, igst_amount: g.igst_amount,
+                        party_gstin: g.party_gstin, vehicle_no: g.vehicle_no,
+                        farm_name: g.farms?.name, is_rcm: g.is_rcm
+                      })} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title="Print GRN"><Printer size={13}/></button>
                       <button onClick={() => setDelId(g.id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={13}/></button>
                     </div>
                   </Td>
