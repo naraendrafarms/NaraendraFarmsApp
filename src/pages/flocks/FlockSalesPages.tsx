@@ -276,7 +276,7 @@ export const HEDispatch: React.FC = () => {
   const [form, setForm] = useState({
     flock_id: '', dispatch_date: today(),
     dc_no: '', invoice_no: '', party_id: '',
-    free_eggs: '0', rate: '', amount: '', round_off: '0', tds_pct: '0', tds_amount: '0', remarks: ''
+    free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0', remarks: ''
   })
   const [invSeries, setInvSeries] = useState('HHF')
   const [genningInv, setGenningInv] = useState(false)
@@ -300,21 +300,18 @@ export const HEDispatch: React.FC = () => {
   const totalFromLines = lineTotal('grade_a') + lineTotal('grade_b') + lineTotal('grade_c')
   const freeEggsCount = parseInt(form.free_eggs) || 0
   const invoiceEggs = totalFromLines - freeEggsCount
-  // Per-line rate: use line's own rate if set, else fall back to header rate
   const headerRate = parseFloat(form.rate) || 0
-  // Gross = sum of all eggs × their effective rate; then deduct free eggs proportionally
+  // Gross = sum of ALL eggs × their effective rate (including free eggs)
   const grossTotal = lines.reduce((sum, l) => {
     const qty = (parseInt(l.grade_a)||0) + (parseInt(l.grade_b)||0) + (parseInt(l.grade_c)||0)
     const r = parseFloat(l.rate) || headerRate
     return sum + qty * r
   }, 0)
-  // Proportional: invoice eggs / total eggs × grossTotal (handles mixed rates correctly)
-  const autoAmount = totalFromLines > 0 ? Math.round(grossTotal * invoiceEggs / totalFromLines * 100) / 100 : 0
-  const roundOff = parseFloat(form.round_off) || 0
-  // Total amount = auto (eggs × rates) + manual round-off; override possible via amount field
-  const totalBeforeRound = autoAmount || 0
-  const autoTotal = totalBeforeRound + roundOff
-  const effectiveAmount = parseFloat(form.amount) || autoTotal || 0
+  // autoAmount: when header rate set → exact (invoiceEggs × rate); else proportional
+  const autoAmount = headerRate > 0
+    ? Math.round(invoiceEggs * headerRate * 100) / 100
+    : (totalFromLines > 0 ? Math.round(grossTotal * invoiceEggs / totalFromLines * 100) / 100 : 0)
+  const effectiveAmount = parseFloat(form.amount) || autoAmount || 0
   const autoTds = parseFloat(form.tds_pct) > 0 ? Math.round(effectiveAmount * parseFloat(form.tds_pct) / 100 * 100) / 100 : 0
 
   const openForm = (row?: any) => {
@@ -325,7 +322,7 @@ export const HEDispatch: React.FC = () => {
         dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
         party_id: row.party_id ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
-        amount: '', round_off: row.round_off?.toString() ?? '0', tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
+        amount: row.amount?.toString() ?? '', tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
       })
       // Load existing lines for this dispatch
       supabase.from('he_dispatch_lines').select('*').eq('dispatch_id', row.id).order('prod_date')
@@ -343,7 +340,7 @@ export const HEDispatch: React.FC = () => {
       setEditing(null)
       setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
-        party_id: '', free_eggs: '0', rate: '', amount: '', round_off: '0', tds_pct: '0', tds_amount: '0', remarks: '' })
+        party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0', remarks: '' })
       setLines([emptyLine()])
     }
     setShowForm(true)
@@ -386,7 +383,7 @@ export const HEDispatch: React.FC = () => {
       const prodDateFrom = sortedDates[0] || null
       const prodDateTo = sortedDates.length > 1 ? sortedDates[sortedDates.length - 1] : null
       const inv = totalFromLines - (parseInt(form.free_eggs)||0)
-      const heAmount = parseFloat(form.amount) || autoTotal || 0
+      const heAmount = parseFloat(form.amount) || autoAmount || 0
       // Effective rate: use header rate if typed; else weighted avg from lines (heAmount / invoiceEggs)
       const effectiveRate = parseFloat(form.rate) || (inv > 0 && heAmount > 0 ? Math.round(heAmount / inv * 10000) / 10000 : null)
       const buyer = (parties ?? []).find((p: any) => p.id === form.party_id)
@@ -995,12 +992,9 @@ export const HEDispatch: React.FC = () => {
               onChange={e => s('free_eggs', e.target.value)} />
             <Input label="Default Rate (Rs/egg)" type="number" step="0.0001" value={form.rate}
               onChange={e => s('rate', e.target.value)} hint="Used for lines without individual rate" />
-            <Input label="Gross Amount (Rs)" type="number" step="0.01" value={form.amount}
+            <Input label="Invoice Amount (Rs)" type="number" step="0.01" value={form.amount}
               onChange={e => s('amount', e.target.value)}
-              hint={totalBeforeRound > 0 ? `Auto: ${inr(totalBeforeRound)}${editing ? ` | Prev: ${inr(editing.amount)}` : ''}` : editing ? `Prev saved: ${inr(editing.amount)}` : undefined} />
-            <Input label="Round Off (±)" type="number" step="0.01" value={form.round_off}
-              onChange={e => s('round_off', e.target.value)}
-              hint={autoTotal > 0 ? `Total: ${inr(parseFloat(form.amount) || autoTotal)}` : undefined} />
+              hint={autoAmount > 0 ? `Auto: ${inr(autoAmount)}` : undefined} />
           </FormRow>
           <FormRow cols={3}>
             <Select label="TDS Rate" value={form.tds_pct} onChange={e => {
