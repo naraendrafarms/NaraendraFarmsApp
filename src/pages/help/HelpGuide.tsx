@@ -3,58 +3,50 @@ import {
   BookOpen, Bird, Calendar, ArrowRightLeft, ShoppingCart, Users, Zap,
   Package, FileSpreadsheet, BarChart2, Settings, ChevronRight, ChevronDown,
   AlertCircle, CheckCircle, Info, ArrowRight, Hash, MapPin, CreditCard,
-  Sparkles, Clock
+  Sparkles, Clock, Receipt, FileText
 } from 'lucide-react'
 
-// ── last updated ───────────────────────────────────────────────────────────────
-const LAST_UPDATED = '2026-06-18'
+const LAST_UPDATED = '2026-06-21'
 
-// ── changelog ─────────────────────────────────────────────────────────────────
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-06-21', tag: 'New',      text: 'GST implementation: Parties now store GSTIN, GST type (registered/unregistered/composition), State Code, and RCM flag. GSTIN auto-parses state code and validates format when you type it.' },
+  { date: '2026-06-21', tag: 'New',      text: 'Purchase Entry (GRN) now captures GST details — Nature (purchase/expense/asset), Supply Type (intra-state CGST+SGST / inter-state IGST), RCM flag, and live CGST/SGST/IGST tax split shown before saving.' },
+  { date: '2026-06-21', tag: 'New',      text: 'HE Dispatch: Invoice series selector (HHF / HE / VHPL) + Generate button. Generate shows a preview of the next number without consuming it. The actual number is assigned only when the record is saved.' },
+  { date: '2026-06-21', tag: 'New',      text: 'NHE Sales: Invoice series selector (NHE / CB) + Generate button with the same preview-then-save behaviour. GST % field added (0 / 5 / 18%).' },
+  { date: '2026-06-21', tag: 'New',      text: 'Sales Invoice Register added under Accounts → Sales Invoice Register. Shows all HE Dispatch and NHE Sales invoices in one list. Filter by series (HHF/HE/NHE/VHPL/CB) and date range. Export to Excel.' },
+  { date: '2026-06-21', tag: 'New',      text: 'GST Reports page added (Reports → GST Reports): GSTR-1 tab (B2B, B2C, exempt sales, HSN summary), GSTR-3B tab (section 3.1 outward supplies + 6.1 tax payable), RCM Register, and Purchase GST register.' },
+  { date: '2026-06-21', tag: 'Improved', text: 'Sidebar Accounts menu renamed: "Invoice Register" split into "Sales Invoice Register" (outward) and "Purchase Invoice Register" (supplier invoices).' },
+  { date: '2026-06-21', tag: 'Improved', text: 'Party / supplier dropdowns now have a live search box. Click the dropdown and type any part of the name to filter — works in Purchase Entry, HE Dispatch, and NHE Sales.' },
+  { date: '2026-06-21', tag: 'Fix',      text: 'Generate invoice button no longer wastes a number when the form is cancelled. It now shows a preview only; the counter increments only on Save.' },
+  { date: '2026-06-21', tag: 'New',      text: 'Masters tab now shows editable dropdown lists: Categories, Units, Material Types, Payment Methods, Breeds, Feed Types, and Designations — all can be added, edited, or deleted.' },
   { date: '2026-06-18', tag: 'New',      text: 'Vendors Master tab added in Purchase & Payments — lists all unique vendors from POs, Payments, and Vendor Banks. Delete all data for a vendor (POs + payments + bank details) in one step. Supports bulk select and bulk delete.' },
   { date: '2026-06-18', tag: 'Improved', text: 'Vendor Banks tab now has checkboxes and bulk delete — select multiple bank records and delete them at once.' },
   { date: '2026-06-18', tag: 'Improved', text: 'Feed Formulas: Feed Type is now linked to the master feed types (BCM, BGM, L1, etc.) instead of a hardcoded Breeder/Broiler/Layer dropdown. Flock Type auto-derives from the selected feed type name. Filter bar also uses master feed types.' },
   { date: '2026-06-18', tag: 'Fix',      text: 'GRN bulk delete: fixed "invalid input syntax for uuid: undefined" error when selecting all 100+ records. Rows with missing IDs are now safely skipped.' },
-  { date: '2026-06-18', tag: 'Fix',      text: 'GRN data not being restored — previous bulk deletions were failing silently (no error shown) due to the uuid error. Data appeared to reappear but was never actually deleted. Now fixed.' },
   { date: '2026-06-17', tag: 'New',      text: 'Chick Placements tab added to each flock — record staggered chick intake per shed per day. Total Placed updates automatically.' },
-  { date: '2026-06-17', tag: 'New',      text: 'Invoice Register added under Accounts — track all supplier invoices (chick, feed, medicine, electricity). Link to flock or farm. Mark payment. Import/Export Excel.' },
-  { date: '2026-06-17', tag: 'New',      text: 'Chick invoice fields added to flock creation form — auto-creates an invoice record in Invoice Register.' },
-  { date: '2026-06-17', tag: 'New',      text: 'Medicine Purchases linked to Invoice Register — when a medicine purchase has an invoice number, a matching invoice record is auto-created/updated in Invoice Register.' },
-  { date: '2026-06-17', tag: 'New',      text: 'GRN page: checkboxes and bulk delete added — select multiple GRN records and delete them at once.' },
-  { date: '2026-06-17', tag: 'New',      text: 'Shed capacity shown in Flock placements — Shed Capacity, Box Usage, and Utilization % columns added per placement row. Utilization is colour-coded green/orange/red.' },
-  { date: '2026-06-17', tag: 'Improved', text: 'Vaccination Schedule: Clear All button added to start fresh. Single delete now shows proper error if it fails.' },
-  { date: '2026-06-17', tag: 'Improved', text: 'Parties master: bulk delete now works correctly for large selections (chunked in batches of 50 to avoid URL length limit).' },
-  { date: '2026-06-17', tag: 'Improved', text: 'Purchase Orders: bulk delete fixed — was silently swallowing errors, causing data to appear after deletion. Now correctly errors and is chunked in batches of 50.' },
-  { date: '2026-06-17', tag: 'Improved', text: 'Parties can now be deleted even if they have linked GRN, HE Dispatch, or NHE Sales records — those links are set to null on delete (no more bad request).' },
-  { date: '2026-06-17', tag: 'Improved', text: 'Daily Entry: Egg Collection fields (Total Eggs, HE, grades, JE/TE/BE) are now hidden during Rearing phase and only appear from Laying Start Date.' },
-  { date: '2026-06-17', tag: 'Improved', text: 'Daily Entry: When a shed has a Placement batch for the selected date, opening bird count auto-fills from the batch.' },
-  { date: '2026-06-17', tag: 'Improved', text: 'Payments & Bank Ledger: Checkboxes, bulk delete, edit, import, and export added.' },
+  { date: '2026-06-17', tag: 'New',      text: 'Chick invoice fields added to flock creation form — auto-creates an invoice record in Purchase Invoice Register.' },
+  { date: '2026-06-17', tag: 'New',      text: 'Medicine Purchases linked to Purchase Invoice Register — when a medicine purchase has an invoice number, a matching invoice record is auto-created/updated.' },
+  { date: '2026-06-17', tag: 'New',      text: 'GRN page: checkboxes and bulk delete added.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Daily Entry: Egg Collection fields are hidden during Rearing phase and appear only from Laying Start Date.' },
+  { date: '2026-06-17', tag: 'Improved', text: 'Parties can now be deleted even if they have linked GRN, HE Dispatch, or NHE Sales records.' },
   { date: '2026-06-17', tag: 'Improved', text: 'Item Master renamed from "Feed Ingredients" in sidebar.' },
-  { date: '2026-06-17', tag: 'Fix',      text: 'Flock creation Save button was disconnected — fixed.' },
-  { date: '2026-06-17', tag: 'Fix',      text: 'Edit flock form now loads correct data (rearing farm, laying farm, chick rate, paid counts).' },
-  { date: '2026-06-17', tag: 'Fix',      text: 'Laying Site now shows correctly in Flock List (database view updated).' },
-  { date: '2026-06-17', tag: 'Fix',      text: 'GRN table name fixed across all pages — was incorrectly using "grn_entries" internally.' },
-  { date: '2026-06-17', tag: 'Fix',      text: 'Dashboard low-stock alert now reads correct tables and columns.' },
-  { date: '2026-06-17', tag: 'Fix',      text: 'All mutations now show error toasts when something fails (previously silent).' },
 ]
 
-// ── types ──────────────────────────────────────────────────────────────────────
 interface Step { text: string; note?: string; warning?: string }
 interface Workflow { title: string; path: string; steps: Step[] }
 interface Section {
   id: string
   icon: React.ReactNode
   label: string
-  color: string           // tailwind bg class for accent
+  color: string
   intro: string
   workflows: Workflow[]
   tips?: string[]
 }
 
-// ── content ────────────────────────────────────────────────────────────────────
 const SECTIONS: Section[] = [
-  // ── CHANGELOG / AUDIT ─────────────────────────────────────────────────────────
+  // ── CHANGELOG ─────────────────────────────────────────────────────────────────
   {
     id: 'changelog',
     icon: <Sparkles size={20}/>,
@@ -118,8 +110,8 @@ const SECTIONS: Section[] = [
         steps: [
           { text: 'While creating a flock, scroll to the "Chick Invoice" section.' },
           { text: 'Enter Invoice No (from hatchery invoice) and Invoice Date.' },
-          { text: 'Save the flock. An invoice record is automatically created in Accounts → Invoice Register, linked to this flock.', note: 'The invoice amount is auto-calculated from (Paid Female + Paid Male) × Chick Rate.' },
-          { text: 'Go to Invoice Register to mark it paid when payment is made.' },
+          { text: 'Save the flock. An invoice record is automatically created in Accounts → Purchase Invoice Register, linked to this flock.', note: 'The invoice amount is auto-calculated from (Paid Female + Paid Male) × Chick Rate.' },
+          { text: 'Go to Purchase Invoice Register to mark it paid when payment is made.' },
         ]
       },
       {
@@ -181,7 +173,6 @@ const SECTIONS: Section[] = [
           { text: 'Download the Template first to see the exact column format required.' },
           { text: 'Fill your Excel with dates and data matching the template columns.' },
           { text: 'Upload the file. Records are upserted — existing dates are updated, new dates are inserted.' },
-          { text: 'Column names: date, opening_female, opening_male, feed_female_kg, transfer_female, transfer_male, cull_female, cull_male, mortality_female, mortality_male, closing_female, closing_male, total_eggs, he_eggs, etc.' },
         ]
       },
     ],
@@ -211,7 +202,7 @@ const SECTIONS: Section[] = [
           { text: 'Sex Error Female/Male — birds found to be wrongly sexed during transfer (counted separately).' },
           { text: 'Sold Female/Male — birds sold off at the time of transfer (culls, rejects).' },
           { text: 'Tick "Final Transfer" if this is the last batch moving — the flock status will automatically change to Laying and the Laying Farm is set.', note: 'Once status is Laying, Daily Entry will show Laying Farm sheds instead of Rearing Farm sheds.' },
-          { text: 'Save. The transfer count is automatically deducted from the daily record\'s Transfer Female/Male for that date.' },
+          { text: 'Save.' },
         ]
       },
     ],
@@ -221,29 +212,27 @@ const SECTIONS: Section[] = [
     ]
   },
 
-  // ── BIRD SALES (NHE & BIRD SALES) ─────────────────────────────────────────────
+  // ── NHE & BIRD SALES ──────────────────────────────────────────────────────────
   {
     id: 'bird-sales',
     icon: <ShoppingCart size={20}/>,
     label: 'NHE & Bird Sales',
     color: 'bg-orange-600',
-    intro: 'All non-hatching egg sales and bird sales are recorded here. Egg sales (Jumbo, Table, Broken) are straightforward. Bird sales use a weight-based calculation and automatically deduct from the flock\'s daily bird count.',
+    intro: 'All non-hatching egg sales and bird sales are recorded here. Egg sales (Jumbo, Table, Broken) and bird sales (cull / lame) are entered per flock. Each sale can be assigned an invoice number from the NHE or CB series.',
     workflows: [
       {
-        title: 'Record a bird sale (cull / lame / weak / sex error)',
+        title: 'Record a bird sale (cull / lame / weak)',
         path: 'Flock Management → NHE & Bird Sales → Add Sale',
         steps: [
           { text: 'Select Flock and Sale Date.' },
           { text: 'Sale Type: choose "Bird Sales".' },
           { text: 'Bird Sex: Female, Male, Sex Error, or Mixed.' },
           { text: 'Category: Cull (most common), Lame, Weak, Other.' },
-          { text: 'No. of Birds — count of birds being sold.' },
-          { text: 'Avg Weight/bird (kg) — weigh a sample and enter average. The app calculates Total Weight = qty × avg weight.' },
-          { text: 'Rate per kg (₹) — agreed price per kg live weight. Total Amount = total weight × rate/kg auto-fills.', note: 'Amount auto-calculates as you type. You can override it manually if needed.' },
-          { text: 'Payment section: enter Cash amount and Online/NEFT amount separately. Total is shown.' },
-          { text: 'Vehicle No — truck/vehicle number for the load.' },
-          { text: 'Party — select the buyer from the party master.' },
-          { text: 'Save. The cull count is automatically added to the daily record for that flock on that date (cull_female or cull_male depending on Bird Sex).' },
+          { text: 'No. of Birds and Avg Weight/bird (kg). Total Weight auto-calculates.' },
+          { text: 'Rate per kg (₹). Total Amount auto-fills.' },
+          { text: 'Party — select the buyer from the party master. Type to search if you have many parties.' },
+          { text: 'Payment section: Cash and Online/NEFT amounts. Vehicle No.' },
+          { text: 'Save. The cull count is automatically added to the daily record for that flock on that date.' },
         ]
       },
       {
@@ -251,15 +240,27 @@ const SECTIONS: Section[] = [
         path: 'Flock Management → NHE & Bird Sales → Add Sale',
         steps: [
           { text: 'Sale Type: Jumbo Eggs, Table Eggs, or Broken/Crack Eggs.' },
-          { text: 'Enter Qty (number of eggs), Unit (nos), Rate (₹/egg), Amount auto-calculates.' },
+          { text: 'Enter Qty, Rate (₹/egg), Amount auto-calculates.' },
+          { text: 'GST %: select 0%, 5%, or 18% as applicable for the item.' },
           { text: 'Party, DC No, Remarks as needed.' },
+          { text: 'Save.' },
+        ]
+      },
+      {
+        title: 'Generate a sale invoice number',
+        path: 'Flock Management → NHE & Bird Sales → Add Sale → Invoice Series + Generate',
+        steps: [
+          { text: 'In the sale form, select the Invoice Series from the dropdown: NHE (for non-hatching eggs) or CB (for cull birds).' },
+          { text: 'Click the "Gen" button. A preview of the next invoice number appears in the Invoice No field (e.g. NF/26-27/NHE/3).', note: 'Clicking Generate only SHOWS the next number — it does not reserve it. The counter is only incremented when you click Save.' },
+          { text: 'You can also type an invoice number manually instead of using Generate.' },
+          { text: 'Click Save. The invoice number is now permanently assigned to this sale.', warning: 'If you click Generate but then Cancel without saving, no number is wasted — the same number will be offered next time.' },
         ]
       },
     ],
     tips: [
       'Female and Sex Error birds both go into cull_female in daily records.',
-      'Mixed type does NOT auto-deduct from stock — use Female or Male where possible.',
       'The Bird Sales Summary at the top of the page shows totals, kg sold, and average ₹/kg.',
+      'All saved invoices appear in Accounts → Sales Invoice Register.',
     ]
   },
 
@@ -269,23 +270,195 @@ const SECTIONS: Section[] = [
     icon: <Package size={20}/>,
     label: 'HE Dispatch',
     color: 'bg-teal-600',
-    intro: 'Hatching Eggs dispatched to hatcheries are recorded here with grade breakdown per production date.',
+    intro: 'Hatching Eggs dispatched to hatcheries are recorded here with grade breakdown per production date. Each dispatch can carry a formal invoice number from the HHF, HE, or VHPL series.',
     workflows: [
       {
         title: 'Record an HE dispatch',
         path: 'Flock Management → HE Dispatch → Add Dispatch',
         steps: [
-          { text: 'Select Flock, Dispatch Date, Hatchery/Party.' },
+          { text: 'Select Flock, Dispatch Date.' },
+          { text: 'Party — select the hatchery/buyer. Type to search if you have many parties.' },
           { text: 'DC No (Dispatch Challan number).' },
           { text: 'Add lines: each production date gets Grade A, Grade B, Grade C egg counts and rate.' },
           { text: 'Free Eggs (2%) and Invoice Eggs are auto-calculated.' },
           { text: 'Amount = Invoice Eggs × Rate.' },
           { text: 'Setting Date, Hatch Date, Chicks Sold — fill when the hatchery reports back.' },
+          { text: 'Save.' },
+        ]
+      },
+      {
+        title: 'Generate an invoice number for HE Dispatch',
+        path: 'Flock Management → HE Dispatch → Add Dispatch → Invoice Series + Generate',
+        steps: [
+          { text: 'Select the Invoice Series matching the buyer:', note: 'HHF = NF/HHF/26-27/{N} for Hitech Hatch Fresh Pvt Ltd. HE = NF/HE/26-27/{N} for other hatchery buyers. VHPL = NF/VHPL/26-27/{N} for VHPL.' },
+          { text: 'Click "Generate". The next invoice number appears as a preview (e.g. NF/HHF/26-27/51).', note: 'Generate only previews — does not consume the number yet.' },
+          { text: 'Edit the Invoice No field manually if needed.' },
+          { text: 'Click Save. The number is confirmed and the series counter increments.', warning: 'If you Cancel after clicking Generate, no number is wasted. The same number will appear next time.' },
         ]
       },
     ],
     tips: [
-      'One dispatch can cover eggs from multiple production dates (enter one line per date in the dispatch lines).',
+      'One dispatch can cover eggs from multiple production dates — enter one line per date in the dispatch lines.',
+      'Use HHF series only for Hitech Hatch Fresh Pvt Ltd. Use HE for all other hatchery buyers.',
+      'All dispatches with an invoice number appear in Accounts → Sales Invoice Register.',
+    ]
+  },
+
+  // ── GST ───────────────────────────────────────────────────────────────────────
+  {
+    id: 'gst',
+    icon: <Receipt size={20}/>,
+    label: 'GST',
+    color: 'bg-red-700',
+    intro: 'GST compliance for both purchases and sales. The app handles intra-state (CGST+SGST) and inter-state (IGST) automatically based on supplier/buyer state. Input GST on purchases goes to indirect expenses (no ITC claim). RCM applies to rent and flagged vendors.',
+    workflows: [
+      {
+        title: 'Set up a party\'s GST details',
+        path: 'Masters → Parties → Add / Edit party',
+        steps: [
+          { text: 'GSTIN field — type the 15-digit GST number. The app validates format and auto-fills the state code from the first two digits.', note: 'Example: 36ABJFM1393C1ZC → state code 36 = Telangana.' },
+          { text: 'GST Registration — select Registered, Unregistered, or Composition.' },
+          { text: 'State Code — auto-filled from GSTIN; can also be typed manually for unregistered parties.' },
+          { text: 'RCM Applicable — tick this for parties where you pay tax under Reverse Charge (e.g. rent landlords). When you select this party in Purchase Entry, RCM is automatically ticked.' },
+          { text: 'Save.' },
+        ]
+      },
+      {
+        title: 'Enter a purchase with GST (GRN)',
+        path: 'Feed Mill → GRN Entry → + New GRN (or Purchase Entry)',
+        steps: [
+          { text: 'Select Supplier. Supply Type (Intra-state / Inter-state) is auto-detected from the supplier\'s state code vs our state (Telangana).' },
+          { text: 'GST %: select 0%, 5%, or 18%.' },
+          { text: 'Nature of Purchase: Purchase (stock item), Expense (service/indirect), or Asset.' },
+          { text: 'RCM: auto-ticked if the supplier is flagged for RCM. Can be manually overridden.' },
+          { text: 'The GST Classification section shows live CGST + SGST (intra) or IGST (inter) amounts as you enter the basic amount.', note: 'No ITC is claimed — input GST goes to indirect expenses as per our accounting policy.' },
+          { text: 'Save. CGST, SGST, IGST amounts are stored on the GRN record for GST reports.' },
+        ]
+      },
+      {
+        title: 'View GSTR-1 (outward supplies) data',
+        path: 'Reports → GST Reports → GSTR-1 tab',
+        steps: [
+          { text: 'Select month and year at the top.' },
+          { text: 'B2B table: sales to registered buyers (buyer GSTIN on the invoice). Used for Table 4 of GSTR-1.' },
+          { text: 'B2C table: sales to unregistered buyers. Used for Table 7 of GSTR-1.' },
+          { text: 'Exempt/Nil Sales card: HE (hatching eggs) sales which are zero-rated/exempt.' },
+          { text: 'HSN Summary: item-wise tax breakdown required in GSTR-1 Table 12.' },
+          { text: 'Export to Excel for filing or sharing with your CA.' },
+        ]
+      },
+      {
+        title: 'View GSTR-3B summary',
+        path: 'Reports → GST Reports → GSTR-3B tab',
+        steps: [
+          { text: 'Select month and year.' },
+          { text: 'Section 3.1(a): Total taxable outward supplies and tax payable (CGST + SGST + IGST).' },
+          { text: 'Section 3.1(c): Nil-rated and exempt outward supplies (HE eggs).' },
+          { text: 'Section 3.1(d): Inward supplies under RCM — tax you must pay as the buyer.' },
+          { text: 'Section 6.1: Total tax payable = outward tax + RCM tax.' },
+          { text: 'Export to Excel.' },
+        ]
+      },
+      {
+        title: 'View RCM Register',
+        path: 'Reports → GST Reports → RCM Register tab',
+        steps: [
+          { text: 'Shows all purchase GRN entries where is_rcm = Yes.' },
+          { text: 'Use this to verify the RCM tax you need to pay in cash for the month (no set-off available without ITC).' },
+          { text: 'Common RCM sources: rent payments, flagged vendors identified from GSTR-2B.' },
+        ]
+      },
+    ],
+    tips: [
+      'Our company GSTIN: 36ABJFM1393C1ZC, State: Telangana (36). The app uses this to auto-detect intra vs inter-state.',
+      'GST on purchases (input tax) is not claimed as ITC — it is treated as part of the cost (indirect expense).',
+      'RCM means you pay GST directly to the government, not to the supplier. The supplier invoices you without tax.',
+      'Hatching eggs (HE) are exempt from GST — always use 0% for HE dispatches.',
+      'After getting your GSTR-2B from the portal, you can identify additional RCM vendors and flag them in party master.',
+    ]
+  },
+
+  // ── INVOICE SERIES ────────────────────────────────────────────────────────────
+  {
+    id: 'invoice-series',
+    icon: <FileText size={20}/>,
+    label: 'Invoice Series',
+    color: 'bg-blue-800',
+    intro: 'The app maintains separate invoice number sequences for each type of sale to avoid duplicate invoice numbers across different buyers and sale types.',
+    workflows: [
+      {
+        title: 'Invoice series in use',
+        path: 'Used in HE Dispatch and NHE Sales forms',
+        steps: [
+          { text: 'HHF series — NF/HHF/26-27/{N} — for Hitech Hatch Fresh Pvt Ltd (main hatching egg buyer). Started from 50 (April–June 2026 filed).', note: 'Use this series ONLY for Hitech Hatch Fresh invoices.' },
+          { text: 'HE series — NF/HE/26-27/{N} — for all other hatching egg buyers. Started from 7.' },
+          { text: 'VHPL series — NF/VHPL/26-27/{N} — for VHPL. Started from 2.' },
+          { text: 'NHE series — NF/26-27/NHE/{N} — for non-hatching egg sales (JE, TE, BE). Started from 2.', note: 'Note: in the NHE format the year comes before the series code — NF/26-27/NHE/3.' },
+          { text: 'CB series — NF/CB/26-27/{N} — for Cull Bird sales. Started from 15. Uses 2-digit padding (NF/CB/26-27/16).' },
+        ]
+      },
+      {
+        title: 'How Generate works (important)',
+        path: 'HE Dispatch or NHE Sales form → Generate button',
+        steps: [
+          { text: 'Click Generate → the app shows a PREVIEW of the next invoice number. Example: NF/HHF/26-27/51.' },
+          { text: 'The counter is NOT incremented yet. If you cancel the form, the number is not wasted.' },
+          { text: 'When you click Save, the counter increments at that moment and the number is permanently assigned.', warning: 'If two people click Generate at the same moment and both Save, the second Save automatically gets the next available number — no duplicates.' },
+          { text: 'You can also type an invoice number manually and skip Generate.' },
+        ]
+      },
+    ],
+    tips: [
+      'Invoice numbers for April–May 2026 are already filed and locked. Do not create invoices that would conflict with already-filed numbers.',
+      'All issued invoices appear in Accounts → Sales Invoice Register.',
+    ]
+  },
+
+  // ── ACCOUNTS ──────────────────────────────────────────────────────────────────
+  {
+    id: 'accounts',
+    icon: <CreditCard size={20}/>,
+    label: 'Accounts & Invoices',
+    color: 'bg-violet-700',
+    intro: 'The Accounts section has the Cash Book, Sales Invoice Register, and Purchase Invoice Register. Cash entries flow in automatically from sales.',
+    workflows: [
+      {
+        title: 'Sales Invoice Register',
+        path: 'Accounts → Sales Invoice Register',
+        steps: [
+          { text: 'Shows all outward (sale) invoices — both HE Dispatch and NHE Sales — where an invoice number has been assigned.' },
+          { text: 'Filter by invoice series (HHF / HE / NHE / VHPL / CB) and date range.' },
+          { text: 'Columns: Invoice No, Date, Series, Type, Party, Flock, Amount.' },
+          { text: 'Export to Excel for month-end reconciliation or CA submission.' },
+          { text: 'Invoices only appear here after Save — clicking Generate alone does not create an entry.', note: 'This is your GSTR-1 outward supply list for sales invoices.' },
+        ]
+      },
+      {
+        title: 'Purchase Invoice Register',
+        path: 'Accounts → Purchase Invoice Register',
+        steps: [
+          { text: 'Shows all supplier invoices received — chick supply, feed, medicines, electricity, labour, other.' },
+          { text: 'Each invoice shows: Invoice No, Date, Type, Supplier, Linked Flock/Farm, Total, Paid, Balance, Status.' },
+          { text: 'Click the "Pay" button on any row to record a payment (full or partial).' },
+          { text: 'Overdue invoices (past due date, not fully paid) are highlighted in red.' },
+          { text: 'Filter by invoice type or payment status.' },
+          { text: 'Import from Excel using the Template → Import flow.' },
+        ]
+      },
+      {
+        title: 'Cash Book',
+        path: 'Accounts → Cash Book',
+        steps: [
+          { text: 'Every NHE / Bird Sale that is paid in cash or online is automatically added to the Cash Book on save.' },
+          { text: 'HE Dispatch payments are added to Cash Book when payment is received (separate step).' },
+          { text: 'You can also add manual cash entries for any other income or expense.' },
+          { text: 'Filter by date range and category.' },
+        ]
+      },
+    ],
+    tips: [
+      'Sales Invoice Register = outward (what you issued). Purchase Invoice Register = inward (what you received from suppliers).',
+      'Cash Book entries from sales are created automatically — do not enter them again manually.',
     ]
   },
 
@@ -314,7 +487,7 @@ const SECTIONS: Section[] = [
         steps: [
           { text: 'Select Farm and Date.' },
           { text: 'For each employee: set status — P (Present), A (Absent), H (Half Day), WO (Week Off), OT (Full OT Day).' },
-          { text: 'OT Hours column — enter hours of overtime worked on a normal Present day (e.g. 2.5 hrs).' },
+          { text: 'OT Hours column — enter hours of overtime worked on a normal Present day.' },
           { text: 'Save All button saves the entire day at once.' },
         ]
       },
@@ -323,10 +496,9 @@ const SECTIONS: Section[] = [
         path: 'HR & Payroll → Salary Entry → + Add',
         steps: [
           { text: 'Select Employee and Month.' },
-          { text: 'Click "📋 Auto-fill Attendance" — this reads the attendance for that month and fills Days Worked and any pending Advances automatically.' },
+          { text: 'Click "📋 Auto-fill Attendance" — fills Days Worked and pending Advances automatically.' },
           { text: 'Review: Basic, HRA, Arrears, OT Bonus. Gross is auto-calculated.' },
           { text: 'Deductions: ESI (only if gross ≤ ₹21,000), PF, PT (auto-slabbed: ≤15k→0, ≤20k→150, >20k→200).' },
-          { text: 'Advance deduction auto-filled from employee_advances table.' },
           { text: 'Net Salary = Gross − All Deductions.' },
           { text: 'Payment Mode: Cash or Online.' },
           { text: 'Save.' },
@@ -367,7 +539,6 @@ const SECTIONS: Section[] = [
           { text: 'Select Financial Year (e.g. 2025-26).' },
           { text: 'Optionally select a Compare Year to see side-by-side.' },
           { text: 'Summary cards show total units and amount for the year.' },
-          { text: 'Bar chart shows site-wise breakdown.' },
           { text: 'Month-wise table shows units and amount with % change vs previous year.' },
         ]
       },
@@ -389,9 +560,11 @@ const SECTIONS: Section[] = [
         title: 'Record a raw material purchase (GRN)',
         path: 'Feed Mill → GRN Entry → + New GRN',
         steps: [
-          { text: 'GRN Date, GRN/Invoice No, Supplier/Party.' },
+          { text: 'GRN Date, GRN/Invoice No, Supplier/Party. Type to search supplier if you have many.' },
           { text: 'Ingredient (Maize, Soya, etc.) — must exist in Masters → Ingredients.' },
           { text: 'Quantity (kg), Rate per kg, Total Amount.' },
+          { text: 'GST %: select 0%, 5%, or 18%. Supply Type and CGST/SGST/IGST split auto-calculate.', note: 'Common rates: Maize/Soya/DORB = 5%, Trays/Boxes/Twine = 5%, Tape/Chemicals = 18%.' },
+          { text: 'Nature: Purchase (stock item), Expense (service), or Asset.' },
           { text: 'Vehicle No for the truck.' },
           { text: 'Save. Stock automatically increases.' },
         ]
@@ -401,10 +574,10 @@ const SECTIONS: Section[] = [
         path: 'Feed Mill → Formulas → + Add Formula',
         steps: [
           { text: 'Formula Code — your internal code (e.g. BRD-PRE-V2).' },
-          { text: 'Feed Type — select from the master feed types (BCM, BGM, L1, L2, etc.). This is the required link to the feed type master. Flock Type (Breeder/Layer/Broiler) auto-fills from the feed type name.', note: 'Feed Types must be set up in Masters → Feed Types before formulas can be created.' },
+          { text: 'Feed Type — select from the master feed types (BCM, BGM, L1, L2, etc.). Flock Type (Breeder/Layer/Broiler) auto-fills.', note: 'Feed Types must be set up in Masters → Feed Types before formulas can be created.' },
           { text: 'Week From / Week To — the age range (weeks) this formula applies to.' },
           { text: 'Add ingredients with percentage and kg per 1000 kg batch. Total % should add up to 100.' },
-          { text: 'Save. Formula can then be selected when recording feed production.' },
+          { text: 'Save.' },
         ]
       },
       {
@@ -432,43 +605,6 @@ const SECTIONS: Section[] = [
     ]
   },
 
-  // ── IMPORT / EXCEL CONVERTER ──────────────────────────────────────────────────
-  {
-    id: 'import',
-    icon: <FileSpreadsheet size={20}/>,
-    label: 'Import & Excel Converter',
-    color: 'bg-cyan-700',
-    intro: 'Import bulk data from your existing Excel files using the Excel Converter. It maps your columns to the app fields, shows a preview with errors, then imports in one click.',
-    workflows: [
-      {
-        title: 'Import data from your Excel file',
-        path: 'Import Data → ✦ Excel Converter',
-        steps: [
-          { text: 'Step 1 — Select Type: choose what you are importing (Daily Records, Salary, Electricity Bills, Attendance, GRN, Flock Transfers).' },
-          { text: 'Step 2 — Upload File: drag and drop your .xlsx or .csv file onto the upload area, or click Browse.' },
-          { text: 'Step 3 — Map Columns: the app tries to auto-match your column names to app fields. Green = matched. For unmatched fields use the dropdown to pick your column manually.', note: 'Your file does not need to have the exact column names — the mapping step handles the difference.' },
-          { text: 'For Daily Records and Flock Transfers: also select the Flock from the dropdown at top right.' },
-          { text: 'Click "Preview Mapped Data" to see all rows with OK / Warn / Error status.' },
-          { text: 'Step 4 — Review: fix any red-error rows in your Excel if needed, re-upload. Green rows will import.' },
-          { text: 'Click "Import N Valid Rows". Done.' },
-        ]
-      },
-      {
-        title: 'Download a blank template',
-        path: 'Import Data → ✦ Excel Converter → Step 2 → Download Template button',
-        steps: [
-          { text: 'After selecting the import type, click Download Template on the upload screen.' },
-          { text: 'A CSV with the exact expected columns and one example row is downloaded.' },
-          { text: 'Fill your data in this format for the smoothest import.' },
-        ]
-      },
-    ],
-    tips: [
-      'The converter handles Indian date formats (DD.MM.YY, DD/MM/YYYY, DD-MM-YYYY) and Excel serial dates automatically.',
-      'If the same record already exists (same flock + date, or same employee + month), it is updated — not duplicated.',
-    ]
-  },
-
   // ── MASTERS ───────────────────────────────────────────────────────────────────
   {
     id: 'masters',
@@ -481,43 +617,67 @@ const SECTIONS: Section[] = [
         title: 'Setup order — do this first',
         path: 'Masters (left nav)',
         steps: [
-          { text: '1. Farms — add each farm/site (Kethereddypally, Agraharam Potlapally, etc.) with code and location.' },
-          { text: '2. Sheds — add sheds for each farm. Each shed belongs to one farm. Set shed_no and shed_type (layer/breeder).' },
-          { text: '3. Parties — add buyers, suppliers, hatcheries with their type.' },
+          { text: '1. Farms — add each farm/site with code and location.' },
+          { text: '2. Sheds — add sheds for each farm. Each shed belongs to one farm.' },
+          { text: '3. Parties — add buyers, suppliers, hatcheries. Include GSTIN and State Code for GST compliance.' },
           { text: '4. Ingredients — raw materials used in feed (Maize, Soya, DORB, etc.).' },
           { text: '5. Meters — electricity meters with their farm and USC number.' },
           { text: '6. Feed Types — L1, L2, L3, BCM, BGM, etc.' },
           { text: '7. Vaccination Schedule — standard schedule per age week for each vaccine.' },
         ]
       },
+      {
+        title: 'Edit dropdown option lists',
+        path: 'Admin Centre → Masters tab',
+        steps: [
+          { text: 'The Masters tab in Admin Centre shows editable lists for all dropdown options used across the app.' },
+          { text: 'Categories — expense/purchase categories used in Cash Book and GRN.' },
+          { text: 'Units — measurement units (kg, nos, bags, ltrs, trays, etc.) used in sale and purchase forms.' },
+          { text: 'Material Types — types of raw materials (feed ingredient categories).' },
+          { text: 'Payment Methods — Cash, NEFT, UPI, Cheque, RTGS etc.' },
+          { text: 'Breeds — chicken breeds (BV300, Dekalb, etc.) used in flock creation.' },
+          { text: 'Feed Types — BCM, BGM, L1, L2, L3, etc. used in Feed Mill formulas and Daily Entry.' },
+          { text: 'Designations — employee job titles used in HR & Payroll.' },
+          { text: 'To add a new option: type in the input box and click Add. To delete: click the × on any existing item.' },
+        ]
+      },
+      {
+        title: 'Add a party with GST details',
+        path: 'Masters → Parties → + Add Party',
+        steps: [
+          { text: 'Name, Type (Buyer / Supplier / Both / Hatchery), Phone.' },
+          { text: 'GSTIN — type the 15-digit number. State code auto-fills from the first two digits and the format is validated.', note: 'Leave blank for unregistered parties.' },
+          { text: 'GST Registration — Registered, Unregistered, or Composition.' },
+          { text: 'State Code — auto-filled from GSTIN; type manually for unregistered inter-state parties.' },
+          { text: 'RCM Applicable — tick for landlords and any other parties under Reverse Charge.' },
+          { text: 'Save.' },
+        ]
+      },
     ],
     tips: [
       'You cannot enter daily records without sheds. You cannot enter GRN without ingredients. Set up masters first.',
-      'Parties with type "Buyer" appear in NHE/Bird Sale party dropdowns. Type "Supplier" appears in GRN.',
+      'Parties with type "Buyer" appear in NHE/Bird Sale party dropdowns. Type "Supplier" appears in GRN and Purchase Entry.',
+      'All dropdown lists in the app (Breeds, Feed Types, Units, etc.) can be customised in Admin Centre → Masters.',
     ]
   },
 
   // ── PURCHASE & PAYMENTS ───────────────────────────────────────────────────────
   {
     id: 'purchase-payments',
-    icon: <CreditCard size={20}/>,
+    icon: <ShoppingCart size={20}/>,
     label: 'Purchase & Payments',
     color: 'bg-emerald-700',
-    intro: 'Track every purchase made for the farm — feed ingredients, medicines, equipment, services. Each purchase is raised as a Purchase Order (PO). Payments are recorded separately against each PO and tracked until fully paid. The Bank Ledger shows all money going out.',
+    intro: 'Track every purchase made for the farm — feed ingredients, medicines, equipment, services. Each purchase is raised as a Purchase Order (PO). Payments are recorded separately against each PO.',
     workflows: [
       {
         title: 'Raise a Purchase Order (PO)',
         path: 'Purchase & Payments → + New PO',
         steps: [
-          { text: 'PO No — your internal PO number (e.g. PO-2025-001). One PO can have multiple line items (ingredients or products).' },
+          { text: 'PO No — your internal PO number.' },
           { text: 'Vendor Name — type the supplier name. Existing vendors auto-suggest.' },
           { text: 'Financial Year — select the FY this PO belongs to (e.g. 2025-26).' },
-          { text: 'Item/Ingredient — what is being purchased (Maize, Soya, Medicine, etc.).' },
-          { text: 'Quantity and Unit (kg, bags, nos, ltrs).' },
-          { text: 'Rate per unit and Total Amount.' },
-          { text: 'Expected Delivery Date if known.' },
+          { text: 'Item/Ingredient, Quantity, Unit, Rate, Total Amount.' },
           { text: 'Save. The PO status starts as "Pending".' },
-          { text: 'To add more items to the same PO, click the + icon on the PO row in the list.' },
         ]
       },
       {
@@ -525,44 +685,19 @@ const SECTIONS: Section[] = [
         path: 'Purchase & Payments → PO row → 📦 receipt icon',
         steps: [
           { text: 'When goods physically arrive, click the green box/package icon on the PO row.' },
-          { text: 'Enter the quantity actually received (may differ from ordered quantity).' },
-          { text: 'Enter the actual rate and invoice amount.' },
-          { text: 'Vehicle No and Bill/Invoice No.' },
-          { text: 'Save. PO status updates to "Received". Stock in Feed Mill also increases if it is a raw material.' },
+          { text: 'Enter the quantity received, actual rate, invoice amount, Vehicle No and Bill/Invoice No.' },
+          { text: 'Save. PO status updates to "Received". Stock in Feed Mill increases if it is a raw material.' },
         ]
       },
       {
         title: 'Record a payment against a PO',
         path: 'Purchase & Payments → Payments tab → + Add Payment',
         steps: [
-          { text: 'Select the PO No from the dropdown — the vendor name and outstanding amount fill automatically.' },
-          { text: 'Payment Date.' },
-          { text: 'Amount Paid.' },
-          { text: 'Payment Mode: Cash, NEFT, RTGS, Cheque, UPI.' },
+          { text: 'Select the PO No — vendor name and outstanding amount fill automatically.' },
+          { text: 'Payment Date, Amount Paid, Payment Mode: Cash, NEFT, RTGS, Cheque, UPI.' },
           { text: 'Bank Reference No / UTR / Cheque No — important for reconciliation.' },
           { text: 'TDS deducted (if applicable) — enter TDS amount separately.' },
-          { text: 'Remarks (e.g. "Partial payment, balance in July").' },
           { text: 'Save. Outstanding balance on that PO reduces automatically.' },
-          { text: 'A PO can have multiple payments spread over time. The system tracks Total Invoiced vs Total Paid vs Outstanding for each vendor.' },
-        ]
-      },
-      {
-        title: 'View pending / overdue payments',
-        path: 'Purchase & Payments → Pending Payments tab',
-        steps: [
-          { text: 'This tab shows all POs where payment is not fully done.' },
-          { text: 'Filter by vendor or financial year.' },
-          { text: 'Outstanding column = Invoiced Amount − Total Paid so far.' },
-          { text: 'Click on a vendor row to see all their POs and payment history.' },
-        ]
-      },
-      {
-        title: 'View vendor-wise outstanding (Party Outstanding)',
-        path: 'Reports → Party Outstanding',
-        steps: [
-          { text: 'Shows total amount owed to each vendor across all POs.' },
-          { text: 'Filter by vendor name or date range.' },
-          { text: 'Use this when a vendor calls to ask how much is pending.' },
         ]
       },
       {
@@ -570,81 +705,41 @@ const SECTIONS: Section[] = [
         path: 'Purchase & Payments → Vendors Master tab',
         steps: [
           { text: 'The Vendors Master tab lists every unique vendor name from Purchase Orders, Payments, and Vendor Bank Details.' },
-          { text: 'Each row shows how many POs, payments, and whether bank details exist for that vendor.' },
-          { text: 'Click the trash icon on a row to delete ALL data for that vendor — their POs, payments, and bank details are permanently removed.', warning: 'This cannot be undone. Use only when you want to completely remove a vendor and all their history.' },
+          { text: 'Click the trash icon on a row to delete ALL data for that vendor — POs, payments, and bank details are permanently removed.', warning: 'This cannot be undone. Use only when you want to completely remove a vendor and all their history.' },
           { text: 'To delete multiple vendors at once, tick checkboxes and click "Delete All Data for Selected".' },
-          { text: 'After deletion, Vendor Statement and Rate Analysis will no longer show those vendor names.' },
         ]
       },
     ],
     tips: [
       'Always record stock receipt before recording payment — the receipt confirms goods arrived.',
-      'TDS: if you deduct TDS before paying the vendor, enter TDS amount in the payment form. The vendor\'s outstanding is reduced by the full invoice amount, not just what was paid in cash.',
-      'One PO can cover multiple deliveries — just record a new receipt each time a truck arrives.',
-      'Bank Ledger (Accounts → Cash Book) shows all outgoing payments in date order — use this to match with your bank statement.',
+      'TDS: enter TDS amount in the payment form. The vendor\'s outstanding reduces by the full invoice amount, not just cash paid.',
       'Party Outstanding report is the fastest way to answer "how much do we owe to [vendor]?"',
     ]
   },
 
-  // ── INVOICE REGISTER ──────────────────────────────────────────────────────────
+  // ── IMPORT ────────────────────────────────────────────────────────────────────
   {
-    id: 'invoices',
-    icon: <CreditCard size={20}/>,
-    label: 'Invoice Register',
-    color: 'bg-violet-600',
-    intro: 'Every invoice you receive from a supplier — for chicks, feed, medicines, electricity, or any other purchase — should be recorded here. This gives you a single place to track what is owed, what is partially paid, and what is fully settled.',
+    id: 'import',
+    icon: <FileSpreadsheet size={20}/>,
+    label: 'Import & Excel Converter',
+    color: 'bg-cyan-700',
+    intro: 'Import bulk data from your existing Excel files using the Excel Converter. It maps your columns to the app fields, shows a preview with errors, then imports in one click.',
     workflows: [
       {
-        title: 'Add a supplier invoice',
-        path: 'Accounts → Invoice Register → Add Invoice',
+        title: 'Import data from your Excel file',
+        path: 'Import Data → ✦ Excel Converter',
         steps: [
-          { text: 'Invoice No — the number printed on the supplier\'s invoice.' },
-          { text: 'Invoice Date — date on the invoice.' },
-          { text: 'Invoice Type — select one: Chick Supply, Feed/GRN, Medicine, Electricity, Labour/Contractor, Other.' },
-          { text: 'Supplier — select from Party Master, or type the name in the free-text field.' },
-          { text: 'For Chick Supply invoices — also select the Flock. This links the invoice directly to that flock.' },
-          { text: 'Farm — the farm/site this invoice relates to.' },
-          { text: 'Basic Amount, GST%, GST Amount — enter Basic and GST%, then click outside the field to auto-calculate Total.' },
-          { text: 'Total Amount (required) — the final invoice value.' },
-          { text: 'Due Date — when payment must be made. Overdue invoices are highlighted red.' },
-          { text: 'Payment Status — Unpaid, Partial, or Paid.' },
-          { text: 'Save.' },
-        ]
-      },
-      {
-        title: 'Mark an invoice as paid (or partially paid)',
-        path: 'Accounts → Invoice Register → Pay button on the row',
-        steps: [
-          { text: 'Click the green "Pay" button on any unpaid or partial invoice row.' },
-          { text: 'Enter the amount paid so far (can be less than total for partial).' },
-          { text: 'Save. Status automatically updates: full amount = Paid, less than total = Partial.' },
-          { text: 'For partial payments, click Pay again when additional payments are made.' },
-        ]
-      },
-      {
-        title: 'Import invoices from Excel',
-        path: 'Accounts → Invoice Register → Template → Import',
-        steps: [
-          { text: 'Click Template to download the Excel format with all columns and one example row.' },
-          { text: 'Fill your invoice data in the same format.' },
-          { text: 'Key columns: invoice_no, invoice_date, supplier_name, source_type (chick/grn/medicine/electricity/labour/other), flock_no, farm_name, basic_amount, gst_pct, total_amount, payment_status, paid_amount, due_date.' },
-          { text: 'Click Import and select your file. Flock numbers and farm names are matched automatically.' },
-        ]
-      },
-      {
-        title: 'Chick invoice auto-created from flock',
-        path: 'Flock Management → + New Flock → Chick Invoice section',
-        steps: [
-          { text: 'When creating a new flock, fill in Invoice No and Invoice Date in the Chick Invoice section.' },
-          { text: 'On save, the app automatically creates an invoice record in Invoice Register linked to that flock.', note: 'The invoice amount is set to Paid Count × Chick Rate. You can edit it later in Invoice Register if needed.' },
+          { text: 'Step 1 — Select Type: choose what you are importing (Daily Records, Salary, Electricity Bills, Attendance, GRN, Flock Transfers).' },
+          { text: 'Step 2 — Upload File: drag and drop your .xlsx or .csv file, or click Browse.' },
+          { text: 'Step 3 — Map Columns: the app tries to auto-match your column names to app fields. Green = matched. For unmatched fields use the dropdown to pick your column manually.', note: 'Your file does not need to have the exact column names — the mapping step handles the difference.' },
+          { text: 'Click "Preview Mapped Data" to see all rows with OK / Warn / Error status.' },
+          { text: 'Click "Import N Valid Rows". Done.' },
         ]
       },
     ],
     tips: [
-      'Overdue invoices (past due date, not paid) are shown with a red highlight and "Overdue" label.',
-      'Use the filter bar to view by type (e.g. only Chick Supply), or by status (e.g. only Unpaid).',
-      'Invoice Register does not affect stock — it is a financial tracking tool only.',
-      'For feed invoices: the GRN entry already has an Invoice No field. You can also add those invoices here for payment tracking.',
+      'The converter handles Indian date formats (DD.MM.YY, DD/MM/YYYY, DD-MM-YYYY) and Excel serial dates automatically.',
+      'If the same record already exists (same flock + date, or same employee + month), it is updated — not duplicated.',
     ]
   },
 
@@ -654,7 +749,7 @@ const SECTIONS: Section[] = [
     icon: <BarChart2 size={20}/>,
     label: 'Reports',
     color: 'bg-rose-600',
-    intro: 'Reports pull data from all modules. No data entry here — only viewing.',
+    intro: 'Reports pull data from all modules. No data entry here — only viewing and export.',
     workflows: [
       {
         title: 'Key reports and where to find them',
@@ -668,13 +763,26 @@ const SECTIONS: Section[] = [
           { text: 'Egg Stock — current HE/NHE stock balance.' },
           { text: 'Flock Compare — side-by-side performance of two flocks (HD%, HE%, feed/bird).' },
           { text: 'Shed Performance — compare sheds within a flock.' },
-          { text: 'Cash Book — Accounts → Cash Book for daily cash transactions.' },
           { text: 'Party Outstanding — amount owed to/by each party.' },
+          { text: 'GST Reports — GSTR-1, GSTR-3B, RCM Register, and Purchase GST tab for monthly filing.' },
+        ]
+      },
+      {
+        title: 'GST Reports — monthly filing data',
+        path: 'Reports → GST Reports',
+        steps: [
+          { text: 'Select Month and Year at the top. All tabs update for the selected period.' },
+          { text: 'GSTR-1 tab: B2B invoices (registered buyers), B2C (unregistered buyers), exempt sales, HSN summary.' },
+          { text: 'GSTR-3B tab: outward tax summary (3.1a), exempt sales (3.1c), RCM inward (3.1d), total payable (6.1).' },
+          { text: 'RCM Register tab: all purchases where RCM applies — use this to know how much tax to pay directly.' },
+          { text: 'Purchase GST tab: all GRN entries with tax breakdown. Note shows "No ITC — all input GST goes to indirect expenses".' },
+          { text: 'Each tab has an Export to Excel button for sharing with your CA.' },
         ]
       },
     ],
     tips: [
       'Most reports have date range filters. Start with a broad range and narrow down.',
+      'GST Reports → GSTR-1 and GSTR-3B tabs give you the exact figures needed for filing. Export and share with your CA.',
     ]
   },
 ]
@@ -720,7 +828,6 @@ const WorkflowCard: React.FC<{ wf: Workflow; accent: string }> = ({ wf, accent }
       </button>
       {open && (
         <div className="px-4 pb-4 pt-3 space-y-4">
-          {/* Navigation path */}
           <div className="flex items-start gap-1.5 flex-wrap">
             <MapPin size={13} className="text-gray-400 mt-0.5 flex-shrink-0"/>
             <div className="flex items-center gap-1 flex-wrap">
@@ -734,7 +841,6 @@ const WorkflowCard: React.FC<{ wf: Workflow; accent: string }> = ({ wf, accent }
               ))}
             </div>
           </div>
-          {/* Steps */}
           <div className="space-y-3">
             {wf.steps.map((s, i) => <StepItem key={i} step={s} num={i + 1}/>)}
           </div>
@@ -744,14 +850,12 @@ const WorkflowCard: React.FC<{ wf: Workflow; accent: string }> = ({ wf, accent }
   )
 }
 
-// ── main page ──────────────────────────────────────────────────────────────────
 export const HelpGuidePage: React.FC = () => {
   const [active, setActive] = useState('flock-setup')
   const section = SECTIONS.find(s => s.id === active)!
 
   return (
     <div className="flex h-full min-h-screen bg-gray-50">
-      {/* Sidebar */}
       <aside className="w-60 flex-shrink-0 bg-white border-r border-gray-200 sticky top-0 h-screen overflow-y-auto">
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
@@ -774,7 +878,6 @@ export const HelpGuidePage: React.FC = () => {
             </button>
           ))}
         </nav>
-        {/* Quick index */}
         <div className="p-4 border-t border-gray-100 mt-2">
           <p className="text-[10px] uppercase font-semibold text-gray-400 mb-2">Quick index</p>
           <div className="space-y-1 text-xs text-gray-500">
@@ -783,22 +886,22 @@ export const HelpGuidePage: React.FC = () => {
             <div className="flex items-center gap-1"><Hash size={10}/>Egg fields missing → Daily Entry</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Bird sold → NHE & Bird Sales</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Transfer flock → Flock Transfer</div>
-            <div className="flex items-center gap-1"><Hash size={10}/>Invoice received → Invoice Register</div>
-            <div className="flex items-center gap-1"><Hash size={10}/>Mark invoice paid → Invoice Register</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Generate invoice no → Invoice Series</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Sales invoices → Accounts & Invoices</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Supplier invoice → Accounts & Invoices</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>GSTR-1 / GSTR-3B → GST</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>RCM → GST</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Add breed/unit/category → Masters</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Pay salary → Employees</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Electricity bill → Electricity</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Raise PO → Purchase & Payments</div>
-            <div className="flex items-center gap-1"><Hash size={10}/>Record payment → Purchase & Payments</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Import Excel → Import Data</div>
-            <div className="flex items-center gap-1"><Hash size={10}/>Who changed what → What's New</div>
           </div>
         </div>
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-          {/* Section header */}
           <div className="flex items-start gap-4">
             <div className={`${section.color} w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0`}>
               {section.icon}
@@ -809,7 +912,6 @@ export const HelpGuidePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Tips box */}
           {section.tips && section.tips.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <p className="text-xs font-semibold text-amber-700 uppercase mb-2">Key Points to Remember</p>
@@ -824,7 +926,6 @@ export const HelpGuidePage: React.FC = () => {
             </div>
           )}
 
-          {/* Workflows */}
           <div className="space-y-4">
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Step-by-Step Workflows</h2>
             {section.workflows.map((wf, i) => (
@@ -832,7 +933,6 @@ export const HelpGuidePage: React.FC = () => {
             ))}
           </div>
 
-          {/* Changelog panel — only shown on changelog section */}
           {active === 'changelog' && (
             <div className="space-y-3">
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Recent Changes</h2>
@@ -853,12 +953,11 @@ export const HelpGuidePage: React.FC = () => {
             </div>
           )}
 
-          {/* Footer note */}
           <div className="border-t border-gray-200 pt-4 flex items-start gap-2">
             <Info size={14} className="text-gray-400 mt-0.5 flex-shrink-0"/>
             <p className="text-xs text-gray-400">
               This guide is part of the app and is updated whenever workflows change.
-              If something doesn't match what you see, the app may have been updated — refresh this page.
+              If something doesn't match what you see, refresh this page.
               Last updated: <strong>{LAST_UPDATED}</strong>.
             </p>
           </div>
