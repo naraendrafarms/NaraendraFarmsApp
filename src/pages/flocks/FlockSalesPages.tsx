@@ -254,7 +254,7 @@ export const HEDispatch: React.FC = () => {
     queryKey: ['he_dispatch', flockFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('he_dispatch')
-        .select('*, flocks(flock_no), parties(name), hatcheries(name)')
+        .select('*, flocks(flock_no), parties(name,address,contact), hatcheries(name)')
         .order('dispatch_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (fromDate) q = q.gte('dispatch_date', fromDate)
@@ -299,7 +299,13 @@ export const HEDispatch: React.FC = () => {
   const lineTotal = (f: keyof DispLine) => lines.reduce((sum, l) => sum + (parseInt((l as any)[f]) || 0), 0)
   const totalFromLines = lineTotal('grade_a') + lineTotal('grade_b') + lineTotal('grade_c')
   const invoiceEggs = totalFromLines - (parseInt(form.free_eggs)||0)
-  const autoAmount = invoiceEggs * (parseFloat(form.rate)||0)
+  // Per-line rate: use line's own rate if set, else fall back to header rate
+  const headerRate = parseFloat(form.rate) || 0
+  const autoAmount = lines.reduce((sum, l) => {
+    const qty = (parseInt(l.grade_a)||0) + (parseInt(l.grade_b)||0) + (parseInt(l.grade_c)||0)
+    const r = parseFloat(l.rate) || headerRate
+    return sum + qty * r
+  }, 0) - (parseInt(form.free_eggs)||0) * headerRate
   const effectiveAmount = parseFloat(form.amount) || autoAmount || 0
   const autoTds = parseFloat(form.tds_pct) > 0 ? Math.round(effectiveAmount * parseFloat(form.tds_pct) / 100 * 100) / 100 : 0
 
@@ -726,6 +732,7 @@ export const HEDispatch: React.FC = () => {
                           free_eggs: d.free_eggs ?? 0, invoice_eggs: d.invoice_eggs ?? 0,
                           rate: d.rate, amount: d.amount, tds_pct: d.tds_pct, tds_amount: d.tds_amount,
                           buyer_gstin: d.buyer_gstin, party_name: d.parties?.name ?? '—',
+                          party_address: [d.parties?.address, d.parties?.contact].filter(Boolean).join(' | '),
                           hsn_code: d.hsn_code ?? '0407'
                         }, ls ?? [])
                       }} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Print invoice"><Printer size={13}/></button>
@@ -1131,7 +1138,7 @@ export const NHESales: React.FC = () => {
   const { data: sales, isLoading } = useQuery({
     queryKey: ['nhe_sales', flockFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name), bank_accounts(bank_name,account_name)')
+      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), bank_accounts(bank_name,account_name)')
         .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (fromDate) q = q.gte('sale_date', fromDate)
@@ -1650,6 +1657,7 @@ export const NHESales: React.FC = () => {
                         taxable_value: s.taxable_value, gst_pct: s.gst_pct ?? 0,
                         cgst_amount: s.cgst_amount, sgst_amount: s.sgst_amount, igst_amount: s.igst_amount,
                         buyer_gstin: s.buyer_gstin, party_name: s.parties?.name ?? '—',
+                        party_address: [s.parties?.address, s.parties?.contact].filter(Boolean).join(' | '),
                         vehicle_no: s.vehicle_no, bird_sex: s.bird_sex, bird_category: s.bird_category,
                         avg_weight_kg: s.avg_weight_kg, total_weight_kg: s.total_weight_kg, rate_per_kg: s.rate_per_kg
                       })} className="p-1 text-gray-400 hover:text-blue-600" title="Print invoice"><Printer size={13}/></button>

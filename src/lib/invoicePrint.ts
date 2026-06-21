@@ -15,6 +15,12 @@ const CO = {
   branch: 'Himayat Nagar',
 }
 
+// Round to nearest 0.25 (quarter-rupee rounding standard)
+function roundOff(amount: number): { rounded: number; diff: number } {
+  const rounded = Math.round(amount * 4) / 4
+  return { rounded, diff: Math.round((rounded - amount) * 100) / 100 }
+}
+
 function openPrint(html: string) {
   const win = window.open('', '_blank', 'width=900,height=700')
   if (!win) { alert('Allow pop-ups to print invoice'); return }
@@ -88,7 +94,8 @@ export interface HELine {
 }
 
 export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
-  const netPayable = (d.amount ?? 0) - (d.tds_amount ?? 0)
+  const { rounded: roundedAmt, diff: roDiff } = roundOff(d.amount ?? 0)
+  const netPayable = roundedAmt - (d.tds_amount ?? 0)
   const tdsLabel = d.tds_pct ? `TDS @ ${d.tds_pct}%` : 'TDS Deducted'
   const linesHtml = lines.length > 0
     ? lines.map(l => {
@@ -186,6 +193,7 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
       <div class="box">
         <table style="margin:0;border:none;width:100%">
           <tr><td style="border:none;padding:2px 0">Invoice Amount</td><td style="border:none;padding:2px 0;text-align:right;font-weight:700">${d.amount ? inr(d.amount) : '—'}</td></tr>
+          ${roDiff !== 0 ? `<tr><td style="border:none;padding:2px 0;color:#555">Round Off</td><td style="border:none;padding:2px 0;text-align:right;color:#555">${roDiff > 0 ? '+' : ''}${inr(roDiff)}</td></tr>` : ''}
           ${d.tds_amount ? `<tr><td style="border:none;padding:2px 0;color:#c00">${tdsLabel}</td><td style="border:none;padding:2px 0;text-align:right;color:#c00">- ${inr(d.tds_amount)}</td></tr>` : ''}
           <tr style="border-top:2px solid #aaa"><td style="border:none;padding:4px 0;font-weight:700;font-size:12px">Net Payable</td><td style="border:none;padding:4px 0;text-align:right;font-weight:700;font-size:12px">${inr(netPayable)}</td></tr>
         </table>
@@ -261,6 +269,7 @@ export function printNHESale(d: NHESaleRecord) {
   const sgst = d.sgst_amount ?? 0
   const igst = d.igst_amount ?? 0
   const taxable = d.taxable_value ?? d.amount ?? 0
+  const { rounded: roundedAmt, diff: roDiff } = roundOff(d.amount ?? 0)
   const description = SALE_TYPE_LABEL[d.sale_type] ?? d.sale_type
   const unit = UNIT_LABEL[d.unit] ?? d.unit
 
@@ -354,7 +363,8 @@ export function printNHESale(d: NHESaleRecord) {
         <table style="margin:0;border:none;width:100%">
           <tr><td style="border:none;padding:2px 0">Taxable Value</td><td style="border:none;padding:2px 0;text-align:right">${inr(taxable)}</td></tr>
           ${gstRows}
-          <tr style="border-top:2px solid #aaa"><td style="border:none;padding:4px 0;font-weight:700;font-size:12px">Total Amount</td><td style="border:none;padding:4px 0;text-align:right;font-weight:700;font-size:12px">${d.amount ? inr(d.amount) : '—'}</td></tr>
+          ${roDiff !== 0 ? `<tr><td style="border:none;padding:2px 0;color:#555">Round Off</td><td style="border:none;padding:2px 0;text-align:right;color:#555">${roDiff > 0 ? '+' : ''}${inr(roDiff)}</td></tr>` : ''}
+          <tr style="border-top:2px solid #aaa"><td style="border:none;padding:4px 0;font-weight:700;font-size:12px">Total Amount</td><td style="border:none;padding:4px 0;text-align:right;font-weight:700;font-size:12px">${d.amount ? inr(roundedAmt) : '—'}</td></tr>
         </table>
       </div>
     </div>
