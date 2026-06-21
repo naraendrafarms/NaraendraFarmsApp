@@ -9,8 +9,7 @@ import {
 import {
   Shield, Users, Bird, Factory, Zap, IndianRupee,
   CheckCircle, AlertCircle, Plus, Edit2, ChevronRight,
-  BookOpen, Trash2, Package, FlaskConical, Syringe,
-  Boxes, Gauge, Building2, Calendar
+  BookOpen, Trash2
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -384,20 +383,7 @@ const SalaryAllocation: React.FC = () => {
 }
 
 // ── MASTERS HUB ─────────────────────────────────────────────────
-const MASTER_LINKS = [
-  { label: 'Farms / Sites',     link: '/masters/farms',       icon: <Building2 size={20}/>,    color: 'bg-blue-50 text-blue-600' },
-  { label: 'Sheds',             link: '/masters/sheds',       icon: <Factory size={20}/>,      color: 'bg-indigo-50 text-indigo-600' },
-  { label: 'Parties / Vendors', link: '/masters/parties',     icon: <Users size={20}/>,        color: 'bg-green-50 text-green-600' },
-  { label: 'Ingredients',       link: '/masters/ingredients', icon: <Package size={20}/>,      color: 'bg-yellow-50 text-yellow-700' },
-  { label: 'Feed Types',        link: '/masters/feed-types',  icon: <Boxes size={20}/>,        color: 'bg-orange-50 text-orange-600' },
-  { label: 'Medicines',         link: '/masters/medicines',   icon: <FlaskConical size={20}/>, color: 'bg-pink-50 text-pink-600' },
-  { label: 'Electricity Meters',link: '/masters/meters',      icon: <Gauge size={20}/>,        color: 'bg-purple-50 text-purple-600' },
-  { label: 'Hatcheries',        link: '/masters/hatcheries',  icon: <Bird size={20}/>,         color: 'bg-teal-50 text-teal-600' },
-  { label: 'Vaccination Schedule',link:'/masters/vaccination',icon: <Syringe size={20}/>,      color: 'bg-red-50 text-red-500' },
-  { label: 'Employees',         link: '/employees',           icon: <Users size={20}/>,        color: 'bg-gray-100 text-gray-600' },
-  { label: 'Vaccination Events',link: '/flocks/vaccination',  icon: <Calendar size={20}/>,     color: 'bg-lime-50 text-lime-700' },
-]
-
+// InlineMaster for categories_master / units_master (own tables)
 const InlineMaster: React.FC<{
   title: string
   queryKey: string
@@ -490,41 +476,135 @@ const InlineMaster: React.FC<{
   )
 }
 
+// InlineConfig for config_options table (uses grp column)
+const InlineConfig: React.FC<{ title: string; grp: string; placeholder: string }> = ({ title, grp, placeholder }) => {
+  const qc = useQueryClient()
+  const [newVal, setNewVal] = useState('')
+  const [editId, setEditId] = useState<number|null>(null)
+  const [editVal, setEditVal] = useState('')
+  const [confirmDelId, setConfirmDelId] = useState<number|null>(null)
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['config_options', grp],
+    queryFn: async () => {
+      const { data } = await supabase.from('config_options').select('id,value,sort_order').eq('grp', grp).order('sort_order').order('value')
+      return data ?? []
+    }
+  })
+
+  const inv = () => qc.invalidateQueries({ queryKey: ['config_options', grp] })
+
+  const addMut = useMutation({
+    mutationFn: async () => {
+      if (!newVal.trim()) throw new Error('Value required')
+      const maxOrder = (rows as any[]).reduce((m: number, r: any) => Math.max(m, r.sort_order ?? 0), 0)
+      const { error } = await supabase.from('config_options').insert({ grp, value: newVal.trim(), sort_order: maxOrder + 1 })
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Added!'); inv(); setNewVal('') },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const saveMut = useMutation({
+    mutationFn: async ({ id, value }: { id: number; value: string }) => {
+      if (!value.trim()) throw new Error('Value required')
+      const { error } = await supabase.from('config_options').update({ value: value.trim() }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Saved!'); inv(); setEditId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: number) => {
+      const { error } = await supabase.from('config_options').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Deleted!'); inv(); setConfirmDelId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  return (
+    <Card className="space-y-3">
+      <p className="font-semibold text-gray-700 text-sm">{title}</p>
+      {isLoading ? <Spinner /> : (
+        <div className="space-y-1.5">
+          {(rows as any[]).map((r: any) => (
+            <div key={r.id} className="flex items-center gap-2">
+              {editId === r.id ? (
+                <>
+                  <Input label="" value={editVal} onChange={e => setEditVal(e.target.value)} className="flex-1 text-sm" placeholder={placeholder} />
+                  <Button size="sm" onClick={() => saveMut.mutate({ id: r.id, value: editVal })} loading={saveMut.isPending}>Save</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditId(null)}>Cancel</Button>
+                </>
+              ) : confirmDelId === r.id ? (
+                <>
+                  <span className="flex-1 text-xs text-red-600">Delete "{r.value}"?</span>
+                  <Button size="sm" variant="danger" onClick={() => delMut.mutate(r.id)} loading={delMut.isPending}>Yes</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setConfirmDelId(null)}>No</Button>
+                </>
+              ) : (
+                <>
+                  <span className="flex-1 text-sm text-gray-700 bg-gray-50 rounded px-2 py-1">{r.value}</span>
+                  <button onClick={() => { setEditId(r.id); setEditVal(r.value) }}
+                    className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                  <button onClick={() => setConfirmDelId(r.id)}
+                    className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 pt-1">
+        <Input label="" value={newVal} onChange={e => setNewVal(e.target.value)}
+          placeholder={`New ${placeholder.toLowerCase()}…`} className="flex-1 text-sm" />
+        <Button size="sm" icon={<Plus size={14}/>} onClick={() => addMut.mutate()} loading={addMut.isPending}>Add</Button>
+      </div>
+    </Card>
+  )
+}
+
 const MastersHub: React.FC = () => (
   <div className="space-y-6">
-    <p className="text-sm text-gray-500">Navigate to any master list to add or edit records. Category and Unit masters can be edited here directly.</p>
+    <p className="text-sm text-gray-500">Edit the dropdown lists used across all entry pages. Changes take effect immediately.</p>
 
     <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Master Pages</p>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {MASTER_LINKS.map(m => (
-          <Link key={m.label} to={m.link}
-            className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl p-3 hover:shadow-sm transition-shadow">
-            <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${m.color}`}>
-              {m.icon}
-            </div>
-            <span className="text-sm font-medium text-gray-700 leading-tight">{m.label}</span>
-            <ChevronRight size={13} className="text-gray-300 ml-auto flex-shrink-0"/>
-          </Link>
-        ))}
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Inventory</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <InlineMaster title="Inventory Categories" queryKey="categories_master" table="categories_master" placeholder="Category name" />
+        <InlineMaster title="Units of Measure" queryKey="units_master" table="units_master" placeholder="Unit (kg, Ltr, Nos…)" />
       </div>
     </div>
 
-    <Divider label="Editable Masters" />
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Purchase / GRN</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <InlineConfig title="Material Types (PO / GRN)" grp="material_type" placeholder="e.g. Feed Raw Material" />
+        <InlineConfig title="Purchase Categories" grp="purchase_category" placeholder="e.g. Feed, Medicine" />
+      </div>
+    </div>
 
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <InlineMaster
-        title="Inventory Categories"
-        queryKey="categories_master"
-        table="categories_master"
-        placeholder="Category name"
-      />
-      <InlineMaster
-        title="Units of Measure"
-        queryKey="units_master"
-        table="units_master"
-        placeholder="Unit name"
-      />
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Payments</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <InlineConfig title="Payment Methods" grp="payment_method" placeholder="e.g. NEFT, Cash" />
+      </div>
+    </div>
+
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Flocks</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <InlineConfig title="Bird Breeds" grp="breed" placeholder="e.g. VENCO-430" />
+        <InlineConfig title="Feed Types (Daily Entry)" grp="feed_type" placeholder="e.g. L1, BCM" />
+      </div>
+    </div>
+
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Employees</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <InlineConfig title="Designations" grp="designation" placeholder="e.g. Farm Manager" />
+      </div>
     </div>
   </div>
 )
