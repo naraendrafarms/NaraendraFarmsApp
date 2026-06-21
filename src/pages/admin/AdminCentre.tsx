@@ -408,8 +408,9 @@ const InlineMaster: React.FC<{
   const [newName, setNewName] = useState('')
   const [editId, setEditId] = useState<number|null>(null)
   const [editName, setEditName] = useState('')
+  const [confirmDelId, setConfirmDelId] = useState<number|null>(null)
 
-  const { data: rows, isLoading } = useQuery({
+  const { data: rows = [], isLoading } = useQuery({
     queryKey: [queryKey],
     queryFn: async () => {
       const { data } = await supabase.from(table).select('id,name,sort_order').order('sort_order').order('name')
@@ -420,7 +421,7 @@ const InlineMaster: React.FC<{
   const addMut = useMutation({
     mutationFn: async () => {
       if (!newName.trim()) throw new Error('Name required')
-      const maxOrder = (rows as any[])?.reduce((m: number, r: any) => Math.max(m, r.sort_order ?? 0), 0) ?? 0
+      const maxOrder = (rows as any[]).reduce((m: number, r: any) => Math.max(m, r.sort_order ?? 0), 0)
       const { error } = await supabase.from(table).insert({ name: newName.trim(), sort_order: maxOrder + 1 })
       if (error) throw error
     },
@@ -443,7 +444,7 @@ const InlineMaster: React.FC<{
       const { error } = await supabase.from(table).delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('Deleted!'); qc.invalidateQueries({ queryKey: [queryKey] }) },
+    onSuccess: () => { toast.success('Deleted!'); qc.invalidateQueries({ queryKey: [queryKey] }); setConfirmDelId(null) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -452,7 +453,7 @@ const InlineMaster: React.FC<{
       <p className="font-semibold text-gray-700 text-sm">{title}</p>
       {isLoading ? <Spinner /> : (
         <div className="space-y-1.5">
-          {(rows as any[])?.map((r: any) => (
+          {(rows as any[]).map((r: any) => (
             <div key={r.id} className="flex items-center gap-2">
               {editId === r.id ? (
                 <>
@@ -461,12 +462,18 @@ const InlineMaster: React.FC<{
                   <Button size="sm" onClick={() => saveMut.mutate({ id: r.id, name: editName })} loading={saveMut.isPending}>Save</Button>
                   <Button size="sm" variant="secondary" onClick={() => setEditId(null)}>Cancel</Button>
                 </>
+              ) : confirmDelId === r.id ? (
+                <>
+                  <span className="flex-1 text-xs text-red-600">Delete "{r.name}"?</span>
+                  <Button size="sm" variant="danger" onClick={() => delMut.mutate(r.id)} loading={delMut.isPending}>Yes</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setConfirmDelId(null)}>No</Button>
+                </>
               ) : (
                 <>
                   <span className="flex-1 text-sm text-gray-700 bg-gray-50 rounded px-2 py-1">{r.name}</span>
                   <button onClick={() => { setEditId(r.id); setEditName(r.name) }}
                     className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
-                  <button onClick={() => { if (confirm(`Delete "${r.name}"?`)) delMut.mutate(r.id) }}
+                  <button onClick={() => setConfirmDelId(r.id)}
                     className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
                 </>
               )}
