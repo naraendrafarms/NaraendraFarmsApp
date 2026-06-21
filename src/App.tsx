@@ -47,6 +47,7 @@ import { GSTReportPage } from '@/pages/reports/GSTReport'
 import { EggStockPage } from '@/pages/reports/EggStock'
 import { CashBookPage } from '@/pages/accounts/CashBook'
 import { InvoiceRegister } from '@/pages/accounts/InvoiceRegister'
+import { SalesInvoiceRegister } from '@/pages/accounts/SalesInvoiceRegister'
 import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
 import { HelpGuidePage } from '@/pages/help/HelpGuide'
 import { Spinner } from '@/components/ui'
@@ -173,6 +174,7 @@ export const App: React.FC = () => {
             <Route path="reports/daily-summary" element={<DailySummaryPage />} />
             <Route path="accounts/cash-book" element={<CashBookPage />} />
             <Route path="accounts/invoices" element={<InvoiceRegister />} />
+            <Route path="accounts/sales-invoices" element={<SalesInvoiceRegister />} />
             <Route path="purchases/new" element={<RequireRole check={can.viewPurchase}><PurchaseEntry /></RequireRole>} />
             <Route path="purchase-orders" element={<RequireRole check={can.viewPurchase}><PurchaseOrdersPage /></RequireRole>} />
             <Route path="pending-payments" element={<RequireRole check={can.viewPurchase}><PendingPaymentsPage /></RequireRole>} />
