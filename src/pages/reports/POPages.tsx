@@ -162,7 +162,7 @@ const POTab: React.FC = () => {
   const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set())
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptPO, setReceiptPO]     = useState<any>(null)
-  const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', remarks: '' })
+  const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', remarks: '' })
   const rf = (k: string) => (e: any) => setReceiptForm((p: any) => ({...p,[k]:e.target.value}))
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
 
@@ -237,6 +237,7 @@ const POTab: React.FC = () => {
             vendor_name:     receiptPO.vendor_name,
             po_no:           receiptPO.po_no,
             grn_date:        receiptForm.receipt_date,
+            invoice_no:      receiptForm.invoice_no || null,
             invoice_amount:  receiptPO.total_amount ?? null,
             payment_status:  'Pending',
             credit_limit:    receiptPO.credit_limit_days,
@@ -421,7 +422,7 @@ const POTab: React.FC = () => {
                     <div className="flex gap-1">
                       {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
                       {canEdit && o.material_status !== 'Received' && (
-                        <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', remarks: '' }); setReceiptOpen(true) }}
+                        <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', remarks: '' }); setReceiptOpen(true) }}
                           className="p-1 text-green-500 hover:text-green-700" title="Record Stock Receipt"><PackageCheck size={13}/></button>
                       )}
                       {canDel && <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600" title="Delete"><Trash2 size={13}/></button>}
@@ -494,7 +495,7 @@ const POTab: React.FC = () => {
                             <div className="flex gap-1">
                               {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
                               {canEdit && o.material_status !== 'Received' && (
-                                <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', remarks: '' }); setReceiptOpen(true) }}
+                                <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', remarks: '' }); setReceiptOpen(true) }}
                                   className="p-1 text-green-500 hover:text-green-700" title="Record Stock Receipt"><PackageCheck size={13}/></button>
                               )}
                               {canDel && <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600" title="Delete"><Trash2 size={13}/></button>}
@@ -601,10 +602,13 @@ const POTab: React.FC = () => {
                 <Sel label="Condition" value={receiptForm.condition} onChange={rf('condition')} options={['Good','Partial','Damaged'].map(c=>({value:c,label:c}))} />
               </div>
               <div className="grid grid-cols-2 gap-3">
+                <Input label="Supplier Invoice No" value={receiptForm.invoice_no} onChange={rf('invoice_no')} placeholder="Invoice no. on the bill" />
                 <Input label="Vehicle No" value={receiptForm.vehicle_no} onChange={rf('vehicle_no')} />
-                <Input label="Received By" value={receiptForm.received_by} onChange={rf('received_by')} />
               </div>
-              <Input label="Remarks" value={receiptForm.remarks} onChange={rf('remarks')} />
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Received By" value={receiptForm.received_by} onChange={rf('received_by')} />
+                <Input label="Remarks" value={receiptForm.remarks} onChange={rf('remarks')} />
+              </div>
               <p className="text-xs text-green-600">✓ PO status → Received · GRN date set · Payment due date auto-calculated</p>
             </div>
           )
