@@ -6,7 +6,7 @@ import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle } from 'lucide-react'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
@@ -818,8 +818,8 @@ export const HEDispatch: React.FC = () => {
             <div className="relative">
               <div className="flex items-end gap-1">
                 <div className="flex-1">
-                  <Select label="Party" placeholder="— Select —" options={partyOptions}
-                    value={form.party_id} onChange={e => s('party_id', e.target.value)} />
+                  <SearchableSelect label="Party" placeholder="— Select —" options={partyOptions}
+                    value={form.party_id} onChange={v => s('party_id', v)} />
                 </div>
                 <QuickAddParty defaultType="buyer" onCreated={p => s('party_id', p.id)} />
               </div>
@@ -1643,8 +1643,8 @@ export const NHESales: React.FC = () => {
                   <div className="relative">
                     <div className="flex items-end gap-1">
                       <div className="flex-1">
-                        <Select label="Party / Buyer" placeholder="— Select —" options={partyOptions}
-                          value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
+                        <SearchableSelect label="Party / Buyer" placeholder="— Select —" options={partyOptions}
+                          value={form.party_id} onChange={v => sv('party_id', v)} />
                       </div>
                       <QuickAddParty defaultType="buyer" onCreated={p => sv('party_id', p.id)} />
                     </div>
@@ -1662,8 +1662,8 @@ export const NHESales: React.FC = () => {
                 <div className="relative">
                   <div className="flex items-end gap-1">
                     <div className="flex-1">
-                      <Select label="Party" placeholder="— Select —" options={partyOptions}
-                        value={form.party_id} onChange={e => sv('party_id', e.target.value)} />
+                      <SearchableSelect label="Party" placeholder="— Select —" options={partyOptions}
+                        value={form.party_id} onChange={v => sv('party_id', v)} />
                     </div>
                     <QuickAddParty defaultType="buyer" onCreated={p => sv('party_id', p.id)} />
                   </div>

@@ -5,7 +5,7 @@ import { inr, fmtDate, today } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState,
-  DateInput,
+  DateInput, SearchableSelect,
 } from '@/components/ui'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import { Plus, ShoppingCart } from 'lucide-react'
@@ -243,8 +243,9 @@ export const PurchaseEntry: React.FC = () => {
 
           <FormRow cols={3}>
             <div>
-              <Select label="Supplier" value={form.supplier_id} onChange={e => pickSupplier(e.target.value)}
-                options={[{ value: '', label: 'Select supplier…' }, ...(suppliers ?? []).map((p: any) => ({ value: p.id, label: p.name }))]} />
+              <SearchableSelect label="Supplier" value={form.supplier_id} onChange={v => pickSupplier(v)}
+                placeholder="Select supplier…"
+                options={(suppliers ?? []).map((p: any) => ({ value: p.id, label: p.name }))} />
               <div className="mt-1"><QuickAddParty onCreated={(p) => { qc.invalidateQueries({ queryKey: ['parties_all'] }); s('supplier_id', p.id) }} /></div>
             </div>
             <Select label="Farm (optional)" value={form.farm_id} onChange={e => s('farm_id', e.target.value)}

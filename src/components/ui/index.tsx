@@ -194,6 +194,109 @@ export const Select: React.FC<SelectProps> = ({
   )
 }
 
+// ── SEARCHABLE SELECT ────────────────────────────────────────
+interface SearchableSelectProps {
+  label?: string
+  error?: string
+  hint?: string
+  required?: boolean
+  placeholder?: string
+  options: Array<{ value: string; label: string }>
+  value: string
+  onChange: (value: string) => void
+  disabled?: boolean
+  className?: string
+}
+export const SearchableSelect: React.FC<SearchableSelectProps> = ({
+  label, error, hint, required, placeholder = 'Select…', options,
+  value, onChange, disabled, className = '',
+}) => {
+  const [open, setOpen] = React.useState(false)
+  const [query, setQuery] = React.useState('')
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  const selected = options.find(o => o.value === value)
+  const filtered = query.trim() === ''
+    ? options
+    : options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const pick = (v: string) => { onChange(v); setOpen(false); setQuery('') }
+
+  return (
+    <div className={`flex flex-col gap-1 ${className}`} ref={ref}>
+      {label && (
+        <label className="text-sm font-medium text-gray-700">
+          {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => { if (!disabled) setOpen(v => !v) }}
+          className={`w-full flex items-center justify-between rounded-lg border px-3 py-2 text-sm shadow-sm bg-white text-left
+            border-gray-300 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500
+            disabled:bg-gray-50 disabled:cursor-not-allowed
+            ${error ? 'border-red-400' : ''}`}
+        >
+          <span className={selected ? 'text-gray-900' : 'text-gray-400'}>
+            {selected ? selected.label : placeholder}
+          </span>
+          <ChevronDown size={14} className="text-gray-400 shrink-0 ml-2" />
+        </button>
+
+        {open && (
+          <div className="absolute z-50 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg">
+            <div className="p-2 border-b border-gray-100">
+              <input
+                autoFocus
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Search…"
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <ul className="max-h-52 overflow-y-auto py-1">
+              {placeholder && (
+                <li
+                  className="px-3 py-2 text-sm text-gray-400 cursor-pointer hover:bg-gray-50"
+                  onClick={() => pick('')}
+                >
+                  {placeholder}
+                </li>
+              )}
+              {filtered.length === 0 && (
+                <li className="px-3 py-2 text-sm text-gray-400">No results</li>
+              )}
+              {filtered.map(o => (
+                <li
+                  key={o.value}
+                  onClick={() => pick(o.value)}
+                  className={`px-3 py-2 text-sm cursor-pointer hover:bg-brand-50
+                    ${o.value === value ? 'bg-brand-50 font-medium text-brand-700' : 'text-gray-800'}`}
+                >
+                  {o.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+      {hint && !error && <p className="text-xs text-gray-500">{hint}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
 // ── TEXTAREA ─────────────────────────────────────────────────
 interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   label?: string
