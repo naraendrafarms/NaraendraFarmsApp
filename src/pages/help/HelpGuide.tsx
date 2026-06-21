@@ -10,6 +10,13 @@ const LAST_UPDATED = '2026-06-21'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-06-21', tag: 'New',      text: 'Invoice Series / Counters page added under Accounts. Shows all invoice series (HHF, HE, VHPL, NHE, CB) with current counter and next invoice preview. You can edit the counter to fix it if it got ahead of real invoices.' },
+  { date: '2026-06-21', tag: 'Improved', text: 'Medicine Purchases now save full GST split (supply type, nature, is_rcm, CGST, SGST, IGST, party GSTIN) — so medicine bills appear correctly in GST Reports → Purchase GST tab.' },
+  { date: '2026-06-21', tag: 'New',      text: 'GST Reports → Purchase GST tab now includes medicine purchases alongside GRN (feed) entries. All purchase GST is now visible in one place.' },
+  { date: '2026-06-21', tag: 'New',      text: 'Feed Ingredients master now has HSN Code and GST Rate % fields — set these once per ingredient; Purchase Entry will use them for GST calculations.' },
+  { date: '2026-06-21', tag: 'New',      text: 'Rate Comparison and Vendor Statement pages are now accessible from the Purchase & Payments sidebar menu.' },
+  { date: '2026-06-21', tag: 'Improved', text: 'Removed "Hatchability (Legacy)" from the sidebar. The page is still accessible but no longer clutters the navigation.' },
+  { date: '2026-06-21', tag: 'Fix',      text: 'HHF invoice counter reset to 50 (last real filed invoice was 50). Next generate will correctly show HHF51.' },
   { date: '2026-06-21', tag: 'New',      text: 'GST implementation: Parties now store GSTIN, GST type (registered/unregistered/composition), State Code, and RCM flag. GSTIN auto-parses state code and validates format when you type it.' },
   { date: '2026-06-21', tag: 'New',      text: 'Purchase Entry (GRN) now captures GST details — Nature (purchase/expense/asset), Supply Type (intra-state CGST+SGST / inter-state IGST), RCM flag, and live CGST/SGST/IGST tax split shown before saving.' },
   { date: '2026-06-21', tag: 'New',      text: 'HE Dispatch: Invoice series selector (HHF / HE / VHPL) + Generate button. Generate shows a preview of the next number without consuming it. The actual number is assigned only when the record is saved.' },
@@ -407,10 +414,20 @@ const SECTIONS: Section[] = [
           { text: 'You can also type an invoice number manually and skip Generate.' },
         ]
       },
+      {
+        title: 'Invoice Series / Counters admin page',
+        path: 'Accounts → Invoice Series / Counters',
+        steps: [
+          { text: 'Lists all series with their current counter, prefix, and what the next invoice number will be.' },
+          { text: 'Click the edit (pencil) icon on any row to change the current_no counter.', note: 'current_no = last used number. Next invoice = current_no + 1.' },
+          { text: 'Use this ONLY to fix a counter that got ahead of real invoices.', warning: 'Never set current_no below the last real filed invoice number — that would create duplicate invoice numbers.' },
+        ]
+      },
     ],
     tips: [
       'Invoice numbers for April–May 2026 are already filed and locked. Do not create invoices that would conflict with already-filed numbers.',
       'All issued invoices appear in Accounts → Sales Invoice Register.',
+      'If a counter needs resetting, use Accounts → Invoice Series / Counters instead of direct DB edits.',
     ]
   },
 
@@ -420,7 +437,7 @@ const SECTIONS: Section[] = [
     icon: <CreditCard size={20}/>,
     label: 'Accounts & Invoices',
     color: 'bg-violet-700',
-    intro: 'The Accounts section has the Cash Book, Sales Invoice Register, and Purchase Invoice Register. Cash entries flow in automatically from sales.',
+    intro: 'The Accounts section has the Cash Book, Sales Invoice Register, Purchase Invoice Register, and Invoice Series / Counters. Cash entries flow in automatically from sales.',
     workflows: [
       {
         title: 'Sales Invoice Register',
@@ -459,6 +476,7 @@ const SECTIONS: Section[] = [
     tips: [
       'Sales Invoice Register = outward (what you issued). Purchase Invoice Register = inward (what you received from suppliers).',
       'Cash Book entries from sales are created automatically — do not enter them again manually.',
+      'To fix an invoice counter (e.g. HHF got ahead), go to Accounts → Invoice Series / Counters.',
     ]
   },
 
@@ -642,6 +660,16 @@ const SECTIONS: Section[] = [
         ]
       },
       {
+        title: 'Set HSN Code and GST Rate on Feed Ingredients',
+        path: 'Masters → Ingredients → Edit (pencil icon)',
+        steps: [
+          { text: 'Open any ingredient and scroll to the bottom of the edit form.' },
+          { text: 'HSN Code — enter the 8-digit HSN code for the raw material (e.g. 10059090 for Maize).', note: 'HSN codes appear in GSTR-1 HSN Summary table.' },
+          { text: 'GST Rate % — select 0%, 5%, or 18% as applicable for this ingredient.' },
+          { text: 'Save. These values will pre-fill when you raise a GRN for this ingredient.' },
+        ]
+      },
+      {
         title: 'Add a party with GST details',
         path: 'Masters → Parties → + Add Party',
         steps: [
@@ -698,6 +726,23 @@ const SECTIONS: Section[] = [
           { text: 'Bank Reference No / UTR / Cheque No — important for reconciliation.' },
           { text: 'TDS deducted (if applicable) — enter TDS amount separately.' },
           { text: 'Save. Outstanding balance on that PO reduces automatically.' },
+        ]
+      },
+      {
+        title: 'Rate Comparison',
+        path: 'Purchase & Payments → Rate Comparison',
+        steps: [
+          { text: 'Compare the rates charged by different vendors for the same ingredient across GRN entries.' },
+          { text: 'Useful for identifying which vendor gives the best rate for Maize, Soya, etc.' },
+        ]
+      },
+      {
+        title: 'Vendor Statement',
+        path: 'Purchase & Payments → Vendor Statement',
+        steps: [
+          { text: 'Full account statement for a selected vendor — all POs, receipts, and payments in chronological order.' },
+          { text: 'Running balance column shows how much was owed after each transaction.' },
+          { text: 'Use this when a vendor queries their account or before making a payment.' },
         ]
       },
       {
@@ -775,7 +820,7 @@ const SECTIONS: Section[] = [
           { text: 'GSTR-1 tab: B2B invoices (registered buyers), B2C (unregistered buyers), exempt sales, HSN summary.' },
           { text: 'GSTR-3B tab: outward tax summary (3.1a), exempt sales (3.1c), RCM inward (3.1d), total payable (6.1).' },
           { text: 'RCM Register tab: all purchases where RCM applies — use this to know how much tax to pay directly.' },
-          { text: 'Purchase GST tab: all GRN entries with tax breakdown. Note shows "No ITC — all input GST goes to indirect expenses".' },
+          { text: 'Purchase GST tab: all GRN (feed) entries AND medicine purchases with tax breakdown — all purchase GST in one place. Note: no ITC — all input GST goes to indirect expenses.' },
           { text: 'Each tab has an Export to Excel button for sharing with your CA.' },
         ]
       },
