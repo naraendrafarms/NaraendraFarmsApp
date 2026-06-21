@@ -208,6 +208,8 @@ export const HEDispatch: React.FC = () => {
   const [tab, setTab] = useState<'dispatch'|'stock'>('dispatch')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [receiptSale, setReceiptSale] = useState<any>(null)
+  const [expandedDispatch, setExpandedDispatch] = useState<string|null>(null)
+  const [expandedLines, setExpandedLines] = useState<any[]>([])
 
   const { data: bankAccounts } = useQuery({
     queryKey: ['bank_accounts'],
@@ -272,8 +274,8 @@ export const HEDispatch: React.FC = () => {
 
   const [form, setForm] = useState({
     flock_id: '', dispatch_date: today(),
-    dc_no: '', invoice_no: '', party_id: '', hatchery_id: '',
-    free_eggs: '0', rate: '', amount: '', tds_amount: '0', remarks: ''
+    dc_no: '', invoice_no: '', party_id: '',
+    free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0', remarks: ''
   })
   const [invSeries, setInvSeries] = useState('HHF')
   const [genningInv, setGenningInv] = useState(false)
@@ -297,6 +299,8 @@ export const HEDispatch: React.FC = () => {
   const totalFromLines = lineTotal('grade_a') + lineTotal('grade_b') + lineTotal('grade_c')
   const invoiceEggs = totalFromLines - (parseInt(form.free_eggs)||0)
   const autoAmount = invoiceEggs * (parseFloat(form.rate)||0)
+  const effectiveAmount = parseFloat(form.amount) || autoAmount || 0
+  const autoTds = parseFloat(form.tds_pct) > 0 ? Math.round(effectiveAmount * parseFloat(form.tds_pct) / 100 * 100) / 100 : 0
 
   const openForm = (row?: any) => {
     if (row) {
@@ -304,9 +308,9 @@ export const HEDispatch: React.FC = () => {
       setForm({
         flock_id: row.flock_id, dispatch_date: row.dispatch_date,
         dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
-        party_id: row.party_id ?? '', hatchery_id: row.hatchery_id ?? '',
+        party_id: row.party_id ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
-        amount: row.amount?.toString() ?? '', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
+        amount: row.amount?.toString() ?? '', tds_pct: '0', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
       })
       // Load existing lines for this dispatch
       supabase.from('he_dispatch_lines').select('*').eq('dispatch_id', row.id).order('prod_date')
@@ -324,7 +328,7 @@ export const HEDispatch: React.FC = () => {
       setEditing(null)
       setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
-        party_id: '', hatchery_id: '', free_eggs: '0', rate: '', amount: '', tds_amount: '0', remarks: '' })
+        party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0', remarks: '' })
       setLines([emptyLine()])
     }
     setShowForm(true)
@@ -381,7 +385,7 @@ export const HEDispatch: React.FC = () => {
         flock_id: form.flock_id, dispatch_date: form.dispatch_date,
         prod_date: prodDateFrom, prod_date_to: prodDateTo,
         dc_no: parseInt(form.dc_no) || null, invoice_no: finalInvoiceNo,
-        party_id: form.party_id || null, hatchery_id: form.hatchery_id || null,
+        party_id: form.party_id || null,
         grade_a: gradeA, grade_b: gradeB,
         total_dispatched: totalFromLines,
         free_eggs: parseInt(form.free_eggs) || 0,
@@ -431,7 +435,6 @@ export const HEDispatch: React.FC = () => {
     if (hePartyFilter.trim()) {
       const q = hePartyFilter.trim().toLowerCase()
       if (!(d.parties?.name ?? '').toLowerCase().includes(q) &&
-          !(d.hatcheries?.name ?? '').toLowerCase().includes(q) &&
           !(d.dc_no ?? '').toLowerCase().includes(q) &&
           !(d.invoice_no ?? '').toLowerCase().includes(q)) return false
     }
@@ -450,7 +453,7 @@ export const HEDispatch: React.FC = () => {
         .select('record_date,flock_id,he_eggs,he_grade_a,he_grade_b,he_grade_c,be_eggs,le_eggs,wastage_eggs,flocks(flock_no)')
         .order('record_date', { ascending: false })
       let lq = supabase.from('he_dispatch_lines')
-        .select('prod_date,flock_id,grade_a,grade_b,grade_c,he_dispatch(dispatch_date,invoice_no)')
+        .select('prod_date,flock_id,grade_a,grade_b,grade_c,he_dispatch(dispatch_date,invoice_no),flocks(flock_no)')
         .order('prod_date', { ascending: false })
       if (flockFilter) { dq = dq.eq('flock_id', flockFilter); lq = lq.eq('flock_id', flockFilter) }
       const [{ data: prod }, { data: dispLines }] = await Promise.all([dq, lq])
@@ -469,7 +472,7 @@ export const HEDispatch: React.FC = () => {
       }
       for (const l of (dispLines ?? [])) {
         const key = `${l.prod_date}__${l.flock_id}`
-        const ex = map.get(key) ?? { date: l.prod_date, flock: `F-${l.flock_id?.slice(0,4)}`, prod_a:0,prod_b:0,prod_c:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
+        const ex = map.get(key) ?? { date: l.prod_date, flock: `F-${(l.flocks as any)?.flock_no ?? l.flock_id?.slice(0,4)}`, prod_a:0,prod_b:0,prod_c:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
         ex.disp_a += l.grade_a ?? 0
         ex.disp_b += l.grade_b ?? 0
         ex.disp_c += l.grade_c ?? 0
@@ -490,7 +493,6 @@ export const HEDispatch: React.FC = () => {
 
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
-  const hatchOptions = hatcheries?.map((h: any) => ({ value: h.id, label: h.name })) ?? []
 
   const dispIds = (dispatches ?? []).map((d: any) => d.id)
   const allSel = dispIds.length > 0 && dispIds.every((id: string) => sel.has(id))
@@ -675,12 +677,12 @@ export const HEDispatch: React.FC = () => {
             <thead><tr>
               <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Dispatch Date</Th><Th>Prod Date</Th>
-              <Th right>DC No</Th><Th>Invoice No</Th><Th>Party</Th><Th>Hatchery</Th>
+              <Th right>DC No</Th><Th>Invoice No</Th><Th>Party</Th>
               <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice Qty</Th>
               <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Payment</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {filtered.map((d: any) => (
+              {filtered.map((d: any) => (<>
                 <tr key={d.id} className={`hover:bg-gray-50 ${sel.has(d.id) ? 'bg-red-50' : !d.invoice_no ? 'bg-orange-50' : ''}`}>
                   <Td><CB checked={sel.has(d.id)} onChange={() => toggle(d.id)}/></Td>
                   <Td><Badge color="green">F-{d.flocks?.flock_no}</Badge></Td>
@@ -689,11 +691,15 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="text-xs">{d.dc_no ?? '—'}</Td>
                   <Td className="text-xs">
                     {d.invoice_no
-                      ? <span className="font-medium text-blue-700">{d.invoice_no}</span>
+                      ? <button className="font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900 text-left" onClick={async () => {
+                          if (expandedDispatch === d.id) { setExpandedDispatch(null); setExpandedLines([]); return }
+                          const { data: ls } = await supabase.from('he_dispatch_lines').select('prod_date,grade_a,grade_b,grade_c,rate').eq('dispatch_id', d.id).order('prod_date')
+                          setExpandedLines(ls ?? [])
+                          setExpandedDispatch(d.id)
+                        }}>{d.invoice_no} {expandedDispatch === d.id ? '▲' : '▼'}</button>
                       : <span className="flex items-center gap-1 text-orange-500"><AlertCircle size={11}/>Pending</span>}
                   </Td>
                   <Td className="text-xs max-w-[120px] truncate">{d.parties?.name ?? '—'}</Td>
-                  <Td className="text-xs text-gray-400 max-w-[100px] truncate">{d.hatcheries?.name ?? '—'}</Td>
                   <Td right className="font-medium">{d.total_dispatched?.toLocaleString('en-IN')}</Td>
                   <Td right className="text-xs text-orange-500">{d.free_eggs > 0 ? d.free_eggs : '—'}</Td>
                   <Td right className="text-xs">{d.invoice_eggs?.toLocaleString('en-IN') ?? '—'}</Td>
@@ -711,7 +717,55 @@ export const HEDispatch: React.FC = () => {
                     <button onClick={() => openForm(d)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit dispatch"><Edit2 size={13}/></button>
                   </Td>
                 </tr>
-              ))}
+                {expandedDispatch === d.id && (
+                  <tr key={`lines-${d.id}`} className="bg-blue-50">
+                    <Td colSpan={16}>
+                      <div className="py-2 px-2">
+                        <p className="text-xs font-semibold text-blue-700 mb-2">Production Date Breakdown — {d.invoice_no}</p>
+                        {expandedLines.length === 0
+                          ? <p className="text-xs text-gray-400">No line details recorded</p>
+                          : <table className="text-xs w-auto border-collapse">
+                              <thead><tr className="text-gray-500">
+                                <th className="pr-6 pb-1 text-left font-medium">Prod Date</th>
+                                <th className="pr-6 pb-1 text-right font-medium">Grade A</th>
+                                <th className="pr-6 pb-1 text-right font-medium">Grade B</th>
+                                <th className="pr-6 pb-1 text-right font-medium">Grade C</th>
+                                <th className="pr-6 pb-1 text-right font-medium">Total</th>
+                                <th className="pr-6 pb-1 text-right font-medium">Rate</th>
+                                <th className="pb-1 text-right font-medium">Amount</th>
+                              </tr></thead>
+                              <tbody>
+                                {expandedLines.map((l: any, i: number) => {
+                                  const tot = (l.grade_a||0)+(l.grade_b||0)+(l.grade_c||0)
+                                  const lineAmt = l.rate ? tot * l.rate : null
+                                  return (
+                                    <tr key={i} className="border-t border-blue-100">
+                                      <td className="pr-6 py-0.5">{fmtDate(l.prod_date)}</td>
+                                      <td className="pr-6 py-0.5 text-right">{(l.grade_a||0).toLocaleString('en-IN')}</td>
+                                      <td className="pr-6 py-0.5 text-right">{(l.grade_b||0).toLocaleString('en-IN')}</td>
+                                      <td className="pr-6 py-0.5 text-right">{(l.grade_c||0).toLocaleString('en-IN')}</td>
+                                      <td className="pr-6 py-0.5 text-right font-medium">{tot.toLocaleString('en-IN')}</td>
+                                      <td className="pr-6 py-0.5 text-right">{l.rate ? `₹${l.rate}` : '—'}</td>
+                                      <td className="py-0.5 text-right">{lineAmt ? inr(lineAmt) : '—'}</td>
+                                    </tr>
+                                  )
+                                })}
+                                <tr className="border-t-2 border-blue-300 font-semibold">
+                                  <td className="pr-6 py-1">TOTAL</td>
+                                  <td className="pr-6 py-1 text-right">{expandedLines.reduce((s,l)=>s+(l.grade_a||0),0).toLocaleString('en-IN')}</td>
+                                  <td className="pr-6 py-1 text-right">{expandedLines.reduce((s,l)=>s+(l.grade_b||0),0).toLocaleString('en-IN')}</td>
+                                  <td className="pr-6 py-1 text-right">{expandedLines.reduce((s,l)=>s+(l.grade_c||0),0).toLocaleString('en-IN')}</td>
+                                  <td className="pr-6 py-1 text-right">{expandedLines.reduce((s,l)=>s+(l.grade_a||0)+(l.grade_b||0)+(l.grade_c||0),0).toLocaleString('en-IN')}</td>
+                                  <td></td><td></td>
+                                </tr>
+                              </tbody>
+                            </table>
+                        }
+                      </div>
+                    </Td>
+                  </tr>
+                )}
+              </>))}
             </tbody>
             {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50">
@@ -836,8 +890,6 @@ export const HEDispatch: React.FC = () => {
                 <QuickAddParty defaultType="buyer" onCreated={p => s('party_id', p.id)} />
               </div>
             </div>
-            <Select label="Hatchery" placeholder="— Select —" options={hatchOptions}
-              value={form.hatchery_id} onChange={e => s('hatchery_id', e.target.value)} />
           </FormRow>
 
           {/* Production Lines */}
@@ -916,13 +968,30 @@ export const HEDispatch: React.FC = () => {
               hint={autoAmount > 0 ? `Auto: ${inr(autoAmount)}` : undefined} />
           </FormRow>
           <FormRow cols={3}>
-            <Input label="TDS Deducted (Rs)" type="number" step="0.01" value={form.tds_amount}
-              onChange={e => s('tds_amount', e.target.value)} hint="Tax deducted at source by buyer" />
-            <div className="col-span-2 flex items-end pb-1">
+            <Select label="TDS Rate" value={form.tds_pct} onChange={e => {
+              const pct = e.target.value
+              s('tds_pct', pct)
+              if (parseFloat(pct) > 0) {
+                const amt = Math.round((parseFloat(form.amount)||autoAmount||0) * parseFloat(pct) / 100 * 100) / 100
+                s('tds_amount', amt.toString())
+              } else {
+                s('tds_amount', '0')
+              }
+            }} options={[
+              { value: '0', label: 'No TDS' },
+              { value: '0.1', label: '0.1%' },
+              { value: '1', label: '1%' },
+              { value: '2', label: '2%' },
+              { value: '5', label: '5%' },
+              { value: '10', label: '10%' },
+            ]} />
+            <Input label="TDS Amount (Rs)" type="number" step="0.01" value={form.tds_amount}
+              onChange={e => s('tds_amount', e.target.value)}
+              hint={autoTds > 0 && form.tds_amount !== autoTds.toString() ? `Auto: ${inr(autoTds)}` : 'Editable — override if needed'} />
+            <div className="flex items-end pb-1">
               {(parseFloat(form.tds_amount)||0) > 0 && (
-                <p className="text-sm text-amber-700 bg-amber-50 rounded px-3 py-2">
-                  Net receivable: <strong>{inr((parseFloat(form.amount)||autoAmount||0) - (parseFloat(form.tds_amount)||0))}</strong>
-                  {' '}(Amount − TDS)
+                <p className="text-sm text-amber-700 bg-amber-50 rounded px-3 py-2 w-full">
+                  Net receivable: <strong>{inr(effectiveAmount - (parseFloat(form.tds_amount)||0))}</strong>
                 </p>
               )}
             </div>
