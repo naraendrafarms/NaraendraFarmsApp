@@ -212,7 +212,10 @@ export const HEDispatch: React.FC = () => {
   const [expandedDispatch, setExpandedDispatch] = useState<string|null>(null)
   const [expandedLines, setExpandedLines] = useState<any[]>([])
   const [printTarget, setPrintTarget] = useState<any>(null)
-  const [printOpts, setPrintOpts] = useState({ lorry: true, driver: false, outTime: true, boxes: true })
+  const [printOpts, setPrintOpts] = useState({
+    companyAddr: true, buyerDetails: true, bankDetails: true, supplyDetails: true,
+    lorry: true, driver: false, outTime: true, boxes: true
+  })
 
   const { data: bankAccounts } = useQuery({
     queryKey: ['bank_accounts'],
@@ -279,7 +282,7 @@ export const HEDispatch: React.FC = () => {
     flock_id: '', dispatch_date: today(),
     dc_no: '', invoice_no: '', party_id: '',
     free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
-    boxes_20lb: '', boxes_23lb: '', extra_trays: '', lorry_no: '', driver_phone: '', out_time: '', remarks: ''
+    boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', lorry_no: '', driver_phone: '', out_time: '', remarks: ''
   })
   const [invSeries, setInvSeries] = useState('HHF')
   const [genningInv, setGenningInv] = useState(false)
@@ -330,7 +333,8 @@ export const HEDispatch: React.FC = () => {
         amount: row.amount?.toString() ?? '',
         tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0',
         boxes_20lb: row.boxes_20lb?.toString() ?? '', boxes_23lb: row.boxes_23lb?.toString() ?? '',
-        extra_trays: row.extra_trays?.toString() ?? '', lorry_no: row.lorry_no ?? '',
+        extra_trays_20lb: row.extra_trays_20lb?.toString() ?? '', extra_trays_23lb: row.extra_trays_23lb?.toString() ?? '',
+        lorry_no: row.lorry_no ?? '',
         driver_phone: row.driver_phone ?? '', out_time: row.out_time ?? '', remarks: row.remarks ?? ''
       })
       // Load existing lines for this dispatch
@@ -350,7 +354,7 @@ export const HEDispatch: React.FC = () => {
       setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
         party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
-        boxes_20lb: '', boxes_23lb: '', extra_trays: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
+        boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
       setLines([emptyLine()])
     }
     setShowForm(true)
@@ -422,7 +426,8 @@ export const HEDispatch: React.FC = () => {
         tds_amount: parseFloat(form.tds_amount) || 0,
         boxes_20lb: parseInt(form.boxes_20lb) || 0,
         boxes_23lb: parseInt(form.boxes_23lb) || 0,
-        extra_trays: parseInt(form.extra_trays) || 0,
+        extra_trays_20lb: parseInt(form.extra_trays_20lb) || 0,
+        extra_trays_23lb: parseInt(form.extra_trays_23lb) || 0,
         lorry_no: form.lorry_no || null,
         driver_phone: form.driver_phone || null,
         out_time: form.out_time || null,
@@ -906,16 +911,49 @@ export const HEDispatch: React.FC = () => {
               lorry_no: printOpts.lorry ? d.lorry_no : null,
               driver_phone: printOpts.driver ? d.driver_phone : null,
               out_time: printOpts.outTime ? d.out_time : null,
-              boxes_20lb: printOpts.boxes ? d.boxes_20lb : null,
-              boxes_23lb: printOpts.boxes ? d.boxes_23lb : null,
-              extra_trays: printOpts.boxes ? d.extra_trays : null,
-            }, ls ?? [])
+              boxes_20lb: printOpts.boxes ? (d.boxes_20lb ?? null) : null,
+              boxes_23lb: printOpts.boxes ? (d.boxes_23lb ?? null) : null,
+              extra_trays_20lb: printOpts.boxes ? (d.extra_trays_20lb ?? null) : null,
+              extra_trays_23lb: printOpts.boxes ? (d.extra_trays_23lb ?? null) : null,
+            }, ls ?? [], {
+              companyAddr: printOpts.companyAddr,
+              buyerDetails: printOpts.buyerDetails,
+              bankDetails: printOpts.bankDetails,
+              supplyDetails: printOpts.supplyDetails,
+              lorry: printOpts.lorry, driver: printOpts.driver,
+              outTime: printOpts.outTime, boxes: printOpts.boxes,
+            })
             setPrintTarget(null)
           }}>Print</Button></>
         }>
         <div className="space-y-3 py-2">
           <p className="text-sm text-gray-600">Select what to include on the invoice:</p>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Seller / Header</p>
           {[
+            { key: 'companyAddr', label: 'Company Address & Phone' },
+          ].map(({ key, label }) => (
+            <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded"
+                checked={printOpts[key as keyof typeof printOpts]}
+                onChange={e => setPrintOpts(p => ({ ...p, [key]: e.target.checked }))} />
+              {label}
+            </label>
+          ))}
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-2">Buyer Section</p>
+          {[
+            { key: 'buyerDetails', label: 'Buyer Address & GSTIN' },
+            { key: 'supplyDetails', label: 'Supply Details (HSN, Dispatched Qty)' },
+          ].map(({ key, label }) => (
+            <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded"
+                checked={printOpts[key as keyof typeof printOpts]}
+                onChange={e => setPrintOpts(p => ({ ...p, [key]: e.target.checked }))} />
+              {label}
+            </label>
+          ))}
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-2">Payment / Logistics</p>
+          {[
+            { key: 'bankDetails', label: 'Bank Details' },
             { key: 'lorry', label: 'Lorry Number' },
             { key: 'outTime', label: 'Out Time' },
             { key: 'boxes', label: 'Box Details (20LB / 23LB / Extra Trays)' },
@@ -1088,19 +1126,22 @@ export const HEDispatch: React.FC = () => {
             <span>Free: <strong>{parseInt(form.free_eggs)||0}</strong></span>
             <span>Invoice Eggs: <strong>{invoiceEggs.toLocaleString('en-IN')}</strong></span>
             {autoAmount > 0 && <span>Auto Amount: <strong>{inr(autoAmount)}</strong></span>}
-            <span className="text-blue-500">Total Boxes (auto): <strong>{Math.floor(totalFromLines/210)}</strong> boxes + <strong>{Math.floor((totalFromLines%210)/30)}</strong> extra trays</span>
+            <span className="text-blue-500">Auto hint: <strong>{Math.floor(totalFromLines/210)}</strong> boxes + <strong>{Math.floor((totalFromLines%210)/30)}</strong> extra trays</span>
+            {(form.boxes_20lb || form.boxes_23lb) && <span className="text-green-700">Entered: <strong>{(parseInt(form.boxes_20lb)||0)+(parseInt(form.boxes_23lb)||0)}</strong> boxes &nbsp;|&nbsp; Extra trays: 20LB <strong>{parseInt(form.extra_trays_20lb)||0}</strong> · 23LB <strong>{parseInt(form.extra_trays_23lb)||0}</strong></span>}
           </div>
 
           <Divider label="Loading Details" />
-          <FormRow cols={3}>
+          <FormRow cols={4}>
             <Input label="20LB Boxes" type="number" value={form.boxes_20lb}
               onChange={e => s('boxes_20lb', e.target.value)}
-              hint={`Total auto: ${Math.floor(totalFromLines/210)} boxes`} />
+              hint={`Auto total: ${Math.floor(totalFromLines/210)} boxes`} />
             <Input label="23LB Boxes" type="number" value={form.boxes_23lb}
               onChange={e => s('boxes_23lb', e.target.value)} />
-            <Input label="Extra Trays" type="number" value={form.extra_trays}
-              onChange={e => s('extra_trays', e.target.value)}
+            <Input label="Extra Trays (20LB)" type="number" value={form.extra_trays_20lb}
+              onChange={e => s('extra_trays_20lb', e.target.value)}
               hint={`Auto: ${Math.floor((totalFromLines%210)/30)} trays`} />
+            <Input label="Extra Trays (23LB)" type="number" value={form.extra_trays_23lb}
+              onChange={e => s('extra_trays_23lb', e.target.value)} />
           </FormRow>
           <FormRow cols={3}>
             <Input label="Lorry Number" value={form.lorry_no} onChange={e => s('lorry_no', e.target.value)} placeholder="e.g. TS09EA1234" />

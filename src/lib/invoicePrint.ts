@@ -60,6 +60,17 @@ function inr(n: number) {
 }
 
 // ── HE Dispatch Invoice ───────────────────────────────────────────────────────
+export interface HEPrintOpts {
+  companyAddr?: boolean    // seller header (default true)
+  buyerDetails?: boolean   // Bill To box (default true)
+  bankDetails?: boolean    // Bank Details box (default true)
+  supplyDetails?: boolean  // Supply Details box (default true)
+  lorry?: boolean
+  driver?: boolean
+  outTime?: boolean
+  boxes?: boolean
+}
+
 export interface HEDispatchRecord {
   id: string
   dispatch_date: string
@@ -83,6 +94,8 @@ export interface HEDispatchRecord {
   boxes_20lb?: number | null
   boxes_23lb?: number | null
   extra_trays?: number | null
+  extra_trays_20lb?: number | null
+  extra_trays_23lb?: number | null
 }
 
 export interface HELine {
@@ -93,7 +106,11 @@ export interface HELine {
   rate: number | null
 }
 
-export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
+export function printHEDispatch(d: HEDispatchRecord, lines: HELine[], opts: HEPrintOpts = {}) {
+  const showCompany    = opts.companyAddr    !== false
+  const showBuyer      = opts.buyerDetails   !== false
+  const showBank       = opts.bankDetails    !== false
+  const showSupply     = opts.supplyDetails  !== false
   // Compute gross from lines (each line's own rate or fallback to d.rate)
   const grossFromLines = lines.reduce((sum, l) => {
     const qty = (l.grade_a || 0) + (l.grade_b || 0) + (l.grade_c || 0)
@@ -137,10 +154,10 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
   <div class="header">
     <div>
       <h1>${CO.name}</h1>
-      <div class="sub">${CO.addr1}</div>
+      ${showCompany ? `<div class="sub">${CO.addr1}</div>
       <div class="sub">${CO.addr2}</div>
       <div class="sub">GSTIN: ${CO.gstin} | State: ${CO.state} (${CO.stateCode})</div>
-      <div class="sub">Ph: ${CO.phone}</div>
+      <div class="sub">Ph: ${CO.phone}</div>` : `<div class="sub">GSTIN: ${CO.gstin}</div>`}
     </div>
     <div class="header-right">
       <h2>Tax Invoice<br><span style="font-size:10px;font-weight:400">(Exempt Supply — HSN ${d.hsn_code ?? '0407'})</span></h2>
@@ -154,15 +171,15 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
   </div>
 
   <div class="two-col section">
-    <div>
+    ${showBuyer ? `<div>
       <div class="label">Bill To</div>
       <div class="box">
         <div class="bold">${d.party_name}</div>
         ${d.party_address ? `<div class="sub">${d.party_address}</div>` : ''}
         ${d.buyer_gstin ? `<div class="sub">GSTIN: ${d.buyer_gstin}</div>` : ''}
       </div>
-    </div>
-    <div>
+    </div>` : `<div><div class="label">Bill To</div><div class="box"><div class="bold">${d.party_name}</div></div></div>`}
+    ${showSupply ? `<div>
       <div class="label">Supply Details</div>
       <div class="box">
         <div>HSN Code: <strong>${d.hsn_code ?? '0407'}</strong></div>
@@ -171,7 +188,7 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
         ${d.free_eggs > 0 ? `<div>Free Eggs: <strong>${d.free_eggs.toLocaleString('en-IN')}</strong></div>` : ''}
         <div>Invoice Qty: <strong>${(d.invoice_eggs||0).toLocaleString('en-IN')} eggs</strong></div>
       </div>
-    </div>
+    </div>` : '<div></div>'}
   </div>
 
   <div class="section">
@@ -209,7 +226,7 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
         ${d.tds_amount ? `<div class="note">* Buyer to deduct TDS and deposit with IT Dept.<br>Seller to claim credit via Form 26AS.</div>` : ''}
       </div>
     </div>
-    <div>
+    ${showBank ? `<div>
       <div class="label">Bank Details (for payment)</div>
       <div class="box">
         <div><strong>${CO.bank}</strong></div>
@@ -217,10 +234,10 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
         <div>Branch: ${CO.branch}</div>
         <div>IFSC: ${CO.ifsc}</div>
       </div>
-    </div>
+    </div>` : '<div></div>'}
   </div>
 
-  ${(d.lorry_no || d.out_time || d.driver_phone || d.boxes_20lb || d.boxes_23lb) ? `
+  ${(d.lorry_no || d.out_time || d.driver_phone || d.boxes_20lb || d.boxes_23lb || d.extra_trays_20lb || d.extra_trays_23lb) ? `
   <div class="section two-col" style="margin-top:8px">
     ${(d.lorry_no || d.out_time || d.driver_phone) ? `
     <div>
@@ -230,17 +247,18 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
         ${d.out_time ? `<div>Out Time: <strong>${d.out_time}</strong></div>` : ''}
         ${d.driver_phone ? `<div>Driver Ph: ${d.driver_phone}</div>` : ''}
       </div>
-    </div>` : ''}
-    ${(d.boxes_20lb || d.boxes_23lb || d.extra_trays) ? `
+    </div>` : '<div></div>'}
+    ${(d.boxes_20lb || d.boxes_23lb || d.extra_trays_20lb || d.extra_trays_23lb) ? `
     <div>
       <div class="label">Box Details</div>
       <div class="box">
         ${d.boxes_20lb ? `<div>20LB Boxes: <strong>${d.boxes_20lb}</strong></div>` : ''}
         ${d.boxes_23lb ? `<div>23LB Boxes: <strong>${d.boxes_23lb}</strong></div>` : ''}
-        ${d.extra_trays ? `<div>Extra Trays: <strong>${d.extra_trays}</strong></div>` : ''}
+        ${d.extra_trays_20lb ? `<div>Extra Trays (20LB): <strong>${d.extra_trays_20lb}</strong></div>` : ''}
+        ${d.extra_trays_23lb ? `<div>Extra Trays (23LB): <strong>${d.extra_trays_23lb}</strong></div>` : ''}
         <div class="note">1 box = 7 trays = 210 eggs</div>
       </div>
-    </div>` : ''}
+    </div>` : '<div></div>'}
   </div>` : ''}
 
   <div class="sign-row">
