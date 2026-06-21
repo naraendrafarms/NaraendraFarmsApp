@@ -157,6 +157,7 @@ export const PurchaseEntry: React.FC = () => {
           vendor_name: supplierName,
           grn_no: form.grn_no || `${form.category.toUpperCase()}-${form.invoice_no || Date.now()}`,
           grn_date: form.purchase_date,
+          invoice_no: form.invoice_no || null,
           invoice_date: form.invoice_date || form.purchase_date,
           invoice_amount: total || null,
           payment_status: form.payment_status,
@@ -189,6 +190,7 @@ export const PurchaseEntry: React.FC = () => {
       setForm(f => ({ ...empty(), category: f.category, supplier_id: f.supplier_id, farm_id: f.farm_id, purchase_date: f.purchase_date }))
       qc.invalidateQueries({ queryKey: ['recent_purchases'] })
       qc.invalidateQueries({ queryKey: ['grn'] })
+      qc.invalidateQueries({ queryKey: ['grns'] })
       qc.invalidateQueries({ queryKey: ['medicine_purchases'] })
       qc.invalidateQueries({ queryKey: ['v_medicine_stock'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
