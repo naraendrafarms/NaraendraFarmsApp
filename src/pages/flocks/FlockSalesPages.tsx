@@ -259,7 +259,7 @@ export const HEDispatch: React.FC = () => {
     queryKey: ['he_dispatch', flockFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('he_dispatch')
-        .select('*, flocks(flock_no), parties(name,address,contact), hatcheries(name)')
+        .select('*, flocks(flock_no,placement_date), parties(name,address,contact), hatcheries(name)')
         .order('dispatch_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (fromDate) q = q.gte('dispatch_date', fromDate)
@@ -770,6 +770,7 @@ export const HEDispatch: React.FC = () => {
                           : <table className="text-xs w-auto border-collapse">
                               <thead><tr className="text-gray-500">
                                 <th className="pr-6 pb-1 text-left font-medium">Prod Date</th>
+                                <th className="pr-6 pb-1 text-center font-medium">Flock Age</th>
                                 <th className="pr-6 pb-1 text-right font-medium">Grade A</th>
                                 <th className="pr-6 pb-1 text-right font-medium">Grade B</th>
                                 <th className="pr-6 pb-1 text-right font-medium">Grade C</th>
@@ -781,9 +782,17 @@ export const HEDispatch: React.FC = () => {
                                 {expandedLines.map((l: any, i: number) => {
                                   const tot = (l.grade_a||0)+(l.grade_b||0)+(l.grade_c||0)
                                   const lineAmt = l.rate ? tot * l.rate : null
+                                  const placement = d.flocks?.placement_date ?? null
+                                  const ageDaysVal = placement && l.prod_date
+                                    ? Math.round((new Date(l.prod_date).getTime() - new Date(placement).getTime()) / 86400000)
+                                    : null
+                                  const ageStr = ageDaysVal && ageDaysVal > 0
+                                    ? `${Math.floor(ageDaysVal/7)}w ${ageDaysVal%7}d`
+                                    : '—'
                                   return (
                                     <tr key={i} className="border-t border-blue-100">
                                       <td className="pr-6 py-0.5">{fmtDate(l.prod_date)}</td>
+                                      <td className="pr-6 py-0.5 text-center text-blue-600 font-medium">{ageStr}</td>
                                       <td className="pr-6 py-0.5 text-right">{(l.grade_a||0).toLocaleString('en-IN')}</td>
                                       <td className="pr-6 py-0.5 text-right">{(l.grade_b||0).toLocaleString('en-IN')}</td>
                                       <td className="pr-6 py-0.5 text-right">{(l.grade_c||0).toLocaleString('en-IN')}</td>
@@ -795,6 +804,7 @@ export const HEDispatch: React.FC = () => {
                                 })}
                                 <tr className="border-t-2 border-blue-300 font-semibold">
                                   <td className="pr-6 py-1">TOTAL</td>
+                                  <td></td>
                                   <td className="pr-6 py-1 text-right">{expandedLines.reduce((s,l)=>s+(l.grade_a||0),0).toLocaleString('en-IN')}</td>
                                   <td className="pr-6 py-1 text-right">{expandedLines.reduce((s,l)=>s+(l.grade_b||0),0).toLocaleString('en-IN')}</td>
                                   <td className="pr-6 py-1 text-right">{expandedLines.reduce((s,l)=>s+(l.grade_c||0),0).toLocaleString('en-IN')}</td>

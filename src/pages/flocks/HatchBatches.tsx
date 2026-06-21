@@ -69,6 +69,9 @@ function exportExcel(rows: any[]) {
       'Setting Date':   fmtDate(b.setting_date),
       'Hatch Date':     b.hatch_date ? fmtDate(b.hatch_date) : '',
       'Setting No':     b.setting_no ?? '',
+      'Age @ Setting':  b.flocks?.placement_date && b.setting_date
+        ? Math.round((new Date(b.setting_date).getTime() - new Date(b.flocks.placement_date).getTime()) / 86400000) + ' days'
+        : '',
       'Eggs Weight':    b.eggs_weight ?? '',
       'Received':       r.received,
       'Setting':        r.setting,
@@ -144,12 +147,42 @@ export const HatchBatches: React.FC = () => {
     queryKey: ['hatch_batches', flockFilter],
     queryFn: async () => {
       let q = supabase.from('hatch_batches')
-        .select('*, he_dispatch(dispatch_date,invoice_no,dc_no,total_dispatched,flocks(flock_no)), flocks(flock_no,placement_date)')
+        .select('*, he_dispatch(dispatch_date,invoice_no,dc_no,total_dispatched,flocks(flock_no,placement_date)), flocks(flock_no,placement_date)')
         .order('setting_date', { ascending: false }).limit(200)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       const { data } = await q; return data ?? []
     }
   })
+
+  // Fetch dispatch lines for all batches that have a linked dispatch (for egg age + flock age at prod)
+  const dispatchIds = [...new Set((batches ?? []).map((b: any) => b.dispatch_id).filter(Boolean))]
+  const { data: allDispatchLines } = useQuery({
+    queryKey: ['hatch_dispatch_lines', dispatchIds.join(',')],
+    enabled: dispatchIds.length > 0,
+    queryFn: async () => {
+      const { data } = await supabase.from('he_dispatch_lines')
+        .select('dispatch_id,prod_date,grade_a,grade_b,grade_c')
+        .in('dispatch_id', dispatchIds)
+      return data ?? []
+    }
+  })
+  // Build a map: dispatch_id -> avg prod_date (as Date ms), total eggs
+  const dispatchAvgProd: Record<string, number> = {}
+  if (allDispatchLines) {
+    const groups: Record<string, { sumMs: number; count: number }> = {}
+    for (const l of allDispatchLines) {
+      if (!l.dispatch_id || !l.prod_date) continue
+      const ms = new Date(l.prod_date).getTime()
+      if (!groups[l.dispatch_id]) groups[l.dispatch_id] = { sumMs: 0, count: 0 }
+      const qty = (l.grade_a || 0) + (l.grade_b || 0) + (l.grade_c || 0)
+      // weighted average by egg quantity
+      groups[l.dispatch_id].sumMs += ms * (qty || 1)
+      groups[l.dispatch_id].count += (qty || 1)
+    }
+    for (const [id, g] of Object.entries(groups)) {
+      dispatchAvgProd[id] = g.sumMs / g.count
+    }
+  }
 
   // ── form state ───────────────────────────────────────────────────────────────
   const emptyForm = {
@@ -402,7 +435,7 @@ export const HatchBatches: React.FC = () => {
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm" style={{ minWidth: '1800px' }}>
+            <table className="w-full text-sm" style={{ minWidth: '2100px' }}>
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
                   <th className="px-3 py-2 w-8">
@@ -414,7 +447,9 @@ export const HatchBatches: React.FC = () => {
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">Setting Date</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">Hatch Date</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 whitespace-nowrap">Setting No</th>
-                  <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600 whitespace-nowrap">Age</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600 whitespace-nowrap">Age@Setting</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600 whitespace-nowrap">Age@Prod</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600 whitespace-nowrap">Egg Age</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Eggs Wt</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Received</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Setting</th>
@@ -441,7 +476,14 @@ export const HatchBatches: React.FC = () => {
                   const r = rowCalc(b)
                   const hasReport = !!b.hatched_chicks
                   const placement = b.flocks?.placement_date ?? b.he_dispatch?.flocks?.placement_date ?? null
-                  const age = ageDays(placement, b.setting_date)
+                  const ageAtSetting = ageDays(placement, b.setting_date)
+                  // Flock age at avg production date + egg age (avg prod → setting)
+                  const avgProdMs = b.dispatch_id ? dispatchAvgProd?.[b.dispatch_id] : null
+                  const avgProdDate = avgProdMs ? new Date(avgProdMs).toISOString().slice(0,10) : null
+                  const ageAtProd = ageDays(placement, avgProdDate ?? b.setting_date)
+                  const eggAgeDays = avgProdDate && b.setting_date
+                    ? Math.round((new Date(b.setting_date).getTime() - new Date(avgProdDate).getTime()) / 86400000)
+                    : null
                   const isSelected = sel.has(b.id)
                   return (
                     <tr key={b.id}
@@ -468,7 +510,9 @@ export const HatchBatches: React.FC = () => {
                         {b.hatch_date ? fmtDate(b.hatch_date) : <span className="text-orange-400">Awaiting</span>}
                       </td>
                       <td className="px-3 py-2 text-xs">{b.setting_no ?? '—'}</td>
-                      <td className="px-3 py-2 text-xs text-center">{ageLabel(age)}</td>
+                      <td className="px-3 py-2 text-xs text-center text-blue-600 font-medium">{ageLabel(ageAtSetting)}</td>
+                      <td className="px-3 py-2 text-xs text-center text-purple-600 font-medium">{ageLabel(ageAtProd)}</td>
+                      <td className="px-3 py-2 text-xs text-center text-orange-600 font-medium">{eggAgeDays != null ? `${eggAgeDays}d` : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right">{b.eggs_weight ?? '—'}</td>
                       <td className="px-3 py-2 text-xs text-right font-medium">{r.received > 0 ? r.received.toLocaleString('en-IN') : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right">{r.setting > 0 ? r.setting.toLocaleString('en-IN') : '—'}</td>
