@@ -273,7 +273,7 @@ export const HEDispatch: React.FC = () => {
   const [form, setForm] = useState({
     flock_id: '', dispatch_date: today(),
     dc_no: '', invoice_no: '', party_id: '', hatchery_id: '',
-    free_eggs: '0', rate: '', amount: '', remarks: ''
+    free_eggs: '0', rate: '', amount: '', tds_amount: '0', remarks: ''
   })
   const [invSeries, setInvSeries] = useState('HHF')
   const [genningInv, setGenningInv] = useState(false)
@@ -306,7 +306,7 @@ export const HEDispatch: React.FC = () => {
         dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
         party_id: row.party_id ?? '', hatchery_id: row.hatchery_id ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
-        amount: row.amount?.toString() ?? '', remarks: row.remarks ?? ''
+        amount: row.amount?.toString() ?? '', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
       })
       // Load existing lines for this dispatch
       supabase.from('he_dispatch_lines').select('*').eq('dispatch_id', row.id).order('prod_date')
@@ -324,7 +324,7 @@ export const HEDispatch: React.FC = () => {
       setEditing(null)
       setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
-        party_id: '', hatchery_id: '', free_eggs: '0', rate: '', amount: '', remarks: '' })
+        party_id: '', hatchery_id: '', free_eggs: '0', rate: '', amount: '', tds_amount: '0', remarks: '' })
       setLines([emptyLine()])
     }
     setShowForm(true)
@@ -390,6 +390,7 @@ export const HEDispatch: React.FC = () => {
         supply_type: heSupply, gst_pct: 0, taxable_value: heAmount || null,
         cgst_amount: 0, sgst_amount: 0, igst_amount: 0,
         buyer_gstin: buyer?.gstin || null, hsn_code: '0407',
+        tds_amount: parseFloat(form.tds_amount) || 0,
         remarks: form.remarks || null
       }
       let dispatchId: string
@@ -676,7 +677,7 @@ export const HEDispatch: React.FC = () => {
               <Th>Flock</Th><Th>Dispatch Date</Th><Th>Prod Date</Th>
               <Th right>DC No</Th><Th>Invoice No</Th><Th>Party</Th><Th>Hatchery</Th>
               <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice Qty</Th>
-              <Th right>Rate</Th><Th right>Amount</Th><Th>Payment</Th><Th></Th>
+              <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Payment</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((d: any) => (
@@ -698,6 +699,7 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="text-xs">{d.invoice_eggs?.toLocaleString('en-IN') ?? '—'}</Td>
                   <Td right className="text-xs">{d.rate ? `Rs ${d.rate}` : '—'}</Td>
                   <Td right className="font-semibold text-green-700 text-xs">{d.amount ? inr(d.amount) : '—'}</Td>
+                  <Td right className="text-xs text-red-500">{d.tds_amount > 0 ? inr(d.tds_amount) : '—'}</Td>
                   <Td className="text-xs">
                     {d.payment_status === 'Received'
                       ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200">✓ {d.payment_mode ?? 'Paid'}</button>
@@ -912,6 +914,18 @@ export const HEDispatch: React.FC = () => {
             <Input label="Amount (Rs)" type="number" step="0.01" value={form.amount}
               onChange={e => s('amount', e.target.value)}
               hint={autoAmount > 0 ? `Auto: ${inr(autoAmount)}` : undefined} />
+          </FormRow>
+          <FormRow cols={3}>
+            <Input label="TDS Deducted (Rs)" type="number" step="0.01" value={form.tds_amount}
+              onChange={e => s('tds_amount', e.target.value)} hint="Tax deducted at source by buyer" />
+            <div className="col-span-2 flex items-end pb-1">
+              {(parseFloat(form.tds_amount)||0) > 0 && (
+                <p className="text-sm text-amber-700 bg-amber-50 rounded px-3 py-2">
+                  Net receivable: <strong>{inr((parseFloat(form.amount)||autoAmount||0) - (parseFloat(form.tds_amount)||0))}</strong>
+                  {' '}(Amount − TDS)
+                </p>
+              )}
+            </div>
           </FormRow>
           <div className="bg-blue-50 rounded-lg px-4 py-2 text-sm text-blue-700 flex gap-6 flex-wrap">
             <span>Total Dispatched: <strong>{totalFromLines.toLocaleString('en-IN')}</strong></span>
