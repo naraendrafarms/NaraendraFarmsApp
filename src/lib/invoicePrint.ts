@@ -77,6 +77,12 @@ export interface HEDispatchRecord {
   party_name: string
   party_address?: string
   hsn_code?: string
+  lorry_no?: string | null
+  driver_phone?: string | null
+  out_time?: string | null
+  boxes_20lb?: number | null
+  boxes_23lb?: number | null
+  extra_trays?: number | null
 }
 
 export interface HELine {
@@ -213,6 +219,29 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[]) {
       </div>
     </div>
   </div>
+
+  ${(d.lorry_no || d.out_time || d.driver_phone || d.boxes_20lb || d.boxes_23lb) ? `
+  <div class="section two-col" style="margin-top:8px">
+    ${(d.lorry_no || d.out_time || d.driver_phone) ? `
+    <div>
+      <div class="label">Logistics</div>
+      <div class="box">
+        ${d.lorry_no ? `<div>Lorry No: <strong>${d.lorry_no}</strong></div>` : ''}
+        ${d.out_time ? `<div>Out Time: <strong>${d.out_time}</strong></div>` : ''}
+        ${d.driver_phone ? `<div>Driver Ph: ${d.driver_phone}</div>` : ''}
+      </div>
+    </div>` : ''}
+    ${(d.boxes_20lb || d.boxes_23lb || d.extra_trays) ? `
+    <div>
+      <div class="label">Box Details</div>
+      <div class="box">
+        ${d.boxes_20lb ? `<div>20LB Boxes: <strong>${d.boxes_20lb}</strong></div>` : ''}
+        ${d.boxes_23lb ? `<div>23LB Boxes: <strong>${d.boxes_23lb}</strong></div>` : ''}
+        ${d.extra_trays ? `<div>Extra Trays: <strong>${d.extra_trays}</strong></div>` : ''}
+        <div class="note">1 box = 7 trays = 210 eggs</div>
+      </div>
+    </div>` : ''}
+  </div>` : ''}
 
   <div class="sign-row">
     <div>

@@ -211,6 +211,8 @@ export const HEDispatch: React.FC = () => {
   const [receiptSale, setReceiptSale] = useState<any>(null)
   const [expandedDispatch, setExpandedDispatch] = useState<string|null>(null)
   const [expandedLines, setExpandedLines] = useState<any[]>([])
+  const [printTarget, setPrintTarget] = useState<any>(null)
+  const [printOpts, setPrintOpts] = useState({ lorry: true, driver: false, outTime: true, boxes: true })
 
   const { data: bankAccounts } = useQuery({
     queryKey: ['bank_accounts'],
@@ -276,7 +278,7 @@ export const HEDispatch: React.FC = () => {
   const [form, setForm] = useState({
     flock_id: '', dispatch_date: today(),
     dc_no: '', invoice_no: '', party_id: '',
-    free_eggs: '0', rate: '', amount: '', round_off: '0', tds_pct: '0', tds_amount: '0',
+    free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
     boxes_20lb: '', boxes_23lb: '', extra_trays: '', lorry_no: '', driver_phone: '', out_time: '', remarks: ''
   })
   const [invSeries, setInvSeries] = useState('HHF')
@@ -309,13 +311,12 @@ export const HEDispatch: React.FC = () => {
     return sum + qty * r
   }, 0)
   // autoAmount: when header rate set → exact (invoiceEggs × rate); else proportional
-  const autoAmount = headerRate > 0
-    ? Math.round(invoiceEggs * headerRate * 100) / 100
-    : (totalFromLines > 0 ? Math.round(grossTotal * invoiceEggs / totalFromLines * 100) / 100 : 0)
-  const roundOff = parseFloat(form.round_off) || 0
-  // Final amount = (form.amount if typed, else autoAmount) + round_off
-  const baseAmount = parseFloat(form.amount) || autoAmount || 0
-  const effectiveAmount = Math.round((baseAmount + roundOff) * 100) / 100
+  // autoAmount: exact calc then standard round (< 0.5 → down, ≥ 0.5 → up)
+  const rawAmount = headerRate > 0
+    ? invoiceEggs * headerRate
+    : (totalFromLines > 0 ? grossTotal * invoiceEggs / totalFromLines : 0)
+  const autoAmount = Math.round(rawAmount)
+  const effectiveAmount = parseFloat(form.amount) || autoAmount || 0
   const autoTds = parseFloat(form.tds_pct) > 0 ? Math.round(effectiveAmount * parseFloat(form.tds_pct) / 100 * 100) / 100 : 0
 
   const openForm = (row?: any) => {
@@ -326,7 +327,7 @@ export const HEDispatch: React.FC = () => {
         dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
         party_id: row.party_id ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
-        amount: row.amount?.toString() ?? '', round_off: '0',
+        amount: row.amount?.toString() ?? '',
         tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0',
         boxes_20lb: row.boxes_20lb?.toString() ?? '', boxes_23lb: row.boxes_23lb?.toString() ?? '',
         extra_trays: row.extra_trays?.toString() ?? '', lorry_no: row.lorry_no ?? '',
@@ -348,7 +349,7 @@ export const HEDispatch: React.FC = () => {
       setEditing(null)
       setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
-        party_id: '', free_eggs: '0', rate: '', amount: '', round_off: '0', tds_pct: '0', tds_amount: '0',
+        party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
         boxes_20lb: '', boxes_23lb: '', extra_trays: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
       setLines([emptyLine()])
     }
@@ -392,7 +393,7 @@ export const HEDispatch: React.FC = () => {
       const prodDateFrom = sortedDates[0] || null
       const prodDateTo = sortedDates.length > 1 ? sortedDates[sortedDates.length - 1] : null
       const inv = totalFromLines - (parseInt(form.free_eggs)||0)
-      const heAmount = effectiveAmount || 0
+      const heAmount = parseFloat(form.amount) || autoAmount || 0
       // Effective rate: use header rate if typed; else weighted avg from lines (heAmount / invoiceEggs)
       const effectiveRate = parseFloat(form.rate) || (inv > 0 && heAmount > 0 ? Math.round(heAmount / inv * 10000) / 10000 : null)
       const buyer = (parties ?? []).find((p: any) => p.id === form.party_id)
@@ -748,18 +749,7 @@ export const HEDispatch: React.FC = () => {
                   <Td>
                     <div className="flex gap-1">
                       <button onClick={() => openForm(d)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit dispatch"><Edit2 size={13}/></button>
-                      <button onClick={async () => {
-                        const { data: ls } = await supabase.from('he_dispatch_lines').select('prod_date,grade_a,grade_b,grade_c,rate').eq('dispatch_id', d.id).order('prod_date')
-                        printHEDispatch({
-                          id: d.id, dispatch_date: d.dispatch_date, invoice_no: d.invoice_no,
-                          dc_no: d.dc_no, flock_no: d.flocks?.flock_no, total_dispatched: d.total_dispatched,
-                          free_eggs: d.free_eggs ?? 0, invoice_eggs: d.invoice_eggs ?? 0,
-                          rate: d.rate, amount: d.amount, tds_pct: d.tds_pct, tds_amount: d.tds_amount,
-                          buyer_gstin: d.buyer_gstin, party_name: d.parties?.name ?? '—',
-                          party_address: [d.parties?.address, d.parties?.contact].filter(Boolean).join(' | '),
-                          hsn_code: d.hsn_code ?? '0407'
-                        }, ls ?? [])
-                      }} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Print invoice"><Printer size={13}/></button>
+                      <button onClick={() => setPrintTarget(d)} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Print invoice"><Printer size={13}/></button>
                     </div>
                   </Td>
                 </tr>
@@ -898,6 +888,49 @@ export const HEDispatch: React.FC = () => {
         onSaved={() => { setReceiptSale(null); qc.invalidateQueries({ queryKey: ['he_dispatch'] }) }}
       />
 
+      {/* Print Options Modal */}
+      <Modal open={!!printTarget} onClose={() => setPrintTarget(null)} title="Print Invoice — Options" size="sm"
+        footer={
+          <><Button variant="secondary" onClick={() => setPrintTarget(null)}>Cancel</Button>
+          <Button onClick={async () => {
+            const d = printTarget
+            const { data: ls } = await supabase.from('he_dispatch_lines').select('prod_date,grade_a,grade_b,grade_c,rate').eq('dispatch_id', d.id).order('prod_date')
+            printHEDispatch({
+              id: d.id, dispatch_date: d.dispatch_date, invoice_no: d.invoice_no,
+              dc_no: d.dc_no, flock_no: d.flocks?.flock_no, total_dispatched: d.total_dispatched,
+              free_eggs: d.free_eggs ?? 0, invoice_eggs: d.invoice_eggs ?? 0,
+              rate: d.rate, amount: d.amount, tds_pct: d.tds_pct, tds_amount: d.tds_amount,
+              buyer_gstin: d.buyer_gstin, party_name: d.parties?.name ?? '—',
+              party_address: [d.parties?.address, d.parties?.contact].filter(Boolean).join(' | '),
+              hsn_code: d.hsn_code ?? '0407',
+              lorry_no: printOpts.lorry ? d.lorry_no : null,
+              driver_phone: printOpts.driver ? d.driver_phone : null,
+              out_time: printOpts.outTime ? d.out_time : null,
+              boxes_20lb: printOpts.boxes ? d.boxes_20lb : null,
+              boxes_23lb: printOpts.boxes ? d.boxes_23lb : null,
+              extra_trays: printOpts.boxes ? d.extra_trays : null,
+            }, ls ?? [])
+            setPrintTarget(null)
+          }}>Print</Button></>
+        }>
+        <div className="space-y-3 py-2">
+          <p className="text-sm text-gray-600">Select what to include on the invoice:</p>
+          {[
+            { key: 'lorry', label: 'Lorry Number' },
+            { key: 'outTime', label: 'Out Time' },
+            { key: 'boxes', label: 'Box Details (20LB / 23LB / Extra Trays)' },
+            { key: 'driver', label: 'Driver Phone' },
+          ].map(({ key, label }) => (
+            <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded"
+                checked={printOpts[key as keyof typeof printOpts]}
+                onChange={e => setPrintOpts(p => ({ ...p, [key]: e.target.checked }))} />
+              {label}
+            </label>
+          ))}
+        </div>
+      </Modal>
+
       <Modal open={showForm} onClose={() => setShowForm(false)}
         title={editing ? 'Edit HE Dispatch' : 'New HE Dispatch'} size="xl"
         footer={
@@ -940,9 +973,9 @@ export const HEDispatch: React.FC = () => {
 
           {/* Production Lines */}
           <Divider label="Production Date Lines (one row per production date)" />
-          <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
+          <div className="rounded-lg border border-gray-200 overflow-x-auto overflow-y-auto max-h-72">
+            <table className="text-sm" style={{minWidth:'700px'}}>
+              <thead className="bg-gray-50 sticky top-0">
                 <tr>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Prod Date</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-green-700">Grade A</th>
@@ -950,12 +983,15 @@ export const HEDispatch: React.FC = () => {
                   <th className="px-3 py-2 text-right text-xs font-semibold text-orange-700">Grade C</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Total</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600">Rate/egg</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-purple-700">Amount</th>
                   <th className="px-2 py-2 w-8"></th>
                 </tr>
               </thead>
               <tbody>
                 {lines.map((l, i) => {
                   const rowTotal = (parseInt(l.grade_a)||0)+(parseInt(l.grade_b)||0)+(parseInt(l.grade_c)||0)
+                  const lineRate = parseFloat(l.rate) || parseFloat(form.rate) || 0
+                  const lineAmt = rowTotal * lineRate
                   return (
                     <tr key={i} className="border-t border-gray-100">
                       <td className="px-2 py-1.5">
@@ -979,6 +1015,9 @@ export const HEDispatch: React.FC = () => {
                         <input type="number" value={l.rate} placeholder={form.rate||'0'} onChange={e => setLine(i,'rate',e.target.value)}
                           className="border border-gray-300 rounded px-2 py-1 text-xs w-24 text-right"/>
                       </td>
+                      <td className="px-3 py-1.5 text-right font-medium text-xs text-purple-700">
+                        {lineAmt > 0 ? inr(lineAmt) : '—'}
+                      </td>
                       <td className="px-2 py-1.5">
                         {lines.length > 1 && (
                           <button onClick={() => removeLine(i)} className="text-red-400 hover:text-red-600 text-xs px-1">✕</button>
@@ -994,7 +1033,9 @@ export const HEDispatch: React.FC = () => {
                   <td className="px-3 py-2 text-right text-blue-700">{lineTotal('grade_b').toLocaleString('en-IN')}</td>
                   <td className="px-3 py-2 text-right text-orange-700">{lineTotal('grade_c').toLocaleString('en-IN')}</td>
                   <td className="px-3 py-2 text-right text-gray-800">{totalFromLines.toLocaleString('en-IN')}</td>
-                  <td colSpan={2}></td>
+                  <td></td>
+                  <td className="px-3 py-2 text-right text-purple-700">{grossTotal > 0 ? inr(grossTotal) : '—'}</td>
+                  <td></td>
                 </tr>
               </tbody>
             </table>
@@ -1011,10 +1052,7 @@ export const HEDispatch: React.FC = () => {
               onChange={e => s('rate', e.target.value)} hint="Used for lines without individual rate" />
             <Input label="Invoice Amount (Rs)" type="number" step="0.01" value={form.amount}
               onChange={e => s('amount', e.target.value)}
-              hint={autoAmount > 0 ? `Auto: ${inr(autoAmount)}` : undefined} />
-            <Input label="Round Off (±)" type="number" step="0.01" value={form.round_off}
-              onChange={e => s('round_off', e.target.value)}
-              hint={effectiveAmount > 0 ? `Final: ${inr(effectiveAmount)}` : undefined} />
+              hint={rawAmount > 0 ? `Auto (rounded): ${inr(autoAmount)}${rawAmount !== autoAmount ? ` (raw: ${inr(Math.round(rawAmount*100)/100)})` : ''}` : undefined} />
           </FormRow>
           <FormRow cols={3}>
             <Select label="TDS Rate" value={form.tds_pct} onChange={e => {
