@@ -298,14 +298,18 @@ export const HEDispatch: React.FC = () => {
   // Totals from lines
   const lineTotal = (f: keyof DispLine) => lines.reduce((sum, l) => sum + (parseInt((l as any)[f]) || 0), 0)
   const totalFromLines = lineTotal('grade_a') + lineTotal('grade_b') + lineTotal('grade_c')
-  const invoiceEggs = totalFromLines - (parseInt(form.free_eggs)||0)
+  const freeEggsCount = parseInt(form.free_eggs) || 0
+  const invoiceEggs = totalFromLines - freeEggsCount
   // Per-line rate: use line's own rate if set, else fall back to header rate
   const headerRate = parseFloat(form.rate) || 0
-  const autoAmount = lines.reduce((sum, l) => {
+  // Gross = sum of all eggs × their effective rate; then deduct free eggs proportionally
+  const grossTotal = lines.reduce((sum, l) => {
     const qty = (parseInt(l.grade_a)||0) + (parseInt(l.grade_b)||0) + (parseInt(l.grade_c)||0)
     const r = parseFloat(l.rate) || headerRate
     return sum + qty * r
-  }, 0) - (parseInt(form.free_eggs)||0) * headerRate
+  }, 0)
+  // Proportional: invoice eggs / total eggs × grossTotal (handles mixed rates correctly)
+  const autoAmount = totalFromLines > 0 ? Math.round(grossTotal * invoiceEggs / totalFromLines * 100) / 100 : 0
   const roundOff = parseFloat(form.round_off) || 0
   // Total amount = auto (eggs × rates) + manual round-off; override possible via amount field
   const totalBeforeRound = autoAmount || 0
@@ -321,7 +325,7 @@ export const HEDispatch: React.FC = () => {
         dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
         party_id: row.party_id ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
-        amount: row.amount?.toString() ?? '', round_off: '0', tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
+        amount: '', round_off: row.round_off?.toString() ?? '0', tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
       })
       // Load existing lines for this dispatch
       supabase.from('he_dispatch_lines').select('*').eq('dispatch_id', row.id).order('prod_date')
@@ -991,7 +995,7 @@ export const HEDispatch: React.FC = () => {
               onChange={e => s('rate', e.target.value)} hint="Used for lines without individual rate" />
             <Input label="Gross Amount (Rs)" type="number" step="0.01" value={form.amount}
               onChange={e => s('amount', e.target.value)}
-              hint={totalBeforeRound > 0 ? `Auto: ${inr(totalBeforeRound)}` : undefined} />
+              hint={totalBeforeRound > 0 ? `Auto: ${inr(totalBeforeRound)}${editing ? ` | Prev: ${inr(editing.amount)}` : ''}` : editing ? `Prev saved: ${inr(editing.amount)}` : undefined} />
             <Input label="Round Off (±)" type="number" step="0.01" value={form.round_off}
               onChange={e => s('round_off', e.target.value)}
               hint={autoTotal > 0 ? `Total: ${inr(parseFloat(form.amount) || autoTotal)}` : undefined} />
