@@ -277,15 +277,17 @@ export const HEDispatch: React.FC = () => {
   })
   const [invSeries, setInvSeries] = useState('HHF')
   const [genningInv, setGenningInv] = useState(false)
+  const [peekInv, setPeekInv] = useState<string | null>(null)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
-  // Generate next invoice number from the chosen series (atomic via DB function)
+  // Preview next invoice number without consuming it (counter not changed)
   const genInvoice = async () => {
     setGenningInv(true)
     try {
-      const { data, error } = await supabase.rpc('fn_next_invoice', { p_code: invSeries })
+      const { data, error } = await supabase.rpc('fn_peek_invoice', { p_code: invSeries })
       if (error) throw error
       s('invoice_no', data as string)
-      toast.success(`Invoice ${data}`)
+      setPeekInv(data as string)
+      toast.success(`Preview: ${data} — will be confirmed on Save`)
     } catch (e: any) { toast.error(e.message) }
     finally { setGenningInv(false) }
   }
@@ -320,6 +322,7 @@ export const HEDispatch: React.FC = () => {
         })
     } else {
       setEditing(null)
+      setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
         party_id: '', hatchery_id: '', free_eggs: '0', rate: '', amount: '', remarks: '' })
       setLines([emptyLine()])
@@ -367,10 +370,17 @@ export const HEDispatch: React.FC = () => {
       const heAmount = parseFloat(form.amount) || autoAmount || 0
       const buyer = (parties ?? []).find((p: any) => p.id === form.party_id)
       const heSupply = supplyType(buyer?.state_code)   // HE eggs are 0% exempt → no tax
+      // If user clicked Generate (preview), consume the real invoice number now at save time
+      let finalInvoiceNo = form.invoice_no || null
+      if (form.invoice_no && form.invoice_no === peekInv) {
+        const { data: realInv, error: invErr } = await supabase.rpc('fn_next_invoice', { p_code: invSeries })
+        if (invErr) throw invErr
+        finalInvoiceNo = realInv as string
+      }
       const payload = {
         flock_id: form.flock_id, dispatch_date: form.dispatch_date,
         prod_date: prodDateFrom, prod_date_to: prodDateTo,
-        dc_no: parseInt(form.dc_no) || null, invoice_no: form.invoice_no || null,
+        dc_no: parseInt(form.dc_no) || null, invoice_no: finalInvoiceNo,
         party_id: form.party_id || null, hatchery_id: form.hatchery_id || null,
         grade_a: gradeA, grade_b: gradeB,
         total_dispatched: totalFromLines,
@@ -1005,13 +1015,15 @@ export const NHESales: React.FC = () => {
 
   const [invSeries, setInvSeries] = useState('NHE')
   const [genningInv, setGenningInv] = useState(false)
+  const [peekInv, setPeekInv] = useState<string | null>(null)
   const genInvoice = async () => {
     setGenningInv(true)
     try {
-      const { data, error } = await supabase.rpc('fn_next_invoice', { p_code: invSeries })
+      const { data, error } = await supabase.rpc('fn_peek_invoice', { p_code: invSeries })
       if (error) throw error
       setForm((f: any) => ({ ...f, invoice_no: data as string }))
-      toast.success(`Invoice ${data}`)
+      setPeekInv(data as string)
+      toast.success(`Preview: ${data} — will be confirmed on Save`)
     } catch (e: any) { toast.error(e.message) }
     finally { setGenningInv(false) }
   }
@@ -1109,11 +1121,18 @@ export const NHESales: React.FC = () => {
       const nheSupply = supplyType(buyer?.state_code)
       const gstPct = parseFloat(form.gst_pct) || 0
       const tax = splitTax(finalAmt, gstPct, nheSupply)
+      // Consume the real invoice number only at save time
+      let finalInvoiceNo = form.invoice_no || null
+      if (form.invoice_no && form.invoice_no === peekInv) {
+        const { data: realInv, error: invErr } = await supabase.rpc('fn_next_invoice', { p_code: invSeries })
+        if (invErr) throw invErr
+        finalInvoiceNo = realInv as string
+      }
       const payload: any = {
         flock_id: form.flock_id, sale_date: form.sale_date,
         sale_type: bird ? 'bird_sale' : form.sale_type,
         party_id: form.party_id || null, dc_no: form.dc_no || null,
-        invoice_no: form.invoice_no || null,
+        invoice_no: finalInvoiceNo,
         quantity: parseFloat(form.quantity) || null,
         unit: bird ? 'nos' : (form.unit || 'nos'),
         rate: bird ? null : (parseFloat(form.rate) || null),
@@ -1239,13 +1258,14 @@ export const NHESales: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['nhe_sales'] })
       qc.invalidateQueries({ queryKey: ['daily_record'] })
       qc.invalidateQueries({ queryKey: ['flock_daily'] })
-      setShowForm(false); setEditing(null)
+      setPeekInv(null); setShowForm(false); setEditing(null)
     },
     onError: (e: any) => toast.error(e.message)
   })
 
   const openNew = () => {
     setEditing(null)
+    setPeekInv(null)
     setForm({ ...EMPTY_NHE_FORM, flock_id: flockFilter })
     setShowForm(true)
   }
