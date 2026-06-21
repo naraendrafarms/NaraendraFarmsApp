@@ -646,14 +646,10 @@ export const AdminCentre: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Admin Centre" subtitle="Configure sites, flocks, users and cost allocations for full P&L" />
 
-      {/* Tab bar */}
-      <div className="flex gap-1 flex-wrap border-b border-gray-100 pb-1">
+      {/* hidden — sidebar links drive tab via ?tab= param */}
+      <div className="hidden">
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors
-              ${tab === t.id ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-            {t.icon}{t.label}
-          </button>
+          <button key={t.id} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </div>
 
