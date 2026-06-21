@@ -3,13 +3,26 @@ import {
   BookOpen, Bird, Calendar, ArrowRightLeft, ShoppingCart, Users, Zap,
   Package, FileSpreadsheet, BarChart2, Settings, ChevronRight, ChevronDown,
   AlertCircle, CheckCircle, Info, ArrowRight, Hash, MapPin, CreditCard,
-  Sparkles, Clock, Receipt, FileText
+  Sparkles, Clock, Receipt, FileText, Egg
 } from 'lucide-react'
 
 const LAST_UPDATED = '2026-06-21'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-06-21', tag: 'New',      text: 'HE Dispatch: Flock Age now shows per production date in the expandable lines breakdown. Click the invoice number to expand — each date shows age as e.g. "24w 3d".' },
+  { date: '2026-06-21', tag: 'New',      text: 'HE Dispatch: Vehicle Type field added (AC / NON-AC). Shows in dispatch table and on invoice print in the Logistics section.' },
+  { date: '2026-06-21', tag: 'Improved', text: 'HE Dispatch: Extra Trays split into Extra Trays (20LB) and Extra Trays (23LB) — tracked separately for each box type. Loading Details section now has 4 fields: Vehicle Type, Lorry No, Driver Phone, Out Time, and 4 box fields.' },
+  { date: '2026-06-21', tag: 'New',      text: 'HE Dispatch: Print Invoice to PDF added. Click the printer icon on any dispatch row. A Print Options modal lets you choose which sections to include: Company Address, Buyer Details & GSTIN, Bank Details, Supply Details, Lorry No, Out Time, Box Details, Driver Phone.' },
+  { date: '2026-06-21', tag: 'Improved', text: 'HE Dispatch: Round Off is now fully automatic — amounts use Math.round() (< 0.5 rounds down, ≥ 0.5 rounds up). Round Off on invoice is auto-derived as saved amount minus gross total. No manual entry needed.' },
+  { date: '2026-06-21', tag: 'New',      text: 'HE Dispatch: TDS % selector added (No TDS / 0.1% / 1% / 2% / 5% / 10%). TDS Amount auto-calculates but can be overridden. Net receivable shown instantly.' },
+  { date: '2026-06-21', tag: 'Improved', text: 'HE Dispatch: Hatchery field removed from dispatch form — it belongs in Hatch Batches (each batch links to a hatchery). Dispatch only needs Flock, Party, and dates.' },
+  { date: '2026-06-21', tag: 'New',      text: 'Hatch Batches: Full page rewrite with all spreadsheet columns — Received, Setting, Broken, Broken%, Inf, Inf%, Blst, Blst%, Sale Chk, Hatch%, Std, Unhatch, Unhatch%, Reject, Reject%, Setting×STD%, STD-Sale. Table scrolls horizontally.' },
+  { date: '2026-06-21', tag: 'New',      text: 'Hatch Batches: Three age columns added — Age@Setting (flock age when eggs were placed in incubator), Age@Prod (flock age when eggs were laid, from linked dispatch lines), Egg Age (days from average production date to setting date).' },
+  { date: '2026-06-21', tag: 'New',      text: 'Hatch Batches: Checkboxes and bulk delete added. Select rows and click Delete to remove multiple batches at once.' },
+  { date: '2026-06-21', tag: 'New',      text: 'Hatch Batches: Import from Excel (with Template download) and Export to Excel added. Template has all columns in correct format.' },
+  { date: '2026-06-21', tag: 'New',      text: 'Hatch Batches: New fields — Setting No (hatchery batch/setting number), Eggs Weight, Infertile (eggs at candling), Std Chicks (auto = Hatched − Culled − Rejects).' },
+  { date: '2026-06-21', tag: 'New',      text: 'Reports → TDS Receivable added. Shows all HE dispatches where TDS is applicable, rate-wise summary cards (Total TDS, TDS on Paid, TDS on Pending), filter by date range and TDS %, export to Excel.' },
   { date: '2026-06-21', tag: 'New',      text: 'Invoice Series / Counters page added under Accounts. Shows all invoice series (HHF, HE, VHPL, NHE, CB) with current counter and next invoice preview. You can edit the counter to fix it if it got ahead of real invoices.' },
   { date: '2026-06-21', tag: 'Improved', text: 'Medicine Purchases now save full GST split (supply type, nature, is_rcm, CGST, SGST, IGST, party GSTIN) — so medicine bills appear correctly in GST Reports → Purchase GST tab.' },
   { date: '2026-06-21', tag: 'New',      text: 'GST Reports → Purchase GST tab now includes medicine purchases alongside GRN (feed) entries. All purchase GST is now visible in one place.' },
@@ -277,20 +290,42 @@ const SECTIONS: Section[] = [
     icon: <Package size={20}/>,
     label: 'HE Dispatch',
     color: 'bg-teal-600',
-    intro: 'Hatching Eggs dispatched to hatcheries are recorded here with grade breakdown per production date. Each dispatch can carry a formal invoice number from the HHF, HE, or VHPL series.',
+    intro: 'Hatching Eggs dispatched to hatcheries are recorded here with grade breakdown per production date. Each dispatch can carry a formal invoice number from the HHF, HE, or VHPL series. TDS, loading details, and invoice printing are all handled here.',
     workflows: [
       {
         title: 'Record an HE dispatch',
         path: 'Flock Management → HE Dispatch → Add Dispatch',
         steps: [
           { text: 'Select Flock, Dispatch Date.' },
-          { text: 'Party — select the hatchery/buyer. Type to search if you have many parties.' },
+          { text: 'Party — select the hatchery/buyer. Type to search.' },
           { text: 'DC No (Dispatch Challan number).' },
-          { text: 'Add lines: each production date gets Grade A, Grade B, Grade C egg counts and rate.' },
-          { text: 'Free Eggs (2%) and Invoice Eggs are auto-calculated.' },
-          { text: 'Amount = Invoice Eggs × Rate.' },
-          { text: 'Setting Date, Hatch Date, Chicks Sold — fill when the hatchery reports back.' },
+          { text: 'Add production date lines: each date gets Grade A, Grade B, Grade C counts and an optional per-date rate.' },
+          { text: 'Free Eggs and Invoice Eggs auto-calculate. Amount auto-rounds using Math.round().', note: 'If eggs span multiple dates at different rates, each line uses its own rate. Amount = sum of line amounts, then rounded.' },
+          { text: 'TDS: select TDS % (0.1% to 10%). TDS Amount auto-calculates but can be edited. Net receivable shows instantly.' },
+          { text: 'Loading Details: Vehicle Type (AC / NON-AC), Lorry Number, Driver Phone, Out Time.' },
+          { text: 'Box Details: 20LB Boxes, 23LB Boxes, Extra Trays (20LB), Extra Trays (23LB). Auto-hint shows total eggs ÷ 210.' },
           { text: 'Save.' },
+        ]
+      },
+      {
+        title: 'View flock age per production date (expanded lines)',
+        path: 'Flock Management → HE Dispatch → click the Invoice No link on any row',
+        steps: [
+          { text: 'Click the blue invoice number (e.g. NF/HHF/26-27/51 ▼) to expand the production date breakdown.' },
+          { text: 'A table appears showing: Prod Date, Flock Age (at that date), Grade A, Grade B, Grade C, Total, Rate, Amount.' },
+          { text: 'Flock Age is computed from flock placement date to each production date — e.g. "24w 3d".', note: 'This helps you track egg quality by flock age for each date of collection.' },
+          { text: 'Click the invoice number again (▲) to collapse.' },
+        ]
+      },
+      {
+        title: 'Print invoice to PDF',
+        path: 'Flock Management → HE Dispatch → printer icon on any row',
+        steps: [
+          { text: 'Click the printer icon on the dispatch row.' },
+          { text: 'A Print Options modal opens — tick which sections to include on the invoice:', note: 'Seller section: Company Address & Phone. Buyer section: Buyer Address & GSTIN, Supply Details. Payment/Logistics: Bank Details, Lorry Number, Out Time, Box Details, Driver Phone.' },
+          { text: 'Click Print. A new browser tab opens with the formatted invoice.' },
+          { text: 'In the browser print dialog, choose "Save as PDF" to get a PDF file.', warning: 'Allow pop-ups for this site if you get a pop-up blocked warning.' },
+          { text: 'The invoice shows: Production Date breakdown with Grade A/B/C per date, Amount Summary (Gross → Round Off → Invoice Amount → TDS → Net Payable), and Logistics section.' },
         ]
       },
       {
@@ -298,16 +333,100 @@ const SECTIONS: Section[] = [
         path: 'Flock Management → HE Dispatch → Add Dispatch → Invoice Series + Generate',
         steps: [
           { text: 'Select the Invoice Series matching the buyer:', note: 'HHF = NF/HHF/26-27/{N} for Hitech Hatch Fresh Pvt Ltd. HE = NF/HE/26-27/{N} for other hatchery buyers. VHPL = NF/VHPL/26-27/{N} for VHPL.' },
-          { text: 'Click "Generate". The next invoice number appears as a preview (e.g. NF/HHF/26-27/51).', note: 'Generate only previews — does not consume the number yet.' },
-          { text: 'Edit the Invoice No field manually if needed.' },
-          { text: 'Click Save. The number is confirmed and the series counter increments.', warning: 'If you Cancel after clicking Generate, no number is wasted. The same number will appear next time.' },
+          { text: 'Click "Generate". The next invoice number appears as a preview.', note: 'Generate only previews — does not consume the number yet.' },
+          { text: 'Click Save. The number is confirmed and the series counter increments.', warning: 'Cancelling after Generate does not waste a number — same number appears next time.' },
         ]
       },
     ],
     tips: [
-      'One dispatch can cover eggs from multiple production dates — enter one line per date in the dispatch lines.',
+      'One dispatch can cover eggs from multiple production dates — enter one line per date.',
+      'One invoice (dispatch) can be sent to multiple hatcheries on different days — link each Hatch Batch to the same invoice in the Hatch Batches page.',
       'Use HHF series only for Hitech Hatch Fresh Pvt Ltd. Use HE for all other hatchery buyers.',
       'All dispatches with an invoice number appear in Accounts → Sales Invoice Register.',
+      'Vehicle Type AC/NON-AC appears on the invoice print and in the dispatch table for quick reference.',
+    ]
+  },
+
+  // ── HATCH BATCHES ─────────────────────────────────────────────────────────────
+  {
+    id: 'hatch-batches',
+    icon: <Egg size={20}/>,
+    label: 'Hatch Batches',
+    color: 'bg-amber-600',
+    intro: 'Link HE dispatch invoices to hatchery settings and record full hatch reports. One invoice can go to multiple hatcheries or be split across dates — each setting is a separate batch. Full spreadsheet-style column view with Import/Export.',
+    workflows: [
+      {
+        title: 'Record a hatch batch (setting)',
+        path: 'Flock Management → Hatch Batches → Add Batch',
+        steps: [
+          { text: 'Flock — select the flock whose eggs were sent.' },
+          { text: 'Hatchery Name — the hatchery where eggs were set (e.g. Hitech Hatch Fresh Pvt Ltd).' },
+          { text: 'Setting No — hatchery\'s own batch/setting number (e.g. S-2026-01).', note: 'Useful for matching with hatchery reports later.' },
+          { text: 'Link Dispatch Invoice — select the HE dispatch this batch came from. Auto-fills Flock, Invoice No, and Received qty.' },
+          { text: 'Setting Date (when eggs were placed in incubator). Hatch Date (when chicks emerged).', note: 'Egg Age column is auto-calculated as Setting Date minus average production date from the linked dispatch.' },
+          { text: 'Eggs Weight (kg) if you track egg weight.' },
+          { text: 'Received = total eggs from farm. Broken in Transit = cracked/broken eggs. Setting = Received − Broken (auto-computed).' },
+        ]
+      },
+      {
+        title: 'Enter hatch report (fill after hatch)',
+        path: 'Flock Management → Hatch Batches → Edit (pencil icon) on a pending batch',
+        steps: [
+          { text: 'Infertile — eggs found infertile at candling (7-day check).' },
+          { text: 'Blasters — blood-ring / early-dead eggs at candling.' },
+          { text: 'Hatched (Total) — total chicks that emerged.' },
+          { text: 'Culled Chicks — weak/deformed chicks culled at hatchery.' },
+          { text: 'Std Chicks — auto-fills as Hatched − Culled − Rejects. Can be overridden.', note: 'Std = Standard/saleable chicks.' },
+          { text: 'Unhatched — eggs that did not hatch.' },
+          { text: 'Rejects — rejected chicks (wrong sex, deformed).' },
+          { text: 'Chicks Sold — how many chicks were sold from this batch. Chick Rate (₹/chick). Revenue auto-calculates.' },
+          { text: 'Save. All % columns (Broken%, Inf%, Blst%, Hatch%, Unhatch%, Reject%) are computed automatically in the table.' },
+        ]
+      },
+      {
+        title: 'One invoice → multiple hatchery batches',
+        path: 'Flock Management → Hatch Batches → Add Batch (repeat for each hatchery)',
+        steps: [
+          { text: 'If one dispatch invoice covers eggs sent to multiple hatcheries or on different days, create a separate batch for each.', note: 'Example: Invoice of 80,640 eggs → 20,000 to Hatchery A on Day 1, 40,000 to Hatchery B on Day 1, 10,000 to Hatchery C on Day 1, 10,640 to Hatchery A on Day 2.' },
+          { text: 'Link all 4 batches to the same dispatch invoice in the "Link Dispatch Invoice" dropdown.' },
+          { text: 'Each batch tracks its own received qty, broken, setting, hatch result separately.' },
+          { text: 'The Received field on each batch is what you enter manually — no automatic validation against the invoice total.' },
+        ]
+      },
+      {
+        title: 'Understanding the 3 age columns',
+        path: 'Flock Management → Hatch Batches → table view (scroll right)',
+        steps: [
+          { text: 'Age@Setting (blue) — how old the flock was on the setting date. Example: "25w 1d". Computed from flock placement date.' },
+          { text: 'Age@Prod (purple) — how old the flock was when eggs were laid. Computed from the weighted average production date of the linked dispatch. Example: "24w 4d".', note: 'Requires a linked dispatch with production date lines entered.' },
+          { text: 'Egg Age (orange) — how many days eggs were stored between collection and setting. Example: "4d". Computed as Setting Date − average production date.', note: 'Lower egg age = fresher eggs = better hatchability. Industry target is ≤ 5 days.' },
+        ]
+      },
+      {
+        title: 'Import hatch batches from Excel',
+        path: 'Flock Management → Hatch Batches → Template → (fill) → Import',
+        steps: [
+          { text: 'Click "Template" to download a blank Excel file with the correct column headers.' },
+          { text: 'Fill in your data. Date format: DD/MM/YYYY. Flock No: just the number (e.g. 19, not F-19).' },
+          { text: 'Click "Import" and select your filled file.' },
+          { text: 'Batches are inserted. Existing records are not updated — import creates new rows only.' },
+        ]
+      },
+      {
+        title: 'Export and delete batches',
+        path: 'Flock Management → Hatch Batches',
+        steps: [
+          { text: 'Export: click the "Export" button to download visible batches as Excel with all computed columns.' },
+          { text: 'Delete: tick checkboxes on rows to select them. A "Delete (N)" button appears at the top — click it and confirm to delete selected batches.' },
+        ]
+      },
+    ],
+    tips: [
+      'Yellow rows = batches awaiting hatch report (setting date entered but no hatched chicks yet). Pipeline tab shows only these.',
+      'Std Chicks auto-fills as Hatched − Culled − Rejects. Override if the hatchery gives you the Std count directly.',
+      'Egg Age < 5 days is ideal. Eggs older than 7 days typically show lower hatchability.',
+      'Setting×STD% column = Setting × (Std/Setting) — useful for cross-batch comparison of effective yield.',
+      'STD−Sale Chicks = how many standard chicks were kept (not sold immediately).',
     ]
   },
 
@@ -810,6 +929,7 @@ const SECTIONS: Section[] = [
           { text: 'Shed Performance — compare sheds within a flock.' },
           { text: 'Party Outstanding — amount owed to/by each party.' },
           { text: 'GST Reports — GSTR-1, GSTR-3B, RCM Register, and Purchase GST tab for monthly filing.' },
+          { text: 'TDS Receivable — all HE dispatches where TDS is applicable, rate-wise summary (Total TDS, TDS on Paid, TDS on Pending). Filter by date range and TDS %. Export to Excel.' },
         ]
       },
       {
@@ -931,6 +1051,10 @@ export const HelpGuidePage: React.FC = () => {
             <div className="flex items-center gap-1"><Hash size={10}/>Egg fields missing → Daily Entry</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Bird sold → NHE & Bird Sales</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Transfer flock → Flock Transfer</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Hatch batch / setting → Hatch Batches</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Egg age / flock age → Hatch Batches</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Print invoice PDF → HE Dispatch</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>TDS on HE sales → HE Dispatch / TDS Receivable</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Generate invoice no → Invoice Series</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Sales invoices → Accounts & Invoices</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Supplier invoice → Accounts & Invoices</div>
