@@ -16,9 +16,33 @@ import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 
 // ── constants ──────────────────────────────────────────────────────
-const CATEGORIES = ['Feed', 'Medicine', 'Vaccine', 'Packaging', 'Chemical', 'Spares', 'Other']
+const CATEGORIES_DEFAULT = ['Feed', 'Medicine', 'Vaccine', 'Packaging', 'Chemical', 'Spares', 'Other']
 const ADJ_TYPES  = ['Wastage', 'Damage', 'Correction', 'Found', 'Transfer Out', 'Transfer In']
-const UNITS      = ['kg','MT','Quintal','Ltr','ML','Gms','Dose','Nos','Box','Mtrs','Bag']
+const UNITS_DEFAULT      = ['kg','MT','Quintal','Ltr','ML','Gms','Dose','Nos','Box','Mtrs','Bag']
+
+// ── DB-backed masters (fall back to defaults if tables not yet seeded) ──
+function useCategoryList() {
+  const { data } = useQuery({
+    queryKey: ['categories_master'],
+    queryFn: async () => {
+      const { data } = await supabase.from('categories_master').select('name').order('sort_order').order('name')
+      return (data ?? []).map((r: any) => r.name as string)
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  return data?.length ? data : CATEGORIES_DEFAULT
+}
+function useUnitList() {
+  const { data } = useQuery({
+    queryKey: ['units_master'],
+    queryFn: async () => {
+      const { data } = await supabase.from('units_master').select('name').order('sort_order').order('name')
+      return (data ?? []).map((r: any) => r.name as string)
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  return data?.length ? data : UNITS_DEFAULT
+}
 
 const norm = (s?: string | null) => (s ?? '').trim().toLowerCase()
 const cleanNum = (v: any): number | null => {
@@ -182,6 +206,7 @@ function useStockRows(asOf: string) {
 // TAB 1: STOCK STATUS (automatic, computed)
 // ════════════════════════════════════════════════════════════════════
 const StockStatusTab: React.FC = () => {
+  const CATEGORIES = useCategoryList()
   const [asOf, setAsOf] = useState(today())
   const [cat, setCat] = useState('')
   const [q, setQ] = useState('')
@@ -280,6 +305,7 @@ const StockStatusTab: React.FC = () => {
 // TAB 2 & 3: OPENING STOCK + ADJUSTMENTS (manual CRUD, share one table)
 // ════════════════════════════════════════════════════════════════════
 const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => {
+  const UNITS = useUnitList()
   const qc = useQueryClient()
   const { profile } = useAuth()
   const role = profile?.role
@@ -457,6 +483,8 @@ const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => 
 // TAB 4: ITEM CATEGORIES (classify items, reorder levels)
 // ════════════════════════════════════════════════════════════════════
 const CategoriesTab: React.FC = () => {
+  const CATEGORIES = useCategoryList()
+  const UNITS = useUnitList()
   const qc = useQueryClient()
   const { profile } = useAuth()
   const role = profile?.role
@@ -685,6 +713,7 @@ const PERIOD_OPTIONS = (() => {
 })()
 
 const ClosingStockReportTab: React.FC = () => {
+  const CATEGORIES = useCategoryList()
   const defaultDate = today()
   const [asOf, setAsOf] = useState(defaultDate)
   const [cat, setCat] = useState('')

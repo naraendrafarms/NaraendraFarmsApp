@@ -389,13 +389,13 @@ const MASTER_LINKS = [
   { label: 'Sheds',             link: '/masters/sheds',       icon: <Factory size={20}/>,      color: 'bg-indigo-50 text-indigo-600' },
   { label: 'Parties / Vendors', link: '/masters/parties',     icon: <Users size={20}/>,        color: 'bg-green-50 text-green-600' },
   { label: 'Ingredients',       link: '/masters/ingredients', icon: <Package size={20}/>,      color: 'bg-yellow-50 text-yellow-700' },
-  { label: 'Feed Types',        link: '/masters/feedtypes',   icon: <Boxes size={20}/>,        color: 'bg-orange-50 text-orange-600' },
+  { label: 'Feed Types',        link: '/masters/feed-types',  icon: <Boxes size={20}/>,        color: 'bg-orange-50 text-orange-600' },
   { label: 'Medicines',         link: '/masters/medicines',   icon: <FlaskConical size={20}/>, color: 'bg-pink-50 text-pink-600' },
   { label: 'Electricity Meters',link: '/masters/meters',      icon: <Gauge size={20}/>,        color: 'bg-purple-50 text-purple-600' },
   { label: 'Hatcheries',        link: '/masters/hatcheries',  icon: <Bird size={20}/>,         color: 'bg-teal-50 text-teal-600' },
   { label: 'Vaccination Schedule',link:'/masters/vaccination',icon: <Syringe size={20}/>,      color: 'bg-red-50 text-red-500' },
   { label: 'Employees',         link: '/employees',           icon: <Users size={20}/>,        color: 'bg-gray-100 text-gray-600' },
-  { label: 'Vaccination Events',link: '/vaccination',         icon: <Calendar size={20}/>,     color: 'bg-lime-50 text-lime-700' },
+  { label: 'Vaccination Events',link: '/flocks/vaccination',  icon: <Calendar size={20}/>,     color: 'bg-lime-50 text-lime-700' },
 ]
 
 const InlineMaster: React.FC<{
