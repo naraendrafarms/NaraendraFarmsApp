@@ -11,6 +11,7 @@ import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle } from
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
+import { supplyType, splitTax, GST_RATE_OPTIONS } from '@/lib/gst'
 
 // ── Receive Payment Modal ─────────────────────────────────────────
 const ReceivePaymentModal: React.FC<{
@@ -231,7 +232,7 @@ export const HEDispatch: React.FC = () => {
   const { data: parties } = useQuery({
     queryKey: ['parties_buyers'],
     queryFn: async () => {
-      const { data } = await supabase.from('parties').select('id,name').order('name')
+      const { data } = await supabase.from('parties').select('id,name,state_code,gstin').order('name')
       return data ?? []
     }
   })
@@ -274,7 +275,20 @@ export const HEDispatch: React.FC = () => {
     dc_no: '', invoice_no: '', party_id: '', hatchery_id: '',
     free_eggs: '0', rate: '', amount: '', remarks: ''
   })
+  const [invSeries, setInvSeries] = useState('HHF')
+  const [genningInv, setGenningInv] = useState(false)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  // Generate next invoice number from the chosen series (atomic via DB function)
+  const genInvoice = async () => {
+    setGenningInv(true)
+    try {
+      const { data, error } = await supabase.rpc('fn_next_invoice', { p_code: invSeries })
+      if (error) throw error
+      s('invoice_no', data as string)
+      toast.success(`Invoice ${data}`)
+    } catch (e: any) { toast.error(e.message) }
+    finally { setGenningInv(false) }
+  }
 
   // Totals from lines
   const lineTotal = (f: keyof DispLine) => lines.reduce((sum, l) => sum + (parseInt((l as any)[f]) || 0), 0)
@@ -350,6 +364,9 @@ export const HEDispatch: React.FC = () => {
       const prodDateFrom = sortedDates[0] || null
       const prodDateTo = sortedDates.length > 1 ? sortedDates[sortedDates.length - 1] : null
       const inv = totalFromLines - (parseInt(form.free_eggs)||0)
+      const heAmount = parseFloat(form.amount) || autoAmount || 0
+      const buyer = (parties ?? []).find((p: any) => p.id === form.party_id)
+      const heSupply = supplyType(buyer?.state_code)   // HE eggs are 0% exempt → no tax
       const payload = {
         flock_id: form.flock_id, dispatch_date: form.dispatch_date,
         prod_date: prodDateFrom, prod_date_to: prodDateTo,
@@ -359,7 +376,10 @@ export const HEDispatch: React.FC = () => {
         total_dispatched: totalFromLines,
         free_eggs: parseInt(form.free_eggs) || 0,
         invoice_eggs: inv, rate: parseFloat(form.rate) || null,
-        amount: parseFloat(form.amount) || autoAmount || null,
+        amount: heAmount || null,
+        supply_type: heSupply, gst_pct: 0, taxable_value: heAmount || null,
+        cgst_amount: 0, sgst_amount: 0, igst_amount: 0,
+        buyer_gstin: buyer?.gstin || null, hsn_code: '0407',
         remarks: form.remarks || null
       }
       let dispatchId: string
@@ -782,8 +802,17 @@ export const HEDispatch: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="DC No" type="number" value={form.dc_no} onChange={e => s('dc_no', e.target.value)} />
-            <Input label="Invoice No" placeholder="e.g. INV-2026-001" value={form.invoice_no}
-              onChange={e => s('invoice_no', e.target.value)} />
+            <div className="flex items-end gap-1">
+              <div className="w-28">
+                <Select label="Series" value={invSeries} onChange={e => setInvSeries(e.target.value)}
+                  options={[{value:'HHF',label:'HHF'},{value:'HE',label:'HE'},{value:'VHPL',label:'VHPL'}]} />
+              </div>
+              <div className="flex-1">
+                <Input label="Invoice No" placeholder="auto-generate →" value={form.invoice_no}
+                  onChange={e => s('invoice_no', e.target.value)} />
+              </div>
+              <Button type="button" variant="outline" size="sm" loading={genningInv} onClick={genInvoice}>Generate</Button>
+            </div>
           </FormRow>
           <FormRow>
             <div className="relative">
@@ -927,7 +956,7 @@ const BIRD_CAT_OPTS = [
 
 const EMPTY_NHE_FORM = {
   flock_id: '', sale_date: today(), sale_type: 'je',
-  party_id: '', dc_no: '', vehicle_no: '',
+  party_id: '', dc_no: '', vehicle_no: '', invoice_no: '', gst_pct: '0',
   quantity: '', unit: 'nos', rate: '', amount: '',
   bird_sex: 'female', bird_category: 'cull',
   avg_weight_kg: '', total_weight_kg: '', rate_per_kg: '',
@@ -971,8 +1000,21 @@ export const NHESales: React.FC = () => {
   })
   const { data: parties } = useQuery({
     queryKey: ['parties_buyers'],
-    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').order('name'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name,state_code,gstin').order('name'); return data ?? [] }
   })
+
+  const [invSeries, setInvSeries] = useState('NHE')
+  const [genningInv, setGenningInv] = useState(false)
+  const genInvoice = async () => {
+    setGenningInv(true)
+    try {
+      const { data, error } = await supabase.rpc('fn_next_invoice', { p_code: invSeries })
+      if (error) throw error
+      setForm((f: any) => ({ ...f, invoice_no: data as string }))
+      toast.success(`Invoice ${data}`)
+    } catch (e: any) { toast.error(e.message) }
+    finally { setGenningInv(false) }
+  }
 
   const hasFilter = !!(flockFilter || fromDate || toDate)
 
@@ -1063,14 +1105,22 @@ export const NHESales: React.FC = () => {
       const finalAmt = parseFloat(form.amount) || autoAmt
       if (!form.flock_id || !form.sale_date || !finalAmt) throw new Error('Flock, date and amount required')
       const bird = isBirdSale(form.sale_type)
+      const buyer = parties?.find((p: any) => p.id === form.party_id)
+      const nheSupply = supplyType(buyer?.state_code)
+      const gstPct = parseFloat(form.gst_pct) || 0
+      const tax = splitTax(finalAmt, gstPct, nheSupply)
       const payload: any = {
         flock_id: form.flock_id, sale_date: form.sale_date,
         sale_type: bird ? 'bird_sale' : form.sale_type,
         party_id: form.party_id || null, dc_no: form.dc_no || null,
+        invoice_no: form.invoice_no || null,
         quantity: parseFloat(form.quantity) || null,
         unit: bird ? 'nos' : (form.unit || 'nos'),
         rate: bird ? null : (parseFloat(form.rate) || null),
         amount: finalAmt,
+        supply_type: nheSupply, gst_pct: gstPct, taxable_value: finalAmt,
+        cgst_amount: tax.cgst, sgst_amount: tax.sgst, igst_amount: tax.igst,
+        buyer_gstin: buyer?.gstin || null,
         remarks: form.remarks || null,
         vehicle_no: form.vehicle_no || null,
       }
@@ -1515,6 +1565,24 @@ export const NHESales: React.FC = () => {
               value={form.flock_id} onChange={e => sv('flock_id', e.target.value)} />
             <DateInput label="Sale Date" required value={form.sale_date} onChange={e => sv('sale_date', e.target.value)} />
             <Select label="Sale Type" required options={NHE_TYPES} value={form.sale_type} onChange={e => sv('sale_type', e.target.value)} />
+          </FormRow>
+
+          {/* ── Invoice & GST (common) ── */}
+          <FormRow cols={3}>
+            <div className="flex items-end gap-1">
+              <div className="w-24">
+                <Select label="Series" value={invSeries} onChange={e => setInvSeries(e.target.value)}
+                  options={[{value:'NHE',label:'NHE'},{value:'CB',label:'Cull Birds'}]} />
+              </div>
+              <div className="flex-1">
+                <Input label="Invoice No" placeholder="auto →" value={form.invoice_no} onChange={e => sv('invoice_no', e.target.value)} />
+              </div>
+              <Button type="button" variant="outline" size="sm" loading={genningInv} onClick={genInvoice}>Gen</Button>
+            </div>
+            <Select label="GST %" value={form.gst_pct} onChange={e => sv('gst_pct', e.target.value)}
+              options={GST_RATE_OPTIONS} />
+            <Input label="Supply Type" disabled
+              value={(() => { const b = parties?.find((p:any)=>p.id===form.party_id); return supplyType(b?.state_code)==='inter'?'Inter (IGST)':'Intra (CGST+SGST)' })()} />
           </FormRow>
 
           {/* ── Bird Sale fields ── */}

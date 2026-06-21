@@ -10,6 +10,7 @@ import {
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import { Plus, ShoppingCart } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { supplyType, splitTax, PURCHASE_NATURE_OPTIONS, GST_RATE_OPTIONS, OUR_STATE_CODE } from '@/lib/gst'
 
 // One place to enter every purchase. Pick a category, pick the item, the app
 // files it into the right tables (feed stock / medicine stock) AND always logs
@@ -38,6 +39,7 @@ export const PurchaseEntry: React.FC = () => {
     purchase_date: today(), invoice_no: '', invoice_date: '',
     grn_no: '', vehicle_no: '',
     qty: '', rate: '', gst_pct: '0',
+    nature: 'purchase', is_rcm: false,
     payment_status: 'Pending', credit_limit: '', account_type: 'Online',
     remarks: '',
   })
@@ -50,7 +52,7 @@ export const PurchaseEntry: React.FC = () => {
   })
   const { data: suppliers } = useQuery({
     queryKey: ['parties_all'],
-    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name,credit_days').order('name'); return data ?? [] },
+    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name,credit_days,gstin,state_code,gst_type,is_rcm_default').order('name'); return data ?? [] },
   })
   const { data: farms } = useQuery({
     queryKey: ['farms_all'],
@@ -76,7 +78,14 @@ export const PurchaseEntry: React.FC = () => {
   const gstAmt = Math.round(basic * gst / 100 * 100) / 100
   const total = Math.round((basic + gstAmt) * 100) / 100
 
-  const supplierName = (suppliers ?? []).find((p: any) => p.id === form.supplier_id)?.name ?? ''
+  const supplier = (suppliers ?? []).find((p: any) => p.id === form.supplier_id)
+  const supplierName = supplier?.name ?? ''
+  const sType = supplyType(supplier?.state_code)               // 'intra' | 'inter'
+  const taxSplit = splitTax(basic, gst, sType)                  // cgst/sgst/igst
+  const pickSupplier = (id: string) => {
+    const p = (suppliers ?? []).find((x: any) => x.id === id)
+    setForm(f => ({ ...f, supplier_id: id, is_rcm: p?.is_rcm_default ?? false }))
+  }
 
   const payBefore = useMemo(() => {
     const base = form.invoice_date || form.purchase_date
@@ -110,7 +119,16 @@ export const PurchaseEntry: React.FC = () => {
           price_per_unit: rate || null,
           basic_amount: basic || null,
           gst_pct: gst || null,
+          gst_amount: taxSplit.total || 0,
           total_amount: total || null,
+          supply_type: sType,
+          nature: form.nature,
+          is_rcm: form.is_rcm,
+          taxable: gst > 0,
+          cgst_amount: taxSplit.cgst,
+          sgst_amount: taxSplit.sgst,
+          igst_amount: taxSplit.igst,
+          party_gstin: supplier?.gstin || null,
           vehicle_no: form.vehicle_no || null,
           remarks: form.remarks || null,
         })
@@ -225,7 +243,7 @@ export const PurchaseEntry: React.FC = () => {
 
           <FormRow cols={3}>
             <div>
-              <Select label="Supplier" value={form.supplier_id} onChange={e => s('supplier_id', e.target.value)}
+              <Select label="Supplier" value={form.supplier_id} onChange={e => pickSupplier(e.target.value)}
                 options={[{ value: '', label: 'Select supplier…' }, ...(suppliers ?? []).map((p: any) => ({ value: p.id, label: p.name }))]} />
               <div className="mt-1"><QuickAddParty onCreated={(p) => { qc.invalidateQueries({ queryKey: ['parties_all'] }); s('supplier_id', p.id) }} /></div>
             </div>
@@ -238,9 +256,37 @@ export const PurchaseEntry: React.FC = () => {
           <FormRow cols={4}>
             <Input label="Qty" type="number" step="0.001" value={form.qty} onChange={e => s('qty', e.target.value)} />
             <Input label="Rate / Unit (₹)" type="number" step="0.001" value={form.rate} onChange={e => s('rate', e.target.value)} />
-            <Input label="GST %" type="number" step="0.01" value={form.gst_pct} onChange={e => s('gst_pct', e.target.value)} />
+            <Select label="GST %" value={form.gst_pct} onChange={e => s('gst_pct', e.target.value)} options={GST_RATE_OPTIONS} />
             <Input label="Total" value={total ? inr(total) : '—'} disabled hint={basic ? `Basic ${inr(basic)} + GST ${inr(gstAmt)}` : undefined} />
           </FormRow>
+
+          <Divider label="GST Classification" />
+          <FormRow cols={3}>
+            <Select label="Nature of Purchase" value={form.nature} onChange={e => s('nature', e.target.value)} options={PURCHASE_NATURE_OPTIONS} />
+            <Input label="Supply Type" disabled
+              value={sType === 'inter' ? 'Inter-state (IGST)' : 'Intra-state (CGST+SGST)'}
+              hint={supplier ? (supplier.state_code === OUR_STATE_CODE ? 'Same state as us (36)' : `Supplier state ${supplier.state_code || '—'}`) : 'Select supplier first'} />
+            <div className="flex flex-col justify-center">
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={form.is_rcm} onChange={e => setForm(f => ({ ...f, is_rcm: e.target.checked }))} className="rounded text-brand-600" />
+                Reverse Charge (RCM)
+              </label>
+              <span className="text-xs text-gray-400 mt-1">Auto-set from supplier; tick for rent/unregistered</span>
+            </div>
+          </FormRow>
+          {gst > 0 && (
+            <div className="flex flex-wrap gap-4 text-xs bg-gray-50 rounded-lg px-3 py-2 text-gray-600">
+              {sType === 'inter'
+                ? <span>IGST @{gst}%: <strong className="text-gray-800">{inr(taxSplit.igst)}</strong></span>
+                : <>
+                    <span>CGST @{gst/2}%: <strong className="text-gray-800">{inr(taxSplit.cgst)}</strong></span>
+                    <span>SGST @{gst/2}%: <strong className="text-gray-800">{inr(taxSplit.sgst)}</strong></span>
+                  </>}
+              <span>Total GST: <strong className="text-gray-800">{inr(taxSplit.total)}</strong></span>
+              {form.is_rcm && <span className="text-amber-600 font-medium">⚠ RCM — you pay this tax</span>}
+              <span className="text-gray-400">(input GST → indirect expense, no ITC)</span>
+            </div>
+          )}
           <FormRow cols={4}>
             <Input label="Invoice No" value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
             <DateInput label="Invoice Date" value={form.invoice_date} onChange={e => s('invoice_date', e.target.value)} />

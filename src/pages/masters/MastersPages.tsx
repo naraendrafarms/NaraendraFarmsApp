@@ -9,6 +9,7 @@ import {
 import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
+import { parseGstin, GST_TYPE_OPTIONS, GST_RATE_OPTIONS } from '@/lib/gst'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -373,9 +374,17 @@ export const PartiesMaster: React.FC = () => {
   const [mergeKeepId,  setMergeKeepId]  = useState('')
   const [filterName,   setFilterName]   = useState('')
   const [filterType,   setFilterType]   = useState('')
-  const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:''})
+  const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false})
   const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+  // When GSTIN typed: auto-set registered + derive state code
+  const onGstin=(v:string)=>{
+    const up=v.toUpperCase()
+    const p=parseGstin(up)
+    setForm(f=>({...f, gstin:up,
+      gst_type: up ? 'registered' : f.gst_type,
+      state_code: p.stateCode || f.state_code}))
+  }
 
   const {data:allData,isLoading}=useQuery({queryKey:['parties'],queryFn:async()=>{const{data}=await supabase.from('parties').select('*').order('created_at',{ascending:false});return data??[]}})
 
@@ -387,14 +396,14 @@ export const PartiesMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
-    setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??''}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:''})
+    setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??'',gst_type:row.gst_type??'unregistered',state_code:row.state_code??'',is_rcm_default:row.is_rcm_default??false}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false})
     setShowForm(true)
   }
 
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.name)throw new Error('Name required')
-      const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null}
+      const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null,gst_type:form.gst_type,state_code:form.state_code||null,is_rcm_default:form.is_rcm_default}
       if(editing){const{error}=await supabase.from('parties').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('parties').insert(p);if(error)throw error}
     },
@@ -583,9 +592,19 @@ export const PartiesMaster: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Contact" value={form.contact} onChange={e=>s('contact',e.target.value)} />
-            <Input label="GSTIN" value={form.gstin} onChange={e=>s('gstin',e.target.value)} />
+            <div>
+              <Input label="GSTIN" value={form.gstin} onChange={e=>onGstin(e.target.value)} hint={form.gstin ? (parseGstin(form.gstin).valid ? `✓ ${parseGstin(form.gstin).stateName||'Valid'}` : 'Invalid GSTIN format') : '15-char GSTIN'} />
+            </div>
+          </FormRow>
+          <FormRow>
+            <Select label="GST Registration" options={GST_TYPE_OPTIONS} value={form.gst_type} onChange={e=>s('gst_type',e.target.value)} />
+            <Input label="State Code" value={form.state_code} onChange={e=>s('state_code',e.target.value)} hint="Auto from GSTIN (36=Telangana)" />
           </FormRow>
           <Input label="Address" value={form.address} onChange={e=>s('address',e.target.value)} />
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" checked={form.is_rcm_default} onChange={e=>setForm(f=>({...f,is_rcm_default:e.target.checked}))} className="rounded text-brand-600" />
+            Reverse Charge (RCM) applies to purchases from this party — e.g. rent / unregistered vendor
+          </label>
         </div>
       </Modal>
     </>

@@ -1,469 +1,388 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtMonth } from '@/lib/utils'
+import { inr } from '@/lib/utils'
 import {
-  Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Button
+  Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Button,
 } from '@/components/ui'
 import { Download, AlertTriangle, Info } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
-
-// ── GST rate mapping for NHE sales categories ──────────────────────
-const NHE_GST_RATES: Record<string, number> = {
-  je: 0,
-  te: 0,
-  be: 0,
-  bird_cull: 5,
-  bird_lame: 5,
-  bird_weak: 5,
-  bird_sex_error: 5,
-  gas: 18,
-  manure: 5,
-  gunny_bags: 12,
-  maize_bags: 12,
-  plastic_bags: 12,
-  other: 5,
-}
 
 const FY_OPTIONS = [
   { value: '2024-25', label: 'FY 2024-25' },
   { value: '2025-26', label: 'FY 2025-26' },
   { value: '2026-27', label: 'FY 2026-27' },
 ]
-
 const MONTH_OPTIONS = [
   { value: '', label: 'All Months' },
-  { value: '01', label: 'January' }, { value: '02', label: 'February' },
-  { value: '03', label: 'March' },   { value: '04', label: 'April' },
-  { value: '05', label: 'May' },     { value: '06', label: 'June' },
-  { value: '07', label: 'July' },    { value: '08', label: 'August' },
-  { value: '09', label: 'September' },{ value: '10', label: 'October' },
-  { value: '11', label: 'November' },{ value: '12', label: 'December' },
+  { value: '04', label: 'April' }, { value: '05', label: 'May' }, { value: '06', label: 'June' },
+  { value: '07', label: 'July' }, { value: '08', label: 'August' }, { value: '09', label: 'September' },
+  { value: '10', label: 'October' }, { value: '11', label: 'November' }, { value: '12', label: 'December' },
+  { value: '01', label: 'January' }, { value: '02', label: 'February' }, { value: '03', label: 'March' },
 ]
+const TABS = [
+  { id: 'gstr1', label: 'GSTR-1 (Sales)' },
+  { id: 'gstr3b', label: 'GSTR-3B' },
+  { id: 'rcm', label: 'RCM Register' },
+  { id: 'purchase', label: 'Purchase GST' },
+] as const
+type Tab = typeof TABS[number]['id']
 
-function fyDateRange(fy: string): { start: string; end: string } {
-  const [startYear] = fy.split('-')
-  return {
-    start: `${startYear}-04-01`,
-    end:   `${parseInt(startYear) + 1}-03-31`,
-  }
+function fyRange(fy: string) {
+  const y = parseInt(fy.split('-')[0])
+  return { start: `${y}-04-01`, end: `${y + 1}-03-31` }
+}
+const n = (v: any) => Number(v) || 0
+function inMonth(dateStr: string, month: string) {
+  return !month || (dateStr || '').slice(5, 7) === month
 }
 
-function monthLabel(ym: string) {
-  try { return new Date(ym + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }) }
-  catch { return ym }
+interface SaleRow {
+  source: 'NHE' | 'HE'
+  date: string
+  invoice_no: string | null
+  party: string
+  buyer_gstin: string | null
+  supply_type: string | null
+  taxable: number
+  gst_pct: number
+  cgst: number
+  sgst: number
+  igst: number
+  hsn: string | null
+  desc: string
 }
-
-interface GstMonthRow {
-  month: string
-  input5: number
-  input12: number
-  input18: number
-  inputTotal: number
-  output0: number
-  output5: number
-  output12: number
-  output18: number
-  outputTotal: number
-  netPayable: number
+interface PurchaseRow {
+  date: string
+  invoice_no: string | null
+  party_gstin: string | null
+  vendor: string
+  supply_type: string | null
+  nature: string | null
+  is_rcm: boolean
+  taxable: number
+  gst_pct: number
+  cgst: number
+  sgst: number
+  igst: number
+  item: string
 }
 
 export const GSTReportPage: React.FC = () => {
-  const [fy, setFy] = useState('2025-26')
-  const [monthFilter, setMonthFilter] = useState('')
+  const [fy, setFy] = useState('2026-27')
+  const [month, setMonth] = useState('')
+  const [tab, setTab] = useState<Tab>('gstr1')
+  const { start, end } = fyRange(fy)
 
-  const { start, end } = fyDateRange(fy)
-
-  // ── Input GST: GRN purchases ────────────────────────────────────
-  const { data: grnData, isLoading: grnLoading } = useQuery({
-    queryKey: ['gst_grn', fy],
+  const { data: nhe, isLoading: l1 } = useQuery({
+    queryKey: ['gstr_nhe', fy],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('grn')
-        .select('grn_date, basic_amount, gst_pct')
-        .gte('grn_date', start)
-        .lte('grn_date', end)
-        .order('grn_date')
+      const { data } = await supabase.from('nhe_sales')
+        .select('sale_date,invoice_no,sale_type,amount,taxable_value,gst_pct,cgst_amount,sgst_amount,igst_amount,buyer_gstin,supply_type,hsn_code,parties(name)')
+        .gte('sale_date', start).lte('sale_date', end)
       return data ?? []
-    }
+    },
+  })
+  const { data: he, isLoading: l2 } = useQuery({
+    queryKey: ['gstr_he', fy],
+    queryFn: async () => {
+      const { data } = await supabase.from('he_dispatch')
+        .select('dispatch_date,invoice_no,amount,taxable_value,gst_pct,cgst_amount,sgst_amount,igst_amount,buyer_gstin,supply_type,hsn_code,parties(name)')
+        .gte('dispatch_date', start).lte('dispatch_date', end)
+      return data ?? []
+    },
+  })
+  const { data: grn, isLoading: l3 } = useQuery({
+    queryKey: ['gstr_grn', fy],
+    queryFn: async () => {
+      const { data } = await supabase.from('grn')
+        .select('grn_date,invoice_no,item_name,basic_amount,gst_pct,gst_amount,cgst_amount,sgst_amount,igst_amount,supply_type,nature,is_rcm,party_gstin,parties(name)')
+        .gte('grn_date', start).lte('grn_date', end)
+      return data ?? []
+    },
   })
 
-  // ── Output GST: HE dispatch ─────────────────────────────────────
-  const { data: heData, isLoading: heLoading } = useQuery({
-    queryKey: ['gst_he', fy],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('he_dispatch')
-        .select('dispatch_date, amount')
-        .gte('dispatch_date', start)
-        .lte('dispatch_date', end)
-      return data ?? []
+  const isLoading = l1 || l2 || l3
+
+  // ── Normalise sales ──
+  const sales: SaleRow[] = useMemo(() => {
+    const rows: SaleRow[] = []
+    for (const r of (nhe ?? []) as any[]) {
+      if (!inMonth(r.sale_date, month)) continue
+      rows.push({
+        source: 'NHE', date: r.sale_date, invoice_no: r.invoice_no,
+        party: r.parties?.name ?? '—', buyer_gstin: r.buyer_gstin,
+        supply_type: r.supply_type, taxable: n(r.taxable_value ?? r.amount),
+        gst_pct: n(r.gst_pct), cgst: n(r.cgst_amount), sgst: n(r.sgst_amount), igst: n(r.igst_amount),
+        hsn: r.hsn_code, desc: r.sale_type,
+      })
     }
-  })
-
-  // ── Output GST: NHE sales ────────────────────────────────────────
-  const { data: nheData, isLoading: nheLoading } = useQuery({
-    queryKey: ['gst_nhe', fy],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('nhe_sales')
-        .select('sale_date, category, amount')
-        .gte('sale_date', start)
-        .lte('sale_date', end)
-      return data ?? []
+    for (const r of (he ?? []) as any[]) {
+      if (!inMonth(r.dispatch_date, month)) continue
+      rows.push({
+        source: 'HE', date: r.dispatch_date, invoice_no: r.invoice_no,
+        party: r.parties?.name ?? '—', buyer_gstin: r.buyer_gstin,
+        supply_type: r.supply_type, taxable: n(r.taxable_value ?? r.amount),
+        gst_pct: n(r.gst_pct), cgst: n(r.cgst_amount), sgst: n(r.sgst_amount), igst: n(r.igst_amount),
+        hsn: r.hsn_code ?? '0407', desc: 'Hatching Eggs',
+      })
     }
-  })
+    return rows.sort((a, b) => a.date.localeCompare(b.date))
+  }, [nhe, he, month])
 
-  // ── Output GST: Hatch batches (chicks) ──────────────────────────
-  const { data: hatchData, isLoading: hatchLoading } = useQuery({
-    queryKey: ['gst_hatch', fy],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('hatch_batches')
-        .select('hatch_date, chick_amount')
-        .gte('hatch_date', start)
-        .lte('hatch_date', end)
-      return data ?? []
+  const purchases: PurchaseRow[] = useMemo(() => {
+    const rows: PurchaseRow[] = []
+    for (const r of (grn ?? []) as any[]) {
+      if (!inMonth(r.grn_date, month)) continue
+      rows.push({
+        date: r.grn_date, invoice_no: r.invoice_no, party_gstin: r.party_gstin,
+        vendor: r.parties?.name ?? '—', supply_type: r.supply_type, nature: r.nature,
+        is_rcm: !!r.is_rcm, taxable: n(r.basic_amount), gst_pct: n(r.gst_pct),
+        cgst: n(r.cgst_amount), sgst: n(r.sgst_amount), igst: n(r.igst_amount), item: r.item_name ?? '—',
+      })
     }
-  })
+    return rows.sort((a, b) => a.date.localeCompare(b.date))
+  }, [grn, month])
 
-  const isLoading = grnLoading || heLoading || nheLoading || hatchLoading
+  // ── GSTR-1 split ──
+  const b2b = sales.filter(s => s.buyer_gstin && s.buyer_gstin.length === 15)
+  const b2c = sales.filter(s => !(s.buyer_gstin && s.buyer_gstin.length === 15) && s.gst_pct > 0)
+  const exemptSales = sales.filter(s => s.gst_pct === 0)
+  const sum = (rows: SaleRow[], k: keyof SaleRow) => rows.reduce((a, r) => a + n(r[k]), 0)
 
-  // ── Build monthly summary ────────────────────────────────────────
-  const monthlyRows = useMemo((): GstMonthRow[] => {
-    const map: Record<string, GstMonthRow> = {}
-    const get = (month: string): GstMonthRow => {
-      if (!map[month]) map[month] = {
-        month,
-        input5: 0, input12: 0, input18: 0, inputTotal: 0,
-        output0: 0, output5: 0, output12: 0, output18: 0, outputTotal: 0,
-        netPayable: 0,
-      }
-      return map[month]
+  // HSN summary
+  const hsnSummary = useMemo(() => {
+    const m: Record<string, { hsn: string; taxable: number; cgst: number; sgst: number; igst: number }> = {}
+    for (const s of sales) {
+      const key = s.hsn || '0407'
+      if (!m[key]) m[key] = { hsn: key, taxable: 0, cgst: 0, sgst: 0, igst: 0 }
+      m[key].taxable += s.taxable; m[key].cgst += s.cgst; m[key].sgst += s.sgst; m[key].igst += s.igst
     }
+    return Object.values(m).sort((a, b) => a.hsn.localeCompare(b.hsn))
+  }, [sales])
 
-    // Input: GRN
-    for (const g of (grnData ?? [])) {
-      const month = (g.grn_date as string).slice(0, 7)
-      const gstAmt = (g.basic_amount ?? 0) * ((g.gst_pct ?? 0) / 100)
-      const r = get(month)
-      if (g.gst_pct === 5)       r.input5  += gstAmt
-      else if (g.gst_pct === 12) r.input12 += gstAmt
-      else if (g.gst_pct === 18) r.input18 += gstAmt
-      else                       r.input5  += gstAmt // fallback unknown → 5%
-      r.inputTotal += gstAmt
-    }
+  // ── GSTR-3B ──
+  const outTaxable = sales.filter(s => s.gst_pct > 0)
+  const out31a = { taxable: sum(outTaxable, 'taxable'), cgst: sum(outTaxable, 'cgst'), sgst: sum(outTaxable, 'sgst'), igst: sum(outTaxable, 'igst') }
+  const out31c = sum(exemptSales, 'taxable')
+  const rcmRows = purchases.filter(p => p.is_rcm)
+  const rcm = { taxable: rcmRows.reduce((a, r) => a + r.taxable, 0), cgst: rcmRows.reduce((a, r) => a + r.cgst, 0), sgst: rcmRows.reduce((a, r) => a + r.sgst, 0), igst: rcmRows.reduce((a, r) => a + r.igst, 0) }
+  const taxPayable = {
+    cgst: out31a.cgst + rcm.cgst, sgst: out31a.sgst + rcm.sgst, igst: out31a.igst + rcm.igst,
+  }
 
-    // Output: HE dispatch — 0% exempt
-    for (const h of (heData ?? [])) {
-      const month = (h.dispatch_date as string).slice(0, 7)
-      const r = get(month)
-      r.output0 += h.amount ?? 0
-    }
+  // Purchase GST by rate (input — booked as expense, no ITC)
+  const purchTax = { cgst: purchases.reduce((a, r) => a + r.cgst, 0), sgst: purchases.reduce((a, r) => a + r.sgst, 0), igst: purchases.reduce((a, r) => a + r.igst, 0) }
 
-    // Output: NHE sales
-    for (const n of (nheData ?? [])) {
-      const month = (n.sale_date as string).slice(0, 7)
-      const rate = NHE_GST_RATES[n.category ?? 'other'] ?? 5
-      const gstAmt = (n.amount ?? 0) * (rate / 100)
-      const r = get(month)
-      if (rate === 0)       r.output0  += n.amount ?? 0
-      else if (rate === 5)  r.output5  += gstAmt
-      else if (rate === 12) r.output12 += gstAmt
-      else if (rate === 18) r.output18 += gstAmt
-      r.outputTotal += gstAmt
-    }
-
-    // Output: Hatch batches — chicks 0% exempt
-    for (const hb of (hatchData ?? [])) {
-      const month = (hb.hatch_date as string).slice(0, 7)
-      const r = get(month)
-      r.output0 += hb.chick_amount ?? 0
-    }
-
-    // Compute net
-    for (const r of Object.values(map)) {
-      r.netPayable = r.outputTotal - r.inputTotal
-    }
-
-    return Object.values(map).sort((a, b) => a.month.localeCompare(b.month))
-  }, [grnData, heData, nheData, hatchData])
-
-  // Apply month filter
-  const filtered = useMemo(() => {
-    if (!monthFilter) return monthlyRows
-    return monthlyRows.filter(r => r.month.slice(5, 7) === monthFilter)
-  }, [monthlyRows, monthFilter])
-
-  const totals = useMemo(() => filtered.reduce((acc, r) => ({
-    input5: acc.input5 + r.input5,
-    input12: acc.input12 + r.input12,
-    input18: acc.input18 + r.input18,
-    inputTotal: acc.inputTotal + r.inputTotal,
-    output0: acc.output0 + r.output0,
-    output5: acc.output5 + r.output5,
-    output12: acc.output12 + r.output12,
-    output18: acc.output18 + r.output18,
-    outputTotal: acc.outputTotal + r.outputTotal,
-    netPayable: acc.netPayable + r.netPayable,
-  }), { input5: 0, input12: 0, input18: 0, inputTotal: 0, output0: 0, output5: 0, output12: 0, output18: 0, outputTotal: 0, netPayable: 0 }), [filtered])
-
-  const handleExport = () => {
-    if (!filtered.length) return toast.error('No data to export')
-    const rows = filtered.map(r => ({
-      Month: monthLabel(r.month),
-      'Input GST @5%': r.input5.toFixed(2),
-      'Input GST @12%': r.input12.toFixed(2),
-      'Input GST @18%': r.input18.toFixed(2),
-      'Total Input GST': r.inputTotal.toFixed(2),
-      'Input CGST': (r.inputTotal / 2).toFixed(2),
-      'Input SGST': (r.inputTotal / 2).toFixed(2),
-      'Output GST Exempt (Sales)': r.output0.toFixed(2),
-      'Output GST @5%': r.output5.toFixed(2),
-      'Output GST @12%': r.output12.toFixed(2),
-      'Output GST @18%': r.output18.toFixed(2),
-      'Total Output GST': r.outputTotal.toFixed(2),
-      'Output CGST': (r.outputTotal / 2).toFixed(2),
-      'Output SGST': (r.outputTotal / 2).toFixed(2),
-      'Net GST Payable': r.netPayable.toFixed(2),
-    }))
+  const exportRows = (name: string, rows: any[]) => {
+    if (!rows.length) return toast.error('No data to export')
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'GST Summary')
-    XLSX.writeFile(wb, `GST_Summary_${fy}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31))
+    XLSX.writeFile(wb, `${name}_${fy}${month ? '_' + month : ''}.xlsx`)
   }
 
   if (isLoading) return <Spinner />
 
   return (
     <div className="space-y-5">
-      <SectionHeader
-        title="GST Summary Report"
-        subtitle="Input GST (purchases) vs Output GST (sales) — Net payable estimate"
-        action={
-          <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={handleExport}>
-            Export CSV
-          </Button>
-        }
-      />
+      <SectionHeader title="GST Reports" subtitle="GSTR-1, GSTR-3B & RCM — from recorded invoice tax" />
 
-      {/* Disclaimer banner */}
       <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
         <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
         <p className="text-xs text-amber-800">
-          <strong>Estimate only.</strong> This is an estimate based on standard GST rates for the poultry industry.
-          GST on farm operating expenses is not tracked separately in this system. Verify all figures with your CA before filing GST returns.
+          Figures are built from GST recorded on each invoice/GRN. Input GST is <strong>not claimed as ITC</strong> (booked to indirect expense).
+          RCM tax (rent / notified vendors) is payable by us. Verify with your CA before filing.
         </p>
       </div>
 
-      {/* Filters */}
       <Card>
         <div className="flex flex-wrap gap-3 items-end">
           <Select label="Financial Year" options={FY_OPTIONS} value={fy} onChange={e => setFy(e.target.value)} className="w-40" />
-          <Select label="Month" options={MONTH_OPTIONS} value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="w-44" />
-          {monthFilter && (
-            <button className="text-xs text-brand-600 hover:underline mt-5" onClick={() => setMonthFilter('')}>Clear</button>
-          )}
+          <Select label="Month" options={MONTH_OPTIONS} value={month} onChange={e => setMonth(e.target.value)} className="w-40" />
         </div>
       </Card>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="text-center py-3">
-          <div className="text-xs text-gray-500 font-medium">Total Input GST (Credit)</div>
-          <div className="text-lg font-bold text-green-700 mt-1">{inr(totals.inputTotal)}</div>
-          <div className="text-xs text-gray-400 mt-0.5">CGST {inr(totals.inputTotal / 2)} + SGST {inr(totals.inputTotal / 2)}</div>
-        </Card>
-        <Card className="text-center py-3">
-          <div className="text-xs text-gray-500 font-medium">Total Output GST (Liability)</div>
-          <div className="text-lg font-bold text-red-700 mt-1">{inr(totals.outputTotal)}</div>
-          <div className="text-xs text-gray-400 mt-0.5">CGST {inr(totals.outputTotal / 2)} + SGST {inr(totals.outputTotal / 2)}</div>
-        </Card>
-        <Card className="text-center py-3">
-          <div className="text-xs text-gray-500 font-medium">Exempt Sales (0% GST)</div>
-          <div className="text-lg font-bold text-gray-700 mt-1">{inr(totals.output0)}</div>
-          <div className="text-xs text-gray-400 mt-0.5">Eggs, Chicks, HE dispatch</div>
-        </Card>
-        <Card className={`text-center py-3 ${totals.netPayable > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
-          <div className="text-xs text-gray-500 font-medium">Net GST Payable</div>
-          <div className={`text-lg font-bold mt-1 ${totals.netPayable > 0 ? 'text-red-700' : 'text-green-700'}`}>
-            {totals.netPayable >= 0 ? '' : '(Credit) '}{inr(Math.abs(totals.netPayable))}
-          </div>
-          <div className="text-xs text-gray-400 mt-0.5">
-            {totals.netPayable > 0 ? 'Pay to Govt' : totals.netPayable < 0 ? 'Carry Forward' : 'Nil'}
-          </div>
-        </Card>
+      {/* Tabs */}
+      <div className="flex gap-1 flex-wrap border-b border-gray-100 pb-1">
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${tab === t.id ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {/* Input GST Section */}
-      <Card>
-        <div className="flex items-center gap-2 mb-3">
-          <h3 className="font-semibold text-gray-800">Input GST — Purchases (Credit)</h3>
-          <Badge color="green">ITC Eligible</Badge>
-        </div>
-        <div className="flex items-start gap-2 bg-blue-50 rounded p-2 mb-4">
-          <Info size={13} className="text-blue-500 mt-0.5 shrink-0" />
-          <p className="text-xs text-blue-700">
-            Input GST is computed from GRN (Goods Receipt Notes) using the GST % recorded at the time of purchase.
-            Operating expenses (electricity, salary, maintenance) GST is not tracked separately in this system.
-          </p>
-        </div>
-        <div className="overflow-x-auto">
-          <Table>
-            <thead>
-              <tr>
-                <Th>Month</Th>
-                <Th className="text-right">Taxable Value (est.)</Th>
-                <Th className="text-right">@5% GST</Th>
-                <Th className="text-right">@12% GST</Th>
-                <Th className="text-right">@18% GST</Th>
-                <Th className="text-right">Total GST</Th>
-                <Th className="text-right">CGST</Th>
-                <Th className="text-right">SGST</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(r => (
-                <tr key={'inp-' + r.month} className="hover:bg-gray-50">
-                  <Td className="font-medium text-sm">{monthLabel(r.month)}</Td>
-                  <Td className="text-right text-sm text-gray-600">{inr(r.inputTotal > 0 ? r.inputTotal / 0.1 * 0.9 : 0)}</Td>
-                  <Td className="text-right text-sm">{r.input5 > 0 ? inr(r.input5) : <span className="text-gray-300">—</span>}</Td>
-                  <Td className="text-right text-sm">{r.input12 > 0 ? inr(r.input12) : <span className="text-gray-300">—</span>}</Td>
-                  <Td className="text-right text-sm">{r.input18 > 0 ? inr(r.input18) : <span className="text-gray-300">—</span>}</Td>
-                  <Td className="text-right text-sm font-semibold text-green-700">{inr(r.inputTotal)}</Td>
-                  <Td className="text-right text-sm text-green-600">{inr(r.inputTotal / 2)}</Td>
-                  <Td className="text-right text-sm text-green-600">{inr(r.inputTotal / 2)}</Td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-green-50 font-semibold">
-                <Td>TOTAL</Td>
-                <Td className="text-right">—</Td>
-                <Td className="text-right">{inr(totals.input5)}</Td>
-                <Td className="text-right">{inr(totals.input12)}</Td>
-                <Td className="text-right">{inr(totals.input18)}</Td>
-                <Td className="text-right text-green-700">{inr(totals.inputTotal)}</Td>
-                <Td className="text-right text-green-700">{inr(totals.inputTotal / 2)}</Td>
-                <Td className="text-right text-green-700">{inr(totals.inputTotal / 2)}</Td>
-              </tr>
-            </tfoot>
-          </Table>
-        </div>
-      </Card>
+      {/* ── GSTR-1 ── */}
+      {tab === 'gstr1' && (
+        <div className="space-y-5">
+          <Card>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-gray-800">B2B — Registered Buyers</h3>
+              <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={() => exportRows('GSTR1_B2B', b2b.map(s => ({
+                'GSTIN': s.buyer_gstin, 'Buyer': s.party, 'Invoice': s.invoice_no, 'Date': s.date,
+                'Taxable': s.taxable.toFixed(2), 'Rate%': s.gst_pct, 'CGST': s.cgst.toFixed(2), 'SGST': s.sgst.toFixed(2), 'IGST': s.igst.toFixed(2),
+              })))}>Export</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr><Th>GSTIN</Th><Th>Buyer</Th><Th>Invoice</Th><Th>Date</Th><Th className="text-right">Taxable</Th><Th className="text-right">Rate</Th><Th className="text-right">CGST</Th><Th className="text-right">SGST</Th><Th className="text-right">IGST</Th></tr></thead>
+                <tbody>
+                  {b2b.map((s, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <Td className="font-mono text-xs">{s.buyer_gstin}</Td><Td className="text-sm">{s.party}</Td>
+                      <Td className="text-sm">{s.invoice_no ?? '—'}</Td><Td className="text-sm">{s.date}</Td>
+                      <Td className="text-right text-sm">{inr(s.taxable)}</Td><Td className="text-right text-sm">{s.gst_pct}%</Td>
+                      <Td className="text-right text-sm">{inr(s.cgst)}</Td><Td className="text-right text-sm">{inr(s.sgst)}</Td><Td className="text-right text-sm">{inr(s.igst)}</Td>
+                    </tr>
+                  ))}
+                  {b2b.length === 0 && <tr><Td colSpan={9} className="text-center text-gray-400 py-4 text-sm">No B2B invoices</Td></tr>}
+                </tbody>
+                {b2b.length > 0 && <tfoot><tr className="bg-gray-50 font-semibold"><Td colSpan={4}>TOTAL</Td><Td className="text-right">{inr(sum(b2b,'taxable'))}</Td><Td></Td><Td className="text-right">{inr(sum(b2b,'cgst'))}</Td><Td className="text-right">{inr(sum(b2b,'sgst'))}</Td><Td className="text-right">{inr(sum(b2b,'igst'))}</Td></tr></tfoot>}
+              </Table>
+            </div>
+          </Card>
 
-      {/* Output GST Section */}
-      <Card>
-        <div className="flex items-center gap-2 mb-3">
-          <h3 className="font-semibold text-gray-800">Output GST — Sales (Liability)</h3>
-          <Badge color="red">GST Collected</Badge>
-        </div>
-        <div className="text-xs text-gray-500 mb-4 space-y-1">
-          <p>• <strong>HE Eggs / NHE Eggs (je/te/be) / Poultry Chicks:</strong> Exempt (0% GST)</p>
-          <p>• <strong>Culled / Weak / Lame Birds, Manure, Other:</strong> 5% GST</p>
-          <p>• <strong>Gunny / Maize / Plastic Bags:</strong> 12% GST</p>
-          <p>• <strong>Gas / LPG:</strong> 18% GST</p>
-        </div>
-        <div className="overflow-x-auto">
-          <Table>
-            <thead>
-              <tr>
-                <Th>Month</Th>
-                <Th className="text-right">Exempt Sales</Th>
-                <Th className="text-right">@5% GST</Th>
-                <Th className="text-right">@12% GST</Th>
-                <Th className="text-right">@18% GST</Th>
-                <Th className="text-right">Total GST</Th>
-                <Th className="text-right">CGST</Th>
-                <Th className="text-right">SGST</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(r => (
-                <tr key={'out-' + r.month} className="hover:bg-gray-50">
-                  <Td className="font-medium text-sm">{monthLabel(r.month)}</Td>
-                  <Td className="text-right text-sm text-gray-500">{r.output0 > 0 ? inr(r.output0) : <span className="text-gray-300">—</span>}</Td>
-                  <Td className="text-right text-sm">{r.output5 > 0 ? inr(r.output5) : <span className="text-gray-300">—</span>}</Td>
-                  <Td className="text-right text-sm">{r.output12 > 0 ? inr(r.output12) : <span className="text-gray-300">—</span>}</Td>
-                  <Td className="text-right text-sm">{r.output18 > 0 ? inr(r.output18) : <span className="text-gray-300">—</span>}</Td>
-                  <Td className="text-right text-sm font-semibold text-red-700">{inr(r.outputTotal)}</Td>
-                  <Td className="text-right text-sm text-red-600">{inr(r.outputTotal / 2)}</Td>
-                  <Td className="text-right text-sm text-red-600">{inr(r.outputTotal / 2)}</Td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-red-50 font-semibold">
-                <Td>TOTAL</Td>
-                <Td className="text-right text-gray-600">{inr(totals.output0)}</Td>
-                <Td className="text-right">{inr(totals.output5)}</Td>
-                <Td className="text-right">{inr(totals.output12)}</Td>
-                <Td className="text-right">{inr(totals.output18)}</Td>
-                <Td className="text-right text-red-700">{inr(totals.outputTotal)}</Td>
-                <Td className="text-right text-red-700">{inr(totals.outputTotal / 2)}</Td>
-                <Td className="text-right text-red-700">{inr(totals.outputTotal / 2)}</Td>
-              </tr>
-            </tfoot>
-          </Table>
-        </div>
-      </Card>
+          <Card>
+            <h3 className="font-semibold text-gray-800 mb-3">B2C — Unregistered (taxable)</h3>
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr><Th>Buyer</Th><Th>Invoice</Th><Th>Date</Th><Th className="text-right">Taxable</Th><Th className="text-right">Rate</Th><Th className="text-right">CGST</Th><Th className="text-right">SGST</Th><Th className="text-right">IGST</Th></tr></thead>
+                <tbody>
+                  {b2c.map((s, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <Td className="text-sm">{s.party}</Td><Td className="text-sm">{s.invoice_no ?? '—'}</Td><Td className="text-sm">{s.date}</Td>
+                      <Td className="text-right text-sm">{inr(s.taxable)}</Td><Td className="text-right text-sm">{s.gst_pct}%</Td>
+                      <Td className="text-right text-sm">{inr(s.cgst)}</Td><Td className="text-right text-sm">{inr(s.sgst)}</Td><Td className="text-right text-sm">{inr(s.igst)}</Td>
+                    </tr>
+                  ))}
+                  {b2c.length === 0 && <tr><Td colSpan={8} className="text-center text-gray-400 py-4 text-sm">No B2C taxable invoices</Td></tr>}
+                </tbody>
+              </Table>
+            </div>
+          </Card>
 
-      {/* Net GST Summary Table */}
-      <Card>
-        <h3 className="font-semibold text-gray-800 mb-3">Monthly Net GST Payable</h3>
-        <div className="overflow-x-auto">
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card className="text-center py-4">
+              <div className="text-xs text-gray-500 font-medium">Nil-rated / Exempt Sales (eggs, birds)</div>
+              <div className="text-xl font-bold text-gray-700 mt-1">{inr(out31c)}</div>
+              <div className="text-xs text-gray-400 mt-0.5">{exemptSales.length} invoices — 0% GST</div>
+            </Card>
+            <Card className="text-center py-4">
+              <div className="text-xs text-gray-500 font-medium">Total Outward Tax (CGST+SGST+IGST)</div>
+              <div className="text-xl font-bold text-red-700 mt-1">{inr(out31a.cgst + out31a.sgst + out31a.igst)}</div>
+              <div className="text-xs text-gray-400 mt-0.5">on {outTaxable.length} taxable invoices</div>
+            </Card>
+          </div>
+
+          <Card>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-gray-800">HSN Summary</h3>
+              <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={() => exportRows('GSTR1_HSN', hsnSummary.map(h => ({
+                'HSN': h.hsn, 'Taxable': h.taxable.toFixed(2), 'CGST': h.cgst.toFixed(2), 'SGST': h.sgst.toFixed(2), 'IGST': h.igst.toFixed(2),
+              })))}>Export</Button>
+            </div>
+            <Table>
+              <thead><tr><Th>HSN</Th><Th className="text-right">Taxable Value</Th><Th className="text-right">CGST</Th><Th className="text-right">SGST</Th><Th className="text-right">IGST</Th></tr></thead>
+              <tbody>
+                {hsnSummary.map((h, i) => (
+                  <tr key={i} className="hover:bg-gray-50"><Td className="font-mono text-sm">{h.hsn}</Td><Td className="text-right text-sm">{inr(h.taxable)}</Td><Td className="text-right text-sm">{inr(h.cgst)}</Td><Td className="text-right text-sm">{inr(h.sgst)}</Td><Td className="text-right text-sm">{inr(h.igst)}</Td></tr>
+                ))}
+              </tbody>
+            </Table>
+          </Card>
+        </div>
+      )}
+
+      {/* ── GSTR-3B ── */}
+      {tab === 'gstr3b' && (
+        <Card>
+          <h3 className="font-semibold text-gray-800 mb-3">GSTR-3B Summary</h3>
           <Table>
-            <thead>
-              <tr>
-                <Th>Month</Th>
-                <Th className="text-right">Input GST (Credit)</Th>
-                <Th className="text-right">Output GST (Liability)</Th>
-                <Th className="text-right">Net Payable</Th>
-                <Th>Status</Th>
-              </tr>
-            </thead>
+            <thead><tr><Th>Section</Th><Th className="text-right">Taxable Value</Th><Th className="text-right">CGST</Th><Th className="text-right">SGST</Th><Th className="text-right">IGST</Th></tr></thead>
             <tbody>
-              {filtered.map(r => (
-                <tr key={'net-' + r.month} className="hover:bg-gray-50">
-                  <Td className="font-medium">{monthLabel(r.month)}</Td>
-                  <Td className="text-right text-green-700 text-sm">{inr(r.inputTotal)}</Td>
-                  <Td className="text-right text-red-700 text-sm">{inr(r.outputTotal)}</Td>
-                  <Td className={`text-right font-semibold text-sm ${r.netPayable > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                    {inr(Math.abs(r.netPayable))}
-                  </Td>
-                  <Td>
-                    {r.netPayable > 0
-                      ? <Badge color="red">Pay ₹{Math.round(r.netPayable).toLocaleString('en-IN')}</Badge>
-                      : r.netPayable < 0
-                        ? <Badge color="green">Credit C/F</Badge>
-                        : <Badge color="gray">Nil</Badge>
-                    }
-                  </Td>
-                </tr>
-              ))}
+              <tr className="hover:bg-gray-50"><Td className="text-sm">3.1(a) Outward taxable supplies</Td><Td className="text-right text-sm">{inr(out31a.taxable)}</Td><Td className="text-right text-sm">{inr(out31a.cgst)}</Td><Td className="text-right text-sm">{inr(out31a.sgst)}</Td><Td className="text-right text-sm">{inr(out31a.igst)}</Td></tr>
+              <tr className="hover:bg-gray-50"><Td className="text-sm">3.1(c) Nil-rated / exempt</Td><Td className="text-right text-sm">{inr(out31c)}</Td><Td className="text-right text-gray-300">—</Td><Td className="text-right text-gray-300">—</Td><Td className="text-right text-gray-300">—</Td></tr>
+              <tr className="hover:bg-gray-50"><Td className="text-sm">3.1(d) Inward supplies (RCM) — liable to tax</Td><Td className="text-right text-sm">{inr(rcm.taxable)}</Td><Td className="text-right text-sm">{inr(rcm.cgst)}</Td><Td className="text-right text-sm">{inr(rcm.sgst)}</Td><Td className="text-right text-sm">{inr(rcm.igst)}</Td></tr>
             </tbody>
             <tfoot>
-              <tr className="bg-gray-100 font-bold">
-                <Td>FY Total</Td>
-                <Td className="text-right text-green-700">{inr(totals.inputTotal)}</Td>
-                <Td className="text-right text-red-700">{inr(totals.outputTotal)}</Td>
-                <Td className={`text-right ${totals.netPayable > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                  {inr(Math.abs(totals.netPayable))}
-                </Td>
-                <Td>
-                  {totals.netPayable > 0
-                    ? <Badge color="red">Pay to Govt</Badge>
-                    : totals.netPayable < 0
-                      ? <Badge color="green">Carry Forward</Badge>
-                      : <Badge color="gray">Nil</Badge>
-                  }
-                </Td>
-              </tr>
+              <tr className="bg-red-50 font-bold"><Td>6.1 Total Tax Payable</Td><Td></Td><Td className="text-right text-red-700">{inr(taxPayable.cgst)}</Td><Td className="text-right text-red-700">{inr(taxPayable.sgst)}</Td><Td className="text-right text-red-700">{inr(taxPayable.igst)}</Td></tr>
             </tfoot>
           </Table>
-        </div>
-      </Card>
+          <div className="flex items-start gap-2 bg-blue-50 rounded p-2 mt-3">
+            <Info size={13} className="text-blue-500 mt-0.5 shrink-0" />
+            <p className="text-xs text-blue-700">Total payable = outward tax + RCM tax. No ITC is set off (input GST booked as expense). Table 4 ITC = 0.</p>
+          </div>
+          <div className="mt-3">
+            <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={() => exportRows('GSTR3B', [
+              { Section: '3.1(a) Outward taxable', Taxable: out31a.taxable.toFixed(2), CGST: out31a.cgst.toFixed(2), SGST: out31a.sgst.toFixed(2), IGST: out31a.igst.toFixed(2) },
+              { Section: '3.1(c) Nil/Exempt', Taxable: out31c.toFixed(2), CGST: '', SGST: '', IGST: '' },
+              { Section: '3.1(d) RCM liable', Taxable: rcm.taxable.toFixed(2), CGST: rcm.cgst.toFixed(2), SGST: rcm.sgst.toFixed(2), IGST: rcm.igst.toFixed(2) },
+              { Section: '6.1 Tax Payable', Taxable: '', CGST: taxPayable.cgst.toFixed(2), SGST: taxPayable.sgst.toFixed(2), IGST: taxPayable.igst.toFixed(2) },
+            ])}>Export GSTR-3B</Button>
+          </div>
+        </Card>
+      )}
+
+      {/* ── RCM Register ── */}
+      {tab === 'rcm' && (
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2"><h3 className="font-semibold text-gray-800">RCM Register</h3><Badge color="orange">You pay this tax</Badge></div>
+            <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={() => exportRows('RCM_Register', rcmRows.map(r => ({
+              Date: r.date, Vendor: r.vendor, GSTIN: r.party_gstin, Invoice: r.invoice_no, Item: r.item,
+              Taxable: r.taxable.toFixed(2), 'Rate%': r.gst_pct, CGST: r.cgst.toFixed(2), SGST: r.sgst.toFixed(2), IGST: r.igst.toFixed(2),
+            })))}>Export</Button>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr><Th>Date</Th><Th>Vendor</Th><Th>Invoice</Th><Th>Item</Th><Th className="text-right">Taxable</Th><Th className="text-right">Rate</Th><Th className="text-right">CGST</Th><Th className="text-right">SGST</Th><Th className="text-right">IGST</Th></tr></thead>
+              <tbody>
+                {rcmRows.map((r, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <Td className="text-sm">{r.date}</Td><Td className="text-sm">{r.vendor}</Td><Td className="text-sm">{r.invoice_no ?? '—'}</Td><Td className="text-sm">{r.item}</Td>
+                    <Td className="text-right text-sm">{inr(r.taxable)}</Td><Td className="text-right text-sm">{r.gst_pct}%</Td>
+                    <Td className="text-right text-sm">{inr(r.cgst)}</Td><Td className="text-right text-sm">{inr(r.sgst)}</Td><Td className="text-right text-sm">{inr(r.igst)}</Td>
+                  </tr>
+                ))}
+                {rcmRows.length === 0 && <tr><Td colSpan={9} className="text-center text-gray-400 py-4 text-sm">No RCM purchases — tick "Reverse Charge" on rent / unregistered vendor purchases</Td></tr>}
+              </tbody>
+              {rcmRows.length > 0 && <tfoot><tr className="bg-orange-50 font-semibold"><Td colSpan={4}>TOTAL</Td><Td className="text-right">{inr(rcm.taxable)}</Td><Td></Td><Td className="text-right">{inr(rcm.cgst)}</Td><Td className="text-right">{inr(rcm.sgst)}</Td><Td className="text-right">{inr(rcm.igst)}</Td></tr></tfoot>}
+            </Table>
+          </div>
+        </Card>
+      )}
+
+      {/* ── Purchase GST (input, no ITC) ── */}
+      {tab === 'purchase' && (
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2"><h3 className="font-semibold text-gray-800">Purchase GST (Input)</h3><Badge color="gray">Booked as expense — no ITC</Badge></div>
+            <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={() => exportRows('Purchase_GST', purchases.map(r => ({
+              Date: r.date, Vendor: r.vendor, GSTIN: r.party_gstin, Invoice: r.invoice_no, Item: r.item, Nature: r.nature, RCM: r.is_rcm ? 'Yes' : 'No',
+              Taxable: r.taxable.toFixed(2), 'Rate%': r.gst_pct, CGST: r.cgst.toFixed(2), SGST: r.sgst.toFixed(2), IGST: r.igst.toFixed(2),
+            })))}>Export</Button>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr><Th>Date</Th><Th>Vendor</Th><Th>Item</Th><Th>Nature</Th><Th className="text-right">Taxable</Th><Th className="text-right">Rate</Th><Th className="text-right">CGST</Th><Th className="text-right">SGST</Th><Th className="text-right">IGST</Th></tr></thead>
+              <tbody>
+                {purchases.map((r, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <Td className="text-sm">{r.date}</Td><Td className="text-sm">{r.vendor}</Td><Td className="text-sm">{r.item}</Td>
+                    <Td className="text-sm">{r.nature ?? '—'}{r.is_rcm && <Badge color="orange">RCM</Badge>}</Td>
+                    <Td className="text-right text-sm">{inr(r.taxable)}</Td><Td className="text-right text-sm">{r.gst_pct}%</Td>
+                    <Td className="text-right text-sm">{inr(r.cgst)}</Td><Td className="text-right text-sm">{inr(r.sgst)}</Td><Td className="text-right text-sm">{inr(r.igst)}</Td>
+                  </tr>
+                ))}
+                {purchases.length === 0 && <tr><Td colSpan={9} className="text-center text-gray-400 py-4 text-sm">No purchases in period</Td></tr>}
+              </tbody>
+              {purchases.length > 0 && <tfoot><tr className="bg-gray-50 font-semibold"><Td colSpan={6}>TOTAL INPUT GST</Td><Td className="text-right">{inr(purchTax.cgst)}</Td><Td className="text-right">{inr(purchTax.sgst)}</Td><Td className="text-right">{inr(purchTax.igst)}</Td></tr></tfoot>}
+            </Table>
+          </div>
+        </Card>
+      )}
     </div>
   )
 }
