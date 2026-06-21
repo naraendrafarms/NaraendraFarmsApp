@@ -32,6 +32,8 @@ import { DailySummaryPage } from '@/pages/reports/DailySummary'
 import { CostOverviewPage, ElectricityCostPage, SalaryCostPage } from '@/pages/reports/CostAnalysis'
 import { PurchaseOrdersPage, PendingPaymentsPage } from '@/pages/reports/POPages'
 import { PurchaseEntry } from '@/pages/purchases/PurchaseEntry'
+import { RateCompare } from '@/pages/purchases/RateCompare'
+import { VendorStatement } from '@/pages/purchases/VendorStatement'
 import { UserManagement } from '@/pages/admin/UserManagement'
 import { AdminCentre } from '@/pages/admin/AdminCentre'
 import { AuditLogPage } from '@/pages/admin/AuditLog'
@@ -48,6 +50,7 @@ import { EggStockPage } from '@/pages/reports/EggStock'
 import { CashBookPage } from '@/pages/accounts/CashBook'
 import { InvoiceRegister } from '@/pages/accounts/InvoiceRegister'
 import { SalesInvoiceRegister } from '@/pages/accounts/SalesInvoiceRegister'
+import { InvoiceSeriesPage } from '@/pages/accounts/InvoiceSeries'
 import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
 import { HelpGuidePage } from '@/pages/help/HelpGuide'
 import { Spinner } from '@/components/ui'
@@ -175,7 +178,10 @@ export const App: React.FC = () => {
             <Route path="accounts/cash-book" element={<CashBookPage />} />
             <Route path="accounts/invoices" element={<InvoiceRegister />} />
             <Route path="accounts/sales-invoices" element={<SalesInvoiceRegister />} />
+            <Route path="accounts/invoice-series" element={<InvoiceSeriesPage />} />
             <Route path="purchases/new" element={<RequireRole check={can.viewPurchase}><PurchaseEntry /></RequireRole>} />
+            <Route path="purchases/rate-compare" element={<RequireRole check={can.viewPurchase}><RateCompare /></RequireRole>} />
+            <Route path="purchases/vendor-statement" element={<RequireRole check={can.viewPurchase}><VendorStatement /></RequireRole>} />
             <Route path="purchase-orders" element={<RequireRole check={can.viewPurchase}><PurchaseOrdersPage /></RequireRole>} />
             <Route path="pending-payments" element={<RequireRole check={can.viewPurchase}><PendingPaymentsPage /></RequireRole>} />
 
