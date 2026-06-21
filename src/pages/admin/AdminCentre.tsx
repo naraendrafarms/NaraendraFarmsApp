@@ -582,6 +582,7 @@ const MastersHub: React.FC = () => (
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <InlineConfig title="Material Types (PO / GRN)" grp="material_type" placeholder="e.g. Feed Raw Material" />
         <InlineConfig title="Purchase Categories" grp="purchase_category" placeholder="e.g. Feed, Medicine" />
+        <InlineConfig title="Ingredient Categories (Feed Mill)" grp="ingredient_category" placeholder="e.g. grain, protein" />
       </div>
     </div>
 

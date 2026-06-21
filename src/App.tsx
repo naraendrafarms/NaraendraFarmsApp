@@ -62,6 +62,7 @@ const qc = new QueryClient({
       gcTime:    30 * 60 * 1000,
       retry: 1,
       refetchOnWindowFocus: false,
+      throwOnError: false,
     }
   }
 })

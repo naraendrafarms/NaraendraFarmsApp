@@ -177,6 +177,8 @@ export const IngredientsMaster: React.FC = () => {
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
 
   const {data,isLoading}=useQuery({queryKey:['ingredients'],queryFn:async()=>{const{data}=await supabase.from('feed_ingredients').select('*').order('code');return data??[]}})
+  const {data:ingCats=[]}=useQuery({queryKey:['config_ingredient_category'],queryFn:async()=>{const{data}=await supabase.from('config_options').select('value,sort_order').eq('grp','ingredient_category').order('sort_order');return(data??[]).map((r:any)=>r.value as string)},staleTime:5*60*1000})
+  const catOptions = ingCats.length ? ingCats : ['grain','protein','mineral','supplement','additive','other']
 
   const open=(row?:any)=>{
     setEditing(row??null)
@@ -349,7 +351,7 @@ export const IngredientsMaster: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="Short Name" value={form.short_name} onChange={e=>s('short_name',e.target.value)} />
-            <Select label="Category" options={['grain','protein','mineral','supplement','additive','other']} value={form.category} onChange={e=>s('category',e.target.value)} />
+            <Select label="Category" options={catOptions} value={form.category} onChange={e=>s('category',e.target.value)} />
           </FormRow>
           <FormRow>
             <Input label="Unit" value={form.unit} onChange={e=>s('unit',e.target.value)} />
