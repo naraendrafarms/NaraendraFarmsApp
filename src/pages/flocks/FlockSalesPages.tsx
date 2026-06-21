@@ -394,6 +394,7 @@ export const HEDispatch: React.FC = () => {
         supply_type: heSupply, gst_pct: 0, taxable_value: heAmount || null,
         cgst_amount: 0, sgst_amount: 0, igst_amount: 0,
         buyer_gstin: buyer?.gstin || null, hsn_code: '0407',
+        tds_pct: parseFloat(form.tds_pct) || 0,
         tds_amount: parseFloat(form.tds_amount) || 0,
         remarks: form.remarks || null
       }
