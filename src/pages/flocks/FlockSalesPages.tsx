@@ -276,7 +276,7 @@ export const HEDispatch: React.FC = () => {
   const [form, setForm] = useState({
     flock_id: '', dispatch_date: today(),
     dc_no: '', invoice_no: '', party_id: '',
-    free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0', remarks: ''
+    free_eggs: '0', rate: '', amount: '', round_off: '0', tds_pct: '0', tds_amount: '0', remarks: ''
   })
   const [invSeries, setInvSeries] = useState('HHF')
   const [genningInv, setGenningInv] = useState(false)
@@ -306,7 +306,11 @@ export const HEDispatch: React.FC = () => {
     const r = parseFloat(l.rate) || headerRate
     return sum + qty * r
   }, 0) - (parseInt(form.free_eggs)||0) * headerRate
-  const effectiveAmount = parseFloat(form.amount) || autoAmount || 0
+  const roundOff = parseFloat(form.round_off) || 0
+  // Total amount = auto (eggs × rates) + manual round-off; override possible via amount field
+  const totalBeforeRound = autoAmount || 0
+  const autoTotal = totalBeforeRound + roundOff
+  const effectiveAmount = parseFloat(form.amount) || autoTotal || 0
   const autoTds = parseFloat(form.tds_pct) > 0 ? Math.round(effectiveAmount * parseFloat(form.tds_pct) / 100 * 100) / 100 : 0
 
   const openForm = (row?: any) => {
@@ -317,7 +321,7 @@ export const HEDispatch: React.FC = () => {
         dc_no: row.dc_no?.toString() ?? '', invoice_no: row.invoice_no ?? '',
         party_id: row.party_id ?? '',
         free_eggs: row.free_eggs?.toString() ?? '0', rate: row.rate?.toString() ?? '',
-        amount: row.amount?.toString() ?? '', tds_pct: '0', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
+        amount: row.amount?.toString() ?? '', round_off: '0', tds_pct: row.tds_pct?.toString() ?? '0', tds_amount: row.tds_amount?.toString() ?? '0', remarks: row.remarks ?? ''
       })
       // Load existing lines for this dispatch
       supabase.from('he_dispatch_lines').select('*').eq('dispatch_id', row.id).order('prod_date')
@@ -335,7 +339,7 @@ export const HEDispatch: React.FC = () => {
       setEditing(null)
       setPeekInv(null)
       setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
-        party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0', remarks: '' })
+        party_id: '', free_eggs: '0', rate: '', amount: '', round_off: '0', tds_pct: '0', tds_amount: '0', remarks: '' })
       setLines([emptyLine()])
     }
     setShowForm(true)
@@ -378,7 +382,7 @@ export const HEDispatch: React.FC = () => {
       const prodDateFrom = sortedDates[0] || null
       const prodDateTo = sortedDates.length > 1 ? sortedDates[sortedDates.length - 1] : null
       const inv = totalFromLines - (parseInt(form.free_eggs)||0)
-      const heAmount = parseFloat(form.amount) || autoAmount || 0
+      const heAmount = parseFloat(form.amount) || autoTotal || 0
       const buyer = (parties ?? []).find((p: any) => p.id === form.party_id)
       const heSupply = supplyType(buyer?.state_code)   // HE eggs are 0% exempt → no tax
       // If user clicked Generate (preview), consume the real invoice number now at save time
@@ -985,9 +989,12 @@ export const HEDispatch: React.FC = () => {
               onChange={e => s('free_eggs', e.target.value)} />
             <Input label="Default Rate (Rs/egg)" type="number" step="0.0001" value={form.rate}
               onChange={e => s('rate', e.target.value)} hint="Used for lines without individual rate" />
-            <Input label="Amount (Rs)" type="number" step="0.01" value={form.amount}
+            <Input label="Gross Amount (Rs)" type="number" step="0.01" value={form.amount}
               onChange={e => s('amount', e.target.value)}
-              hint={autoAmount > 0 ? `Auto: ${inr(autoAmount)}` : undefined} />
+              hint={totalBeforeRound > 0 ? `Auto: ${inr(totalBeforeRound)}` : undefined} />
+            <Input label="Round Off (±)" type="number" step="0.01" value={form.round_off}
+              onChange={e => s('round_off', e.target.value)}
+              hint={autoTotal > 0 ? `Total: ${inr(parseFloat(form.amount) || autoTotal)}` : undefined} />
           </FormRow>
           <FormRow cols={3}>
             <Select label="TDS Rate" value={form.tds_pct} onChange={e => {
