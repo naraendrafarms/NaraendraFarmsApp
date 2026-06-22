@@ -1638,6 +1638,16 @@ export const NHESales: React.FC = () => {
       employee_id: row.employee_id ?? '',
       deduct_salary: false,
     })
+    // Check if a salary deduction exists for this sale and pre-tick the checkbox
+    if (row.is_employee_sale && row.id) {
+      supabase.from('employee_deductions')
+        .select('id').eq('nhe_sale_id', row.id).eq('status', 'pending').limit(1)
+        .then(({ data }) => {
+          if (data && data.length > 0) {
+            setForm((f: any) => ({ ...f, deduct_salary: true }))
+          }
+        })
+    }
     // Load lines from DB for egg-type sales
     if (isEggSale(row.sale_type)) {
       supabase.from('nhe_sale_lines').select('*').eq('sale_id', row.id).order('created_at')
