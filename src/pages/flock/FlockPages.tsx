@@ -1753,7 +1753,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
 // ── NHE SALES TAB (egg sales — JE/TE/BE/LE/Gunny) ───────────────────────────
 
-const NHE_EGG_TYPES = ['je_eggs', 'te_eggs', 'be_eggs', 'le_eggs', 'gunny_bags', 'maize_bags', 'plastic_bags']
+const NHE_EGG_TYPES = ['je', 'te', 'be', 'je_eggs', 'te_eggs', 'be_eggs', 'le_eggs', 'gunny_bags', 'maize_bags', 'plastic_bags', 'gas', 'manure', 'other', 'gun_bags']
 
 const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const [fFrom, setFFrom] = useState('')
@@ -1836,7 +1836,7 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
 // ── CULL SALES TAB (bird sales — income generating) ──────────────────────────
 
-const CULL_TYPES = ['cull_birds', 'litter', 'gunny_bags', 'maize_bags', 'plastic_bags']
+const CULL_TYPES = ['bird_sale', 'cull_birds', 'litter', 'manure', 'gunny_bags', 'maize_bags', 'plastic_bags']
 
 const CULL_SALES_FIELDS: FieldDef[] = [
   { key: 'sale_date',  label: 'Date',        type: 'date' },
