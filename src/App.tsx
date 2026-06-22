@@ -54,6 +54,8 @@ import { CashBookPage } from '@/pages/accounts/CashBook'
 import { InvoiceRegister } from '@/pages/accounts/InvoiceRegister'
 import { SalesInvoiceRegister } from '@/pages/accounts/SalesInvoiceRegister'
 import { InvoiceSeriesPage } from '@/pages/accounts/InvoiceSeries'
+import { PaymentPlanningPage } from '@/pages/accounts/PaymentPlanning'
+import { CMSUploadPage } from '@/pages/accounts/CMSUpload'
 import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
 import { HelpGuidePage } from '@/pages/help/HelpGuide'
 import { Spinner } from '@/components/ui'
@@ -183,6 +185,8 @@ export const App: React.FC = () => {
             <Route path="reports/tds-payable" element={<TDSPayable />} />
             <Route path="reports/daily-summary" element={<DailySummaryPage />} />
             <Route path="accounts/cash-book" element={<CashBookPage />} />
+            <Route path="accounts/payment-planning" element={<PaymentPlanningPage />} />
+            <Route path="accounts/cms-upload" element={<CMSUploadPage />} />
             <Route path="accounts/invoices" element={<InvoiceRegister />} />
             <Route path="accounts/sales-invoices" element={<SalesInvoiceRegister />} />
             <Route path="accounts/invoice-series" element={<InvoiceSeriesPage />} />
