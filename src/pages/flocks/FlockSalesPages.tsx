@@ -2032,7 +2032,7 @@ export const MedicinePurchases: React.FC = () => {
 
   const { data: medicines } = useQuery({
     queryKey: ['medicines_all'],
-    queryFn: async () => { const{data}=await supabase.from('medicines_master').select('id,name,unit,rate').order('name'); return data??[] }
+    queryFn: async () => { const{data}=await supabase.from('medicines_master').select('id,name,unit,rate,type').order('name'); return data??[] }
   })
   const { data: farms } = useQuery({
     queryKey: ['farms_all'],

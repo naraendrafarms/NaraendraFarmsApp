@@ -326,7 +326,7 @@ export const PurchaseEntry: React.FC = () => {
             <Button icon={<Plus size={16} />} loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save Purchase</Button>
             <span className="text-xs text-gray-500">
               {form.category === 'Feed' && 'Files into Feed GRN + Pending Payments'}
-              {form.category === 'Medicine' && 'Files into Medicine Purchases + Pending Payments'}
+              {form.category === 'Medicine' && 'Files into GRN (Medicine) + Pending Payments'}
               {(form.category === 'Equipment' || form.category === 'Other') && 'Files into Pending Payments'}
               {form.payment_status === 'Paid' && form.account_type === 'Cash' && ' + Cash Book'}
             </span>

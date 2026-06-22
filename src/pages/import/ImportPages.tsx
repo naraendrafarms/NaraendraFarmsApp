@@ -918,6 +918,7 @@ export const ImportGRN: React.FC = () => {
         const ingredient_id = await getOrCreateIngredient(r.item_name ?? '')
         const { error } = await supabase.from('grn').insert({
           grn_no: r.grn_no, grn_date: r.grn_date,
+          category: 'Feed',
           farm_id, party_id, ingredient_id,
           item_name: r.item_name,
           invoice_no: r.invoice_no,
