@@ -1905,7 +1905,10 @@ export const NHESales: React.FC = () => {
             <Select label="Flock" required placeholder="— Select —" options={flockOptions}
               value={form.flock_id} onChange={e => sv('flock_id', e.target.value)} />
             <DateInput label="Sale Date" required value={form.sale_date} onChange={e => sv('sale_date', e.target.value)} />
-            <Select label="Sale Type" required options={NHE_TYPES} value={form.sale_type} onChange={e => sv('sale_type', e.target.value)} />
+            <Select label="Sale Type" required options={NHE_TYPES} value={form.sale_type} onChange={e => {
+              sv('sale_type', e.target.value)
+              if (isEggSale(e.target.value)) setNheLines([{ ...emptyNheLine(), sale_type: e.target.value }])
+            }} />
           </FormRow>
 
           {/* ── Invoice & GST (common) ── */}
