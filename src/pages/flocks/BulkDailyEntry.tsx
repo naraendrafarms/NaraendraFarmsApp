@@ -37,7 +37,7 @@ export const BulkDailyEntry: React.FC = () => {
       const { data } = await supabase
         .from('flocks')
         .select('id,flock_no,breed,status,farms(name,code)')
-        .eq('status', 'active')
+        .neq('status', 'closed')
         .order('flock_no', { ascending: true })
       return data ?? []
     }
