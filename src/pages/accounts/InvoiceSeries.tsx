@@ -22,7 +22,7 @@ export const InvoiceSeriesPage: React.FC = () => {
     mutationFn: async () => {
       const n = parseInt(val)
       if (isNaN(n) || n < 0) throw new Error('Enter a valid number')
-      const { error } = await supabase.from('invoice_series').update({ current_no: n }).eq('id', editing.id)
+      const { error } = await supabase.from('invoice_series').update({ current_no: n }).eq('code', editing.code)
       if (error) throw error
     },
     onSuccess: () => {
@@ -35,6 +35,12 @@ export const InvoiceSeriesPage: React.FC = () => {
 
   const open = (row: any) => { setEditing(row); setVal(row.current_no?.toString() ?? '0') }
 
+  // Build an invoice number from the template: replace {FY} and {N}
+  const buildNo = (row: any, n: number) =>
+    (row.template ?? `${row.code}/{N}`)
+      .replace('{FY}', row.fy ?? '')
+      .replace('{N}', String(n).padStart(row.pad ?? 0, '0'))
+
   return (
     <>
       <SectionHeader
@@ -45,17 +51,17 @@ export const InvoiceSeriesPage: React.FC = () => {
         <Card padding={false}>
           <Table>
             <thead><tr>
-              <Th>Code</Th><Th>Prefix</Th><Th>Description</Th>
+              <Th>Code</Th><Th>Description</Th><Th>FY</Th>
               <Th right>Current No</Th><Th right>Next Invoice</Th><Th></Th>
             </tr></thead>
             <tbody>
               {(data ?? []).map((r: any) => (
-                <tr key={r.id} className="hover:bg-gray-50">
+                <tr key={r.code} className="hover:bg-gray-50">
                   <Td><span className="font-mono font-bold text-brand-700">{r.code}</span></Td>
-                  <Td>{r.prefix ?? r.code}</Td>
-                  <Td>{r.description ?? '—'}</Td>
+                  <Td>{r.label ?? '—'}</Td>
+                  <Td className="text-xs">{r.fy ?? '—'}</Td>
                   <Td right>{r.current_no}</Td>
-                  <Td right className="font-semibold text-green-700">{(r.prefix ?? r.code)}{String(r.current_no + 1).padStart(r.pad_length ?? 0, '0')}</Td>
+                  <Td right className="font-semibold text-green-700">{buildNo(r, r.current_no + 1)}</Td>
                   <Td>
                     <button onClick={() => open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600">
                       <Edit2 size={13} />
@@ -74,7 +80,7 @@ export const InvoiceSeriesPage: React.FC = () => {
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>Update</Button>
         </>}>
         <p className="text-sm text-gray-600 mb-4">
-          Set <strong>current_no</strong> — the next invoice generated will be <strong>{editing?.code}{String(parseInt(val || '0') + 1).padStart(editing?.pad_length ?? 0, '0')}</strong>.
+          Set <strong>current_no</strong> — the next invoice generated will be <strong>{editing ? buildNo(editing, parseInt(val || '0') + 1) : ''}</strong>.
         </p>
         <Input label="Current No (last used)" type="number" value={val} onChange={e => setVal(e.target.value)} hint="Next invoice = this value + 1" />
         <p className="text-xs text-amber-700 bg-amber-50 rounded px-3 py-2 mt-3">
