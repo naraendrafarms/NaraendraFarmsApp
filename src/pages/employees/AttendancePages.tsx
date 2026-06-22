@@ -36,6 +36,8 @@ export const DailyAttendancePage: React.FC = () => {
   const qc = useQueryClient()
   const [date, setDate] = useState(todayStr())
   const [farmId, setFarmId] = useState('')
+  const [search, setSearch] = useState('')
+  const [genderFilter, setGenderFilter] = useState('')
   const [localStatus, setLocalStatus] = useState<Record<string, string>>({})
   const [localOT, setLocalOT] = useState<Record<string, number>>({})
   const [saving, setSaving] = useState(false)
@@ -51,12 +53,20 @@ export const DailyAttendancePage: React.FC = () => {
   const { data: employees } = useQuery({
     queryKey: ['employees_by_farm', farmId],
     queryFn: async () => {
-      let q = supabase.from('employees').select('id,name,emp_id,designation,farm_id')
+      let q = supabase.from('employees').select('id,name,emp_id,designation,farm_id,gender').eq('is_active', true)
       if (farmId) q = q.eq('farm_id', farmId)
-      const { data } = await q.order('name')
+      const { data } = await q.order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     },
     enabled: !!farmId
+  })
+
+  // Client-side search + gender filter
+  const q = search.trim().toLowerCase()
+  const visibleEmployees = (employees ?? []).filter((e: any) => {
+    if (q && !(`${e.name ?? ''} ${e.emp_id ?? ''} ${e.designation ?? ''}`.toLowerCase().includes(q))) return false
+    if (genderFilter && (e.gender ?? '') !== genderFilter) return false
+    return true
   })
 
   const empIds = employees?.map((e: any) => e.id) ?? []
@@ -91,9 +101,22 @@ export const DailyAttendancePage: React.FC = () => {
   }, [existing, employees])
 
   const markAll = (status: string) => {
-    const map: Record<string, string> = {}
-    for (const e of (employees ?? [])) map[e.id] = status
-    setLocalStatus(map)
+    setLocalStatus(prev => {
+      const map = { ...prev }
+      for (const e of visibleEmployees) map[e.id] = status
+      return map
+    })
+  }
+
+  const exportAttendance = () => {
+    exportCSV(`attendance_${date}.csv`,
+      ['emp_id','name','designation','gender','status','ot_hours'],
+      visibleEmployees.map((e:any)=>[
+        e.emp_id, e.name, e.designation, e.gender,
+        STATUS_LABELS[localStatus[e.id] ?? 'P'] ?? (localStatus[e.id] ?? 'P'),
+        localOT[e.id] ?? 0,
+      ])
+    )
   }
 
   const saveAll = async () => {
@@ -137,6 +160,16 @@ export const DailyAttendancePage: React.FC = () => {
           <DateInput value={date} onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
         </div>
+        {farmId && <>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name, ID…"
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-44 focus:outline-none focus:ring-1 focus:ring-brand-400"/>
+          </div>
+          <Select label="Gender" placeholder="All" options={[{value:'Male',label:'Male'},{value:'Female',label:'Female'},{value:'Other',label:'Other'}]}
+            value={genderFilter} onChange={e=>setGenderFilter(e.target.value)} className="w-32" />
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportAttendance}>Export</Button>
+        </>}
       </div>
 
       {farmId && employees && employees.length > 0 && (
@@ -173,7 +206,7 @@ export const DailyAttendancePage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {employees.map((e: any) => {
+                {visibleEmployees.map((e: any) => {
                   const cur = localStatus[e.id] ?? 'P'
                   const otVal = localOT[e.id] ?? 0
                   return (

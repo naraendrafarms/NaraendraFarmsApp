@@ -88,7 +88,7 @@ export const EmployeeList: React.FC = () => {
     queryFn: async () => {
       let q = supabase.from('employees')
         .select('*, farms(name,code)')
-        .order('name')
+        .order('emp_id', { ascending: true, nullsFirst: false })
       if (farmFilter) q = q.eq('farm_id', farmFilter)
       const { data } = await q
       return data ?? []
