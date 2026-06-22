@@ -140,8 +140,9 @@ export const EmployeeList: React.FC = () => {
         account_no: form.account_no || null, ifsc: form.ifsc || null,
         joining_date: form.joining_date || null, leaving_date: form.leaving_date || null,
         dob: form.dob || null, gender: form.gender || null,
-        mobile: form.mobile || null, esi_no: form.esi_no || null, pf_no: form.pf_no || null,
-        uan_no: form.uan_no || null,
+        mobile: form.mobile || null, esi_no: form.esi_no || null,
+        // UAN and PF No are merged into one — keep pf_no in sync for older reports
+        uan_no: form.uan_no || null, pf_no: form.uan_no || null,
         is_active: form.is_active === 'true',
         esi_applicable: form.esi_applicable === 'true',
         pf_applicable: form.pf_applicable === 'true',
@@ -208,8 +209,8 @@ export const EmployeeList: React.FC = () => {
       gender: r.gender || null,
       dob: r.dob || null,
       esi_no: r.esi_no || null,
-      pf_no: r.pf_no || null,
       uan_no: r.uan_no || null,
+      pf_no: r.uan_no || null,
       bank_name: r.bank_name || null,
       bank_branch: r.bank_branch || null,
       account_no: r.account_no || null,
@@ -234,8 +235,8 @@ export const EmployeeList: React.FC = () => {
 
   const downloadTemplate = () => {
     exportCSV('employees_template.csv',
-      ['emp_id','name','designation','department','farm_name','base_salary','increment','mobile','gender','dob','esi_no','pf_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
-      [['BPS4001','John Doe','Helper','Poultry','Farm Name Here','8000','0','9876543210','Male','1990-01-15','','','','SBI','Main Branch','123456789','SBIN0001234','2024-01-01','','Yes','Yes','No','Active']]
+      ['emp_id','name','designation','department','farm_name','base_salary','increment','mobile','gender','dob','esi_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
+      [['BPS4001','John Doe','Helper','Poultry','Farm Name Here','8000','0','9876543210','Male','1990-01-15','','','SBI','Main Branch','123456789','SBIN0001234','2024-01-01','','Yes','Yes','No','Active']]
     )
   }
 
@@ -386,8 +387,7 @@ export const EmployeeList: React.FC = () => {
           <Divider label="Statutory" />
           <FormRow>
             <Input label="ESI No" value={form.esi_no} onChange={e=>s('esi_no',e.target.value)} hint="Employee State Insurance No" />
-            <Input label="PF No" value={form.pf_no} onChange={e=>s('pf_no',e.target.value)} hint="Provident Fund No" />
-            <Input label="UAN No" value={form.uan_no} onChange={e=>s('uan_no',e.target.value)} hint="UAN for PF" />
+            <Input label="UAN / PF No" value={form.uan_no} onChange={e=>s('uan_no',e.target.value)} hint="Universal Account / PF Number" />
           </FormRow>
           <FormRow>
             <Select label="ESI Applicable" options={[{value:'true',label:'Yes'},{value:'false',label:'No'}]} value={form.esi_applicable} onChange={e=>s('esi_applicable',e.target.value)} />

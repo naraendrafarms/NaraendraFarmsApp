@@ -93,14 +93,14 @@ const Overview: React.FC = () => {
 const FlockShedAssign: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const [form, setForm] = useState({ flock_id:'', shed_id:'' })
+  const [flockId, setFlockId] = useState('')
+  const [shedIds, setShedIds] = useState<string[]>([])
 
   const { data: flocks, isLoading } = useQuery({
     queryKey: ['flocks_sheds'],
     queryFn: async () => {
       const{data}=await supabase.from('flocks')
-        .select('id,flock_no,status,current_shed_id,sheds(shed_no,shed_name,farms(name,code)),placement_date,breed')
+        .select('id,flock_no,status,current_shed_id,placement_date,breed')
         .order('flock_no')
       return data??[]
     }
@@ -112,64 +112,131 @@ const FlockShedAssign: React.FC = () => {
       return data??[]
     }
   })
+  // All flock→shed links (many-to-many)
+  const { data: links } = useQuery({
+    queryKey: ['flock_sheds_links'],
+    queryFn: async () => {
+      const{data}=await supabase.from('flock_sheds').select('flock_id,shed_id')
+      return data??[]
+    }
+  })
 
-  const selectedFlock = flocks?.find((f:any)=>f.id===form.flock_id)
-  const shedOptions = sheds?.map((s:any)=>({value:s.id,label:`${s.farms?.code} — Shed ${s.shed_no}${s.shed_name?' ('+s.shed_name+')':''}`}))??[]
+  const shedLabel = (id:string) => {
+    const s:any = sheds?.find((x:any)=>x.id===id)
+    return s ? `${s.farms?.code} — Shed ${s.shed_no}${s.shed_name?' ('+s.shed_name+')':''}` : '—'
+  }
+  const shedsForFlock = (fid:string) => (links??[]).filter((l:any)=>l.flock_id===fid).map((l:any)=>l.shed_id)
+
+  const openEdit = (f:any) => {
+    setFlockId(f.id)
+    setShedIds(shedsForFlock(f.id))
+    setShowForm(true)
+  }
+  const openNew = () => { setFlockId(''); setShedIds([]); setShowForm(true) }
+  const toggleShed = (id:string) =>
+    setShedIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id])
 
   const mut = useMutation({
     mutationFn: async () => {
-      if(!form.flock_id) throw new Error('Select a flock')
-      const{error}=await supabase.from('flocks').update({current_shed_id:form.shed_id||null}).eq('id',form.flock_id)
-      if(error)throw error
+      if(!flockId) throw new Error('Select a flock')
+      // Replace all links for this flock
+      const { error: delErr } = await supabase.from('flock_sheds').delete().eq('flock_id', flockId)
+      if(delErr) throw delErr
+      if(shedIds.length){
+        const rows = shedIds.map(sid => ({ flock_id: flockId, shed_id: sid }))
+        const { error: insErr } = await supabase.from('flock_sheds').insert(rows)
+        if(insErr) throw insErr
+      }
+      // Keep current_shed_id pointing at the first selected shed (backward compat)
+      const { error: updErr } = await supabase.from('flocks')
+        .update({ current_shed_id: shedIds[0] ?? null }).eq('id', flockId)
+      if(updErr) throw updErr
     },
-    onSuccess: ()=>{ toast.success('Shed assigned!'); qc.invalidateQueries({queryKey:['flocks_sheds']}); setShowForm(false) },
+    onSuccess: ()=>{
+      toast.success('Sheds updated!')
+      qc.invalidateQueries({queryKey:['flocks_sheds']})
+      qc.invalidateQueries({queryKey:['flock_sheds_links']})
+      setShowForm(false)
+    },
     onError: (e:any)=>toast.error(e.message)
   })
 
   const flockOptions = flocks?.map((f:any)=>({value:f.id,label:`Flock ${f.flock_no} (${f.status})`}))??[]
 
+  // Group sheds by farm for the picker
+  const shedsByFarm: Record<string, any[]> = {}
+  for(const s of (sheds??[])){
+    const farm = (s.farms as any)?.code ?? 'Other'
+    if(!shedsByFarm[farm]) shedsByFarm[farm]=[]
+    shedsByFarm[farm].push(s)
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">Assign each flock to its current shed location.</p>
-        <Button icon={<Plus size={16}/>} onClick={()=>{setForm({flock_id:'',shed_id:''});setShowForm(true)}}>Assign Shed</Button>
+        <p className="text-sm text-gray-500">Assign each flock to one or more sheds. A flock can span multiple sheds.</p>
+        <Button icon={<Plus size={16}/>} onClick={openNew}>Assign Sheds</Button>
       </div>
       {isLoading?<Spinner/>:(
         <Card padding={false}>
           <Table>
             <thead><tr>
-              <Th>Flock</Th><Th>Breed</Th><Th>Status</Th><Th>Placed</Th><Th>Current Shed</Th><Th></Th>
+              <Th>Flock</Th><Th>Breed</Th><Th>Status</Th><Th>Placed</Th><Th>Assigned Sheds</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {flocks?.map((f:any)=>(
+              {flocks?.map((f:any)=>{
+                const fSheds = shedsForFlock(f.id)
+                return (
                 <tr key={f.id} className="hover:bg-gray-50">
                   <Td><span className="font-bold text-brand-700">Flock {f.flock_no}</span></Td>
                   <Td className="text-xs">{f.breed??'—'}</Td>
-                  <Td><Badge color={f.status==='active'?'green':f.status==='closed'?'gray':'yellow'}>{f.status}</Badge></Td>
+                  <Td><Badge color={f.status==='laying'?'green':f.status==='closed'?'gray':'yellow'}>{f.status}</Badge></Td>
                   <Td className="text-xs">{f.placement_date??'—'}</Td>
                   <Td>
-                    {f.sheds
-                      ? <span className="font-medium text-green-700">{f.sheds.farms?.code} — Shed {f.sheds.shed_no}{f.sheds.shed_name?' ('+f.sheds.shed_name+')':''}</span>
+                    {fSheds.length
+                      ? <div className="flex flex-wrap gap-1">{fSheds.map((sid:string)=>(
+                          <span key={sid} className="text-xs font-medium text-green-700 bg-green-50 rounded px-1.5 py-0.5">{shedLabel(sid)}</span>
+                        ))}</div>
                       : <span className="text-orange-500 text-xs">Not assigned</span>}
                   </Td>
                   <Td>
-                    <button onClick={()=>{setForm({flock_id:f.id,shed_id:f.current_shed_id??''});setShowForm(true)}}
+                    <button onClick={()=>openEdit(f)}
                       className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600">
                       <Edit2 size={13}/>
                     </button>
                   </Td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </Table>
         </Card>
       )}
-      <Modal open={showForm} onClose={()=>setShowForm(false)} title="Assign Flock to Shed" size="sm"
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title="Assign Flock to Sheds" size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
-          <Select label="Flock" required placeholder="— Select flock —" options={flockOptions} value={form.flock_id} onChange={e=>setForm(f=>({...f,flock_id:e.target.value}))}/>
-          <Select label="Shed" placeholder="— Select shed —" options={shedOptions} value={form.shed_id} onChange={e=>setForm(f=>({...f,shed_id:e.target.value}))}/>
-          {!form.shed_id && <p className="text-xs text-gray-400">Leave blank to un-assign the shed.</p>}
+          <Select label="Flock" required placeholder="— Select flock —" options={flockOptions} value={flockId} onChange={e=>{setFlockId(e.target.value); setShedIds(shedsForFlock(e.target.value))}}/>
+          {flockId && (
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-2">Sheds <span className="text-gray-400">({shedIds.length} selected)</span></p>
+              <div className="max-h-72 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                {Object.entries(shedsByFarm).map(([farm, farmSheds])=>(
+                  <div key={farm} className="p-2">
+                    <p className="text-xs font-semibold text-brand-700 mb-1">{farm}</p>
+                    <div className="space-y-1">
+                      {farmSheds.map((s:any)=>(
+                        <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 rounded px-1 py-0.5">
+                          <input type="checkbox" checked={shedIds.includes(s.id)} onChange={()=>toggleShed(s.id)}
+                            className="rounded border-gray-300 text-brand-600"/>
+                          <span>Shed {s.shed_no}{s.shed_name?' ('+s.shed_name+')':''}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Tick all sheds this flock occupies. Untick all to un-assign.</p>
+            </div>
+          )}
         </div>
       </Modal>
     </div>
