@@ -131,7 +131,7 @@ const ReceivePaymentModal: React.FC<{
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Select label="Payment Mode" value={mode} onChange={e => setMode(e.target.value)}
-              options={['Cash','Bank Transfer','Cheque','UPI']} />
+              options={['Cash','NEFT','RTGS','Bank Transfer','UPI','Cheque']} />
             <DateInput label="Date Received" value={date} onChange={e => setDate(e.target.value)} />
           </div>
           {mode === 'Cash' && (
@@ -1217,7 +1217,7 @@ const EMPTY_NHE_FORM = {
   quantity: '', unit: 'nos', rate: '', amount: '',
   bird_sex: 'female', bird_category: 'cull',
   avg_weight_kg: '', total_weight_kg: '', rate_per_kg: '',
-  payment_cash: '', payment_online: '', cash_farm_id: 'ho',
+  payment_cash: '', payment_online: '', cash_farm_id: 'ho', bank_account_id: '',
   remarks: ''
 }
 
@@ -1418,8 +1418,9 @@ export const NHESales: React.FC = () => {
         payload.payment_status  = 'Received'
         payload.amount_received = cashAmt + onlineAmt
         payload.received_date   = form.sale_date
+        payload.bank_account_id = onlineAmt > 0 && form.bank_account_id ? form.bank_account_id : null
         payload.payment_mode    = cashAmt > 0 && onlineAmt === 0 ? 'Cash'
-          : cashAmt === 0 ? 'Bank Transfer' : 'Cash'
+          : cashAmt === 0 ? 'NEFT' : 'Cash+NEFT'
       }
       let savedId: string | null = null
       if (editing) {
@@ -1478,6 +1479,20 @@ export const NHESales: React.FC = () => {
           nhe_sale_id:  savedId,
         })
         if (cbErr) throw new Error('Sale saved, but Cash Book entry failed: ' + cbErr.message)
+      }
+      // Record bank/NEFT payment to bank_transactions
+      if (onlineAmt > 0 && form.bank_account_id && savedId) {
+        const party = parties?.find((p: any) => p.id === form.party_id)
+        const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
+        await supabase.from('bank_transactions').insert({
+          bank_account_id: form.bank_account_id,
+          txn_date: form.sale_date,
+          txn_type: 'Credit',
+          category: 'Sale Receipt',
+          reference_no: form.dc_no || form.invoice_no || null,
+          description: [`NHE Sale`, flockNo ? `F-${flockNo}` : '', party?.name ?? ''].filter(Boolean).join(' — '),
+          amount: onlineAmt,
+        })
       }
 
       // Auto-deduct bird sale qty from daily record cull counts
@@ -1566,6 +1581,7 @@ export const NHESales: React.FC = () => {
       payment_cash:    row.payment_cash ?? '',
       payment_online:  row.payment_online ?? '',
       cash_farm_id:    row.cash_farm_id ?? 'ho',
+      bank_account_id: row.bank_account_id ?? '',
       remarks: row.remarks ?? '',
       invoice_no: row.invoice_no ?? '',
       gst_pct: row.gst_pct != null ? String(row.gst_pct) : '0',
@@ -2109,6 +2125,14 @@ export const NHESales: React.FC = () => {
                         ...(farmsNhe ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` }))
                       ]} />
                     <p className="text-[10px] text-blue-600 mt-0.5">Cash Book entry will be created automatically</p>
+                  </div>
+                )}
+                {(parseFloat(form.payment_online)||0) > 0 && (
+                  <div>
+                    <Select label="Bank Account (NEFT/Online)" placeholder="— Select bank —"
+                      value={form.bank_account_id} onChange={e => sv('bank_account_id', e.target.value)}
+                      options={(bankAccounts ?? []).map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — '+b.account_name : ''}` }))} />
+                    <p className="text-[10px] text-blue-600 mt-0.5">Bank transaction entry will be created automatically</p>
                   </div>
                 )}
               </div>
