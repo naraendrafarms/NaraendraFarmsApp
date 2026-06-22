@@ -1186,6 +1186,7 @@ const NHE_TYPES = [
 // Legacy types kept for display backward-compat
 const LEGACY_BIRD_TYPES = ['bird_cull','bird_lame','bird_weak','bird_sex_error']
 const isBirdSale = (t: string) => t === 'bird_sale' || LEGACY_BIRD_TYPES.includes(t)
+const isEggSale  = (t: string) => ['je','te','be'].includes(t)
 
 function nheCashCategory(saleType: string): { category: string; label: string } {
   if (isBirdSale(saleType)) return { category: 'bird_sale',   label: 'Bird Sale' }
@@ -1220,6 +1221,9 @@ const EMPTY_NHE_FORM = {
   remarks: ''
 }
 
+type NheLine = { sale_type: string; quantity: string; unit: string; rate: string; amount: string }
+const emptyNheLine = (): NheLine => ({ sale_type: 'je', quantity: '', unit: 'nos', rate: '', amount: '' })
+
 export const NHESales: React.FC = () => {
   const qc = useQueryClient()
   const { applyFlockFarmFilter, farmId } = useFarmScope()
@@ -1235,6 +1239,7 @@ export const NHESales: React.FC = () => {
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [receiptSale, setReceiptSale] = useState<any>(null)
+  const [nheLines, setNheLines] = useState<NheLine[]>([emptyNheLine()])
 
   const { data: bankAccounts } = useQuery({
     queryKey: ['bank_accounts'],
@@ -1315,6 +1320,11 @@ export const NHESales: React.FC = () => {
     ? ((parseFloat(form.total_weight_kg)||0) * (parseFloat(form.rate_per_kg)||0))
     : ((parseFloat(form.quantity)||0) * (parseFloat(form.rate)||0))
 
+  const linesTotal = nheLines.reduce((sum, l) => {
+    const lineAmt = parseFloat(l.amount) || ((parseFloat(l.quantity)||0) * (parseFloat(l.rate)||0))
+    return sum + lineAmt
+  }, 0)
+
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
       // Fetch sale details BEFORE deleting so we can clean up unlinked cash_book entries
@@ -1360,7 +1370,8 @@ export const NHESales: React.FC = () => {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      const finalAmt = parseFloat(form.amount) || autoAmt
+      const egg = isEggSale(form.sale_type)
+      const finalAmt = egg ? linesTotal : (parseFloat(form.amount) || autoAmt)
       if (!form.flock_id || !form.sale_date || !finalAmt) throw new Error('Flock, date and amount required')
       const bird = isBirdSale(form.sale_type)
       const buyer = parties?.find((p: any) => p.id === form.party_id)
@@ -1374,14 +1385,16 @@ export const NHESales: React.FC = () => {
         if (invErr) throw invErr
         finalInvoiceNo = realInv as string
       }
+      // For egg sales: aggregate qty from lines, rate stored per-line
+      const eggTotalQty = egg ? nheLines.reduce((s, l) => s + (parseFloat(l.quantity)||0), 0) : null
       const payload: any = {
         flock_id: form.flock_id, sale_date: form.sale_date,
-        sale_type: bird ? 'bird_sale' : form.sale_type,
+        sale_type: bird ? 'bird_sale' : (egg ? (nheLines[0]?.sale_type ?? 'je') : form.sale_type),
         party_id: form.party_id || null, dc_no: form.dc_no || null,
         invoice_no: finalInvoiceNo,
-        quantity: parseFloat(form.quantity) || null,
+        quantity: egg ? (eggTotalQty || null) : (parseFloat(form.quantity) || null),
         unit: bird ? 'nos' : (form.unit || 'nos'),
-        rate: bird ? null : (parseFloat(form.rate) || null),
+        rate: (bird || egg) ? null : (parseFloat(form.rate) || null),
         amount: finalAmt,
         supply_type: nheSupply, gst_pct: gstPct, taxable_value: finalAmt,
         cgst_amount: tax.cgst, sgst_amount: tax.sgst, igst_amount: tax.igst,
@@ -1417,6 +1430,26 @@ export const NHESales: React.FC = () => {
         const { data: ins, error } = await supabase.from('nhe_sales').insert(payload).select('id').single()
         if (error) throw error
         savedId = ins?.id ?? null
+      }
+
+      // Save lines for egg-type sales
+      if (egg && savedId) {
+        await supabase.from('nhe_sale_lines').delete().eq('sale_id', savedId)
+        const linePayloads = nheLines
+          .filter(l => (parseFloat(l.quantity)||0) > 0 || (parseFloat(l.amount)||0) > 0)
+          .map(l => ({
+            sale_id: savedId,
+            sale_type: l.sale_type,
+            quantity: parseFloat(l.quantity) || null,
+            unit: l.unit || 'nos',
+            rate: parseFloat(l.rate) || null,
+            amount: parseFloat(l.amount) || ((parseFloat(l.quantity)||0)*(parseFloat(l.rate)||0)) || null,
+            gst_pct: gstPct,
+          }))
+        if (linePayloads.length > 0) {
+          const { error: lErr } = await supabase.from('nhe_sale_lines').insert(linePayloads)
+          if (lErr) throw lErr
+        }
       }
 
       // Auto-create/replace cash_book entry when cash received
@@ -1504,7 +1537,7 @@ export const NHESales: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['nhe_sales'] })
       qc.invalidateQueries({ queryKey: ['daily_record'] })
       qc.invalidateQueries({ queryKey: ['flock_daily'] })
-      setPeekInv(null); setShowForm(false); setEditing(null)
+      setPeekInv(null); setShowForm(false); setEditing(null); setNheLines([emptyNheLine()])
     },
     onError: (e: any) => toast.error(e.message)
   })
@@ -1513,6 +1546,7 @@ export const NHESales: React.FC = () => {
     setEditing(null)
     setPeekInv(null)
     setForm({ ...EMPTY_NHE_FORM, flock_id: flockFilter })
+    setNheLines([emptyNheLine()])
     setShowForm(true)
   }
   const openEdit = (row: any) => {
@@ -1532,8 +1566,36 @@ export const NHESales: React.FC = () => {
       payment_cash:    row.payment_cash ?? '',
       payment_online:  row.payment_online ?? '',
       cash_farm_id:    row.cash_farm_id ?? 'ho',
-      remarks: row.remarks ?? ''
+      remarks: row.remarks ?? '',
+      invoice_no: row.invoice_no ?? '',
+      gst_pct: row.gst_pct != null ? String(row.gst_pct) : '0',
     })
+    // Load lines from DB for egg-type sales
+    if (isEggSale(row.sale_type)) {
+      supabase.from('nhe_sale_lines').select('*').eq('sale_id', row.id).order('created_at')
+        .then(({ data }) => {
+          if (data && data.length > 0) {
+            setNheLines(data.map((l: any) => ({
+              sale_type: l.sale_type,
+              quantity: l.quantity?.toString() ?? '',
+              unit: l.unit ?? 'nos',
+              rate: l.rate?.toString() ?? '',
+              amount: l.amount?.toString() ?? '',
+            })))
+          } else {
+            // Legacy row without lines — prefill from header
+            setNheLines([{
+              sale_type: row.sale_type ?? 'je',
+              quantity: row.quantity?.toString() ?? '',
+              unit: row.unit ?? 'nos',
+              rate: row.rate?.toString() ?? '',
+              amount: row.amount?.toString() ?? '',
+            }])
+          }
+        })
+    } else {
+      setNheLines([emptyNheLine()])
+    }
     setShowForm(true)
   }
 
@@ -1834,9 +1896,9 @@ export const NHESales: React.FC = () => {
         onSaved={() => { setReceiptSale(null); qc.invalidateQueries({ queryKey: ['nhe_sales'] }) }}
       />
 
-      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }}
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}
         title={editing ? 'Edit NHE / Bird Sale' : 'Record NHE / Bird Sale'} size="lg"
-        footer={<><Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
+        footer={<><Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}>Cancel</Button>
           <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <FormRow>
@@ -1949,14 +2011,84 @@ export const NHESales: React.FC = () => {
                 </div>
                 <Input label="DC No" value={form.dc_no} onChange={e => sv('dc_no', e.target.value)} />
               </FormRow>
-              <FormRow cols={4}>
-                <Input label="Qty" type="number" value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
-                <Input label="Unit" value={form.unit} onChange={e => sv('unit', e.target.value)} />
-                <Input label="Rate (₹)" type="number" step="0.01" value={form.rate} onChange={e => sv('rate', e.target.value)} />
-                <Input label="Amount (₹)" required type="number" step="0.01" value={form.amount}
-                  onChange={e => sv('amount', e.target.value)}
-                  hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : undefined} />
-              </FormRow>
+
+              {/* ── Egg sale: multi-line table (JE / TE / BE) ── */}
+              {isEggSale(form.sale_type) ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-gray-700">Egg Lines</label>
+                    <Button size="sm" variant="ghost" onClick={() => setNheLines(l => [...l, emptyNheLine()])}>+ Add Line</Button>
+                  </div>
+                  <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-1 text-left text-xs font-medium text-gray-600">Type</th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-600">Qty (nos)</th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-600">Rate (₹)</th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-gray-600">Amount (₹)</th>
+                        <th className="px-2 py-1"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {nheLines.map((line, i) => {
+                        const lineAmt = (parseFloat(line.quantity)||0) * (parseFloat(line.rate)||0)
+                        return (
+                          <tr key={i} className="border-t border-gray-100">
+                            <td className="px-1 py-1">
+                              <select
+                                className="w-full text-xs border border-gray-200 rounded px-1 py-0.5"
+                                value={line.sale_type}
+                                onChange={e => setNheLines(ls => ls.map((l,j) => j===i ? {...l, sale_type: e.target.value} : l))}
+                              >
+                                <option value="je">JE – Jumbo</option>
+                                <option value="te">TE – Table</option>
+                                <option value="be">BE – Broken</option>
+                              </select>
+                            </td>
+                            <td className="px-1 py-1">
+                              <input type="number" className="w-full text-xs border border-gray-200 rounded px-1 py-0.5 text-right"
+                                value={line.quantity} placeholder="0"
+                                onChange={e => setNheLines(ls => ls.map((l,j) => j===i ? {...l, quantity: e.target.value, amount: ''} : l))} />
+                            </td>
+                            <td className="px-1 py-1">
+                              <input type="number" className="w-full text-xs border border-gray-200 rounded px-1 py-0.5 text-right"
+                                value={line.rate} placeholder="0.00"
+                                onChange={e => setNheLines(ls => ls.map((l,j) => j===i ? {...l, rate: e.target.value, amount: ''} : l))} />
+                            </td>
+                            <td className="px-1 py-1 text-right text-xs text-gray-700">
+                              {inr(parseFloat(line.amount) || lineAmt)}
+                            </td>
+                            <td className="px-1 py-1 text-center">
+                              {nheLines.length > 1 && (
+                                <button onClick={() => setNheLines(ls => ls.filter((_,j) => j!==i))}
+                                  className="text-red-400 hover:text-red-600 text-xs px-1">&#x2715;</button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t border-gray-200">
+                      <tr>
+                        <td className="px-2 py-1 text-xs font-semibold text-gray-700" colSpan={3}>Total</td>
+                        <td className="px-2 py-1 text-right text-xs font-semibold text-gray-900">{inr(linesTotal)}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ) : (
+                /* ── Non-egg, non-bird (manure, gas, other): single qty/rate/amount ── */
+                <FormRow cols={4}>
+                  <Input label="Qty" type="number" value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
+                  <Input label="Unit" value={form.unit} onChange={e => sv('unit', e.target.value)} />
+                  <Input label="Rate (₹)" type="number" step="0.01" value={form.rate} onChange={e => sv('rate', e.target.value)} />
+                  <Input label="Amount (₹)" required type="number" step="0.01" value={form.amount}
+                    onChange={e => sv('amount', e.target.value)}
+                    hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : undefined} />
+                </FormRow>
+              )}
+
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
                 <p className="text-xs font-semibold text-blue-700 uppercase">Payment</p>
                 <FormRow cols={2}>
