@@ -215,10 +215,13 @@ export const EmployeeList: React.FC = () => {
       account_no: r.account_no || null,
       ifsc: r.ifsc || null,
       joining_date: r.joining_date || null,
+      leaving_date: r.leaving_date || null,
       esi_applicable: toBool(r.esi_applicable),
       pf_applicable: toBool(r.pf_applicable),
       pt_applicable: toBool(r.pt_applicable),
-      is_active: r.is_active ? toBool(r.is_active) : true,
+      // status column: "Active" => active, anything else (Inactive/Left) => not active
+      is_active: r.status ? r.status.trim().toLowerCase() === 'active'
+               : (r.is_active ? toBool(r.is_active) : true),
     }))
 
     if (!toUpsert.length) { toast.error('No valid rows'); return }
@@ -231,8 +234,8 @@ export const EmployeeList: React.FC = () => {
 
   const downloadTemplate = () => {
     exportCSV('employees_template.csv',
-      ['emp_id','name','designation','department','farm_name','base_salary','increment','mobile','gender','dob','esi_no','pf_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','esi_applicable','pf_applicable','pt_applicable','is_active'],
-      [['BPS4001','John Doe','Helper','Poultry','Farm Name Here','8000','0','9876543210','Male','1990-01-15','','','','SBI','Main Branch','123456789','SBIN0001234','2024-01-01','Yes','Yes','No','Yes']]
+      ['emp_id','name','designation','department','farm_name','base_salary','increment','mobile','gender','dob','esi_no','pf_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
+      [['BPS4001','John Doe','Helper','Poultry','Farm Name Here','8000','0','9876543210','Male','1990-01-15','','','','SBI','Main Branch','123456789','SBIN0001234','2024-01-01','','Yes','Yes','No','Active']]
     )
   }
 
