@@ -522,7 +522,7 @@ export const PartiesMaster: React.FC = () => {
               <thead><tr>
                 <Th><CB checked={allSel} indeterminate={someSel&&!allSel} onChange={toggleAll}/></Th>
                 <Th>Name</Th><Th>Type</Th><Th>Category</Th><Th>Contact</Th>
-                <Th>GSTIN</Th><Th>Status</Th><Th></Th>
+                <Th>GSTIN</Th><Th>Address</Th><Th>Bank</Th><Th>Account No</Th><Th>IFSC</Th><Th>Status</Th><Th></Th>
               </tr></thead>
               <tbody>{data.map((r:any)=>(
                 <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-blue-50':''}`}>
@@ -532,6 +532,10 @@ export const PartiesMaster: React.FC = () => {
                   <Td>{r.category??'—'}</Td>
                   <Td>{r.contact??'—'}</Td>
                   <Td><span className="text-xs font-mono">{r.gstin??'—'}</span></Td>
+                  <Td className="text-xs">{r.address??'—'}</Td>
+                  <Td className="text-xs">{r.bank_name?`${r.bank_name}${r.branch?' / '+r.branch:''}`:'—'}</Td>
+                  <Td className="text-xs font-mono">{r.account_no??'—'}</Td>
+                  <Td className="text-xs font-mono">{r.ifsc??'—'}</Td>
                   <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
                   <Td>
                     <div className="flex gap-1">
