@@ -40,6 +40,7 @@ export const PurchaseEntry: React.FC = () => {
     grn_no: '', vehicle_no: '',
     qty: '', rate: '', gst_pct: '0',
     nature: 'purchase', is_rcm: false,
+    tds_pct: '0',
     payment_status: 'Pending', credit_limit: '', account_type: 'Online',
     remarks: '',
   })
@@ -52,7 +53,7 @@ export const PurchaseEntry: React.FC = () => {
   })
   const { data: suppliers } = useQuery({
     queryKey: ['parties_all'],
-    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name,credit_days,gstin,state_code,gst_type,is_rcm_default').order('name'); return data ?? [] },
+    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name,credit_days,gstin,state_code,gst_type,is_rcm_default,tds_pct_default').order('name'); return data ?? [] },
   })
   const { data: farms } = useQuery({
     queryKey: ['farms_all'],
@@ -82,9 +83,12 @@ export const PurchaseEntry: React.FC = () => {
   const supplierName = supplier?.name ?? ''
   const sType = supplyType(supplier?.state_code)               // 'intra' | 'inter'
   const taxSplit = splitTax(basic, gst, sType)                  // cgst/sgst/igst
+  const tdsPct = parseFloat(form.tds_pct) || 0
+  const tdsAmt = Math.round(basic * tdsPct / 100 * 100) / 100
+  const netPayable = Math.round((total - tdsAmt) * 100) / 100
   const pickSupplier = (id: string) => {
     const p = (suppliers ?? []).find((x: any) => x.id === id)
-    setForm(f => ({ ...f, supplier_id: id, is_rcm: p?.is_rcm_default ?? false }))
+    setForm(f => ({ ...f, supplier_id: id, is_rcm: p?.is_rcm_default ?? false, tds_pct: String(p?.tds_pct_default ?? 0) }))
   }
 
   const payBefore = useMemo(() => {
@@ -106,8 +110,9 @@ export const PurchaseEntry: React.FC = () => {
 
       // 1. Route to the category-specific table
       if (form.category === 'Feed') {
+        const feedGrnNo = form.grn_no || `GRN-${form.purchase_date}-${Date.now() % 100000}`
         const { error } = await supabase.from('grn').insert({
-          grn_no: form.grn_no || `GRN-${form.purchase_date}-${Date.now() % 100000}`,
+          grn_no: feedGrnNo,
           grn_date: form.purchase_date,
           farm_id: form.farm_id || null,
           party_id: form.supplier_id || null,
@@ -133,6 +138,14 @@ export const PurchaseEntry: React.FC = () => {
           remarks: form.remarks || null,
         })
         if (error) throw error
+        // If TDS applies, update the pending_payment created by the DB trigger
+        if (tdsPct > 0) {
+          await supabase.from('pending_payments').update({
+            tds_pct: tdsPct,
+            tds_amount: tdsAmt,
+            net_payable: netPayable,
+          }).eq('grn_no', feedGrnNo)
+        }
       } else if (form.category === 'Medicine') {
         const { error } = await supabase.from('grn').insert({
           grn_no: form.grn_no || `MED-${form.purchase_date.replace(/-/g,'')}-${Date.now()%100000}`,
@@ -174,6 +187,9 @@ export const PurchaseEntry: React.FC = () => {
           invoice_no: form.invoice_no || null,
           invoice_date: form.invoice_date || form.purchase_date,
           invoice_amount: total || null,
+          tds_pct: tdsPct || null,
+          tds_amount: tdsAmt > 0 ? tdsAmt : null,
+          net_payable: tdsAmt > 0 ? netPayable : (total || null),
           payment_status: form.payment_status,
           paid_date: form.payment_status === 'Paid' ? form.purchase_date : null,
           credit_limit: form.credit_limit ? Number(form.credit_limit) : null,
@@ -319,6 +335,19 @@ export const PurchaseEntry: React.FC = () => {
               options={['Online','Cash'].map(v => ({ value: v, label: v }))} />
             <Input label="Credit Days" type="number" value={form.credit_limit} onChange={e => s('credit_limit', e.target.value)} />
             <Input label="Pay Before" value={payBefore ? fmtDate(payBefore) : '—'} disabled />
+          </FormRow>
+          <FormRow cols={4}>
+            <Select label="TDS %" value={form.tds_pct} onChange={e => s('tds_pct', e.target.value)}
+              options={[
+                { value: '0',   label: '0% (None)' },
+                { value: '0.1', label: '0.1% (Goods)' },
+                { value: '1',   label: '1% (Contractor)' },
+                { value: '2',   label: '2% (Contractor)' },
+                { value: '5',   label: '5% (Rent/Commission)' },
+                { value: '10',  label: '10% (Professional)' },
+              ]} />
+            <Input label="TDS Amount" value={tdsPct > 0 ? inr(tdsAmt) : '—'} disabled hint={tdsPct > 0 ? `On basic ${inr(basic)}` : 'No TDS'} />
+            <Input label="Net Payable" value={total ? inr(netPayable) : '—'} disabled hint={tdsPct > 0 ? `After TDS deduction` : undefined} />
           </FormRow>
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
 

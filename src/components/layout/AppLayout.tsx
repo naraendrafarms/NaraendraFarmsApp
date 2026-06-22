@@ -103,6 +103,7 @@ const NAV: NavItem[] = [
       { label: 'Egg Stock Balance',      to: '/reports/egg-stock' },
       { label: 'Daily Summary',           to: '/reports/daily-summary' },
       { label: 'TDS Receivable',          to: '/reports/tds-receivable' },
+      { label: 'TDS Payable',             to: '/reports/tds-payable' },
     ]
   },
   {

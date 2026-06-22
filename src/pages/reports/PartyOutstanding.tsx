@@ -259,7 +259,7 @@ const CreditorsTab: React.FC = () => {
     const buckets: Record<string, number> = { 'Not Due': 0, '0-30d': 0, '31-60d': 0, '61-90d': 0, '90d+': 0 }
     for (const p of (payments ?? [])) {
       if (p.payment_status === 'Paid') continue
-      const b = agingBucket(p.due_date)
+      const b = agingBucket(p.pay_before_date)
       buckets[b] = (buckets[b] ?? 0) + (p.net_payable ?? p.invoice_amount ?? 0)
     }
     return buckets
@@ -284,8 +284,8 @@ const CreditorsTab: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(filtered.map((p: any) => ({
       'Vendor': p.vendor_name, 'Invoice No': p.invoice_no, 'Invoice Date': p.invoice_date,
       'Invoice Amount': p.invoice_amount, 'TDS': p.tds_amount, 'Net Payable': p.net_payable,
-      'Due Date': p.due_date, 'Status': p.payment_status,
-      'Days Overdue': daysOverdue(p.due_date) ?? 0
+      'Due Date': p.pay_before_date, 'Status': p.payment_status,
+      'Days Overdue': daysOverdue(p.pay_before_date) ?? 0
     })))
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Creditors')
@@ -366,7 +366,7 @@ const CreditorsTab: React.FC = () => {
           </thead>
           <tbody>
             {filtered.map((p: any) => {
-              const overdue = daysOverdue(p.due_date)
+              const overdue = daysOverdue(p.pay_before_date)
               const isOverdue = overdue !== null && p.payment_status !== 'Paid'
               return (
                 <tr key={p.id} className={`hover:bg-gray-50 ${isOverdue && overdue > 30 ? 'bg-red-50' : ''}`}>
@@ -376,7 +376,7 @@ const CreditorsTab: React.FC = () => {
                   <Td right>{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
                   <Td right className="text-orange-600 text-sm">{p.tds_amount ? inr(p.tds_amount) : '—'}</Td>
                   <Td right className="font-semibold">{p.net_payable ? inr(p.net_payable) : (p.invoice_amount ? inr(p.invoice_amount) : '—')}</Td>
-                  <Td className="text-sm">{p.due_date ? fmtDate(p.due_date) : '—'}</Td>
+                  <Td className="text-sm">{p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}</Td>
                   <Td><Badge color={statusColor(p.payment_status ?? 'Pending')}>{p.payment_status ?? 'Pending'}</Badge></Td>
                   <Td right className={isOverdue ? 'text-red-600 font-semibold text-sm' : 'text-gray-400 text-sm'}>
                     {isOverdue ? `${overdue}d` : '—'}

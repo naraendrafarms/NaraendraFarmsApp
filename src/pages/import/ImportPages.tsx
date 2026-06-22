@@ -814,6 +814,7 @@ export const ImportGRN: React.FC = () => {
             total_amount:   ['total_amount','totalamount','total','invoice_amount','invoiceamount','grandtotal','netamount','amount'],
             vehicle_no:     ['vehicle_no','vehicleno','vehicle','truckno'],
             remarks:        ['remarks','notes','comment'],
+            category:       ['category','type','item_type','stock_type'],
           }
           for (let ci = 0; ci < norm.length; ci++) {
             for (const [field, alts] of Object.entries(aliases)) {
@@ -840,6 +841,7 @@ export const ImportGRN: React.FC = () => {
         rows.push({
           grn_date: d ?? String(rawDate??'').trim(),
           grn_no: rawGrnNo ? String(rawGrnNo).trim() : `GRN-${d}`,
+          category: (() => { const c = String(get(row,'category',-1)??'').trim(); return ['Feed','Medicine','Vaccine','Packaging','Other'].includes(c) ? c : 'Feed' })(),
           farm_name: get(row, 'farm_name', 2) ? String(get(row,'farm_name',2)).trim() : null,
           party_name: get(row, 'party_name', 3) ? String(get(row,'party_name',3)).trim() : null,
           item_name: get(row, 'item_name', 4) ? String(get(row,'item_name',4)).trim() : null,
@@ -918,7 +920,7 @@ export const ImportGRN: React.FC = () => {
         const ingredient_id = await getOrCreateIngredient(r.item_name ?? '')
         const { error } = await supabase.from('grn').insert({
           grn_no: r.grn_no, grn_date: r.grn_date,
-          category: 'Feed',
+          category: r.category,
           farm_id, party_id, ingredient_id,
           item_name: r.item_name,
           invoice_no: r.invoice_no,
@@ -956,8 +958,9 @@ export const ImportGRN: React.FC = () => {
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
             <p className="font-medium mb-1">Accepted columns (header names detected automatically):</p>
-            <p>grn_no | grn_date | site_code | party_name | invoice_no | invoice_date | item_name | qty | unit | bags | price_per_unit | gst_pct | taxable_amount | tax_amount | total_amount | vehicle_no | remarks</p>
+            <p>grn_no | grn_date | category | site_code | party_name | invoice_no | invoice_date | item_name | qty | unit | bags | price_per_unit | gst_pct | taxable_amount | tax_amount | total_amount | vehicle_no | remarks</p>
             <p className="text-xs text-blue-500 mt-1">Amounts follow your invoice: taxable_amount + tax_amount = total_amount. All three are optional — fill what your invoice shows and the rest is calculated. Leave them blank to auto-calculate from qty × price + GST%.</p>
+            <p className="text-xs text-blue-500 mt-1">category: Feed (default) | Medicine | Vaccine | Packaging | Other</p>
           </div>
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 transition-all" onClick={()=>fileRef.current?.click()}>
             <FileSpreadsheet size={32} className="mx-auto text-gray-300 mb-2"/>

@@ -380,7 +380,7 @@ export const PartiesMaster: React.FC = () => {
   const [mergeKeepId,  setMergeKeepId]  = useState('')
   const [filterName,   setFilterName]   = useState('')
   const [filterType,   setFilterType]   = useState('')
-  const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false})
+  const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0'})
   const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
   // When GSTIN typed: auto-set registered + derive state code
@@ -402,14 +402,14 @@ export const PartiesMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
-    setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??'',gst_type:row.gst_type??'unregistered',state_code:row.state_code??'',is_rcm_default:row.is_rcm_default??false}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false})
+    setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??'',gst_type:row.gst_type??'unregistered',state_code:row.state_code??'',is_rcm_default:row.is_rcm_default??false,tds_pct_default:String(row.tds_pct_default??'0')}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0'})
     setShowForm(true)
   }
 
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.name)throw new Error('Name required')
-      const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null,gst_type:form.gst_type,state_code:form.state_code||null,is_rcm_default:form.is_rcm_default}
+      const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null,gst_type:form.gst_type,state_code:form.state_code||null,is_rcm_default:form.is_rcm_default,tds_pct_default:parseFloat(form.tds_pct_default)||0}
       if(editing){const{error}=await supabase.from('parties').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('parties').insert(p);if(error)throw error}
     },
@@ -611,6 +611,15 @@ export const PartiesMaster: React.FC = () => {
             <input type="checkbox" checked={form.is_rcm_default} onChange={e=>setForm(f=>({...f,is_rcm_default:e.target.checked}))} className="rounded text-brand-600" />
             Reverse Charge (RCM) applies to purchases from this party — e.g. rent / unregistered vendor
           </label>
+          <Select label="Default TDS Rate" value={form.tds_pct_default} onChange={e=>s('tds_pct_default',e.target.value)}
+            options={[
+              {value:'0',  label:'0% (None)'},
+              {value:'0.1',label:'0.1% (Goods)'},
+              {value:'1',  label:'1% (Contractor)'},
+              {value:'2',  label:'2% (Contractor)'},
+              {value:'5',  label:'5% (Rent/Commission)'},
+              {value:'10', label:'10% (Professional)'},
+            ]} />
         </div>
       </Modal>
     </>
