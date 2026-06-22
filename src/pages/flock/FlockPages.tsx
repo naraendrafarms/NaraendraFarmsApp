@@ -37,6 +37,16 @@ function pctFmt(v: number | null | undefined, decimals = 1) {
 
 const PAGE_SIZE = 50
 
+// Delete rows in batches so the request URL never gets too long (PostgREST/proxy
+// returns 400 Bad Request when an `id=in.(...)` URL has hundreds of UUIDs).
+async function chunkedDelete(table: string, ids: string[], chunkSize = 50) {
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const batch = ids.slice(i, i + chunkSize)
+    const { error } = await supabase.from(table).delete().in('id', batch)
+    if (error) throw error
+  }
+}
+
 function daysSince(dateStr: string): number {
   const d = new Date(dateStr)
   const now = new Date()
@@ -805,7 +815,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const bulkDelMut = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('daily_records').delete().in('id', ids) },
+    mutationFn: async (ids: string[]) => { await chunkedDelete('daily_records', ids) },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_records', flockId] }); qc.invalidateQueries({ queryKey: ['flock_daily_all', flockId] }); setSel(new Set()); setBulkConfirm(false) }
   })
 
@@ -1031,7 +1041,7 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const bulkDelMut = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('bird_transfers').delete().in('id', ids) },
+    mutationFn: async (ids: string[]) => { await chunkedDelete('bird_transfers', ids) },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setSel(new Set()); setBulkConfirm(false) }
   })
 
@@ -1190,7 +1200,7 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const bulkDelMutHE = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('he_dispatch').delete().in('id', ids) },
+    mutationFn: async (ids: string[]) => { await chunkedDelete('he_dispatch', ids) },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_he_dispatch', flockId] }); qc.invalidateQueries({ queryKey: ['flock_he_dispatch_all', flockId] }); setSel(new Set()); setBulkConfirm(false) }
   })
 
@@ -1378,10 +1388,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const bulkDelMutFeed = useMutation({
-    mutationFn: async (ids: string[]) => {
-      const { error } = await supabase.from('daily_feed').delete().in('id', ids)
-      if (error) throw error
-    },
+    mutationFn: async (ids: string[]) => { await chunkedDelete('daily_feed', ids) },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setSel(new Set()); setBulkConfirm(false) },
     onError: (e: any) => toast.error('Feed delete: ' + (e.details || e.hint || e.message))
   })
@@ -1622,7 +1629,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const bulkDelMutMed = useMutation({
-    mutationFn: async (ids: string[]) => { const { error } = await supabase.from('medicine_usage').delete().in('id', ids); if (error) throw error },
+    mutationFn: async (ids: string[]) => { await chunkedDelete('medicine_usage', ids) },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setSel(new Set()); setBulkConfirm(false) },
     onError: (e: any) => toast.error('Med delete: ' + (e.details || e.hint || e.message))
   })
@@ -1894,7 +1901,7 @@ const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const bulkDelMutSales = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('nhe_sales').delete().in('id', ids) },
+    mutationFn: async (ids: string[]) => { await chunkedDelete('nhe_sales', ids) },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_cull_sales', flockId] }); setSel(new Set()); setBulkConfirm(false) }
   })
 
