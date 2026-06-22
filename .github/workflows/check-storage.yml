@@ -1,0 +1,13 @@
+name: Check DB Storage
+on:
+  workflow_dispatch:
+
+jobs:
+  storage:
+    name: DB Storage Report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run storage check
+        run: python3 scripts/check_storage.py
+        env: { MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}", REF: kjliulgpipqqwptinrrd }
