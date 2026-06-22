@@ -1284,7 +1284,7 @@ export const NHESales: React.FC = () => {
   const { data: sales, isLoading } = useQuery({
     queryKey: ['nhe_sales', flockFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), bank_accounts(bank_name,account_name)')
+      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), bank_accounts(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount)')
         .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (fromDate) q = q.gte('sale_date', fromDate)
@@ -1839,11 +1839,23 @@ export const NHESales: React.FC = () => {
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
                   <Td className="text-xs">{fmtDate(s.sale_date)}</Td>
                   <Td className="text-xs">
-                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${isBirdSale(s.sale_type) ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>
-                      {isBirdSale(s.sale_type)
-                        ? `Birds — ${s.bird_category ?? (s.sale_type==='bird_sex_error'?'sex_error':s.sale_type.replace('bird_',''))} (${s.bird_sex ?? '?'})`
-                        : (NHE_TYPES.find(t => t.value === s.sale_type)?.label ?? s.sale_type)}
-                    </span>
+                    {isBirdSale(s.sale_type) ? (
+                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">
+                        Birds — {s.bird_category ?? (s.sale_type==='bird_sex_error'?'sex_error':s.sale_type.replace('bird_',''))} ({s.bird_sex ?? '?'})
+                      </span>
+                    ) : s.nhe_sale_lines?.length > 1 ? (
+                      <div className="space-y-0.5">
+                        {s.nhe_sale_lines.map((l: any, i: number) => (
+                          <div key={i} className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                            {l.sale_type.toUpperCase()} — {l.quantity?.toLocaleString('en-IN') ?? '?'} nos @ ₹{l.rate ?? '?'} = {inr(l.amount ?? 0)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                        {NHE_TYPES.find(t => t.value === s.sale_type)?.label ?? s.sale_type}
+                      </span>
+                    )}
                   </Td>
                   <Td className="text-xs text-gray-500">{s.parties?.name ?? '—'}</Td>
                   <Td right className="text-xs">{s.quantity != null ? s.quantity.toLocaleString('en-IN') : '—'}</Td>
@@ -1996,6 +2008,14 @@ export const NHESales: React.FC = () => {
                         ...(farmsNhe ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` }))
                       ]} />
                     <p className="text-[10px] text-blue-600 mt-0.5">Cash Book entry will be created automatically</p>
+                  </div>
+                )}
+                {(parseFloat(form.payment_online)||0) > 0 && (
+                  <div>
+                    <Select label="Bank Account (NEFT/Online)" placeholder="— Select bank —"
+                      value={form.bank_account_id} onChange={e => sv('bank_account_id', e.target.value)}
+                      options={(bankAccounts ?? []).map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — '+b.account_name : ''}` }))} />
+                    <p className="text-[10px] text-blue-600 mt-0.5">Bank transaction entry will be created automatically</p>
                   </div>
                 )}
                 <FormRow cols={3}>

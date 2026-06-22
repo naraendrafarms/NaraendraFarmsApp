@@ -122,7 +122,7 @@ export const FlockDetail: React.FC = () => {
     queryKey: ['flock_nhe', id],
     queryFn: async () => {
       const { data } = await supabase.from('nhe_sales')
-        .select('*').eq('flock_id', id!).order('sale_date', { ascending: false })
+        .select('*, nhe_sale_lines(sale_type,amount)').eq('flock_id', id!).order('sale_date', { ascending: false })
       return data ?? []
     }
   })
@@ -1232,9 +1232,16 @@ export const FlockDetail: React.FC = () => {
                     <td className="py-2 text-gray-500">HE Revenue</td>
                     <td className="py-2 text-right font-semibold text-green-700">{inr(heRevenue)}</td>
                   </tr>
-                  {/* NHE by type */}
+                  {/* NHE by type — use lines when available, else header sale_type */}
                   {Object.entries(nheSales?.reduce((acc: any, s: any) => {
-                    acc[s.sale_type] = (acc[s.sale_type] ?? 0) + s.amount; return acc
+                    if (s.nhe_sale_lines?.length > 0) {
+                      s.nhe_sale_lines.forEach((l: any) => {
+                        acc[l.sale_type] = (acc[l.sale_type] ?? 0) + (l.amount ?? 0)
+                      })
+                    } else {
+                      acc[s.sale_type] = (acc[s.sale_type] ?? 0) + (s.amount ?? 0)
+                    }
+                    return acc
                   }, {}) ?? {}).map(([type, amt]: any) => (
                     <tr key={type} className="border-b border-gray-50">
                       <td className="py-2 text-gray-500 pl-4">• {NHE_LABEL[type] ?? type}</td>
