@@ -1374,7 +1374,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setDeleteRow(null) },
-    onError: (e: any) => toast.error('Delete failed: ' + e.message)
+    onError: (e: any) => toast.error('Feed delete: ' + (e.details || e.hint || e.message))
   })
 
   const bulkDelMutFeed = useMutation({
@@ -1383,7 +1383,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setSel(new Set()); setBulkConfirm(false) },
-    onError: (e: any) => toast.error('Delete failed: ' + e.message)
+    onError: (e: any) => toast.error('Feed delete: ' + (e.details || e.hint || e.message))
   })
 
   const updateMut = useMutation({
@@ -1612,7 +1612,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const deleteMut = useMutation({
     mutationFn: async (id: string) => { const { error } = await supabase.from('medicine_usage').delete().eq('id', id); if (error) throw error },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setDeleteRow(null) },
-    onError: (e: any) => toast.error('Delete failed: ' + e.message)
+    onError: (e: any) => toast.error('Med delete: ' + (e.details || e.hint || e.message))
   })
 
   const updateMut = useMutation({
@@ -1624,7 +1624,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const bulkDelMutMed = useMutation({
     mutationFn: async (ids: string[]) => { const { error } = await supabase.from('medicine_usage').delete().in('id', ids); if (error) throw error },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setSel(new Set()); setBulkConfirm(false) },
-    onError: (e: any) => toast.error('Delete failed: ' + e.message)
+    onError: (e: any) => toast.error('Med delete: ' + (e.details || e.hint || e.message))
   })
 
   const getGrnRate = (name: string) => {
