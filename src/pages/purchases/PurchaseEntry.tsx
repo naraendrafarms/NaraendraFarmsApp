@@ -177,9 +177,9 @@ export const PurchaseEntry: React.FC = () => {
       // Equipment / Other: no stock table — tracked via Pending Payments below.
 
       // 2. Log to Pending Payments so every bill is in one place.
-      //    Feed goes through the grn -> pending_payments DB trigger, so only
-      //    raise the bill manually for non-Feed categories to avoid duplicates.
-      if (form.category !== 'Feed') {
+      //    Feed and Medicine go through the grn -> pending_payments DB trigger,
+      //    so only raise the bill manually for Equipment / Other.
+      if (form.category !== 'Feed' && form.category !== 'Medicine') {
         const { error: payErr } = await supabase.from('pending_payments').insert({
           vendor_name: supplierName,
           grn_no: form.grn_no || `${form.category.toUpperCase()}-${form.invoice_no || Date.now()}`,
@@ -366,7 +366,7 @@ export const PurchaseEntry: React.FC = () => {
             <Button icon={<Plus size={16} />} loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save Purchase</Button>
             <span className="text-xs text-gray-500">
               {form.category === 'Feed' && 'Files into Feed GRN + Pending Payments'}
-              {form.category === 'Medicine' && 'Files into GRN (Medicine) + Pending Payments'}
+              {form.category === 'Medicine' && 'Files into GRN (Medicine) — Pending Payment auto-created by DB trigger'}
               {(form.category === 'Equipment' || form.category === 'Other') && 'Files into Pending Payments'}
               {form.payment_status === 'Paid' && form.account_type === 'Cash' && ' + Cash Book'}
             </span>

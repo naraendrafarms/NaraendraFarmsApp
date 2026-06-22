@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
-import { Card, CardHeader, Button, DateInput, Spinner, Table, Th, Td, Badge, StatCard } from '@/components/ui'
-import { Download, IndianRupee, TrendingUp, TrendingDown, Clock } from 'lucide-react'
+import { Card, CardHeader, Button, DateInput, Input, Modal, Spinner, Table, Th, Td, Badge, StatCard } from '@/components/ui'
+import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
@@ -12,8 +12,11 @@ const COMPANY_ADDR1 = '5-9-22/21 , JVR Amrit Enclave, Roshanlal Residency ,'
 const COMPANY_ADDR2 = 'Adarsh Nagar , Hyderabad - 500063'
 
 export const PaymentPlanningPage: React.FC = () => {
+  const qc = useQueryClient()
   const [planDate, setPlanDate] = useState(today())
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [markPaidOpen, setMarkPaidOpen] = useState(false)
+  const [markPaidForm, setMarkPaidForm] = useState({ paid_date: today(), utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online' })
 
   // Kotak bank account balance (opening_balance + sum of credits - sum of debits)
   const { data: kotakBalance } = useQuery({
@@ -133,6 +136,31 @@ export const PaymentPlanningPage: React.FC = () => {
 
   const totalReceivable = (receivables ?? []).reduce((s, r) => s + r.amount, 0)
 
+  const markPaidMut = useMutation({
+    mutationFn: async () => {
+      const ids = Array.from(selected)
+      const disc = parseFloat(markPaidForm.discount_amount) || 0
+      for (let i = 0; i < ids.length; i += 50) {
+        const { error } = await supabase.from('pending_payments').update({
+          payment_status: 'Paid',
+          paid_date: markPaidForm.paid_date,
+          utr_no: markPaidForm.utr_no || null,
+          account_type: markPaidForm.account_type,
+          discount_amount: disc > 0 ? disc : null,
+          discount_reason: markPaidForm.discount_reason || null,
+        }).in('id', ids.slice(i, i + 50))
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      toast.success(`${selected.size} payment(s) marked as Paid`)
+      setSelected(new Set())
+      setMarkPaidOpen(false)
+      qc.invalidateQueries({ queryKey: ['pending_payments_plan'] })
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   const kotakBal = kotakBalance?.balance ?? 0
   const cashBal  = cashBalance ?? 0
   const balanceAfter = kotakBal - totalSelected
@@ -218,6 +246,11 @@ export const PaymentPlanningPage: React.FC = () => {
         action={
           <div className="flex items-center gap-3">
             <DateInput value={planDate} onChange={setPlanDate} />
+            {selected.size > 0 && (
+              <Button variant="secondary" icon={<CheckCircle size={16} />} onClick={() => { setMarkPaidForm({ paid_date: planDate, utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online' }); setMarkPaidOpen(true) }}>
+                Mark Paid ({selected.size})
+              </Button>
+            )}
             <Button icon={<Download size={16} />} onClick={exportCMS} disabled={selected.size === 0}>
               Export CMS ({selected.size})
             </Button>
@@ -367,6 +400,30 @@ export const PaymentPlanningPage: React.FC = () => {
           </div>
         )}
       </Card>
+      <Modal open={markPaidOpen} onClose={() => setMarkPaidOpen(false)} title={`Mark ${selected.size} Payment(s) as Paid`} size="sm"
+        footer={<>
+          <Button variant="secondary" onClick={() => setMarkPaidOpen(false)}>Cancel</Button>
+          <Button icon={<CheckCircle size={14}/>} loading={markPaidMut.isPending} onClick={() => markPaidMut.mutate()}>Confirm Payment</Button>
+        </>}>
+        <div className="space-y-3 text-sm">
+          <p className="text-gray-600">Total being marked paid: <strong className="text-green-700">{inr(totalSelected)}</strong></p>
+          <div className="grid grid-cols-2 gap-3">
+            <DateInput label="Paid Date" value={markPaidForm.paid_date} onChange={(e: any) => setMarkPaidForm(f => ({ ...f, paid_date: e.target.value }))} />
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Account Type</label>
+              <select value={markPaidForm.account_type} onChange={e => setMarkPaidForm(f => ({ ...f, account_type: e.target.value }))}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                {['Online','NEFT','RTGS','IMPS','Cash','Cheque'].map(a => <option key={a}>{a}</option>)}
+              </select>
+            </div>
+          </div>
+          <Input label="UTR / Reference No" value={markPaidForm.utr_no} onChange={e => setMarkPaidForm(f => ({ ...f, utr_no: e.target.value }))} placeholder="NEFT/RTGS UTR or bank reference" />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Discount / Deduction (₹)" type="number" value={markPaidForm.discount_amount} onChange={e => setMarkPaidForm(f => ({ ...f, discount_amount: e.target.value }))} hint="Applied equally across all selected" />
+            <Input label="Discount Reason" value={markPaidForm.discount_reason} onChange={e => setMarkPaidForm(f => ({ ...f, discount_reason: e.target.value }))} placeholder="Rate diff, short wt, etc." />
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
