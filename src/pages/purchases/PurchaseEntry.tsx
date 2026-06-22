@@ -182,11 +182,16 @@ export const PurchaseEntry: React.FC = () => {
       if (form.category !== 'Feed' && form.category !== 'Medicine') {
         const { error: payErr } = await supabase.from('pending_payments').insert({
           vendor_name: supplierName,
+          party_id: form.supplier_id || null,
           grn_no: form.grn_no || `${form.category.toUpperCase()}-${form.invoice_no || Date.now()}`,
           grn_date: form.purchase_date,
           invoice_no: form.invoice_no || null,
           invoice_date: form.invoice_date || form.purchase_date,
+          basic_amount: basic || null,
+          gst_pct: gst || 0,
+          gst_amount: gstAmt || null,
           invoice_amount: total || null,
+          category: form.category,
           tds_pct: tdsPct || null,
           tds_amount: tdsAmt > 0 ? tdsAmt : null,
           net_payable: tdsAmt > 0 ? netPayable : (total || null),

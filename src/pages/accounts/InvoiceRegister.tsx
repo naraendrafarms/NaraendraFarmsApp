@@ -97,6 +97,9 @@ export const InvoiceRegister: React.FC = () => {
       if (!form.invoice_no) throw new Error('Invoice No is required')
       if (!form.invoice_date) throw new Error('Invoice Date is required')
       if (!form.total_amount) throw new Error('Total Amount is required')
+      const total = parseFloat(form.total_amount)
+      const paidAmt = parseFloat(form.paid_amount) || 0
+      const payStatus = paidAmt >= total ? 'paid' : paidAmt > 0 ? 'partial' : form.payment_status
       const payload = {
         invoice_no:     form.invoice_no.trim(),
         invoice_date:   form.invoice_date,
@@ -108,9 +111,9 @@ export const InvoiceRegister: React.FC = () => {
         basic_amount:   parseFloat(form.basic_amount) || null,
         gst_pct:        parseFloat(form.gst_pct) || 0,
         gst_amount:     parseFloat(form.gst_amount) || null,
-        total_amount:   parseFloat(form.total_amount),
-        payment_status: form.payment_status,
-        paid_amount:    parseFloat(form.paid_amount) || 0,
+        total_amount:   total,
+        payment_status: payStatus,
+        paid_amount:    paidAmt,
         due_date:       form.due_date || null,
         remarks:        form.remarks || null,
       }
@@ -121,9 +124,34 @@ export const InvoiceRegister: React.FC = () => {
         const { error } = await supabase.from('supplier_invoices').insert(payload)
         if (error) throw error
       }
+
+      // Sync to pending_payments so this invoice appears in payment planning
+      const vendorName = form.supplier_name || (parties ?? []).find((p: any) => p.id === form.party_id)?.name || ''
+      if (vendorName) {
+        const ppStatus = payStatus === 'paid' ? 'Paid' : 'Pending'
+        const ppPayload = {
+          vendor_name:    vendorName,
+          party_id:       form.party_id || null,
+          invoice_no:     form.invoice_no.trim(),
+          invoice_date:   form.invoice_date,
+          basic_amount:   parseFloat(form.basic_amount) || null,
+          gst_pct:        parseFloat(form.gst_pct) || 0,
+          gst_amount:     parseFloat(form.gst_amount) || null,
+          invoice_amount: total,
+          paid_amount:    paidAmt,
+          net_payable:    total - paidAmt,
+          payment_status: ppStatus,
+          paid_date:      ppStatus === 'Paid' ? form.due_date || form.invoice_date : null,
+          pay_before_date: form.due_date || null,
+          category:       form.source_type,
+        }
+        await supabase.from('pending_payments')
+          .upsert(ppPayload, { onConflict: 'vendor_name,invoice_no', ignoreDuplicates: false })
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
       setForm({ ...EMPTY }); setEditId(null); setShowForm(false)
       toast.success(editId ? 'Invoice updated' : 'Invoice saved')
     },
@@ -132,13 +160,26 @@ export const InvoiceRegister: React.FC = () => {
 
   const markPaidMut = useMutation({
     mutationFn: async ({ id, amount, total }: { id: string; amount: number; total: number }) => {
+      const inv = (invoices ?? []).find((i: any) => i.id === id)
       const status = amount >= total ? 'paid' : amount > 0 ? 'partial' : 'unpaid'
       const { error } = await supabase.from('supplier_invoices')
         .update({ paid_amount: amount, payment_status: status }).eq('id', id)
       if (error) throw error
+      // Mirror to pending_payments
+      if (inv?.invoice_no) {
+        const vendorName = inv.party?.name ?? inv.supplier_name ?? ''
+        if (vendorName) {
+          await supabase.from('pending_payments').update({
+            paid_amount: amount,
+            payment_status: status === 'paid' ? 'Paid' : 'Pending',
+            paid_date: status === 'paid' ? today() : null,
+          }).eq('vendor_name', vendorName).eq('invoice_no', inv.invoice_no)
+        }
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
       setMarkPayId(null); setPayAmt('')
       toast.success('Payment updated')
     },

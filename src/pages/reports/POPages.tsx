@@ -166,6 +166,23 @@ const POTab: React.FC = () => {
   const rf = (k: string) => (e: any) => setReceiptForm((p: any) => ({...p,[k]:e.target.value}))
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
 
+  // Multi-line items for New PO
+  const emptyLine = () => ({ item_name:'', material_type:'', quantity:'', unit:'', rate:'', gst_pct:'', total_amount:'' })
+  const [newLines, setNewLines] = useState<any[]>([emptyLine()])
+  const setLine = (i: number, k: string, v: string) => setNewLines(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l))
+  const calcLineTotal = (i: number, k: string, v: string) => {
+    setNewLines(ls => ls.map((l, idx) => {
+      if (idx !== i) return l
+      const next = { ...l, [k]: v }
+      const qty = parseFloat(k==='quantity' ? v : next.quantity) || 0
+      const rate = parseFloat(k==='rate' ? v : next.rate) || 0
+      const gst = parseFloat(k==='gst_pct' ? v : next.gst_pct) || 0
+      const basic = qty * rate
+      next.total_amount = (basic + basic * gst / 100).toFixed(2)
+      return next
+    }))
+  }
+
   const { data: orders=[], isLoading } = useQuery({
     queryKey: ['purchase_orders', fy],
     queryFn: async () => {
@@ -175,25 +192,68 @@ const POTab: React.FC = () => {
     }
   })
 
+  const { data: poReceiptsSumRaw=[] } = useQuery({
+    queryKey: ['po_receipts_sum'],
+    queryFn: async () => {
+      const { data } = await supabase.from('po_receipts').select('po_id,qty_received')
+      return data ?? []
+    }
+  })
+  const receivedByPO = useMemo(() => {
+    const m: Record<string, number> = {}
+    poReceiptsSumRaw.forEach((r: any) => { m[r.po_id] = (m[r.po_id] ?? 0) + (r.qty_received ?? 0) })
+    return m
+  }, [poReceiptsSumRaw])
+
   const saveMut = useMutation({
     mutationFn: async () => {
-      const payload = {
-        po_no: form.po_no, po_date: form.po_date || null, fiscal_year: form.fiscal_year,
-        vendor_name: form.vendor_name, item_name: form.item_name || null,
-        material_type: form.material_type || null,
-        quantity: form.quantity ? Number(form.quantity) : null,
-        unit: form.unit || null,
-        rate: form.rate ? Number(form.rate) : null,
-        gst_pct: form.gst_pct ? Number(form.gst_pct) : null,
-        total_amount: form.total_amount ? Number(form.total_amount) : null,
-        grn_no: form.grn_no || null, grn_date: form.grn_date || null,
-        material_status: form.material_status,
-        credit_limit_days: form.credit_limit_days ? Number(form.credit_limit_days) : null,
+      if (!form.po_no) throw new Error('PO No is required')
+      if (!form.vendor_name) throw new Error('Vendor Name is required')
+      if (editing) {
+        // Single-row edit
+        const payload = {
+          po_no: form.po_no, po_date: form.po_date || null, fiscal_year: form.fiscal_year,
+          vendor_name: form.vendor_name, item_name: form.item_name || null,
+          material_type: form.material_type || null,
+          quantity: form.quantity ? Number(form.quantity) : null,
+          unit: form.unit || null,
+          rate: form.rate ? Number(form.rate) : null,
+          gst_pct: form.gst_pct ? Number(form.gst_pct) : null,
+          total_amount: form.total_amount ? Number(form.total_amount) : null,
+          grn_no: form.grn_no || null, grn_date: form.grn_date || null,
+          material_status: form.material_status,
+          credit_limit_days: form.credit_limit_days ? Number(form.credit_limit_days) : null,
+        }
+        const { error } = await supabase.from('purchase_orders').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        // Multi-line insert — one row per item in newLines
+        const validLines = newLines.filter(l => l.item_name || l.total_amount)
+        if (!validLines.length) throw new Error('Add at least one item')
+        const rows = validLines.map(l => ({
+          po_no: form.po_no, po_date: form.po_date || null, fiscal_year: form.fiscal_year,
+          vendor_name: form.vendor_name,
+          item_name: l.item_name || null,
+          material_type: l.material_type || null,
+          quantity: l.quantity ? Number(l.quantity) : null,
+          unit: l.unit || null,
+          rate: l.rate ? Number(l.rate) : null,
+          gst_pct: l.gst_pct ? Number(l.gst_pct) : null,
+          total_amount: l.total_amount ? Number(l.total_amount) : null,
+          material_status: form.material_status,
+          credit_limit_days: form.credit_limit_days ? Number(form.credit_limit_days) : null,
+        }))
+        const { error } = await supabase.from('purchase_orders').insert(rows)
+        if (error) throw error
       }
-      if (editing) await supabase.from('purchase_orders').update(payload).eq('id', editing.id)
-      else await supabase.from('purchase_orders').insert(payload)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); setOpen(false); toast.success('Saved') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] })
+      qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
+      setOpen(false)
+      setNewLines([emptyLine()])
+      toast.success('Saved')
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -219,33 +279,7 @@ const POTab: React.FC = () => {
       if (error) throw error
 
       // Auto-update PO status to Received
-      await supabase.from('purchase_orders').update({ material_status: 'Received', grn_date: receiptForm.receipt_date }).eq('id', receiptPO.id)
-
-      // Auto payment due date: pay_before_date = GRN date + credit_limit_days
-      if (receiptPO.credit_limit_days) {
-        const due = new Date(receiptForm.receipt_date + 'T00:00:00')
-        due.setDate(due.getDate() + receiptPO.credit_limit_days)
-        const payBeforeDate = due.toISOString().split('T')[0]
-        // Upsert pending_payment keyed on po_no + item_name
-        const { data: existing } = await supabase.from('pending_payments')
-          .select('id').eq('po_no', receiptPO.po_no).eq('vendor_name', receiptPO.vendor_name).limit(1)
-        if (existing && existing.length > 0) {
-          await supabase.from('pending_payments').update({ grn_date: receiptForm.receipt_date, pay_before_date: payBeforeDate })
-            .eq('id', existing[0].id)
-        } else {
-          await supabase.from('pending_payments').insert({
-            vendor_name:     receiptPO.vendor_name,
-            po_no:           receiptPO.po_no,
-            grn_date:        receiptForm.receipt_date,
-            invoice_no:      receiptForm.invoice_no || null,
-            invoice_amount:  receiptPO.total_amount ?? null,
-            payment_status:  'Pending',
-            credit_limit:    receiptPO.credit_limit_days,
-            pay_before_date: payBeforeDate,
-            payment_type:    receiptPO.material_type ?? null,
-          })
-        }
-      }
+      await supabase.from('purchase_orders').update({ material_status: 'Received', grn_date: receiptForm.receipt_date, payment_status: 'Pending' }).eq('id', receiptPO.id)
 
       // Auto-add vendor to parties master if not already present
       if (receiptPO.vendor_name) {
@@ -280,11 +314,11 @@ const POTab: React.FC = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase_orders'] })
       qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
-      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['po_receipts_sum'] })
       qc.invalidateQueries({ queryKey: ['parties'] })
       qc.invalidateQueries({ queryKey: ['feed_ingredients'] })
       setReceiptOpen(false)
-      toast.success('Stock received — payment due date set, vendor & item added to masters if new')
+      toast.success('Stock receipt recorded. Enter the supplier invoice via Purchase Entry to create the payment record.')
     },
     onError: (e: any) => toast.error(e.message),
   })
@@ -442,6 +476,8 @@ const POTab: React.FC = () => {
           const first = items[0]
           const isExpanded = expandedPOs.has(poKey)
           const groupTotal = items.reduce((s: number, o: any) => s + Number(o.total_amount ?? 0), 0)
+          const groupOrdered = items.reduce((s: number, o: any) => s + Number(o.quantity ?? 0), 0)
+          const groupReceived = items.reduce((s: number, o: any) => s + (receivedByPO[o.id] ?? 0), 0)
           const allItemsSelected = items.every((o: any) => selected.has(o.id))
           const toggleGroup = () => {
             const newSel = new Set(selected)
@@ -460,6 +496,11 @@ const POTab: React.FC = () => {
                 <span className="text-xs text-gray-500">{first.po_date ? fmtDate(first.po_date) : '—'}</span>
                 <span className="font-medium text-sm text-gray-800 flex-1 truncate">{first.vendor_name}</span>
                 <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+                {groupOrdered > 0 && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${groupReceived >= groupOrdered ? 'bg-green-100 text-green-700' : groupReceived > 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {groupReceived}/{groupOrdered} {items[0]?.unit ?? ''}
+                  </span>
+                )}
                 <span className="font-semibold text-sm text-gray-900">{inr(groupTotal)}</span>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[worstStatus] ?? 'bg-gray-100 text-gray-500'}`}>{worstStatus}</span>
                 <div className="flex gap-1" onClick={e => e.stopPropagation()}>
@@ -474,7 +515,7 @@ const POTab: React.FC = () => {
                   <Table>
                     <thead><tr>
                       <Th></Th>
-                      <Th>Item</Th><Th>Type</Th><Th right>Qty</Th><Th>Unit</Th>
+                      <Th>Item</Th><Th>Type</Th><Th right>Ordered</Th><Th right>Received</Th><Th>Unit</Th>
                       <Th right>Rate</Th><Th right>GST%</Th><Th right>Amount</Th>
                       <Th>GRN No</Th><Th>Status</Th><Th></Th>
                     </tr></thead>
@@ -485,6 +526,7 @@ const POTab: React.FC = () => {
                           <Td className="text-xs max-w-[160px] truncate">{o.item_name ?? '—'}</Td>
                           <Td><span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{o.material_type ?? '—'}</span></Td>
                           <Td right className="text-xs">{o.quantity != null ? Number(o.quantity).toLocaleString('en-IN') : '—'}</Td>
+                          <Td right className={`text-xs font-medium ${(receivedByPO[o.id] ?? 0) >= (o.quantity ?? 0) && o.quantity ? 'text-green-600' : (receivedByPO[o.id] ?? 0) > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>{receivedByPO[o.id] ? Number(receivedByPO[o.id]).toLocaleString('en-IN') : '—'}</Td>
                           <Td className="text-xs text-gray-500">{o.unit ?? '—'}</Td>
                           <Td right className="text-xs">{o.rate ? inr(o.rate) : '—'}</Td>
                           <Td right className="text-xs">{o.gst_pct != null ? `${o.gst_pct}%` : '—'}</Td>
@@ -513,34 +555,90 @@ const POTab: React.FC = () => {
       </div>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title={editing ? 'Edit Purchase Order' : 'New Purchase Order'} size="lg"
-        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
+      <Modal open={open} onClose={() => { setOpen(false); setNewLines([emptyLine()]) }} title={editing ? 'Edit Purchase Order Line' : 'New Purchase Order'} size="lg"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => { setOpen(false); setNewLines([emptyLine()]) }}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
         <div className="space-y-3">
+          {/* PO Header */}
           <div className="grid grid-cols-3 gap-3">
             <Input label="PO No *" value={form.po_no} onChange={f('po_no')} required />
             <DateInput label="PO Date" value={form.po_date} onChange={f('po_date')} />
             <Sel label="Fiscal Year" value={form.fiscal_year} onChange={f('fiscal_year')} options={FY_OPTIONS} />
           </div>
-          <Input label="Vendor Name *" value={form.vendor_name} onChange={f('vendor_name')} required />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Item Name" value={form.item_name} onChange={f('item_name')} />
-            <Sel label="Material Type" value={form.material_type} onChange={f('material_type')} options={[{value:'',label:'Select type'},...MAT_TYPES.map(t=>({value:t,label:t}))]} />
-          </div>
-          <div className="grid grid-cols-4 gap-3">
-            <Input label="Quantity" type="number" value={form.quantity} onChange={f('quantity')} />
-            <Input label="Unit" value={form.unit} onChange={f('unit')} placeholder="KG/Tons/Ltrs" />
-            <Input label="Rate (₹)" type="number" value={form.rate} onChange={f('rate')} />
-            <Input label="GST %" type="number" value={form.gst_pct} onChange={f('gst_pct')} />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <Input label="Total Amount (₹)" type="number" value={form.total_amount} onChange={f('total_amount')} />
-            <Input label="GRN No" value={form.grn_no} onChange={f('grn_no')} />
-            <DateInput label="GRN Date" value={form.grn_date} onChange={f('grn_date')} />
+            <Input label="Vendor Name *" value={form.vendor_name} onChange={f('vendor_name')} required />
+            <Input label="Credit Limit (days)" type="number" value={form.credit_limit_days} onChange={f('credit_limit_days')} placeholder="e.g. 30" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Sel label="Material Status" value={form.material_status} onChange={f('material_status')} options={MAT_STATUS.map(s=>({value:s,label:s}))} />
-            <Input label="Credit Limit (days)" type="number" value={form.credit_limit_days} onChange={f('credit_limit_days')} placeholder="e.g. 30" />
           </div>
+
+          {editing ? (
+            /* Single-line edit */
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Item Name" value={form.item_name} onChange={f('item_name')} />
+                <Sel label="Material Type" value={form.material_type} onChange={f('material_type')} options={[{value:'',label:'Select type'},...MAT_TYPES.map(t=>({value:t,label:t}))]} />
+              </div>
+              <div className="grid grid-cols-4 gap-3">
+                <Input label="Quantity" type="number" value={form.quantity} onChange={f('quantity')} />
+                <Input label="Unit" value={form.unit} onChange={f('unit')} placeholder="KG/Tons/Ltrs" />
+                <Input label="Rate (₹)" type="number" value={form.rate} onChange={f('rate')} />
+                <Input label="GST %" type="number" value={form.gst_pct} onChange={f('gst_pct')} />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <Input label="Total Amount (₹)" type="number" value={form.total_amount} onChange={f('total_amount')} />
+                <Input label="GRN No" value={form.grn_no} onChange={f('grn_no')} />
+                <DateInput label="GRN Date" value={form.grn_date} onChange={f('grn_date')} />
+              </div>
+            </>
+          ) : (
+            /* Multi-line items for new PO */
+            <div>
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Line Items</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-gray-50">
+                    <th className="text-left px-2 py-1 text-xs font-medium text-gray-600">Item</th>
+                    <th className="text-left px-2 py-1 text-xs font-medium text-gray-600">Type</th>
+                    <th className="px-2 py-1 text-xs font-medium text-gray-600">Qty</th>
+                    <th className="px-2 py-1 text-xs font-medium text-gray-600">Unit</th>
+                    <th className="px-2 py-1 text-xs font-medium text-gray-600">Rate</th>
+                    <th className="px-2 py-1 text-xs font-medium text-gray-600">GST%</th>
+                    <th className="px-2 py-1 text-xs font-medium text-gray-600">Total</th>
+                    <th className="w-6"></th>
+                  </tr></thead>
+                  <tbody>
+                    {newLines.map((l, i) => (
+                      <tr key={i} className="border-b border-gray-100">
+                        <td className="px-1 py-1"><input className="w-36 border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Item name" value={l.item_name} onChange={e => setLine(i,'item_name',e.target.value)} /></td>
+                        <td className="px-1 py-1">
+                          <select className="border border-gray-300 rounded px-1 py-1 text-xs" value={l.material_type} onChange={e => setLine(i,'material_type',e.target.value)}>
+                            <option value="">—</option>
+                            {MAT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-1 py-1"><input className="w-20 border border-gray-300 rounded px-2 py-1 text-xs text-right" type="number" placeholder="0" value={l.quantity} onChange={e => calcLineTotal(i,'quantity',e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className="w-16 border border-gray-300 rounded px-2 py-1 text-xs" placeholder="KG" value={l.unit} onChange={e => setLine(i,'unit',e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className="w-20 border border-gray-300 rounded px-2 py-1 text-xs text-right" type="number" placeholder="0" value={l.rate} onChange={e => calcLineTotal(i,'rate',e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className="w-16 border border-gray-300 rounded px-2 py-1 text-xs text-right" type="number" placeholder="0" value={l.gst_pct} onChange={e => calcLineTotal(i,'gst_pct',e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className="w-24 border border-gray-300 rounded px-2 py-1 text-xs text-right bg-gray-50" type="number" placeholder="0" value={l.total_amount} onChange={e => setLine(i,'total_amount',e.target.value)} /></td>
+                        <td className="px-1 py-1">
+                          {newLines.length > 1 && <button onClick={() => setNewLines(ls => ls.filter((_,idx)=>idx!==i))} className="text-red-400 hover:text-red-600 text-xs">✕</button>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button onClick={() => setNewLines(ls => [...ls, emptyLine()])}
+                className="mt-2 text-xs text-brand-600 hover:underline font-medium">+ Add Line Item</button>
+              {newLines.length > 0 && (
+                <div className="mt-1 text-xs text-gray-500 text-right">
+                  PO Total: <strong>{inr(newLines.reduce((s,l)=>s+(parseFloat(l.total_amount)||0),0))}</strong>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </Modal>
 
@@ -609,7 +707,7 @@ const POTab: React.FC = () => {
                 <Input label="Received By" value={receiptForm.received_by} onChange={rf('received_by')} />
                 <Input label="Remarks" value={receiptForm.remarks} onChange={rf('remarks')} />
               </div>
-              <p className="text-xs text-green-600">✓ PO status → Received · GRN date set · Payment due date auto-calculated</p>
+              <p className="text-xs text-green-600">✓ PO status → Received · GRN date recorded · Enter invoice via Purchase Entry to track payment</p>
             </div>
           )
         })()}
@@ -683,6 +781,7 @@ const EMPTY_PAY = {
   po_raised_by:'', payment_approved_by:'', remarks:'',
   tds_pct: '0', tds_amount: '0', net_payable: '',
   discount_amount: '0', discount_reason: '',
+  paid_amount: '0',
 }
 
 const PaymentsTab: React.FC = () => {
@@ -818,6 +917,7 @@ const PaymentsTab: React.FC = () => {
         net_payable: form.net_payable ? Number(form.net_payable) : null,
         discount_amount: form.discount_amount ? Number(form.discount_amount) : 0,
         discount_reason: form.discount_reason || null,
+        paid_amount: form.paid_amount ? Number(form.paid_amount) : 0,
       }
       if (editing) await supabase.from('pending_payments').update(payload).eq('id', editing.id)
       else await supabase.from('pending_payments').insert(payload)
@@ -1135,6 +1235,21 @@ const PaymentsTab: React.FC = () => {
           <div className="grid grid-cols-2 gap-3">
             <Input label="Discount / Deduction (₹)" type="number" value={form.discount_amount} onChange={f('discount_amount')} hint="Rate diff, short supply, quality deduction, etc." />
             <Input label="Discount Reason" value={form.discount_reason} onChange={f('discount_reason')} placeholder="e.g. Rate variance, short wt" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Amount Paid (₹)" type="number" value={form.paid_amount} onChange={(e:any) => {
+              const paid = Number(e.target.value) || 0
+              const net = Number(form.net_payable || form.invoice_amount) || 0
+              const disc = Number(form.discount_amount) || 0
+              const remaining = net - disc - paid
+              setForm((p:any) => ({
+                ...p,
+                paid_amount: e.target.value,
+                payment_status: paid >= (net - disc) && net > 0 ? 'Paid' : paid > 0 ? 'Pending' : p.payment_status,
+              }))
+            }} hint="Partial or full; auto-marks Paid when fully settled" />
+            <Input label="Remaining (₹)" disabled
+              value={(() => { const net = Number(form.net_payable || form.invoice_amount) || 0; const disc = Number(form.discount_amount) || 0; const paid = Number(form.paid_amount) || 0; return net > 0 ? inr(Math.max(0, net - disc - paid)) : '—' })()} />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <Sel label="Payment Status" value={form.payment_status} onChange={f('payment_status')} options={PAY_STATUS.map(s=>({value:s,label:s}))} />
