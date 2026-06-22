@@ -1513,17 +1513,34 @@ export const NHESales: React.FC = () => {
         const { category: cbCategory } = nheCashCategory(form.sale_type)
         const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
         const empName = employees?.find((e: any) => e.id === form.employee_id)?.name ?? ''
-        const saleMonth = form.sale_date.slice(0, 7) + '-01'
+        const saleMonth = form.sale_date.slice(0, 7)
+        const saleMonthFull = saleMonth + '-01'
         if (editing) {
           await supabase.from('employee_deductions').delete().eq('nhe_sale_id', editing.id)
+          // Also remove any existing employee_advances entry for this sale (by narration match)
+          await supabase.from('employee_advances')
+            .delete().eq('employee_id', form.employee_id)
+            .eq('advance_date', form.sale_date)
+            .eq('advance_type', 'other')
+            .like('narration', `%NHE Sale%F-${flockNo}%`)
         }
         await supabase.from('employee_deductions').insert({
           employee_id: form.employee_id,
           nhe_sale_id: savedId,
           description: `Sale F-${flockNo ?? ''} ${cbCategory} to ${empName}`,
           amount: finalAmt,
-          deduction_month: saleMonth,
+          deduction_month: saleMonthFull,
           status: 'pending',
+        })
+        // Also insert into employee_advances so it shows on the Advances page
+        // and is auto-picked up by salary auto-fill
+        await supabase.from('employee_advances').insert({
+          employee_id: form.employee_id,
+          advance_date: form.sale_date,
+          advance_type: 'other',
+          amount: finalAmt,
+          narration: `NHE Sale F-${flockNo ?? ''} ${cbCategory} (salary deduction)`,
+          salary_month: saleMonth,
         })
       }
 
