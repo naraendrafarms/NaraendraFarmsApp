@@ -51,6 +51,8 @@ import { EggStockPage } from '@/pages/reports/EggStock'
 import { TDSReceivable } from '@/pages/reports/TDSReceivable'
 import { TDSPayable } from '@/pages/reports/TDSPayable'
 import { CashBookPage } from '@/pages/accounts/CashBook'
+import { FlockPLSummary } from '@/pages/reports/FlockPLSummary'
+import { BankLedgerPage } from '@/pages/accounts/BankLedger'
 import { InvoiceRegister } from '@/pages/accounts/InvoiceRegister'
 import { SalesInvoiceRegister } from '@/pages/accounts/SalesInvoiceRegister'
 import { InvoiceSeriesPage } from '@/pages/accounts/InvoiceSeries'
@@ -185,6 +187,8 @@ export const App: React.FC = () => {
             <Route path="reports/tds-payable" element={<TDSPayable />} />
             <Route path="reports/daily-summary" element={<DailySummaryPage />} />
             <Route path="accounts/cash-book" element={<CashBookPage />} />
+            <Route path="accounts/bank-ledger" element={<BankLedgerPage />} />
+            <Route path="reports/flock-pl-summary" element={<FlockPLSummary />} />
             <Route path="accounts/payment-planning" element={<PaymentPlanningPage />} />
             <Route path="accounts/cms-upload" element={<CMSUploadPage />} />
             <Route path="accounts/invoices" element={<InvoiceRegister />} />
