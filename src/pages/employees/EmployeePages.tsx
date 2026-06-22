@@ -6,7 +6,7 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3 } from 'lucide-react'
+import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3, Search } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 import { useAuth, can } from '@/lib/auth'
@@ -65,6 +65,10 @@ export const EmployeeList: React.FC = () => {
   const [showForm,    setShowForm]    = useState(false)
   const [editing,     setEditing]     = useState<any>(null)
   const [farmFilter,  setFarmFilter]  = useState('')
+  const [search,      setSearch]      = useState('')
+  const [genderFilter,setGenderFilter]= useState('')
+  const [desigFilter, setDesigFilter] = useState('')
+  const [statusFilter,setStatusFilter]= useState('')
   const [sel,         setSel]         = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [mergeOpen,   setMergeOpen]   = useState(false)
@@ -240,17 +244,43 @@ export const EmployeeList: React.FC = () => {
     )
   }
 
-  const allEmpIds = (employees??[]).map((e:any)=>e.id)
   const toggle = (id:string) => setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
   const farmOptions = farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
-  const byFarm = employees?.reduce((acc:any,e:any)=>{ const k=e.farms?.name||'Unknown'; (acc[k]??=[]).push(e); return acc; },{})??{}
+
+  // Client-side filtering: search + gender + designation + status
+  const q = search.trim().toLowerCase()
+  const filteredEmps = (employees??[]).filter((e:any)=>{
+    if (q && !(`${e.name??''} ${e.emp_id??''} ${e.mobile??''} ${e.designation??''} ${e.department??''}`.toLowerCase().includes(q))) return false
+    if (genderFilter && (e.gender??'')!==genderFilter) return false
+    if (desigFilter && (e.designation??'')!==desigFilter) return false
+    if (statusFilter==='active' && !e.is_active) return false
+    if (statusFilter==='left' && e.is_active) return false
+    return true
+  })
+  const byFarm = filteredEmps.reduce((acc:any,e:any)=>{ const k=e.farms?.name||'Unknown'; (acc[k]??=[]).push(e); return acc; },{})
+  const designationsInData = Array.from(new Set((employees??[]).map((e:any)=>e.designation).filter(Boolean))) as string[]
+
+  const exportEmployees = () => {
+    exportCSV(`employees_${new Date().toISOString().slice(0,10)}.csv`,
+      ['emp_id','name','designation','department','site','gender','dob','mobile','base_salary','increment','esi_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
+      filteredEmps.map((e:any)=>[
+        e.emp_id, e.name, e.designation, e.department, e.farms?.name,
+        e.gender, e.dob, e.mobile, e.base_salary, e.increment,
+        e.esi_no, e.uan_no, e.bank_name, e.bank_branch, e.account_no, e.ifsc,
+        e.joining_date, e.leaving_date,
+        e.esi_applicable?'Yes':'No', e.pf_applicable?'Yes':'No', e.pt_applicable?'Yes':'No',
+        e.is_active?'Active':'Left',
+      ])
+    )
+  }
 
   return (
     <div className="space-y-5">
       <SectionHeader title="Employees"
         subtitle={`${employees?.length??0} total employees`}
         action={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportEmployees}>Export</Button>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={downloadTemplate}>Template</Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
             <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportCSV}/>
@@ -258,10 +288,23 @@ export const EmployeeList: React.FC = () => {
           </div>
         }
       />
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap items-end">
+        <div className="relative">
+          <Search size={15} className="absolute left-2.5 top-2.5 text-gray-400"/>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, ID, mobile…"
+            className="pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg w-60 focus:outline-none focus:ring-1 focus:ring-brand-400"/>
+        </div>
         <Select label="" placeholder="All Sites" options={farmOptions} value={farmFilter}
-          onChange={e=>setFarmFilter(e.target.value)} className="w-52" />
-        {farmFilter && <Button variant="ghost" size="sm" onClick={()=>setFarmFilter('')}>Clear</Button>}
+          onChange={e=>setFarmFilter(e.target.value)} className="w-44" />
+        <Select label="" placeholder="All Genders" options={[{value:'Male',label:'Male'},{value:'Female',label:'Female'},{value:'Other',label:'Other'}]}
+          value={genderFilter} onChange={e=>setGenderFilter(e.target.value)} className="w-36" />
+        <Select label="" placeholder="All Designations" options={designationsInData.map(d=>({value:d,label:d}))}
+          value={desigFilter} onChange={e=>setDesigFilter(e.target.value)} className="w-44" />
+        <Select label="" placeholder="All Status" options={[{value:'active',label:'Active'},{value:'left',label:'Left / Inactive'}]}
+          value={statusFilter} onChange={e=>setStatusFilter(e.target.value)} className="w-36" />
+        {(farmFilter||search||genderFilter||desigFilter||statusFilter) &&
+          <Button variant="ghost" size="sm" onClick={()=>{setFarmFilter('');setSearch('');setGenderFilter('');setDesigFilter('');setStatusFilter('')}}>Clear</Button>}
+        <span className="text-xs text-gray-400 ml-auto self-center">{filteredEmps.length} shown</span>
       </div>
       <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
         onMerge={()=>{ const first=[...sel][0]; setMergeKeepId(first); setMergeOpen(true) }} />
@@ -280,7 +323,7 @@ export const EmployeeList: React.FC = () => {
             <Table>
               <thead><tr>
                 <Th><CB checked={farmAllSel} indeterminate={farmSomeSel&&!farmAllSel} onChange={toggleFarm}/></Th>
-                <Th>Emp ID</Th><Th>Name</Th><Th>Designation</Th>
+                <Th>Emp ID</Th><Th>Name</Th><Th>Designation</Th><Th>Dept</Th><Th>Gender</Th><Th>Mobile</Th>
                 <Th right>Basic Salary</Th><Th right>Increment</Th>
                 <Th>Bank</Th><Th>ESI/PF</Th><Th>Status</Th><Th></Th>
               </tr></thead>
@@ -290,6 +333,9 @@ export const EmployeeList: React.FC = () => {
                   <Td className="text-xs text-gray-400">{e.emp_id??'—'}</Td>
                   <Td><span className="font-medium">{e.name}</span></Td>
                   <Td className="text-xs">{e.designation??'—'}</Td>
+                  <Td className="text-xs">{e.department??'—'}</Td>
+                  <Td className="text-xs">{e.gender??'—'}</Td>
+                  <Td className="text-xs">{e.mobile??'—'}</Td>
                   <Td right>{e.base_salary?inr(e.base_salary):'—'}</Td>
                   <Td right className="text-xs">{e.increment?inr(e.increment):'—'}</Td>
                   <Td className="text-xs">{e.bank_name??'—'}</Td>
@@ -300,7 +346,12 @@ export const EmployeeList: React.FC = () => {
                     {!e.esi_applicable&&!e.pf_applicable&&!e.pt_applicable&&<span className="text-gray-300">—</span>}
                   </Td>
                   <Td><Badge color={e.is_active?'green':'gray'}>{e.is_active?'Active':'Left'}</Badge></Td>
-                  <Td><button onClick={()=>openEdit(e)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={()=>openEdit(e)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                      <button onClick={()=>{setSel(new Set([e.id]));setBulkConfirm(true)}} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}</tbody>
             </Table>
