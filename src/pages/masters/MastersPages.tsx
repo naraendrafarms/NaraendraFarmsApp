@@ -380,7 +380,7 @@ export const PartiesMaster: React.FC = () => {
   const [mergeKeepId,  setMergeKeepId]  = useState('')
   const [filterName,   setFilterName]   = useState('')
   const [filterType,   setFilterType]   = useState('')
-  const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0'})
+  const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0',bank_name:'',branch:'',account_no:'',ifsc:''})
   const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
   // When GSTIN typed: auto-set registered + derive state code
@@ -402,14 +402,14 @@ export const PartiesMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
-    setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??'',gst_type:row.gst_type??'unregistered',state_code:row.state_code??'',is_rcm_default:row.is_rcm_default??false,tds_pct_default:String(row.tds_pct_default??'0')}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0'})
+    setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??'',gst_type:row.gst_type??'unregistered',state_code:row.state_code??'',is_rcm_default:row.is_rcm_default??false,tds_pct_default:String(row.tds_pct_default??'0'),bank_name:row.bank_name??'',branch:row.branch??'',account_no:row.account_no??'',ifsc:row.ifsc??''}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0',bank_name:'',branch:'',account_no:'',ifsc:''})
     setShowForm(true)
   }
 
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.name)throw new Error('Name required')
-      const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null,gst_type:form.gst_type,state_code:form.state_code||null,is_rcm_default:form.is_rcm_default,tds_pct_default:parseFloat(form.tds_pct_default)||0}
+      const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null,gst_type:form.gst_type,state_code:form.state_code||null,is_rcm_default:form.is_rcm_default,tds_pct_default:parseFloat(form.tds_pct_default)||0,bank_name:form.bank_name||null,branch:form.branch||null,account_no:form.account_no||null,ifsc:form.ifsc||null}
       if(editing){const{error}=await supabase.from('parties').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('parties').insert(p);if(error)throw error}
     },
@@ -472,8 +472,8 @@ export const PartiesMaster: React.FC = () => {
 
   const handleExportParties = () => {
     exportCSV('parties.csv',
-      ['name','type','category','contact','address','gstin'],
-      (allData??[]).map((r:any)=>[r.name,r.type,r.category,r.contact,r.address,r.gstin])
+      ['name','type','category','contact','address','gstin','bank_name','branch','account_no','ifsc'],
+      (allData??[]).map((r:any)=>[r.name,r.type,r.category,r.contact,r.address,r.gstin,r.bank_name,r.branch,r.account_no,r.ifsc])
     )
   }
 
@@ -484,7 +484,7 @@ export const PartiesMaster: React.FC = () => {
       name: r.name.trim(), type: r.type||'supplier',
       category: r.category||null, contact: r.contact||null,
       address: r.address||null, gstin: r.gstin||null,
-      bank_name: r.bank_name||null, account_no: r.account_no||null, ifsc: r.ifsc||null,
+      bank_name: r.bank_name||null, branch: r.branch||null, account_no: r.account_no||null, ifsc: r.ifsc||null,
     }))
     if (!toUpsert.length) { toast.error('No valid rows'); return }
     // ignoreDuplicates:false = UPDATE existing records with new GST/address/bank details
@@ -501,7 +501,7 @@ export const PartiesMaster: React.FC = () => {
         <SectionHeader title="Parties" subtitle="Buyers and suppliers"
           action={
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('parties_template.csv',['name','type','category','contact','address','gstin','bank_name','account_no','ifsc'],[['NBF Feeds Ltd','supplier','Feed Supplier','9876543210','Chennai','29ABCDE1234F1Z5','SBI','1234567890','SBIN0001234']])}>Template</Button>
+              <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('parties_template.csv',['name','type','category','contact','address','gstin','bank_name','branch','account_no','ifsc'],[['NBF Feeds Ltd','supplier','Feed Supplier','9876543210','Chennai','29ABCDE1234F1Z5','SBI','Main Branch','1234567890','SBIN0001234']])}>Template</Button>
               <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
               <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImportParties(f)}}/>
               <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportParties}>Export CSV</Button>
@@ -620,6 +620,15 @@ export const PartiesMaster: React.FC = () => {
               {value:'5',  label:'5% (Rent/Commission)'},
               {value:'10', label:'10% (Professional)'},
             ]} />
+          <Divider label="Bank Details (for payments / CMS)" />
+          <FormRow>
+            <Input label="Bank Name" value={form.bank_name} onChange={e=>s('bank_name',e.target.value)} hint="e.g. SBI, Kotak" />
+            <Input label="Branch" value={form.branch} onChange={e=>s('branch',e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="Account No" value={form.account_no} onChange={e=>s('account_no',e.target.value)} />
+            <Input label="IFSC Code" value={form.ifsc} onChange={e=>s('ifsc',e.target.value)} hint="e.g. SBIN0001234" />
+          </FormRow>
         </div>
       </Modal>
     </>
