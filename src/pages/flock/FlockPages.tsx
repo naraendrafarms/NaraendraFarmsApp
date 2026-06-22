@@ -1610,18 +1610,21 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const deleteMut = useMutation({
-    mutationFn: async (id: string) => { await supabase.from('medicine_usage').delete().eq('id', id) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setDeleteRow(null) }
+    mutationFn: async (id: string) => { const { error } = await supabase.from('medicine_usage').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setDeleteRow(null) },
+    onError: (e: any) => toast.error('Delete failed: ' + e.message)
   })
 
   const updateMut = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('medicine_usage').update(data).eq('id', id) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setEditRow(null) }
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { const { error } = await supabase.from('medicine_usage').update(data).eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setEditRow(null) },
+    onError: (e: any) => toast.error('Update failed: ' + e.message)
   })
 
   const bulkDelMutMed = useMutation({
-    mutationFn: async (ids: string[]) => { await supabase.from('medicine_usage').delete().in('id', ids) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+    mutationFn: async (ids: string[]) => { const { error } = await supabase.from('medicine_usage').delete().in('id', ids); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setSel(new Set()); setBulkConfirm(false) },
+    onError: (e: any) => toast.error('Delete failed: ' + e.message)
   })
 
   const getGrnRate = (name: string) => {
