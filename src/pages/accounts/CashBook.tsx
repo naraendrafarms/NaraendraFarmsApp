@@ -53,7 +53,8 @@ const TYPE_ROW_STYLE: Record<string, string> = {
   contra:  'border-l-4 border-l-blue-400',
 }
 
-const obKey = (loc: string) => loc ? `cash_opening_balance_${loc}` : 'cash_opening_balance'
+// Opening balance is keyed by location: '' (all) → 'all', 'ho', or a farm UUID
+const obKey = (loc: string) => loc || 'all'
 
 // ── Checkbox component ────────────────────────────────────────────────────────
 
@@ -111,19 +112,21 @@ export const CashBookPage: React.FC = () => {
   // Party name search (client-side text search)
   const [filterParty, setFilterParty] = useState('')
 
-  // Opening balance (localStorage, per-location)
-  const [openingBalance, setOpeningBalance] = useState<number>(() => {
-    const v = localStorage.getItem(obKey(''))
-    return v ? parseFloat(v) : 0
-  })
+  // Opening balance (server-side, per-location) — see migration 135
   const [editingOB, setEditingOB] = useState(false)
   const [obInput, setObInput] = useState('')
 
-  // Reload opening balance when location changes
-  React.useEffect(() => {
-    const v = localStorage.getItem(obKey(filterLocation))
-    setOpeningBalance(v ? parseFloat(v) : 0)
-  }, [filterLocation])
+  const { data: openingRows } = useQuery({
+    queryKey: ['cash_book_opening'],
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_book_opening').select('location_key,balance')
+      return data ?? []
+    }
+  })
+  const openingBalance = useMemo(() => {
+    const row = (openingRows ?? []).find((r: any) => r.location_key === obKey(filterLocation))
+    return row ? Number(row.balance) : 0
+  }, [openingRows, filterLocation])
 
   // Internal Transfer modal
   const [showTransfer, setShowTransfer] = useState(false)
@@ -320,13 +323,25 @@ export const CashBookPage: React.FC = () => {
     setShowForm(true)
   }
 
+  const obMut = useMutation({
+    mutationFn: async (v: number) => {
+      const { error } = await supabase.from('cash_book_opening')
+        .upsert({ location_key: obKey(filterLocation), balance: v, updated_at: new Date().toISOString() },
+                { onConflict: 'location_key' })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cash_book_opening'] })
+      setEditingOB(false)
+      toast.success('Opening balance saved')
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
   const saveOpeningBalance = () => {
     const v = parseFloat(obInput)
     if (isNaN(v)) { toast.error('Enter a valid number'); return }
-    localStorage.setItem(obKey(filterLocation), String(v))
-    setOpeningBalance(v)
-    setEditingOB(false)
-    toast.success('Opening balance saved')
+    obMut.mutate(v)
   }
 
   const handleTransfer = async () => {
@@ -475,7 +490,7 @@ export const CashBookPage: React.FC = () => {
                   className="text-xs text-brand-600 hover:underline">Edit</button>
               </div>
             )}
-            <p className="text-xs text-gray-400 mt-0.5">Stored locally in your browser</p>
+            <p className="text-xs text-gray-400 mt-0.5">Saved on the server — shared across devices &amp; users</p>
           </div>
         </div>
       </Card>
