@@ -93,6 +93,7 @@ const NAV: NavItem[] = [
     label: 'Reports', icon: <BarChart2 size={18}/>,
     children: [
       { label: 'Flock P&L (Full)',      to: '/reports/pl' },
+      { label: 'Flock P&L Summary',    to: '/reports/flock-pl-summary' },
       { label: 'Company P&L',           to: '/reports/company-pl' },
       { label: 'Party Outstanding',     to: '/reports/party-outstanding' },
       { label: 'GST Reports',           to: '/reports/gst' },
@@ -111,6 +112,7 @@ const NAV: NavItem[] = [
     label: 'Accounts', icon: <BarChart2 size={18}/>,
     children: [
       { label: 'Cash Book', to: '/accounts/cash-book' },
+      { label: 'Bank Ledger', to: '/accounts/bank-ledger' },
       { label: 'Daily Payment Planning', to: '/accounts/payment-planning' },
       { label: 'CMS Upload', to: '/accounts/cms-upload' },
       { label: 'Sales Invoice Register', to: '/accounts/sales-invoices' },
