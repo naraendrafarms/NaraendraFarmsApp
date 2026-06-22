@@ -616,6 +616,19 @@ export const SalaryEntryPage: React.FC = () => {
     }
   })
 
+  const {data:pendingDeductions}=useQuery({
+    queryKey:['employee_deductions_pending',selectedMonth],
+    enabled:!!selectedMonth,
+    queryFn:async()=>{
+      const{data}=await supabase.from('employee_deductions')
+        .select('employee_id,amount').eq('status','pending')
+        .eq('deduction_month',selectedMonth)
+      const agg:Record<string,number>={}
+      for(const r of(data??[])) agg[r.employee_id]=(agg[r.employee_id]??0)+(r.amount??0)
+      return agg
+    }
+  })
+
   const autoFillFromAttendance = async () => {
     if (!form.employee_id || !form.month) { toast.error('Select employee and month first'); return }
     const [yr, mn] = form.month.split('-')
@@ -718,8 +731,15 @@ export const SalaryEntryPage: React.FC = () => {
         is_paid:form.is_paid==='true',
         remarks:form.remarks||null,
       }
-      const{error}=await supabase.from('salary_monthly').upsert(payload,{onConflict:'employee_id,month'})
+      const{data:upserted,error}=await supabase.from('salary_monthly').upsert(payload,{onConflict:'employee_id,month'}).select('id').single()
       if(error)throw error
+      // When marking as paid: auto-deduct pending employee_deductions for this employee+month
+      if(payload.is_paid && upserted?.id){
+        await supabase.from('employee_deductions')
+          .update({status:'deducted',deducted_at:(payload as any).paid_date??new Date().toISOString().slice(0,10),salary_monthly_id:upserted.id})
+          .eq('employee_id',payload.employee_id).eq('deduction_month',payload.month).eq('status','pending')
+        qc.invalidateQueries({queryKey:['employee_deductions_pending']})
+      }
     },
     onSuccess:()=>{toast.success('Salary saved!');qc.invalidateQueries({queryKey:['salary_monthly_detail','salary_fy_summary']});setShowForm(false);setEditingId(null)},
     onError:(e:any)=>toast.error(e.message)
@@ -899,10 +919,12 @@ export const SalaryEntryPage: React.FC = () => {
               <thead><tr>
                 <Th>Employee</Th><Th>Site</Th><Th right>Days</Th>
                 <Th right>Gross</Th><Th right>ESI</Th><Th right>PF</Th><Th right>PT</Th>
-                <Th right>Advance</Th><Th right>TDS</Th><Th right>Net Salary</Th><Th>Paid</Th><Th></Th>
+                <Th right>Advance</Th><Th right>TDS</Th><Th right>Deductions</Th><Th right>Net Salary</Th><Th>Paid</Th><Th></Th>
               </tr></thead>
               <tbody>
-                {salaries?.map((r:any)=>(
+                {salaries?.map((r:any)=>{
+                  const empDed=(pendingDeductions??{})[r.employee_id]??0
+                  return(
                   <tr key={r.id} className="hover:bg-gray-50">
                     <Td><span className="font-medium">{r.employees?.name}</span><span className="text-xs text-gray-400 ml-1">{r.employees?.emp_id}</span></Td>
                     <Td className="text-xs">{r.employees?.farms?.name??'HO/Others'}</Td>
@@ -913,6 +935,7 @@ export const SalaryEntryPage: React.FC = () => {
                     <Td right className="text-xs">{r.pt>0?inr(r.pt):'—'}</Td>
                     <Td right className="text-orange-600">{r.advance>0?inr(r.advance):'—'}</Td>
                     <Td right>{r.tds>0?inr(r.tds):'—'}</Td>
+                    <Td right className={empDed>0?'text-purple-700 font-medium':'text-gray-300'}>{empDed>0?inr(empDed):'—'}</Td>
                     <Td right className="font-semibold text-green-700">{inr(r.net_salary)}</Td>
                     <Td><Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge></Td>
                     <Td>
@@ -922,7 +945,7 @@ export const SalaryEntryPage: React.FC = () => {
                       </div>
                     </Td>
                   </tr>
-                ))}
+                )})}
                 {salaries && salaries.length>0 && (
                   <tr className="bg-gray-50 font-semibold">
                     <Td colSpan={3}>Total ({salaries.length} employees)</Td>
@@ -932,6 +955,7 @@ export const SalaryEntryPage: React.FC = () => {
                     <Td right>{inr(salaries.reduce((s:number,r:any)=>s+(r.pt??0),0))}</Td>
                     <Td right className="text-orange-600">{inr(salaries.reduce((s:number,r:any)=>s+(r.advance??0),0))}</Td>
                     <Td right>{inr(salaries.reduce((s:number,r:any)=>s+(r.tds??0),0))}</Td>
+                    <Td right className="text-purple-700">{inr(Object.values(pendingDeductions??{}).reduce((s:number,v:any)=>s+v,0))}</Td>
                     <Td right className="text-green-700">{inr(salaries.reduce((s:number,r:any)=>s+(r.net_salary??0),0))}</Td>
                     <Td colSpan={2}></Td>
                   </tr>

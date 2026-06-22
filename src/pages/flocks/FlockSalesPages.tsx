@@ -1218,7 +1218,8 @@ const EMPTY_NHE_FORM = {
   bird_sex: 'female', bird_category: 'cull',
   avg_weight_kg: '', total_weight_kg: '', rate_per_kg: '',
   payment_cash: '', payment_online: '', cash_farm_id: 'ho', bank_account_id: '',
-  remarks: ''
+  remarks: '',
+  is_employee_sale: false, employee_id: '', deduct_salary: false,
 }
 
 type NheLine = { sale_type: string; quantity: string; unit: string; rate: string; amount: string }
@@ -1262,6 +1263,11 @@ export const NHESales: React.FC = () => {
   const { data: parties } = useQuery({
     queryKey: ['parties_buyers'],
     queryFn: async () => { const { data } = await supabase.from('parties').select('id,name,state_code,gstin').order('name'); return data ?? [] }
+  })
+
+  const { data: employees } = useQuery({
+    queryKey: ['employees_active'],
+    queryFn: async () => { const { data } = await supabase.from('employees').select('id,name,emp_id').eq('is_active', true).order('name'); return data ?? [] }
   })
 
   const [invSeries, setInvSeries] = useState('NHE')
@@ -1406,6 +1412,8 @@ export const NHESales: React.FC = () => {
         buyer_gstin: buyer?.gstin || null,
         remarks: form.remarks || null,
         vehicle_no: form.vehicle_no || null,
+        is_employee_sale: form.is_employee_sale || false,
+        employee_id: form.is_employee_sale && form.employee_id ? form.employee_id : null,
       }
       const cashAmt   = parseFloat(form.payment_cash)   || 0
       const onlineAmt = parseFloat(form.payment_online) || 0
@@ -1500,6 +1508,25 @@ export const NHESales: React.FC = () => {
         })
       }
 
+      // Create employee deduction record when sale is on salary deduction
+      if (form.is_employee_sale && form.deduct_salary && form.employee_id && savedId) {
+        const { category: cbCategory } = nheCashCategory(form.sale_type)
+        const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
+        const empName = employees?.find((e: any) => e.id === form.employee_id)?.name ?? ''
+        const saleMonth = form.sale_date.slice(0, 7) + '-01'
+        if (editing) {
+          await supabase.from('employee_deductions').delete().eq('nhe_sale_id', editing.id)
+        }
+        await supabase.from('employee_deductions').insert({
+          employee_id: form.employee_id,
+          nhe_sale_id: savedId,
+          description: `Sale F-${flockNo ?? ''} ${cbCategory} to ${empName}`,
+          amount: finalAmt,
+          deduction_month: saleMonth,
+          status: 'pending',
+        })
+      }
+
       // Auto-deduct bird sale qty from daily record cull counts
       if (bird) {
         const qty = parseFloat(form.quantity) || 0
@@ -1590,6 +1617,9 @@ export const NHESales: React.FC = () => {
       remarks: row.remarks ?? '',
       invoice_no: row.invoice_no ?? '',
       gst_pct: row.gst_pct != null ? String(row.gst_pct) : '0',
+      is_employee_sale: row.is_employee_sale ?? false,
+      employee_id: row.employee_id ?? '',
+      deduct_salary: false,
     })
     // Load lines from DB for egg-type sales
     if (isEggSale(row.sale_type)) {
@@ -2169,6 +2199,34 @@ export const NHESales: React.FC = () => {
           )}
 
           <Input label="Remarks" value={form.remarks} onChange={e => sv('remarks', e.target.value)} />
+
+          {/* Employee Sale Section */}
+          <div className="border border-purple-200 bg-purple-50 rounded-lg p-3 space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={!!form.is_employee_sale}
+                onChange={e => setForm((f: any) => ({ ...f, is_employee_sale: e.target.checked, employee_id: '', deduct_salary: false }))}
+                className="rounded border-gray-300 text-purple-600" />
+              <span className="text-sm font-semibold text-purple-800">Sold to Employee</span>
+            </label>
+            {form.is_employee_sale && (
+              <div className="space-y-2">
+                <Select label="Employee" required placeholder="— Select employee —"
+                  value={form.employee_id} onChange={e => sv('employee_id', e.target.value)}
+                  options={(employees ?? []).map((e: any) => ({ value: e.id, label: `${e.name}${e.emp_id ? ' ('+e.emp_id+')' : ''}` }))} />
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={!!form.deduct_salary}
+                    onChange={e => setForm((f: any) => ({ ...f, deduct_salary: e.target.checked }))}
+                    className="rounded border-gray-300 text-purple-600" />
+                  <span className="text-sm text-purple-700">Deduct from salary (unpaid — add to salary deduction)</span>
+                </label>
+                {form.deduct_salary && (
+                  <p className="text-xs text-purple-600 bg-purple-100 rounded px-2 py-1">
+                    Amount will be added to employee's pending deductions for {form.sale_date?.slice(0,7)} salary
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </Modal>
     </div>
