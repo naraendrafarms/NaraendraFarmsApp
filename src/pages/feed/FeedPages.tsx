@@ -81,6 +81,7 @@ export const GRNEntry: React.FC = () => {
   // Filters
   const [fFarm,    setFFarm]    = useState('')
   const [fParties, setFParties] = useState<string[]>([])
+  const [fCat,     setFCat]     = useState('')
   const [fItem,    setFItem]    = useState('')
   const [fFrom,    setFFrom]    = useState('')
   const [fTo,      setFTo]      = useState('')
@@ -88,6 +89,7 @@ export const GRNEntry: React.FC = () => {
   const { data: farms } = useQuery({ queryKey: ['farms'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
   const { data: parties } = useQuery({ queryKey: ['parties_supp'], queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type',['supplier','both']).order('name'); return data ?? [] } })
   const { data: ingredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,code,name').eq('is_active',true).order('name'); return data ?? [] } })
+  const { data: medicines } = useQuery({ queryKey: ['medicines_master'], queryFn: async () => { const { data } = await supabase.from('medicines_master').select('id,name,type,unit').eq('is_active',true).order('name'); return data ?? [] } })
 
   const { data: allGrns, isLoading } = useQuery({
     queryKey: ['grns'],
@@ -113,6 +115,7 @@ export const GRNEntry: React.FC = () => {
   const grns = (allGrns ?? []).filter((g: any) => {
     if (fFarm && g.farm_id !== fFarm) return false
     if (fParties.length > 0 && !fParties.includes(g.party_id)) return false
+    if (fCat && (g.category ?? 'Feed') !== fCat) return false
     if (fItem) {
       const name = (g.feed_ingredients?.name ?? g.item_name ?? '').toLowerCase()
       if (!name.includes(fItem.toLowerCase())) return false
@@ -133,9 +136,10 @@ export const GRNEntry: React.FC = () => {
 
   const [form, setForm] = useState({
     grn_no: '', grn_date: today(), farm_id: '', party_id: '', invoice_no: '',
-    invoice_date: today(), ingredient_id: '', item_name: '', qty: '', unit: 'kg',
+    invoice_date: today(), category: 'Feed', ingredient_id: '', medicine_id: '',
+    item_name: '', qty: '', unit: 'kg',
     bags: '', price_per_unit: '', basic_amount: '', gst_pct: '0', total_amount: '',
-    vehicle_no: '', remarks: ''
+    batch_no: '', expiry_date: '', vehicle_no: '', remarks: ''
   })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
@@ -143,17 +147,26 @@ export const GRNEntry: React.FC = () => {
   const gstAmt = basic * (parseFloat(form.gst_pct)||0) / 100
   const total  = basic + gstAmt
 
+  const isFeed = form.category === 'Feed'
+  const isMedOrVax = form.category === 'Medicine' || form.category === 'Vaccine'
+
   const payload = () => ({
     grn_no: form.grn_no, grn_date: form.grn_date,
     farm_id: form.farm_id, party_id: form.party_id || null,
     invoice_no: form.invoice_no || null, invoice_date: form.invoice_date || null,
-    ingredient_id: form.ingredient_id || null, item_name: form.item_name || null,
+    category: form.category,
+    ingredient_id: isFeed ? (form.ingredient_id || null) : null,
+    medicine_id: isMedOrVax ? (form.medicine_id || null) : null,
+    item_name: form.item_name || null,
     qty: parseFloat(form.qty) || null, unit: form.unit,
     bags: parseInt(form.bags) || null,
     price_per_unit: parseFloat(form.price_per_unit) || null,
     basic_amount: parseFloat(form.basic_amount) || basic || null,
+    gst_amount: gstAmt > 0 ? +gstAmt.toFixed(2) : null,
     gst_pct: parseFloat(form.gst_pct) || 0,
     total_amount: parseFloat(form.total_amount) || total || null,
+    batch_no: isMedOrVax ? (form.batch_no || null) : null,
+    expiry_date: isMedOrVax ? (form.expiry_date || null) : null,
     vehicle_no: form.vehicle_no || null, remarks: form.remarks || null
   })
 
@@ -177,9 +190,10 @@ export const GRNEntry: React.FC = () => {
     setEditing(null)
     setOpenPOs([])
     setForm({ grn_no:'', grn_date:today(), farm_id:'', party_id:'', invoice_no:'',
-      invoice_date:today(), ingredient_id:'', item_name:'', qty:'', unit:'kg',
+      invoice_date:today(), category:'Feed', ingredient_id:'', medicine_id:'',
+      item_name:'', qty:'', unit:'kg',
       bags:'', price_per_unit:'', basic_amount:'', gst_pct:'0', total_amount:'',
-      vehicle_no:'', remarks:'' })
+      batch_no:'', expiry_date:'', vehicle_no:'', remarks:'' })
     setShowForm(true)
   }
 
@@ -190,13 +204,16 @@ export const GRNEntry: React.FC = () => {
       grn_no: g.grn_no ?? '', grn_date: g.grn_date ?? today(),
       farm_id: g.farm_id ?? '', party_id: g.party_id ?? '',
       invoice_no: g.invoice_no ?? '', invoice_date: g.invoice_date ?? today(),
-      ingredient_id: g.ingredient_id ?? '', item_name: g.item_name ?? '',
+      category: g.category ?? 'Feed',
+      ingredient_id: g.ingredient_id ?? '', medicine_id: g.medicine_id ?? '',
+      item_name: g.item_name ?? '',
       qty: g.qty?.toString() ?? '', unit: g.unit ?? 'kg',
       bags: g.bags?.toString() ?? '',
       price_per_unit: g.price_per_unit?.toString() ?? '',
       basic_amount: g.basic_amount?.toString() ?? '',
       gst_pct: g.gst_pct?.toString() ?? '0',
       total_amount: g.total_amount?.toString() ?? '',
+      batch_no: g.batch_no ?? '', expiry_date: g.expiry_date ?? '',
       vehicle_no: g.vehicle_no ?? '', remarks: g.remarks ?? ''
     })
     setShowForm(true)
@@ -244,10 +261,18 @@ export const GRNEntry: React.FC = () => {
   const farmOptions = farms?.map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
   const ingrOptions = ingredients?.map((i: any) => ({ value: i.id, label: `${i.code} — ${i.name}` })) ?? []
+  const medOptions  = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.type})` })) ?? []
+  const categoryOptions = [
+    { value: 'Feed',       label: 'Feed / Raw Material' },
+    { value: 'Medicine',   label: 'Medicine / Oral' },
+    { value: 'Vaccine',    label: 'Vaccine' },
+    { value: 'Packaging',  label: 'Packaging Material' },
+    { value: 'Other',      label: 'Other' },
+  ]
 
   const totalQty = grns.reduce((s: number, g: any) => s + (g.qty ?? 0), 0)
   const totalVal = grns.reduce((s: number, g: any) => s + (g.total_amount ?? 0), 0)
-  const hasFilter = fFarm || fParties.length > 0 || fItem || fFrom || fTo
+  const hasFilter = fFarm || fParties.length > 0 || fCat || fItem || fFrom || fTo
 
   const handleExport = () => {
     exportCSV(`grn_export.csv`,
@@ -338,9 +363,12 @@ export const GRNEntry: React.FC = () => {
 
       {/* Filters */}
       <Card>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 items-end">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
           <Select label="Site" placeholder="All Sites" options={farmOptions}
             value={fFarm} onChange={e => setFFarm(e.target.value)} />
+          <Select label="Category" placeholder="All Categories"
+            options={categoryOptions}
+            value={fCat} onChange={e => setFCat(e.target.value)} />
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Supplier (multi-select)</label>
             <select multiple size={4}
@@ -357,7 +385,7 @@ export const GRNEntry: React.FC = () => {
           <DateInput label="Date To"   value={fTo}   onChange={e => setFTo(e.target.value)} />
         </div>
         {hasFilter && (
-          <button onClick={() => { setFFarm(''); setFParties([]); setFItem(''); setFFrom(''); setFTo('') }}
+          <button onClick={() => { setFFarm(''); setFParties([]); setFCat(''); setFItem(''); setFFrom(''); setFTo('') }}
             className="mt-2 text-xs text-brand-600 hover:underline">Clear filters</button>
         )}
       </Card>
@@ -394,7 +422,7 @@ export const GRNEntry: React.FC = () => {
                   grns.forEach((g: any) => { if (g.id) { e.target.checked ? n.add(g.id) : n.delete(g.id) } })
                   setSel(n)
                 }} /></Th>
-              <Th>GRN No</Th><Th>Date</Th><Th>Site</Th><Th>Party</Th>
+              <Th>GRN No</Th><Th>Date</Th><Th>Site</Th><Th>Category</Th><Th>Party</Th>
               <Th>Item</Th><Th>Invoice No</Th>
               <Th right>Qty</Th><Th right>Unit Price</Th><Th right>Amount</Th><Th></Th>
             </tr></thead>
@@ -407,6 +435,15 @@ export const GRNEntry: React.FC = () => {
                   <Td><span className="font-mono text-xs font-bold">{g.grn_no}</span></Td>
                   <Td className="text-xs">{fmtDate(g.grn_date)}</Td>
                   <Td className="text-xs">{g.farms?.name}</Td>
+                  <Td className="text-xs">
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                      g.category === 'Medicine' ? 'bg-blue-100 text-blue-700' :
+                      g.category === 'Vaccine' ? 'bg-purple-100 text-purple-700' :
+                      g.category === 'Packaging' ? 'bg-orange-100 text-orange-700' :
+                      g.category === 'Other' ? 'bg-gray-100 text-gray-600' :
+                      'bg-green-100 text-green-700'
+                    }`}>{g.category ?? 'Feed'}</span>
+                  </Td>
                   <Td className="text-xs max-w-[120px] truncate">{g.parties?.name ?? '—'}</Td>
                   <Td className="text-xs max-w-[120px] truncate">{g.feed_ingredients?.name ?? g.item_name ?? '—'}</Td>
                   <Td className="text-xs text-gray-400">{g.invoice_no ?? '—'}</Td>
@@ -435,7 +472,7 @@ export const GRNEntry: React.FC = () => {
             </tbody>
             {grns.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={7}>TOTAL ({grns.length} records)</Td>
+                <Td colSpan={8}>TOTAL ({grns.length} records)</Td>
                 <Td right>{totalQty.toLocaleString('en-IN')} kg</Td>
                 <Td right>—</Td>
                 <Td right>{inr(totalVal)}</Td>
@@ -460,11 +497,13 @@ export const GRNEntry: React.FC = () => {
         footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>}>
         <div className="space-y-4">
-          <FormRow cols={3}>
+          <FormRow cols={4}>
             <Input label="GRN No" required value={form.grn_no} onChange={e => s('grn_no', e.target.value)} />
             <DateInput label="GRN Date" required value={form.grn_date} onChange={e => s('grn_date', e.target.value)} />
             <Select label="Received At" required placeholder="— Select Site —" options={farmOptions}
               value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
+            <Select label="Category" required options={categoryOptions}
+              value={form.category} onChange={e => s('category', e.target.value)} />
           </FormRow>
           <FormRow>
             <div className="relative">
@@ -478,19 +517,37 @@ export const GRNEntry: React.FC = () => {
             </div>
             <Input label="Invoice No" value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
           </FormRow>
-          <FormRow>
-            <div className="relative">
-              <div className="flex items-end gap-1">
-                <div className="flex-1">
-                  <Select label="Ingredient" placeholder="— Select from master —" options={ingrOptions}
-                    value={form.ingredient_id} onChange={e => { s('ingredient_id', e.target.value); fetchOpenPOs(e.target.value) }} />
+          {isFeed ? (
+            <FormRow>
+              <div className="relative">
+                <div className="flex items-end gap-1">
+                  <div className="flex-1">
+                    <Select label="Ingredient" placeholder="— Select from master —" options={ingrOptions}
+                      value={form.ingredient_id} onChange={e => { s('ingredient_id', e.target.value); fetchOpenPOs(e.target.value) }} />
+                  </div>
+                  <QuickAddIngredient onCreated={i => { s('ingredient_id', i.id); fetchOpenPOs(i.id) }} />
                 </div>
-                <QuickAddIngredient onCreated={i => { s('ingredient_id', i.id); fetchOpenPOs(i.id) }} />
               </div>
-            </div>
-            <Input label="Item Name (if not in master)" value={form.item_name}
-              onChange={e => s('item_name', e.target.value)} hint="Use if ingredient not in master" />
-          </FormRow>
+              <Input label="Item Name (if not in master)" value={form.item_name}
+                onChange={e => s('item_name', e.target.value)} hint="Use if ingredient not in master" />
+            </FormRow>
+          ) : isMedOrVax ? (
+            <FormRow cols={3}>
+              <Select label={form.category === 'Vaccine' ? 'Vaccine' : 'Medicine'} placeholder="— Select from master —" options={medOptions}
+                value={form.medicine_id} onChange={e => {
+                  s('medicine_id', e.target.value)
+                  const med = medicines?.find((m: any) => m.id === e.target.value)
+                  if (med) { s('item_name', med.name); s('unit', med.unit ?? 'ml') }
+                }} />
+              <Input label="Batch No" value={form.batch_no} onChange={e => s('batch_no', e.target.value)} />
+              <DateInput label="Expiry Date" value={form.expiry_date} onChange={e => s('expiry_date', e.target.value)} />
+            </FormRow>
+          ) : (
+            <FormRow>
+              <Input label="Item Name" value={form.item_name} onChange={e => s('item_name', e.target.value)} />
+              <Input label="Item Code / Part No" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
+            </FormRow>
+          )}
           {/* PO Alert */}
           {poLoading && <p className="text-xs text-blue-500">Checking open POs…</p>}
           {!poLoading && openPOs.length > 0 && (() => {

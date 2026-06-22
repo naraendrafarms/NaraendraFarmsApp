@@ -32,7 +32,6 @@ const NAV: NavItem[] = [
       { label: 'Egg Conversions',    to: '/flocks/egg-conversions' },
       { label: 'Hatch Batches',      to: '/flocks/hatch-batches' },
       { label: 'Medicine Entry',     to: '/flocks/medicine' },
-      { label: 'Medicine Purchases', to: '/flocks/medicine-purchases' },
       { label: 'Egg Opening Stock',  to: '/flocks/opening-stock' },
       { label: 'Vaccination',        to: '/flocks/vaccination' },
     ]
@@ -41,7 +40,6 @@ const NAV: NavItem[] = [
     label: 'Feed Mill', icon: <Factory size={18}/>,
     children: [
       { label: 'Feed Dashboard',       to: '/feed' },
-      { label: 'GRN Entry',            to: '/feed/grn' },
       { label: 'Feed Transfer',        to: '/feed/transfer' },
       { label: 'Stock Status',         to: '/feed/stock' },
       { label: 'Inventory (All Items)', to: '/inventory' },
@@ -120,6 +118,8 @@ const NAV: NavItem[] = [
   {
     label: 'Purchase & Payments', icon: <ShoppingCart size={18}/>,
     children: [
+      { label: 'GRN — Goods Received',  to: '/feed/grn' },
+      { label: 'Medicine Receipts (GRN)', to: '/flocks/medicine-purchases' },
       { label: 'New Purchase',         to: '/purchases/new' },
       { label: 'Purchase Orders',      to: '/purchase-orders' },
       { label: 'Rate Comparison',      to: '/purchases/rate-compare' },

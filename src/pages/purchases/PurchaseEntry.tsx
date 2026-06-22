@@ -134,15 +134,22 @@ export const PurchaseEntry: React.FC = () => {
         })
         if (error) throw error
       } else if (form.category === 'Medicine') {
-        const { error } = await supabase.from('medicine_purchases').insert({
-          purchase_date: form.purchase_date,
+        const { error } = await supabase.from('grn').insert({
+          grn_no: form.grn_no || `MED-${form.purchase_date.replace(/-/g,'')}-${Date.now()%100000}`,
+          grn_date: form.purchase_date,
+          category: 'Medicine',
           medicine_id: form.item_id || null,
+          item_name: itemName,
           farm_id: form.farm_id || null,
-          supplier_id: form.supplier_id || null,
+          party_id: form.supplier_id || null,
           invoice_no: form.invoice_no || null,
           invoice_date: form.invoice_date || null,
           qty, unit: form.unit || null,
-          rate, gst_pct: gst,
+          price_per_unit: rate || null,
+          basic_amount: basic || null,
+          gst_amount: taxSplit.total || 0,
+          gst_pct: gst || 0,
+          total_amount: total || null,
           supply_type: sType,
           nature: form.nature,
           is_rcm: form.is_rcm,
@@ -319,7 +326,7 @@ export const PurchaseEntry: React.FC = () => {
             <Button icon={<Plus size={16} />} loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save Purchase</Button>
             <span className="text-xs text-gray-500">
               {form.category === 'Feed' && 'Files into Feed GRN + Pending Payments'}
-              {form.category === 'Medicine' && 'Files into Medicine Purchases + Pending Payments'}
+              {form.category === 'Medicine' && 'Files into GRN (Medicine) + Pending Payments'}
               {(form.category === 'Equipment' || form.category === 'Other') && 'Files into Pending Payments'}
               {form.payment_status === 'Paid' && form.account_type === 'Cash' && ' + Cash Book'}
             </span>
