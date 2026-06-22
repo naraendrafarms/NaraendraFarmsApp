@@ -175,14 +175,22 @@ export const EmployeeList: React.FC = () => {
 
   const mergeMut = useMutation({
     mutationFn: async ({ keepId, dropIds }: { keepId: string; dropIds: string[] }) => {
+      // Every table that references employees(id) — remap before deleting the old row
+      const linkedTables = [
+        'salary_monthly', 'salary_abstract', 'salary_allocation',
+        'bonus', 'attendance_daily', 'employee_deductions', 'employee_advances',
+      ]
       for (const oldId of dropIds) {
-        await supabase.from('salary_monthly').update({ employee_id: keepId }).eq('employee_id', oldId)
+        for (const tbl of linkedTables) {
+          const { error } = await supabase.from(tbl).update({ employee_id: keepId }).eq('employee_id', oldId)
+          if (error) throw new Error(`${tbl}: ${error.message}`)
+        }
         const { error } = await supabase.from('employees').delete().eq('id', oldId)
         if (error) throw error
       }
     },
     onSuccess: () => {
-      toast.success('Merged — salary records remapped to kept employee')
+      toast.success('Merged — all records remapped to kept employee')
       qc.invalidateQueries({ queryKey: ['employees'] })
       setSel(new Set()); setMergeOpen(false)
     },
@@ -578,10 +586,12 @@ export const SalaryEntryPage: React.FC = () => {
     setGenLoading(true); setGenResult(null)
     try {
       const monthStr = genMonth + '-01'
-      const { data: emps, error: empErr } = await supabase.from('employees')
-        .select('id,base_salary,esi_applicable,pf_applicable,pt_applicable').eq('is_active', true)
+      const { data: empsRaw, error: empErr } = await supabase.from('employees')
+        .select('id,base_salary,esi_applicable,pf_applicable,pt_applicable,leaving_date').eq('is_active', true)
       if (empErr) throw empErr
-      if (!emps?.length) { toast.error('No active employees found'); return }
+      // Skip anyone who left before this salary month (leaving_date < 1st of month)
+      const emps = (empsRaw ?? []).filter((e: any) => !e.leaving_date || e.leaving_date >= monthStr)
+      if (!emps.length) { toast.error('No active employees found for this month'); return }
       const { data: existing, error: exErr } = await supabase.from('salary_monthly')
         .select('employee_id').eq('month', monthStr)
       if (exErr) throw exErr
