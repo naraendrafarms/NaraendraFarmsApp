@@ -630,7 +630,7 @@ const VendorMergeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ op
   const { data: vendors=[] } = useQuery({
     queryKey: ['parties_vendors'],
     queryFn: async () => {
-      const { data } = await supabase.from('parties').select('id,name').eq('type', 'Vendor').order('name')
+      const { data } = await supabase.from('parties').select('id,name').eq('type', 'supplier').order('name')
       return data ?? []
     },
     enabled: open,
@@ -682,6 +682,7 @@ const EMPTY_PAY = {
   bank_account_id:'', utr_no:'', cheque_no:'', transaction_ref:'',
   po_raised_by:'', payment_approved_by:'', remarks:'',
   tds_pct: '0', tds_amount: '0', net_payable: '',
+  discount_amount: '0', discount_reason: '',
 }
 
 const PaymentsTab: React.FC = () => {
@@ -815,6 +816,8 @@ const PaymentsTab: React.FC = () => {
         tds_pct: form.tds_pct ? Number(form.tds_pct) : 0,
         tds_amount: form.tds_amount ? Number(form.tds_amount) : 0,
         net_payable: form.net_payable ? Number(form.net_payable) : null,
+        discount_amount: form.discount_amount ? Number(form.discount_amount) : 0,
+        discount_reason: form.discount_reason || null,
       }
       if (editing) await supabase.from('pending_payments').update(payload).eq('id', editing.id)
       else await supabase.from('pending_payments').insert(payload)
@@ -994,7 +997,7 @@ const PaymentsTab: React.FC = () => {
             <thead><tr>
               <Th><input type="checkbox" checked={payAllSel} ref={el => { if (el) el.indeterminate = paySomeSel && !payAllSel }} onChange={togglePayAll} className="rounded" /></Th>
               <Th>Vendor</Th><Th>Invoice No</Th><Th>Invoice Date</Th>
-              <Th right>Amount</Th><Th right>TDS%</Th><Th right>Net Payable</Th><Th>Type</Th><Th>Pay Before</Th>
+              <Th right>Amount</Th><Th right>TDS%</Th><Th right>Discount</Th><Th right>Net Payable</Th><Th>Type</Th><Th>Pay Before</Th>
               <Th>Days Left</Th><Th>PO No</Th><Th>GRN No</Th>
               <Th>Account</Th><Th>UTR/Cheque</Th>
               <Th>Status</Th><Th>Paid Date</Th><Th></Th>
@@ -1011,6 +1014,7 @@ const PaymentsTab: React.FC = () => {
                     <Td className="text-xs">{p.invoice_date ? fmtDate(p.invoice_date) : '—'}</Td>
                     <Td right className="font-semibold">{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
                     <Td className="text-xs">{p.tds_pct > 0 ? `${p.tds_pct}%` : '—'}</Td>
+                    <Td right className="text-xs text-orange-600">{(p.discount_amount ?? 0) > 0 ? inr(p.discount_amount) : '—'}</Td>
                     <Td right className="text-xs font-semibold text-green-700">{p.net_payable ? inr(p.net_payable) : (p.tds_pct > 0 ? inr(Number(p.invoice_amount||0) - Number(p.tds_amount||0)) : '—')}</Td>
                     <Td><span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{p.payment_type ?? '—'}</span></Td>
                     <Td className="text-xs">{p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}</Td>
@@ -1032,7 +1036,7 @@ const PaymentsTab: React.FC = () => {
                   </tr>
                 )
               })}
-              {filtered.length===0 && <tr><td colSpan={17} className="text-center py-8 text-gray-400 text-sm">No payment records found</td></tr>}
+              {filtered.length===0 && <tr><td colSpan={18} className="text-center py-8 text-gray-400 text-sm">No payment records found</td></tr>}
             </tbody>
           </Table>
         </div>
@@ -1128,6 +1132,10 @@ const PaymentsTab: React.FC = () => {
               </select>
             </div>
           )}
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Discount / Deduction (₹)" type="number" value={form.discount_amount} onChange={f('discount_amount')} hint="Rate diff, short supply, quality deduction, etc." />
+            <Input label="Discount Reason" value={form.discount_reason} onChange={f('discount_reason')} placeholder="e.g. Rate variance, short wt" />
+          </div>
           <div className="grid grid-cols-3 gap-3">
             <Sel label="Payment Status" value={form.payment_status} onChange={f('payment_status')} options={PAY_STATUS.map(s=>({value:s,label:s}))} />
             <DateInput label="Paid Date" value={form.paid_date} onChange={f('paid_date')} />
