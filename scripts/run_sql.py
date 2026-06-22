@@ -58,7 +58,8 @@ for i, stmt in enumerate(stmts):
             errors += 1
     elif isinstance(resp, list):
         if len(resp) > 0 and i < 5:
-            print(f"  [{i+1}] OK rows={len(resp)}")
+            preview = json.dumps(resp[:5], default=str)[:600]
+            print(f"  [{i+1}] OK rows={len(resp)}: {preview}")
     # else: DDL statements return empty list - that's fine
 
 print(f"[{label}] Done. Errors: {errors}")
