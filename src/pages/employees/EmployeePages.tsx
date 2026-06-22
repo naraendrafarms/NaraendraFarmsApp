@@ -195,20 +195,30 @@ export const EmployeeList: React.FC = () => {
     const farmMap: Record<string,string> = {}
     for (const f of (allFarms??[])) farmMap[f.name.toLowerCase()] = f.id
 
+    const toBool = (v: string) => v?.toLowerCase() === 'yes' || v === 'true' || v === '1'
     const toUpsert = records.filter(r => r.name).map(r => ({
       emp_id: r.emp_id || null,
       name: r.name,
       designation: r.designation || null,
+      department: r.department || null,
       farm_id: farmMap[r.farm_name?.toLowerCase()] || null,
       base_salary: parseFloat(r.base_salary) || null,
+      increment: parseFloat(r.increment) || 0,
       mobile: r.mobile || null,
+      gender: r.gender || null,
+      dob: r.dob || null,
       esi_no: r.esi_no || null,
       pf_no: r.pf_no || null,
       uan_no: r.uan_no || null,
       bank_name: r.bank_name || null,
+      bank_branch: r.bank_branch || null,
       account_no: r.account_no || null,
       ifsc: r.ifsc || null,
       joining_date: r.joining_date || null,
+      esi_applicable: toBool(r.esi_applicable),
+      pf_applicable: toBool(r.pf_applicable),
+      pt_applicable: toBool(r.pt_applicable),
+      is_active: r.is_active ? toBool(r.is_active) : true,
     }))
 
     if (!toUpsert.length) { toast.error('No valid rows'); return }
@@ -221,8 +231,8 @@ export const EmployeeList: React.FC = () => {
 
   const downloadTemplate = () => {
     exportCSV('employees_template.csv',
-      ['emp_id','name','designation','farm_name','base_salary','mobile','esi_no','pf_no','uan_no','bank_name','account_no','ifsc','joining_date'],
-      [['BPS4001','John Doe','Helper','Farm Name Here','8000','9876543210','','','','SBI','123456789','SBIN0001234','2024-01-01']]
+      ['emp_id','name','designation','department','farm_name','base_salary','increment','mobile','gender','dob','esi_no','pf_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','esi_applicable','pf_applicable','pt_applicable','is_active'],
+      [['BPS4001','John Doe','Helper','Poultry','Farm Name Here','8000','0','9876543210','Male','1990-01-15','','','','SBI','Main Branch','123456789','SBIN0001234','2024-01-01','Yes','Yes','No','Yes']]
     )
   }
 
