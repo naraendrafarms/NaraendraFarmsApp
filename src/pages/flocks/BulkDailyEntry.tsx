@@ -30,8 +30,17 @@ export const BulkDailyEntry: React.FC = () => {
   const [date, setDate] = useState(today())
   const [rows, setRows] = useState<Record<string, RowState>>({})
   const [saving, setSaving] = useState(false)
+  const [selectedFarm, setSelectedFarm] = useState('')
 
-  const { data: flocks, isLoading: flocksLoading } = useQuery({
+  const { data: farms } = useQuery({
+    queryKey: ['farms_list'],
+    queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name,code').order('name')
+      return data ?? []
+    }
+  })
+
+  const { data: allFlocks, isLoading: flocksLoading } = useQuery({
     queryKey: ['bulk_daily_flocks'],
     queryFn: async () => {
       const { data } = await supabase
@@ -42,6 +51,10 @@ export const BulkDailyEntry: React.FC = () => {
       return data ?? []
     }
   })
+
+  const flocks = selectedFarm
+    ? (allFlocks ?? []).filter((f: any) => f.laying_farm_id === selectedFarm || f.rearing_farm_id === selectedFarm)
+    : (allFlocks ?? [])
 
   const { data: medicines } = useQuery({
     queryKey: ['medicines_master_list'],
@@ -218,7 +231,17 @@ export const BulkDailyEntry: React.FC = () => {
         title="Bulk Daily Entry"
         subtitle="Enter production data for all active sheds in one go"
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Select
+              label=""
+              value={selectedFarm}
+              onChange={e => setSelectedFarm(e.target.value)}
+              options={[
+                { value: '', label: '— All Farms —' },
+                ...(farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))
+              ]}
+              className="w-44"
+            />
             <DateInput value={date} onChange={setDate} />
             <Button icon={<Save size={16} />} loading={saving} onClick={handleSaveAll}>
               Save All
