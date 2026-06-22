@@ -8,7 +8,7 @@ import {
   DateInput, SearchableSelect,
 } from '@/components/ui'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
-import { Plus, ShoppingCart } from 'lucide-react'
+import { Plus, ShoppingCart, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supplyType, splitTax, PURCHASE_NATURE_OPTIONS, GST_RATE_OPTIONS, OUR_STATE_CODE } from '@/lib/gst'
 
@@ -248,6 +248,17 @@ export const PurchaseEntry: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const exportRows = () => {
+    const headers = ['grn_date','vendor_name','grn_no','invoice_no','invoice_amount','payment_status','pay_before_date']
+    const lines = [headers.join(',')]
+    for (const r of (recent ?? [])) {
+      lines.push(headers.map(h => `"${String((r as any)[h] ?? '').replace(/"/g,'""')}"`).join(','))
+    }
+    const blob = new Blob([lines.join('\n')], { type:'text/csv;charset=utf-8;' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+    a.download = `purchases_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+  }
+
   const pickItem = (id: string) => {
     const it = (items ?? []).find((i: any) => i.id === id)
     setForm(f => ({ ...f, item_id: id, item_name: it?.name ?? '', unit: it?.unit ?? f.unit }))
@@ -364,7 +375,10 @@ export const PurchaseEntry: React.FC = () => {
       </Card>
 
       <Card>
-        <p className="font-medium text-gray-700 mb-3 flex items-center gap-2"><ShoppingCart size={16} />Recent Purchases</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-medium text-gray-700 flex items-center gap-2"><ShoppingCart size={16} />Recent Purchases</p>
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportRows}>Export</Button>
+        </div>
         {isLoading ? <Spinner /> : (recent ?? []).length === 0 ? <EmptyState title="No purchases yet" /> : (
           <Table>
             <thead><tr>{['Date','Supplier','GRN','Invoice ₹','Status','Pay Before'].map(h => <Th key={h}>{h}</Th>)}</tr></thead>

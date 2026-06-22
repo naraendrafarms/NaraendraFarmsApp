@@ -6,7 +6,7 @@ import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
@@ -151,6 +151,31 @@ export const VaccinationRecordsPage: React.FC = () => {
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAll = () => setSel(allSel ? new Set() : new Set(rows.map((r: any) => r.id)))
 
+  const exportRows = () => {
+    const flat = rows.map((r: any) => ({
+      flock_no: r.flocks?.flock_no ?? '',
+      vaccine_date: r.vaccine_date ?? '',
+      vaccine_name: r.vaccine_name ?? '',
+      dose_no: r.dose_no ?? '',
+      route: r.route ? (ROUTE_LABELS[r.route] ?? r.route) : '',
+      shed_site: r.sheds ? `Shed ${r.sheds.shed_no}` : r.farms?.name ?? '',
+      quantity: r.quantity ?? '',
+      unit: r.unit ?? '',
+      cost: r.cost ?? '',
+      next_due_date: r.next_due_date ?? '',
+      administered_by: r.administered_by ?? '',
+      remarks: r.remarks ?? '',
+    }))
+    const headers = ['flock_no','vaccine_date','vaccine_name','dose_no','route','shed_site','quantity','unit','cost','next_due_date','administered_by','remarks']
+    const lines = [headers.join(',')]
+    for (const r of (flat ?? [])) {
+      lines.push(headers.map(h => `"${String((r as any)[h] ?? '').replace(/"/g,'""')}"`).join(','))
+    }
+    const blob = new Blob([lines.join('\n')], { type:'text/csv;charset=utf-8;' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+    a.download = `vaccinations_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+  }
+
   const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no} (${f.status})` }))
   const shedOptions = (sheds ?? []).filter((sh: any) => !form.farm_id || sh.farm_id === form.farm_id)
     .map((sh: any) => ({ value: sh.id, label: `Shed ${sh.shed_no}${sh.shed_name ? ' – ' + sh.shed_name : ''}` }))
@@ -160,7 +185,10 @@ export const VaccinationRecordsPage: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Vaccination Records"
         subtitle="Track vaccines administered to each flock with due date alerts"
-        action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Record</Button>}
+        action={<div className="flex gap-2">
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportRows}>Export</Button>
+          <Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Record</Button>
+        </div>}
       />
 
       {/* Due / Overdue alerts */}

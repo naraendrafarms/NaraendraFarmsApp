@@ -7,7 +7,7 @@ import {
   Card, CardHeader, Button, Modal, Input, Select, FormRow, Divider,
   Table, Th, Td, Badge, Spinner, SectionHeader, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, Bird, Eye, Trash2, CheckSquare, Edit2 } from 'lucide-react'
+import { Plus, Bird, Eye, Trash2, CheckSquare, Edit2, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Link } from 'react-router-dom'
 import type { Flock } from '@/types'
@@ -298,6 +298,20 @@ export const FlockList: React.FC = () => {
 
   const filtered = flocks?.filter(f => filter === 'all' ? true : f.status === filter) ?? []
 
+  const exportFlocks = () => {
+    const headers = ['flock_no','breed','status','placement_date','laying_start_date','current_female','current_male','farm']
+    const csv = [headers.join(',')]
+    for (const f of filtered) {
+      csv.push(headers.map(h => {
+        const v = (f as any)[h] ?? (h==='farm' ? ((f as any).laying_farm_name ?? (f as any).farm_name ?? '') : '')
+        return `"${String(v ?? '').replace(/"/g,'""')}"`
+      }).join(','))
+    }
+    const blob = new Blob([csv.join('\n')], { type:'text/csv;charset=utf-8;' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob); a.download = `flocks_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+  }
+
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
       const CHUNK = 100
@@ -358,9 +372,12 @@ export const FlockList: React.FC = () => {
         title="Flocks"
         subtitle={`${flocks?.length ?? 0} total • ${flocks?.filter((f:any)=>f.status!=='closed').length??0} active`}
         action={
-          <Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>
-            Add Flock
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportFlocks}>Export</Button>
+            <Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>
+              Add Flock
+            </Button>
+          </div>
         }
       />
 
