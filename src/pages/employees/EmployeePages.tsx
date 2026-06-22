@@ -357,6 +357,9 @@ export const EmployeeList: React.FC = () => {
             <Select label="Designation" options={DESIGNATIONS} value={form.designation} onChange={e=>s('designation',e.target.value)} placeholder="— Select —" />
           </FormRow>
           <FormRow>
+            <Input label="Department" value={form.department} onChange={e=>s('department',e.target.value)} hint="e.g. Poultry, Admin" />
+          </FormRow>
+          <FormRow>
             <Input label="Basic Salary" type="number" value={form.base_salary} onChange={e=>s('base_salary',e.target.value)} />
             <Input label="Increment" type="number" value={form.increment} onChange={e=>s('increment',e.target.value)} />
           </FormRow>
