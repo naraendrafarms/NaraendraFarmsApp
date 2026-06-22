@@ -1371,7 +1371,12 @@ export const NHESales: React.FC = () => {
   const saveMut = useMutation({
     mutationFn: async () => {
       const egg = isEggSale(form.sale_type)
-      const finalAmt = egg ? linesTotal : (parseFloat(form.amount) || autoAmt)
+      // Compute linesTotal fresh inside mutationFn to avoid stale closure issues
+      const freshLinesTotal = nheLines.reduce((sum, l) => {
+        const amt = parseFloat(l.amount) || ((parseFloat(l.quantity)||0) * (parseFloat(l.rate)||0))
+        return sum + amt
+      }, 0)
+      const finalAmt = egg ? freshLinesTotal : (parseFloat(form.amount) || autoAmt)
       if (!form.flock_id || !form.sale_date || !finalAmt) throw new Error('Flock, date and amount required')
       const bird = isBirdSale(form.sale_type)
       const buyer = parties?.find((p: any) => p.id === form.party_id)
@@ -1599,13 +1604,14 @@ export const NHESales: React.FC = () => {
               amount: l.amount?.toString() ?? '',
             })))
           } else {
-            // Legacy row without lines — prefill from header
+            // No lines in DB — prefill a single line from header values
+            // Always use row.amount so the total is preserved even when rate is null
             setNheLines([{
               sale_type: row.sale_type ?? 'je',
               quantity: row.quantity?.toString() ?? '',
               unit: row.unit ?? 'nos',
               rate: row.rate?.toString() ?? '',
-              amount: row.amount?.toString() ?? '',
+              amount: row.amount != null ? row.amount.toString() : '',
             }])
           }
         })
@@ -2094,8 +2100,11 @@ export const NHESales: React.FC = () => {
                                 value={line.rate} placeholder="0.00"
                                 onChange={e => setNheLines(ls => ls.map((l,j) => j===i ? {...l, rate: e.target.value, amount: ''} : l))} />
                             </td>
-                            <td className="px-1 py-1 text-right text-xs text-gray-700">
-                              {inr(parseFloat(line.amount) || lineAmt)}
+                            <td className="px-1 py-1">
+                              <input type="number" className="w-full text-xs border border-gray-200 rounded px-1 py-0.5 text-right"
+                                value={line.amount || (lineAmt > 0 ? lineAmt.toFixed(2) : '')}
+                                placeholder={lineAmt > 0 ? lineAmt.toFixed(2) : '0.00'}
+                                onChange={e => setNheLines(ls => ls.map((l,j) => j===i ? {...l, amount: e.target.value} : l))} />
                             </td>
                             <td className="px-1 py-1 text-center">
                               {nheLines.length > 1 && (
