@@ -36,7 +36,7 @@ export const BulkDailyEntry: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from('flocks')
-        .select('id,flock_no,breed,status,laying_farm_id,rearing_farm_id,farms(name,code)')
+        .select('id,flock_no,breed,status,laying_farm_id,rearing_farm_id,laying_farm:farms!laying_farm_id(name,code)')
         .neq('status', 'closed')
         .order('flock_no', { ascending: true })
       return data ?? []
@@ -200,7 +200,7 @@ export const BulkDailyEntry: React.FC = () => {
   // Group flocks by farm
   const grouped: Record<string, any[]> = {}
   for (const f of (flocks ?? [])) {
-    const farm = (f.farms as any)?.name ?? 'Unknown'
+    const farm = (f as any).laying_farm?.name ?? 'Unknown'
     if (!grouped[farm]) grouped[farm] = []
     grouped[farm].push(f)
   }
