@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput } from '@/components/ui'
@@ -127,9 +127,10 @@ export const BulkDailyEntry: React.FC = () => {
   const flockSheds = useMemo(() => [...(rawSheds ?? [])].sort(shedSort), [rawSheds])
 
   // ── Existing daily records for date ─────────────────────────────────────────
-  const { data: existingDR, isLoading: existingLoading } = useQuery({
+  const { data: existingDR, isLoading: existingLoading, isFetching: existingFetching } = useQuery({
     queryKey: ['bulk_existing_dr', date, selectedFlock],
     enabled: !!date,
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase.from('daily_records')
         .select('id,flock_id,shed_id,opening_female,opening_male,he_eggs,je_eggs,te_eggs,be_eggs,mortality_female,mortality_male,feed_female_kg,feed_male_kg,transfer_female,transfer_male,cull_female,cull_male,closing_female,closing_male,lighting_hrs,remarks')
@@ -160,12 +161,14 @@ export const BulkDailyEntry: React.FC = () => {
   const { data: existingFeed } = useQuery({
     queryKey: ['bulk_existing_feed', date],
     enabled: !!date && !selectedFlock,
+    placeholderData: keepPreviousData,
     queryFn: async () => { const { data } = await supabase.from('daily_feed').select('id,flock_id,female_kg').eq('feed_date', date); return data ?? [] }
   })
 
   const { data: existingMed } = useQuery({
     queryKey: ['bulk_existing_med', date, selectedFlock],
     enabled: !!date,
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase.from('medicine_usage').select('id,flock_id,shed_id,medicine_id,quantity').eq('usage_date', date)
       if (selectedFlock) q = q.eq('flock_id', selectedFlock)
@@ -182,6 +185,7 @@ export const BulkDailyEntry: React.FC = () => {
 
   useEffect(() => {
     if (selectedFlock) return
+    if (existingFetching) return   // keep rows intact while date is loading
     const newRows: Record<string, FlockRow> = {}
     for (const f of visibleFlocks) {
       const dr = (existingDR ?? []).find((r: any) => r.flock_id === f.id && !r.shed_id)
@@ -203,6 +207,7 @@ export const BulkDailyEntry: React.FC = () => {
   // ── Init shed rows ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedFlock || !flockSheds.length) return
+    if (existingFetching) return   // keep rows intact while date is loading
     const newRows: Record<string, ShedRow> = {}
     for (const shed of flockSheds) {
       const dr = (existingDR ?? []).find((r: any) => r.shed_id === shed.id)
@@ -415,7 +420,7 @@ export const BulkDailyEntry: React.FC = () => {
         }
       />
 
-      {existingLoading && <div className="text-center py-4"><Spinner /></div>}
+      {existingFetching && <div className="text-center py-2 text-xs text-gray-400">Loading records for {date}…</div>}
 
       {/* ── SHED MODE ── */}
       {isSheedMode && (
