@@ -41,7 +41,6 @@ const NAV: NavItem[] = [
     label: 'Feed Mill', icon: <Factory size={18}/>,
     children: [
       { label: 'Feed Dashboard',       to: '/feed' },
-      { label: 'GRN Entry',            to: '/feed/grn' },
       { label: 'Feed Transfer',        to: '/feed/transfer' },
       { label: 'Stock Status',         to: '/feed/stock' },
       { label: 'Inventory (All Items)', to: '/inventory' },
@@ -119,6 +118,7 @@ const NAV: NavItem[] = [
   {
     label: 'Purchase & Payments', icon: <ShoppingCart size={18}/>,
     children: [
+      { label: 'GRN — Goods Received',  to: '/feed/grn' },
       { label: 'New Purchase',         to: '/purchases/new' },
       { label: 'Purchase Orders',      to: '/purchase-orders' },
       { label: 'Rate Comparison',      to: '/purchases/rate-compare' },
