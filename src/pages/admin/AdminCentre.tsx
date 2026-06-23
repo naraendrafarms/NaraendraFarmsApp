@@ -664,8 +664,8 @@ const MastersHub: React.FC = () => (
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Flocks</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <InlineConfig title="Bird Breeds" grp="breed" placeholder="e.g. VENCO-430" />
-        <InlineConfig title="Feed Types (Daily Entry)" grp="feed_type" placeholder="e.g. L1, BCM" />
       </div>
+      <p className="text-xs text-gray-400 mt-2">Feed types are managed in <strong>Masters → Feed Types</strong> and apply to Daily Entry, Bulk Daily Entry, Feed Mill, and Feed Cost reports.</p>
     </div>
 
     <div>
