@@ -122,7 +122,7 @@ export const InventoryPage: React.FC = () => {
   ]
   return (
     <div className="space-y-5">
-      <SectionHeader title="Inventory & Stock" subtitle="Item-wise stock for every GRN item — feed, medicine, vaccine, packaging & more" />
+      <SectionHeader title="All Items Inventory" subtitle="Every GRN item across all categories — Feed, Medicine, Vaccine, Packaging, Spares, Other. Use Category filter to narrow down." />
       <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}

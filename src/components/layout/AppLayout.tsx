@@ -43,8 +43,8 @@ const NAV: NavItem[] = [
     children: [
       { label: 'Feed Dashboard',       to: '/feed' },
       { label: 'Feed Transfer',        to: '/feed/transfer' },
-      { label: 'Stock Status',         to: '/feed/stock' },
-      { label: 'Inventory (All Items)', to: '/inventory' },
+      { label: 'Feed Stock Status',     to: '/feed/stock' },
+      { label: 'All Items Inventory',   to: '/inventory' },
       { label: 'Formula & Production', to: '/feed/mill' },
     ]
   },

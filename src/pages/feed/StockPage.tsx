@@ -83,7 +83,7 @@ export const StockPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Stock Status" subtitle="Current inventory balances"/>
+      <SectionHeader title="Feed Stock Status" subtitle="Feed ingredients stock (GRN received − production used). For medicine/vaccine stock see Medicine & Vaccine tab."/>
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-gray-200">
@@ -168,7 +168,7 @@ export const StockPage: React.FC = () => {
                       {purchased.map((r: any) => (
                         <tr key={r.medicine_id} className="hover:bg-gray-50">
                           <Td className="font-medium">{r.name}</Td>
-                          <Td><Badge color={r.type === 'vaccine' ? 'blue' : 'purple'}>{r.type ?? 'Medicine'}</Badge></Td>
+                          <Td><Badge color={r.type === 'vaccine' ? 'blue' : 'gray'}>{r.type ?? 'Medicine'}</Badge></Td>
                           <Td>{r.unit ?? '—'}</Td>
                           <Td right>{(r.purchased_qty ?? 0).toLocaleString('en-IN')}</Td>
                           <Td right className="text-orange-600">{(r.used_qty ?? 0).toLocaleString('en-IN')}</Td>
