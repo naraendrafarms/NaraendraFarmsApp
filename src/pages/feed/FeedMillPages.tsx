@@ -757,7 +757,7 @@ const StockTab: React.FC = () => {
   const { data: grnData = [], isLoading: grnLoading } = useQuery({
     queryKey: ['stock_grn', fFarm, fFrom, fTo],
     queryFn: async () => {
-      let q = supabase.from('grn').select('ingredient_id,item_name,feed_ingredients(name,code), qty, grn_date, farm_id')
+      let q = supabase.from('grn').select('ingredient_id,item_name,feed_ingredients(name,code), qty, grn_date, farm_id').eq('category', 'Feed')
       if (fFarm) q = q.eq('farm_id', fFarm)
       if (fFrom) q = q.gte('grn_date', fFrom)
       if (fTo)   q = q.lte('grn_date', fTo)

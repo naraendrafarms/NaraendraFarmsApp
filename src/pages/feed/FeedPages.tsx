@@ -807,13 +807,13 @@ export const FeedTransfer: React.FC = () => {
 
 // ── FEED DASHBOARD ────────────────────────────────────────────────
 export const FeedDashboard: React.FC = () => {
-  const { data: grns } = useQuery({ queryKey: ['grns'], queryFn: async () => { const { data } = await supabase.from('grn').select('qty,total_amount,grn_date,feed_ingredients(code)').order('grn_date',{ascending:false}).limit(100); return data ?? [] } })
+  const { data: grns } = useQuery({ queryKey: ['grns'], queryFn: async () => { const { data } = await supabase.from('grn').select('qty,total_amount,grn_date,feed_ingredients(code)').eq('category','Feed').order('grn_date',{ascending:false}).limit(100); return data ?? [] } })
   const { data: prods } = useQuery({ queryKey: ['feed_production'], queryFn: async () => { const { data } = await supabase.from('feed_production').select('quantity_kg,production_date,feed_types(code)').order('production_date',{ascending:false}).limit(100); return data ?? [] } })
   const { data: transfers } = useQuery({ queryKey: ['feed_transfers'], queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('quantity_kg,transfer_date').order('transfer_date',{ascending:false}).limit(100); return data ?? [] } })
 
   // Stock alerts: replicate StockPage logic
   const { data: allIngredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit').eq('is_active',true).order('code'); return data ?? [] } })
-  const { data: allGrnQty } = useQuery({ queryKey: ['grn_stock'], queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty'); return data ?? [] } })
+  const { data: allGrnQty } = useQuery({ queryKey: ['grn_stock'], queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty').eq('category','Feed'); return data ?? [] } })
   const { data: allProdUsage } = useQuery({ queryKey: ['prod_usage_stock'], queryFn: async () => { const { data } = await supabase.from('feed_production_ingredients').select('ingredient_id,qty_used_kg'); return data ?? [] } })
 
   const LOW_STOCK_THRESHOLD = 500 // kg

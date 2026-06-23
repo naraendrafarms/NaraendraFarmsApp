@@ -14,7 +14,7 @@ export const StockPage: React.FC = () => {
 
   const { data: grns, isLoading: loadGrn } = useQuery({
     queryKey: ['grn_stock'],
-    queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty').eq('category', 'Feed'); return data ?? [] }
   })
 
   const { data: productionUsage, isLoading: loadProd } = useQuery({
@@ -25,7 +25,7 @@ export const StockPage: React.FC = () => {
   const { data: latestGrns } = useQuery({
     queryKey: ['grn_latest'],
     queryFn: async () => {
-      const { data } = await supabase.from('grn').select('ingredient_id,grn_date,price_per_unit,qty').order('grn_date', { ascending: false }).limit(200)
+      const { data } = await supabase.from('grn').select('ingredient_id,grn_date,price_per_unit,qty').eq('category', 'Feed').order('grn_date', { ascending: false }).limit(200)
       return data ?? []
     }
   })
