@@ -384,18 +384,21 @@ export const BulkDailyEntry: React.FC = () => {
     const gb = parseInt(gradeRow.he_grade_b) || null
     const gc = parseInt(gradeRow.he_grade_c) || null
     if (ga !== null || gb !== null || gc !== null) {
-      const gradePayload = {
-        flock_id: selectedFlock, record_date: date,
-        farm_id: farmIdForFlock ?? null,
-        he_grade_a: ga, he_grade_b: gb, he_grade_c: gc,
-      }
       if (gradeRow.existingId) {
-        await supabase.from('daily_records').update(gradePayload).eq('id', gradeRow.existingId)
+        const { error } = await supabase.from('daily_records')
+          .update({ he_grade_a: ga, he_grade_b: gb, he_grade_c: gc })
+          .eq('id', gradeRow.existingId)
+        if (error) console.error('Grade update error:', error)
       } else {
-        await supabase.from('daily_records').upsert(
-          { ...gradePayload, he_eggs: 0, je_eggs: 0, te_eggs: 0, be_eggs: 0, le_eggs: 0, total_eggs: 0 },
-          { onConflict: 'flock_id,record_date,farm_id' }
-        )
+        const { error } = await supabase.from('daily_records').insert({
+          flock_id: selectedFlock, record_date: date,
+          farm_id: farmIdForFlock ?? null,
+          shed_id: null,
+          he_grade_a: ga, he_grade_b: gb, he_grade_c: gc,
+          he_eggs: 0, je_eggs: 0, te_eggs: 0, be_eggs: 0, le_eggs: 0, total_eggs: 0,
+          mortality_female: 0, mortality_male: 0,
+        })
+        if (error) console.error('Grade insert error:', error)
       }
     }
 
