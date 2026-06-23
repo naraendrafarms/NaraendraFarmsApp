@@ -31,6 +31,7 @@ export const DailyEntry: React.FC = () => {
   useEffect(() => { localStorage.setItem('de_date', date) }, [date])
 
   const [quickEntry, setQuickEntry] = useState(false)
+  const [showWastageTypes, setShowWastageTypes] = useState(false)
   const [heQuickTotal, setHeQuickTotal] = useState('')
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
@@ -199,6 +200,9 @@ export const DailyEntry: React.FC = () => {
         age_weeks:      existing.age_weeks?.toString() ?? '',
         remarks:        existing.remarks ?? ''
       })
+      if (existing.wastage_he || existing.wastage_je || existing.wastage_te || existing.wastage_be) {
+        setShowWastageTypes(true)
+      }
     } else if (shedPlacement && !existing) {
       // First-day placement: opening = the batch size received
       setForm(f => ({
@@ -662,17 +666,24 @@ export const DailyEntry: React.FC = () => {
                 </FormRow>
               </div>
               <div className="mt-3">
-                <p className="text-xs font-medium text-gray-500 mb-2">Wastage by Type</p>
-                <FormRow cols={4}>
-                  <Input label="Wastage HE" type="number"
-                    value={form.wastage_he} onChange={e => set('wastage_he', e.target.value)} />
-                  <Input label="Wastage JE" type="number"
-                    value={form.wastage_je} onChange={e => set('wastage_je', e.target.value)} />
-                  <Input label="Wastage TE" type="number"
-                    value={form.wastage_te} onChange={e => set('wastage_te', e.target.value)} />
-                  <Input label="Wastage BE" type="number"
-                    value={form.wastage_be} onChange={e => set('wastage_be', e.target.value)} />
-                </FormRow>
+                <button type="button" onClick={() => setShowWastageTypes(w => !w)}
+                  className={`text-xs px-2 py-0.5 rounded border ${showWastageTypes ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                  {showWastageTypes ? '× Hide Wastage by Type' : '+ Wastage by Type'}
+                </button>
+                {showWastageTypes && (
+                  <div className="mt-2">
+                    <FormRow cols={4}>
+                      <Input label="Wastage HE" type="number"
+                        value={form.wastage_he} onChange={e => set('wastage_he', e.target.value)} />
+                      <Input label="Wastage JE" type="number"
+                        value={form.wastage_je} onChange={e => set('wastage_je', e.target.value)} />
+                      <Input label="Wastage TE" type="number"
+                        value={form.wastage_te} onChange={e => set('wastage_te', e.target.value)} />
+                      <Input label="Wastage BE" type="number"
+                        value={form.wastage_be} onChange={e => set('wastage_be', e.target.value)} />
+                    </FormRow>
+                  </div>
+                )}
               </div>
             </div>
           </Card>

@@ -77,6 +77,7 @@ export const BulkDailyEntry: React.FC = () => {
   const [shedRows, setShedRows] = useState<Record<string, ShedRow>>({})
   // Flock-level grade breakdown (shed mode only) — he_grade_a/b/c + existing row id
   const [gradeRow, setGradeRow] = useState({ he_grade_a: '', he_grade_b: '', he_grade_c: '', existingId: null as string | null })
+  const [showWastage, setShowWastage] = useState(false)
 
   // ── Master data ──────────────────────────────────────────────────────────────
   const { data: feedTypesRaw = [] } = useQuery({
@@ -561,8 +562,12 @@ export const BulkDailyEntry: React.FC = () => {
           )}
           {flockSheds.length > 0 && (
             <Card padding={false}>
-              <div className="px-4 py-2 bg-brand-50 border-b border-brand-100">
+              <div className="px-4 py-2 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
                 <h3 className="font-semibold text-brand-800 text-sm">Flock {flockObj?.flock_no} — {flockSheds.length} Sheds</h3>
+                <button onClick={() => setShowWastage(w => !w)}
+                  className={`text-xs px-2 py-0.5 rounded border ${showWastage ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                  {showWastage ? '× Hide Wastage' : '+ Wastage'}
+                </button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -586,10 +591,7 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-1 py-2 text-center">TE</th>
                       <th className="px-1 py-2 text-center">BE</th>
                       <th className="px-1 py-2 text-center">LE</th>
-                      <th className="px-1 py-2 text-center bg-red-50">Wst HE</th>
-                      <th className="px-1 py-2 text-center bg-red-50">Wst JE</th>
-                      <th className="px-1 py-2 text-center bg-red-50">Wst TE</th>
-                      <th className="px-1 py-2 text-center bg-red-50">Wst BE</th>
+                      {showWastage && <><th className="px-1 py-2 text-center bg-red-50">Wst HE</th><th className="px-1 py-2 text-center bg-red-50">Wst JE</th><th className="px-1 py-2 text-center bg-red-50">Wst TE</th><th className="px-1 py-2 text-center bg-red-50">Wst BE</th></>}
                       <th className="px-1 py-2 text-center bg-blue-50">Close ♀</th>
                       <th className="px-1 py-2 text-center bg-blue-50">Close ♂</th>
                       <th className="px-1 py-2 text-center">Light</th>
@@ -634,10 +636,7 @@ export const BulkDailyEntry: React.FC = () => {
                           <td className="px-1 py-1">{numInput(r.te_eggs, u('te_eggs'))}</td>
                           <td className="px-1 py-1">{numInput(r.be_eggs, u('be_eggs'))}</td>
                           <td className="px-1 py-1">{numInput(r.le_eggs, u('le_eggs'))}</td>
-                          <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_he, u('wastage_he'))}</td>
-                          <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_je, u('wastage_je'))}</td>
-                          <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_te, u('wastage_te'))}</td>
-                          <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_be, u('wastage_be'))}</td>
+                          {showWastage && <><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_he, u('wastage_he'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_je, u('wastage_je'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_te, u('wastage_te'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_be, u('wastage_be'))}</td></>}
                           <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_female, u('closing_female'))}</td>
                           <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_male, u('closing_male'))}</td>
                           <td className="px-1 py-1">{numInput(r.lighting_hrs, u('lighting_hrs'))}</td>
@@ -710,14 +709,24 @@ export const BulkDailyEntry: React.FC = () => {
           {visibleFlocks.length === 0 && <EmptyState icon={<Save size={32} />} title="No active flocks found" />}
           {Object.entries(grouped).map(([farm, farmFlocks]) => (
             <Card key={farm} padding={false}>
-              <div className="px-4 py-2 bg-brand-50 border-b border-brand-100">
+              <div className="px-4 py-2 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
                 <h3 className="font-semibold text-brand-800 text-sm">{farm}</h3>
+                <button onClick={() => setShowWastage(w => !w)}
+                  className={`text-xs px-2 py-0.5 rounded border ${showWastage ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                  {showWastage ? '× Hide Wastage' : '+ Wastage'}
+                </button>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase tracking-wide">
                       <th className="px-3 py-2 text-left">Flock</th>
+                      <th className="px-2 py-2 text-center">Feed ♀ kg</th>
+                      <th className="px-2 py-2 text-center">Type ♀</th>
+                      <th className="px-2 py-2 text-center">Feed ♂ kg</th>
+                      <th className="px-2 py-2 text-center">Type ♂</th>
+                      <th className="px-2 py-2 text-center">Death ♀</th>
+                      <th className="px-2 py-2 text-center">Death ♂</th>
                       <th className="px-2 py-2 text-center">HE</th>
                       <th className="px-2 py-2 text-center">JE</th>
                       <th className="px-2 py-2 text-center">TE</th>
@@ -726,16 +735,7 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-2 py-2 text-center bg-green-50">Grd A</th>
                       <th className="px-2 py-2 text-center bg-green-50">Grd B</th>
                       <th className="px-2 py-2 text-center bg-green-50">Grd C</th>
-                      <th className="px-2 py-2 text-center bg-red-50">Wst HE</th>
-                      <th className="px-2 py-2 text-center bg-red-50">Wst JE</th>
-                      <th className="px-2 py-2 text-center bg-red-50">Wst TE</th>
-                      <th className="px-2 py-2 text-center bg-red-50">Wst BE</th>
-                      <th className="px-2 py-2 text-center">Death ♀</th>
-                      <th className="px-2 py-2 text-center">Death ♂</th>
-                      <th className="px-2 py-2 text-center">Feed ♀ kg</th>
-                      <th className="px-2 py-2 text-center">Type ♀</th>
-                      <th className="px-2 py-2 text-center">Feed ♂ kg</th>
-                      <th className="px-2 py-2 text-center">Type ♂</th>
+                      {showWastage && <><th className="px-2 py-2 text-center bg-red-50">Wst HE</th><th className="px-2 py-2 text-center bg-red-50">Wst JE</th><th className="px-2 py-2 text-center bg-red-50">Wst TE</th><th className="px-2 py-2 text-center bg-red-50">Wst BE</th></>}
                       <th className="px-2 py-2 text-left" style={{ minWidth: 160 }}>Medicine</th>
                       <th className="px-2 py-2 text-center">Qty</th>
                     </tr>
@@ -749,34 +749,6 @@ export const BulkDailyEntry: React.FC = () => {
                             F-{flock.flock_no}
                             {flock.breed && <span className="text-xs text-gray-400 ml-1">{flock.breed}</span>}
                           </td>
-                          {(['he_eggs','je_eggs','te_eggs','be_eggs','le_eggs'] as const).map(field => (
-                            <td key={field} className="px-1 py-1">
-                              <input type="number" min="0" value={r[field]} placeholder="0"
-                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
-                                className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
-                            </td>
-                          ))}
-                          {(['he_grade_a','he_grade_b','he_grade_c'] as const).map(field => (
-                            <td key={field} className="px-1 py-1 bg-green-50/40">
-                              <input type="number" min="0" value={r[field]} placeholder="0"
-                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
-                                className="w-full text-center border border-green-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-green-400 bg-white" />
-                            </td>
-                          ))}
-                          {(['wastage_he','wastage_je','wastage_te','wastage_be'] as const).map(field => (
-                            <td key={field} className="px-1 py-1 bg-red-50/30">
-                              <input type="number" min="0" value={r[field]} placeholder="0"
-                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
-                                className="w-full text-center border border-red-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-red-400 bg-white" />
-                            </td>
-                          ))}
-                          {(['mortality_female','mortality_male'] as const).map(field => (
-                            <td key={field} className="px-1 py-1">
-                              <input type="number" min="0" value={r[field]} placeholder="0"
-                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
-                                className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
-                            </td>
-                          ))}
                           <td className="px-1 py-1">
                             <input type="number" min="0" value={r.feed_female_kg} placeholder="0"
                               onChange={e => updateFlockRow(flock.id, 'feed_female_kg', e.target.value)}
@@ -799,6 +771,34 @@ export const BulkDailyEntry: React.FC = () => {
                               {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                             </select>
                           </td>
+                          {(['mortality_female','mortality_male'] as const).map(field => (
+                            <td key={field} className="px-1 py-1">
+                              <input type="number" min="0" value={r[field]} placeholder="0"
+                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
+                                className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
+                            </td>
+                          ))}
+                          {(['he_eggs','je_eggs','te_eggs','be_eggs','le_eggs'] as const).map(field => (
+                            <td key={field} className="px-1 py-1">
+                              <input type="number" min="0" value={r[field]} placeholder="0"
+                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
+                                className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
+                            </td>
+                          ))}
+                          {(['he_grade_a','he_grade_b','he_grade_c'] as const).map(field => (
+                            <td key={field} className="px-1 py-1 bg-green-50/40">
+                              <input type="number" min="0" value={r[field]} placeholder="0"
+                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
+                                className="w-full text-center border border-green-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-green-400 bg-white" />
+                            </td>
+                          ))}
+                          {showWastage && (['wastage_he','wastage_je','wastage_te','wastage_be'] as const).map(field => (
+                            <td key={field} className="px-1 py-1 bg-red-50/30">
+                              <input type="number" min="0" value={r[field]} placeholder="0"
+                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
+                                className="w-full text-center border border-red-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-red-400 bg-white" />
+                            </td>
+                          ))}
                           <td className="px-1 py-1">
                             <select value={r.med_id} onChange={e => updateFlockRow(flock.id, 'med_id', e.target.value)}
                               className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
