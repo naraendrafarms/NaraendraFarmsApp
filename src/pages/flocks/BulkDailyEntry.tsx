@@ -29,6 +29,7 @@ const emptyFlockRow = (): FlockRow => ({
 type ShedRow = {
   opening_female: string; opening_male: string
   he_eggs: string; je_eggs: string; te_eggs: string; be_eggs: string; le_eggs: string
+  he_grade_a: string; he_grade_b: string; he_grade_c: string
   mortality_female: string; mortality_male: string
   feed_female_kg: string; feed_type_f: string
   feed_male_kg: string; feed_type_m: string
@@ -42,6 +43,7 @@ type ShedRow = {
 const emptyShedRow = (): ShedRow => ({
   opening_female: '', opening_male: '',
   he_eggs: '', je_eggs: '', te_eggs: '', be_eggs: '', le_eggs: '',
+  he_grade_a: '', he_grade_b: '', he_grade_c: '',
   mortality_female: '', mortality_male: '',
   feed_female_kg: '', feed_type_f: 'BCM',
   feed_male_kg: '', feed_type_m: 'BCM',
@@ -250,6 +252,9 @@ export const BulkDailyEntry: React.FC = () => {
         he_eggs: dr?.he_eggs?.toString() ?? '', je_eggs: dr?.je_eggs?.toString() ?? '',
         te_eggs: dr?.te_eggs?.toString() ?? '', be_eggs: dr?.be_eggs?.toString() ?? '',
         le_eggs: dr?.le_eggs?.toString() ?? '',
+        he_grade_a: dr?.he_grade_a?.toString() ?? '',
+        he_grade_b: dr?.he_grade_b?.toString() ?? '',
+        he_grade_c: dr?.he_grade_c?.toString() ?? '',
         mortality_female: dr?.mortality_female?.toString() ?? '',
         mortality_male: dr?.mortality_male?.toString() ?? '',
         feed_female_kg: dr?.feed_female_kg?.toString() ?? '',
