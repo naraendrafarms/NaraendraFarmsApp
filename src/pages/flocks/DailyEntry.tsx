@@ -665,6 +665,38 @@ export const DailyEntry: React.FC = () => {
                     value={form.wastage_eggs} onChange={e => set('wastage_eggs', e.target.value)} />
                 </FormRow>
               </div>
+              {/* Live egg totals */}
+              {(() => {
+                const he = parseInt(form.he_eggs) || 0
+                const je = parseInt(form.je_eggs) || 0
+                const te = parseInt(form.te_eggs) || 0
+                const be = parseInt(form.be_eggs) || 0
+                const le = parseInt(form.le_eggs) || 0
+                const total = he + je + te + be + le
+                const ga = parseInt(form.he_grade_a) || 0
+                const gb = parseInt(form.he_grade_b) || 0
+                const gc = parseInt(form.he_grade_c) || 0
+                const gradeTotal = ga + gb + gc
+                const gradeDiff = he - gradeTotal
+                if (!total && !gradeTotal) return null
+                return (
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                    <span className="bg-brand-50 border border-brand-200 rounded px-2 py-1 font-semibold text-brand-800">
+                      Total Eggs: {total.toLocaleString('en-IN')}
+                    </span>
+                    {he > 0 && <span className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-600">HE: {he}</span>}
+                    {je > 0 && <span className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-600">JE: {je}</span>}
+                    {te > 0 && <span className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-600">TE: {te}</span>}
+                    {be > 0 && <span className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-600">BE: {be}</span>}
+                    {le > 0 && <span className="bg-gray-50 border border-gray-200 rounded px-2 py-1 text-gray-600">LE: {le}</span>}
+                    {gradeTotal > 0 && (
+                      <span className={`rounded px-2 py-1 font-semibold border ${gradeDiff === 0 ? 'bg-green-50 border-green-300 text-green-800' : 'bg-red-50 border-red-300 text-red-700'}`}>
+                        A+B+C: {gradeTotal} | HE: {he} {gradeDiff === 0 ? '✓' : `| Diff: ${gradeDiff > 0 ? '+' : ''}${gradeDiff}`}
+                      </span>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="mt-3">
                 <button type="button" onClick={() => setShowWastageTypes(w => !w)}
                   className={`text-xs px-2 py-0.5 rounded border ${showWastageTypes ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>

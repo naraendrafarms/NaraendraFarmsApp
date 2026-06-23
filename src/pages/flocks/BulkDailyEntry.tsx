@@ -520,6 +520,22 @@ export const BulkDailyEntry: React.FC = () => {
 
   if (isLoading) return <div className="p-8 text-center"><Spinner /></div>
 
+  // Shed column totals — live sum of every entered value
+  const shedTotals = (() => {
+    const vals = Object.values(shedRows)
+    const n = (f: keyof ShedRow) => vals.reduce((s, r) => s + (parseFloat(r[f] as string) || 0), 0)
+    return {
+      open_f: n('opening_female'), open_m: n('opening_male'),
+      feed_f: n('feed_female_kg'), feed_m: n('feed_male_kg'),
+      trf_f: n('transfer_female'), trf_m: n('transfer_male'),
+      cull_f: n('cull_female'), cull_m: n('cull_male'),
+      mort_f: n('mortality_female'), mort_m: n('mortality_male'),
+      he: n('he_eggs'), je: n('je_eggs'), te: n('te_eggs'), be: n('be_eggs'), le: n('le_eggs'),
+      wst_he: n('wastage_he'), wst_je: n('wastage_je'), wst_te: n('wastage_te'), wst_be: n('wastage_be'),
+      close_f: n('closing_female'), close_m: n('closing_male'),
+    }
+  })()
+
   const numInput = (val: string, onChange: (v: string) => void, w = 'w-14', tabIndex?: number) => (
     <input type="number" min="0" value={val} onChange={e => onChange(e.target.value)} placeholder="0"
       tabIndex={tabIndex}
@@ -671,40 +687,90 @@ export const BulkDailyEntry: React.FC = () => {
                       )
                     })}
                   </tbody>
+                  {/* ── Totals row ── */}
+                  {flockSheds.length > 1 && (
+                    <tfoot>
+                      <tr className="bg-brand-50 border-t-2 border-brand-200 text-xs font-semibold text-brand-800">
+                        <td className="px-2 py-1.5 sticky left-0 bg-brand-50 z-10">TOTAL</td>
+                        {/* Phase 1 cols */}
+                        <td className="px-1 py-1.5 text-center">{shedTotals.open_f || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.open_m || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.feed_f ? shedTotals.feed_f.toFixed(1) : '—'}</td>
+                        <td className="px-1 py-1.5 text-center text-gray-400">—</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.feed_m ? shedTotals.feed_m.toFixed(1) : '—'}</td>
+                        <td className="px-1 py-1.5 text-center text-gray-400">—</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.trf_f || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.trf_m || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.cull_f || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.cull_m || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.mort_f || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.mort_m || '—'}</td>
+                        {/* Phase 2 cols */}
+                        <td className="px-1 py-1.5 text-center">{shedTotals.he || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.je || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.te || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.be || '—'}</td>
+                        <td className="px-1 py-1.5 text-center">{shedTotals.le || '—'}</td>
+                        {showWastage && <>
+                          <td className="px-1 py-1.5 text-center bg-red-50/60">{shedTotals.wst_he || '—'}</td>
+                          <td className="px-1 py-1.5 text-center bg-red-50/60">{shedTotals.wst_je || '—'}</td>
+                          <td className="px-1 py-1.5 text-center bg-red-50/60">{shedTotals.wst_te || '—'}</td>
+                          <td className="px-1 py-1.5 text-center bg-red-50/60">{shedTotals.wst_be || '—'}</td>
+                        </>}
+                        <td className="px-1 py-1.5 text-center bg-blue-50/60">{shedTotals.close_f || '—'}</td>
+                        <td className="px-1 py-1.5 text-center bg-blue-50/60">{shedTotals.close_m || '—'}</td>
+                        <td className="px-1 py-1.5 text-center text-gray-400">—</td>
+                        <td className="px-1 py-1.5 text-center text-gray-400" colSpan={3}>—</td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
               {/* ── Flock-level grade breakdown ── */}
               {(() => {
-                const sums = Object.values(shedRows).reduce(
-                  (acc, r) => ({
-                    he: acc.he + (parseInt(r.he_eggs) || 0),
-                    je: acc.je + (parseInt(r.je_eggs) || 0),
-                    te: acc.te + (parseInt(r.te_eggs) || 0),
-                    be: acc.be + (parseInt(r.be_eggs) || 0),
-                    le: acc.le + (parseInt(r.le_eggs) || 0),
-                  }),
-                  { he: 0, je: 0, te: 0, be: 0, le: 0 }
-                )
+                const sums = { he: shedTotals.he, je: shedTotals.je, te: shedTotals.te, be: shedTotals.be, le: shedTotals.le }
                 const gi = (f: string) => <input type="number" min="0"
                   value={(gradeRow as any)[f]} placeholder="0"
                   onChange={e => setGradeRow(g => ({ ...g, [f]: e.target.value }))}
                   className="w-24 text-center border border-green-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-green-400 bg-white" />
+                const gradeA = parseInt(gradeRow.he_grade_a) || 0
+                const gradeB = parseInt(gradeRow.he_grade_b) || 0
+                const gradeC = parseInt(gradeRow.he_grade_c) || 0
+                const gradeTotal = gradeA + gradeB + gradeC
+                const gradeDiff = sums.he - gradeTotal
+                const graded = gradeTotal > 0
                 return (
                   <div className="px-4 py-3 border-t border-gray-100 bg-green-50/40">
                     <p className="text-xs font-semibold text-green-800 mb-2">HE Grade Breakdown (flock-level — enter after grading all sheds)</p>
-                    <div className="flex flex-wrap items-center gap-6">
-                      <div className="flex gap-4 text-xs text-gray-500">
-                        <span>HE: <strong className="text-gray-800">{sums.he || '—'}</strong></span>
-                        <span>JE: <strong className="text-gray-800">{sums.je || '—'}</strong></span>
-                        <span>TE: <strong className="text-gray-800">{sums.te || '—'}</strong></span>
-                        <span>BE: <strong className="text-gray-800">{sums.be || '—'}</strong></span>
-                        <span>LE: <strong className="text-gray-800">{sums.le || '—'}</strong></span>
+                    <div className="flex flex-wrap items-start gap-6">
+                      {/* Shed egg totals */}
+                      <div className="flex gap-3 text-xs text-gray-500 flex-wrap">
+                        <span className="bg-white border border-gray-200 rounded px-2 py-1">HE: <strong className="text-gray-800">{sums.he || '—'}</strong></span>
+                        <span className="bg-white border border-gray-200 rounded px-2 py-1">JE: <strong className="text-gray-800">{sums.je || '—'}</strong></span>
+                        <span className="bg-white border border-gray-200 rounded px-2 py-1">TE: <strong className="text-gray-800">{sums.te || '—'}</strong></span>
+                        <span className="bg-white border border-gray-200 rounded px-2 py-1">BE: <strong className="text-gray-800">{sums.be || '—'}</strong></span>
+                        <span className="bg-white border border-gray-200 rounded px-2 py-1">LE: <strong className="text-gray-800">{sums.le || '—'}</strong></span>
+                        <span className="bg-white border border-gray-200 rounded px-2 py-1">Total NHE: <strong className="text-gray-800">{(sums.je+sums.te+sums.be) || '—'}</strong></span>
                       </div>
-                      <div className="flex items-center gap-3">
+                      {/* Grade inputs */}
+                      <div className="flex items-center gap-3 flex-wrap">
                         <label className="text-xs text-gray-600">Grade A</label>{gi('he_grade_a')}
                         <label className="text-xs text-gray-600">Grade B</label>{gi('he_grade_b')}
                         <label className="text-xs text-gray-600">Grade C</label>{gi('he_grade_c')}
                       </div>
+                      {/* Grade match indicator */}
+                      {graded && (
+                        <div className={`flex items-center gap-3 text-xs font-semibold px-3 py-1.5 rounded-lg border ${gradeDiff === 0 ? 'bg-green-100 border-green-300 text-green-800' : 'bg-red-100 border-red-300 text-red-800'}`}>
+                          <span>A+B+C: {gradeTotal}</span>
+                          <span>|</span>
+                          <span>HE total: {sums.he}</span>
+                          <span>|</span>
+                          {gradeDiff === 0
+                            ? <span>✓ Matched</span>
+                            : <span>Diff: {gradeDiff > 0 ? '+' : ''}{gradeDiff} {gradeDiff > 0 ? '(ungraded)' : '(over-graded)'}</span>
+                          }
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
