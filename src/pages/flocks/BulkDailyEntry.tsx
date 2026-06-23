@@ -71,6 +71,8 @@ export const BulkDailyEntry: React.FC = () => {
   const [selectedFlock, setSelectedFlock] = useState('')
   const [flockRows, setFlockRows] = useState<Record<string, FlockRow>>({})
   const [shedRows, setShedRows] = useState<Record<string, ShedRow>>({})
+  // Flock-level grade breakdown (shed mode only) — he_grade_a/b/c + existing row id
+  const [gradeRow, setGradeRow] = useState({ he_grade_a: '', he_grade_b: '', he_grade_c: '', existingId: null as string | null })
 
   // ── Master data ──────────────────────────────────────────────────────────────
   const { data: feedTypesRaw = [] } = useQuery({
@@ -290,6 +292,18 @@ export const BulkDailyEntry: React.FC = () => {
     })
   }
 
+  // Init grade row from flock-level record (shed_id IS NULL) when in shed mode
+  useEffect(() => {
+    if (!selectedFlock) return
+    const flockLevel = (existingDR ?? []).find((r: any) => r.flock_id === selectedFlock && !r.shed_id)
+    setGradeRow({
+      he_grade_a: flockLevel?.he_grade_a?.toString() ?? '',
+      he_grade_b: flockLevel?.he_grade_b?.toString() ?? '',
+      he_grade_c: flockLevel?.he_grade_c?.toString() ?? '',
+      existingId: flockLevel?.id ?? null,
+    })
+  }, [existingDR, selectedFlock])
+
   const updateFlockRow = (id: string, field: keyof FlockRow, val: string) =>
     setFlockRows(p => ({ ...p, [id]: { ...p[id], [field]: val } }))
 
@@ -365,6 +379,26 @@ export const BulkDailyEntry: React.FC = () => {
         if (me) console.error(me)
       }
     }
+    // Save flock-level grade breakdown (shed_id IS NULL)
+    const ga = parseInt(gradeRow.he_grade_a) || null
+    const gb = parseInt(gradeRow.he_grade_b) || null
+    const gc = parseInt(gradeRow.he_grade_c) || null
+    if (ga !== null || gb !== null || gc !== null) {
+      const gradePayload = {
+        flock_id: selectedFlock, record_date: date,
+        farm_id: farmIdForFlock ?? null,
+        he_grade_a: ga, he_grade_b: gb, he_grade_c: gc,
+      }
+      if (gradeRow.existingId) {
+        await supabase.from('daily_records').update(gradePayload).eq('id', gradeRow.existingId)
+      } else {
+        await supabase.from('daily_records').upsert(
+          { ...gradePayload, he_eggs: 0, je_eggs: 0, te_eggs: 0, be_eggs: 0, le_eggs: 0, total_eggs: 0 },
+          { onConflict: 'flock_id,record_date,farm_id' }
+        )
+      }
+    }
+
     setSaving(false)
     qc.invalidateQueries({ queryKey: ['bulk_existing_dr', date, selectedFlock] })
     qc.invalidateQueries({ queryKey: ['bulk_existing_med', date, selectedFlock] })
@@ -599,6 +633,42 @@ export const BulkDailyEntry: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+              {/* ── Flock-level grade breakdown ── */}
+              {(() => {
+                const sums = Object.values(shedRows).reduce(
+                  (acc, r) => ({
+                    he: acc.he + (parseInt(r.he_eggs) || 0),
+                    je: acc.je + (parseInt(r.je_eggs) || 0),
+                    te: acc.te + (parseInt(r.te_eggs) || 0),
+                    be: acc.be + (parseInt(r.be_eggs) || 0),
+                    le: acc.le + (parseInt(r.le_eggs) || 0),
+                  }),
+                  { he: 0, je: 0, te: 0, be: 0, le: 0 }
+                )
+                const gi = (f: string) => <input type="number" min="0"
+                  value={(gradeRow as any)[f]} placeholder="0"
+                  onChange={e => setGradeRow(g => ({ ...g, [f]: e.target.value }))}
+                  className="w-24 text-center border border-green-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-green-400 bg-white" />
+                return (
+                  <div className="px-4 py-3 border-t border-gray-100 bg-green-50/40">
+                    <p className="text-xs font-semibold text-green-800 mb-2">HE Grade Breakdown (flock-level — enter after grading all sheds)</p>
+                    <div className="flex flex-wrap items-center gap-6">
+                      <div className="flex gap-4 text-xs text-gray-500">
+                        <span>HE: <strong className="text-gray-800">{sums.he || '—'}</strong></span>
+                        <span>JE: <strong className="text-gray-800">{sums.je || '—'}</strong></span>
+                        <span>TE: <strong className="text-gray-800">{sums.te || '—'}</strong></span>
+                        <span>BE: <strong className="text-gray-800">{sums.be || '—'}</strong></span>
+                        <span>LE: <strong className="text-gray-800">{sums.le || '—'}</strong></span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs text-gray-600">Grade A</label>{gi('he_grade_a')}
+                        <label className="text-xs text-gray-600">Grade B</label>{gi('he_grade_b')}
+                        <label className="text-xs text-gray-600">Grade C</label>{gi('he_grade_c')}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
             </Card>
           )}
         </>
