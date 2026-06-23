@@ -41,11 +41,10 @@ const NAV: NavItem[] = [
   {
     label: 'Feed Mill', icon: <Factory size={18}/>,
     children: [
-      { label: 'Feed Dashboard',       to: '/feed' },
-      { label: 'Feed Transfer',        to: '/feed/transfer' },
-      { label: 'Feed Stock Status',     to: '/feed/stock' },
-      { label: 'All Items Inventory',   to: '/inventory' },
-      { label: 'Formula & Production', to: '/feed/mill' },
+      { label: 'Raw Materials Stock',  to: '/feed/mill?tab=raw' },
+      { label: 'Production',           to: '/feed/mill?tab=production' },
+      { label: 'Finished Feed Stock',  to: '/feed/mill?tab=finished' },
+      { label: 'Stock Dispatch',       to: '/feed/mill?tab=dispatch' },
     ]
   },
   {
@@ -125,9 +124,17 @@ const NAV: NavItem[] = [
   {
     label: 'Procurement', icon: <ShoppingCart size={18}/>,
     children: [
-      { label: 'Bills & GRN / Payments', to: '/purchase-orders' },
-      { label: 'Medicine Receipts (GRN)', to: '/flocks/medicine-purchases' },
+      { label: 'Purchase Orders',        to: '/purchase-orders?tab=po' },
+      { label: 'Bills / GRN',            to: '/purchase-orders?tab=grn' },
+      { label: 'Payments',               to: '/purchase-orders?tab=payments' },
+      { label: 'Medicine Receipts',      to: '/flocks/medicine-purchases' },
       { label: 'Farm Expenses',          to: '/expenses' },
+    ]
+  },
+  {
+    label: 'Inventory', icon: <Database size={18}/>,
+    children: [
+      { label: 'Repair / Consumables Stock', to: '/inventory' },
     ]
   },
   {

@@ -1,4 +1,7 @@
 import React, { useState, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { FeedTransfer } from '@/pages/feed/FeedPages'
+import { StockPage } from '@/pages/feed/StockPage'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
@@ -41,30 +44,117 @@ const Sel: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { placeholde
   </select>
 )
 
-const TABS = ['Formulas','Production','Stock','Expenses','Flock Allocation'] as const
-type Tab = typeof TABS[number]
+type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock Dispatch' | 'Formulas' | 'Raw Material Adj.' | 'Expenses' | 'Flock Allocation'
+
+// ══════════════════════════════════════════════════════════════════
+// FINISHED FEED STOCK TAB
+// ══════════════════════════════════════════════════════════════════
+const FinishedFeedStockTab: React.FC = () => {
+  const { data: feedTypes = [] } = useQuery({
+    queryKey: ['feed_types'],
+    queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] }
+  })
+  const { data: productions = [] } = useQuery({
+    queryKey: ['feed_production'],
+    queryFn: async () => { const { data } = await supabase.from('feed_production').select('feed_type_id,quantity_kg'); return data ?? [] }
+  })
+  const { data: dispatches = [] } = useQuery({
+    queryKey: ['feed_transfers'],
+    queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('feed_type_id,quantity_kg'); return data ?? [] }
+  })
+
+  const rows = (feedTypes as any[]).map((ft: any) => {
+    const produced   = (productions as any[]).filter((p: any) => p.feed_type_id === ft.id).reduce((s: number, p: any) => s + (p.quantity_kg ?? 0), 0)
+    const dispatched = (dispatches  as any[]).filter((d: any) => d.feed_type_id === ft.id).reduce((s: number, d: any) => s + (d.quantity_kg ?? 0), 0)
+    return { ...ft, produced, dispatched, balance: produced - dispatched }
+  }).filter((r: any) => r.produced > 0 || r.dispatched > 0)
+
+  const totalProd = rows.reduce((s, r) => s + r.produced, 0)
+  const totalDisp = rows.reduce((s, r) => s + r.dispatched, 0)
+  const totalBal  = rows.reduce((s, r) => s + r.balance, 0)
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-4">
+        <Card className="!p-4"><p className="text-xs text-gray-500">Total Produced</p><p className="text-xl font-bold text-brand-700 mt-1">{(totalProd/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalProd.toLocaleString('en-IN')} kg</p></Card>
+        <Card className="!p-4"><p className="text-xs text-gray-500">Total Dispatched</p><p className="text-xl font-bold text-blue-700 mt-1">{(totalDisp/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalDisp.toLocaleString('en-IN')} kg</p></Card>
+        <Card className="!p-4"><p className="text-xs text-gray-500">Balance in Stock</p><p className={`text-xl font-bold mt-1 ${totalBal < 0 ? 'text-red-600' : 'text-green-700'}`}>{(totalBal/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalBal.toLocaleString('en-IN')} kg</p></Card>
+      </div>
+      <Card padding={false}>
+        <Table>
+          <thead><tr>
+            <Th>Feed Type</Th>
+            <Th right>Produced (kg)</Th>
+            <Th right>Dispatched to Farms (kg)</Th>
+            <Th right>Balance (kg)</Th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r: any) => (
+              <tr key={r.id} className="hover:bg-gray-50">
+                <Td><Badge color="blue">{r.code}</Badge><span className="text-sm ml-2">{r.name}</span></Td>
+                <Td right>{r.produced.toLocaleString('en-IN')}</Td>
+                <Td right className="text-blue-600">{r.dispatched.toLocaleString('en-IN')}</Td>
+                <Td right className={r.balance < 0 ? 'text-red-600 font-semibold' : 'text-green-700 font-semibold'}>{r.balance.toLocaleString('en-IN')}</Td>
+              </tr>
+            ))}
+          </tbody>
+          {rows.length > 1 && (
+            <tfoot><tr className="bg-gray-50 font-semibold">
+              <Td>TOTAL</Td>
+              <Td right>{totalProd.toLocaleString('en-IN')}</Td>
+              <Td right className="text-blue-600">{totalDisp.toLocaleString('en-IN')}</Td>
+              <Td right className={totalBal < 0 ? 'text-red-600' : 'text-green-700'}>{totalBal.toLocaleString('en-IN')}</Td>
+            </tr></tfoot>
+          )}
+        </Table>
+        {rows.length === 0 && <EmptyState title="No production records yet" />}
+      </Card>
+    </div>
+  )
+}
 
 // ══════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ══════════════════════════════════════════════════════════════════
 export const FeedMillPage: React.FC = () => {
-  const [tab, setTab] = useState<Tab>('Formulas')
+  const [searchParams] = useSearchParams()
+  const urlTab = searchParams.get('tab')
+  const initialTab: Tab =
+    urlTab === 'production' ? 'Production' :
+    urlTab === 'finished'   ? 'Finished Feed Stock' :
+    urlTab === 'dispatch'   ? 'Stock Dispatch' :
+    urlTab === 'formulas'   ? 'Formulas' : 'Raw Materials Stock'
+  const [tab, setTab] = useState<Tab>(initialTab)
+
+  const mainTabs: Tab[] = ['Raw Materials Stock', 'Production', 'Finished Feed Stock', 'Stock Dispatch']
+  const moreTabs: Tab[] = ['Formulas', 'Raw Material Adj.', 'Expenses', 'Flock Allocation']
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-gray-800">Feed Mill</h1>
-      <div className="flex gap-1 border-b border-gray-200">
-        {TABS.map(t => (
+      <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
+        {mainTabs.map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${tab===t ? 'border-b-2 border-green-600 text-green-700' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${tab===t ? 'border-b-2 border-green-600 text-green-700' : 'text-gray-500 hover:text-gray-700'}`}>
+            {t}
+          </button>
+        ))}
+        <div className="w-px bg-gray-200 mx-1" />
+        {moreTabs.map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${tab===t ? 'border-b-2 border-gray-500 text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}>
             {t}
           </button>
         ))}
       </div>
-      {tab === 'Formulas'         && <FormulasTab />}
-      {tab === 'Production'       && <ProductionTab />}
-      {tab === 'Stock'            && <StockTab />}
-      {tab === 'Expenses'         && <ExpensesTab />}
-      {tab === 'Flock Allocation' && <FlockAllocationTab />}
+      {tab === 'Raw Materials Stock' && <StockPage feedOnly />}
+      {tab === 'Production'          && <ProductionTab />}
+      {tab === 'Finished Feed Stock' && <FinishedFeedStockTab />}
+      {tab === 'Stock Dispatch'      && <FeedTransfer />}
+      {tab === 'Formulas'            && <FormulasTab />}
+      {tab === 'Raw Material Adj.'   && <StockTab />}
+      {tab === 'Expenses'            && <ExpensesTab />}
+      {tab === 'Flock Allocation'    && <FlockAllocationTab />}
     </div>
   )
 }

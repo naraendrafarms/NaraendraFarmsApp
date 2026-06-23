@@ -7,6 +7,7 @@ if (typeof window !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = `htt
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, currentFY } from '@/lib/utils'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth, can } from '@/lib/auth'
 import {
   Card, SectionHeader, Spinner, Table, Th, Td,
@@ -85,11 +86,16 @@ type Tab = 'Bills & GRN' | 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Ve
 export const PurchaseOrdersPage: React.FC = () => {
   const { profile } = useAuth()
   const role = profile?.role
-  const [tab, setTab] = useState<Tab>('Bills & GRN')
+  const [searchParams] = useSearchParams()
+  const urlTab = searchParams.get('tab')
+  const initialTab: Tab =
+    urlTab === 'grn'      ? 'Bills & GRN' :
+    urlTab === 'payments' ? 'Payments' : 'Purchase Orders'
+  const [tab, setTab] = useState<Tab>(initialTab)
 
   const TABS: { id: Tab; icon: any; locked?: boolean }[] = [
-    { id: 'Bills & GRN',     icon: <PackageCheck size={14}/> },
     { id: 'Purchase Orders', icon: <ShoppingCart size={14}/> },
+    { id: 'Bills & GRN',     icon: <PackageCheck size={14}/> },
     { id: 'Payments',        icon: <Clock size={14}/> },
     { id: 'Aging Report',    icon: <BarChart3 size={14}/> },
     { id: 'Vendor Statement',icon: <User size={14}/> },

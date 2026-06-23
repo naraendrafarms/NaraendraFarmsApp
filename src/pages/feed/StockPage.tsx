@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, SectionHeader, Spinner, Table, Th, Td, Badge } from '@/components/ui'
 
-export const StockPage: React.FC = () => {
+export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }) => {
   const [tab, setTab] = useState<'feed' | 'medicine'>('feed')
 
   const { data: ingredients, isLoading: loadIng } = useQuery({
@@ -85,16 +85,18 @@ export const StockPage: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Feed Stock Status" subtitle="Feed ingredients stock (GRN received − production used). For medicine/vaccine stock see Medicine & Vaccine tab."/>
 
-      {/* Tab bar */}
-      <div className="flex gap-1 border-b border-gray-200">
-        {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px
-              ${tab === t.key ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Tab bar — hidden when feedOnly */}
+      {!feedOnly && (
+        <div className="flex gap-1 border-b border-gray-200">
+          {tabs.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px
+                ${tab === t.key ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {tab === 'feed' && (
         <>
