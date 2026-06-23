@@ -354,14 +354,215 @@ export const EggStockPage: React.FC = () => {
 
   const dateLabel = fromDate ? `${fromDate} to ${toDate}` : `up to ${toDate}`
 
+  // Show wastage columns only if any flock actually has wastage data
+  const hasWastage = stockRows.some(r => r.totalWst > 0)
+
+  // Total wastage col count for colspan calculations
+  const wstCols = hasWastage ? 4 : 0
+  // Total data columns: 2(flock+farm) + 6(open) + 7(recv+LE) + wstCols + 6(sales) + 6(close) = 27+wstCols
+  const totalCols = 2 + 6 + 7 + wstCols + 6 + 6
+
   // Column group helper
   const GH = ({ children, span, cls }: { children: React.ReactNode; span?: number; cls?: string }) => (
     <th colSpan={span ?? 1} className={`px-2 py-1 text-center text-xs font-semibold uppercase tracking-wide border-b border-gray-200 ${cls ?? ''}`}>
       {children}
     </th>
   )
+  const SH = ({ children, bg }: { children: React.ReactNode; bg: string }) => (
+    <th className={`px-1 py-1.5 text-right font-medium ${bg}`}>{children}</th>
+  )
 
   return (
+    <div className="space-y-5">
+      <SectionHeader
+        title="Egg Stock Register"
+        subtitle={`Opening · Received · Wastage · Sales · Closing — ${dateLabel}`}
+        action={
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+          >
+            <Download size={14} /> Export CSV
+          </button>
+        }
+      />
+
+      {/* Filters */}
+      <div className="flex gap-3 flex-wrap items-end">
+        <Select
+          label=""
+          placeholder="All Flocks"
+          options={flockOptions}
+          value={flockFilter}
+          onChange={e => setFlockFilter(e.target.value)}
+          className="w-44"
+        />
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          From
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          To
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm" />
+        </label>
+        {(flockFilter || fromDate) && (
+          <button onClick={() => { setFlockFilter(''); setFromDate('') }}
+            className="text-sm text-gray-500 hover:text-gray-700 underline">
+            Clear Filters
+          </button>
+        )}
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="text-center py-3">
+          <div className="text-xs text-gray-500 font-medium uppercase tracking-wide">HE Stock</div>
+          <div className={`text-2xl font-bold mt-1 ${totals.clHE < 0 ? 'text-red-600' : 'text-blue-700'}`}>{fmtN(totals.clHE)}</div>
+          <div className="text-xs text-gray-400 mt-0.5">Closing Balance</div>
+        </Card>
+        <Card className="text-center py-3">
+          <div className="text-xs text-gray-500 font-medium uppercase tracking-wide">NHE Stock</div>
+          <div className={`text-2xl font-bold mt-1 ${totals.clNHE < 0 ? 'text-red-600' : 'text-green-700'}`}>{fmtN(totals.clNHE)}</div>
+          <div className="text-xs text-gray-400 mt-0.5">JE + TE + BE</div>
+        </Card>
+        <Card className="text-center py-3">
+          <div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Total Received</div>
+          <div className="text-2xl font-bold mt-1 text-gray-800">{fmtN(totals.recHE + totals.recNHE)}</div>
+          <div className="text-xs text-gray-400 mt-0.5">HE + NHE (period)</div>
+        </Card>
+        <Card className="text-center py-3">
+          <div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Total Sold</div>
+          <div className="text-2xl font-bold mt-1 text-orange-700">{fmtN(totals.slHE + totals.slNHE)}</div>
+          <div className="text-xs text-gray-400 mt-0.5">HE dispatched + NHE sales</div>
+        </Card>
+      </div>
+
+      {/* Stock Table */}
+      <Card padding={false}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              {/* Group headers — same 6 sub-cols per section (HE-A HE-B HE-C JE TE BE) */}
+              <tr className="bg-gray-100 border-b border-gray-200">
+                <GH span={2} cls="text-left">Flock</GH>
+                <GH span={6} cls="bg-sky-50 text-sky-800">Opening</GH>
+                <GH span={7} cls="bg-green-50 text-green-800">Received (Period)</GH>
+                {hasWastage && <GH span={4} cls="bg-red-50 text-red-800">Wastage (Period)</GH>}
+                <GH span={6} cls="bg-orange-50 text-orange-800">Sales (Period)</GH>
+                <GH span={6} cls="bg-purple-50 text-purple-800">Closing Balance</GH>
+              </tr>
+              <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                <th className="px-2 py-1.5 text-left font-medium">Flock</th>
+                <th className="px-2 py-1.5 text-left font-medium">Farm</th>
+                <SH bg="bg-sky-50/60">HE-A</SH>
+                <SH bg="bg-sky-50/60">HE-B</SH>
+                <SH bg="bg-sky-50/60">HE-C</SH>
+                <SH bg="bg-sky-50/60">JE</SH>
+                <SH bg="bg-sky-50/60">TE</SH>
+                <SH bg="bg-sky-50/60">BE</SH>
+                <SH bg="bg-green-50/60">HE-A</SH>
+                <SH bg="bg-green-50/60">HE-B</SH>
+                <SH bg="bg-green-50/60">HE-C</SH>
+                <SH bg="bg-green-50/60">JE</SH>
+                <SH bg="bg-green-50/60">TE</SH>
+                <SH bg="bg-green-50/60">BE</SH>
+                <SH bg="bg-green-100/60">LE</SH>
+                {hasWastage && <><SH bg="bg-red-50/60">HE</SH><SH bg="bg-red-50/60">JE</SH><SH bg="bg-red-50/60">TE</SH><SH bg="bg-red-50/60">BE</SH></>}
+                <SH bg="bg-orange-50/60">HE-A</SH>
+                <SH bg="bg-orange-50/60">HE-B</SH>
+                <SH bg="bg-orange-50/60">HE-C</SH>
+                <SH bg="bg-orange-50/60">JE</SH>
+                <SH bg="bg-orange-50/60">TE</SH>
+                <SH bg="bg-orange-50/60">BE</SH>
+                <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">HE-A</th>
+                <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">HE-B</th>
+                <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">HE-C</th>
+                <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">JE</th>
+                <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">TE</th>
+                <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">BE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockRows.map((r, idx) => (
+                <tr key={r.id} className={`border-b border-gray-100 hover:bg-gray-50 ${r.hasNegative ? 'bg-red-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                  <td className="px-2 py-1.5"><Badge color="green">F-{r.flockNo}</Badge></td>
+                  <td className="px-2 py-1.5 text-gray-500">{r.farm}</td>
+                  {/* Opening */}
+                  <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opA)}</td>
+                  <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opB)}</td>
+                  <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opC)}</td>
+                  <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opJE)}</td>
+                  <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opTE)}</td>
+                  <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opBE)}</td>
+                  {/* Received */}
+                  <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.recA)}</td>
+                  <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.recB)}</td>
+                  <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.recC)}</td>
+                  <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.recJE)}</td>
+                  <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.recTE)}</td>
+                  <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.recBE)}</td>
+                  <td className="px-1 py-1.5 text-right text-green-600 bg-green-100/30 font-medium">{fmt(r.recLE)}</td>
+                  {/* Wastage — only rendered when hasWastage */}
+                  {hasWastage && <><td className="px-1 py-1.5 text-right text-red-600 bg-red-50/20">{fmt(r.wsHE)}</td><td className="px-1 py-1.5 text-right text-red-600 bg-red-50/20">{fmt(r.wsJE)}</td><td className="px-1 py-1.5 text-right text-red-600 bg-red-50/20">{fmt(r.wsTE)}</td><td className="px-1 py-1.5 text-right text-red-600 bg-red-50/20">{fmt(r.wsBE)}</td></>}
+                  {/* Sales */}
+                  <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.slA)}</td>
+                  <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.slB)}</td>
+                  <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.slC)}</td>
+                  <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.slJE)}</td>
+                  <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.slTE)}</td>
+                  <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.slBE)}</td>
+                  {/* Closing */}
+                  <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clA < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clA)}</td>
+                  <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clB < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clB)}</td>
+                  <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clC < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clC)}</td>
+                  <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clJE < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clJE)}</td>
+                  <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clTE < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clTE)}</td>
+                  <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clBE < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clBE)}</td>
+                </tr>
+              ))}
+              {stockRows.length === 0 && (
+                <tr>
+                  <td colSpan={totalCols} className="text-center text-gray-400 py-8">No flocks found</td>
+                </tr>
+              )}
+            </tbody>
+            {stockRows.length > 1 && (
+              <tfoot>
+                <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold text-xs">
+                  <td colSpan={2} className="px-2 py-2">TOTAL ({stockRows.length} flocks)</td>
+                  {/* Opening */}
+                  <td className="px-1 py-2 text-right text-sky-800 bg-sky-50/30" colSpan={3}>{fmtN(totals.opHE)}</td>
+                  <td className="px-1 py-2 text-right text-sky-800 bg-sky-50/30" colSpan={3}>{fmtN(totals.opNHE)}</td>
+                  {/* Received */}
+                  <td className="px-1 py-2 text-right text-green-800 bg-green-50/30" colSpan={3}>{fmtN(totals.recHE)}</td>
+                  <td className="px-1 py-2 text-right text-green-800 bg-green-50/30" colSpan={3}>{fmtN(totals.recNHE)}</td>
+                  <td className="px-1 py-2 text-right text-green-700 bg-green-100/30">{fmtN(totals.recLE)}</td>
+                  {/* Wastage */}
+                  {hasWastage && <td className="px-1 py-2 text-right text-red-700 bg-red-50/30" colSpan={4}>{fmtN(totals.wst)}</td>}
+                  {/* Sales */}
+                  <td className="px-1 py-2 text-right text-orange-800 bg-orange-50/30" colSpan={3}>{fmtN(totals.slHE)}</td>
+                  <td className="px-1 py-2 text-right text-orange-800 bg-orange-50/30" colSpan={3}>{fmtN(totals.slNHE)}</td>
+                  {/* Closing */}
+                  <td className={`px-1 py-2 text-right bg-purple-50/30 ${totals.clHE < 0 ? 'text-red-700' : 'text-purple-900'}`} colSpan={3}>{fmtN(totals.clHE)}</td>
+                  <td className={`px-1 py-2 text-right bg-purple-50/30 ${totals.clNHE < 0 ? 'text-red-700' : 'text-purple-900'}`} colSpan={3}>{fmtN(totals.clNHE)}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </Card>
+
+      {stockRows.some(r => r.hasNegative) && (
+        <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+          <span className="font-medium">Note:</span> Rows highlighted in red have negative closing stock — check opening stock entries or data errors.
+        </div>
+      )}
+    </div>
+  )
+}
+
     <div className="space-y-5">
       <SectionHeader
         title="Egg Stock Register"
