@@ -90,7 +90,7 @@ export const PaymentPlanningPage: React.FC = () => {
       const { data } = await supabase
         .from('pending_payments')
         .select('*, parties(name,bank_name,account_no,ifsc,branch)')
-        .in('payment_status', ['Pending', 'HOLD'])
+        .or('payment_status.in.(Pending,HOLD),payment_status.is.null')
         .order('pay_before_date', { ascending: true })
       return data ?? []
     }

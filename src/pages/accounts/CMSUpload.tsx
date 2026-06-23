@@ -1,319 +1,222 @@
-import React, { useState, useRef } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useState, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
-import { Card, CardHeader, Button, Table, Th, Td, Badge, Spinner } from '@/components/ui'
-import { Upload, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Card, CardHeader, Button, DateInput, Table, Th, Td, Badge, Spinner } from '@/components/ui'
+import { Download, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
-type ParsedRow = {
-  date: string
-  paymentType: string
-  beneficiary: string
-  bankName: string
-  branch: string
-  ifsc: string
-  accountNo: string
-  grossAmount: number
-  tdsAmount: number
-  payableAmount: number
-  unit: string
-  reference: string
-  grnNo: string
-  grnDate: string
-  matchedPaymentId: string | null
-  matchedVendor: string | null
-  status: 'matched' | 'unmatched' | 'partial'
-}
-
-type UploadRecord = {
-  id: string
-  upload_date: string
-  filename: string
-  payment_date: string
-  total_payments: number
-  total_amount: number
-  applied: boolean
-  created_at: string
-}
+const COMPANY_NAME = 'Naraendra Farms'
+const COMPANY_ADDR1 = '5-9-22/21 , JVR Amrit Enclave, Roshanlal Residency ,'
+const COMPANY_ADDR2 = 'Adarsh Nagar , Hyderabad - 500063'
 
 export const CMSUploadPage: React.FC = () => {
-  const qc = useQueryClient()
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [parsed, setParsed] = useState<ParsedRow[] | null>(null)
-  const [filename, setFilename] = useState('')
-  const [applying, setApplying] = useState(false)
+  const [paymentDate, setPaymentDate] = useState(today())
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const { data: pendingPayments } = useQuery({
-    queryKey: ['pending_payments_for_cms'],
+  // All pending payments with vendor bank details
+  const { data: payments, isLoading } = useQuery({
+    queryKey: ['cms_pending_payments'],
     queryFn: async () => {
-      const { data } = await supabase.from('pending_payments')
-        .select('id,vendor_name,invoice_amount,net_payable,grn_no,po_no,payment_status')
-        .in('payment_status', ['Pending', 'HOLD'])
+      const { data } = await supabase
+        .from('pending_payments')
+        .select('*, parties(name,bank_name,branch,ifsc,account_no)')
+        .or('payment_status.in.(Pending,HOLD),payment_status.is.null')
+        .order('vendor_name', { ascending: true })
       return data ?? []
     }
   })
 
-  const { data: kotakAccount } = useQuery({
-    queryKey: ['kotak_account'],
+  // Vendor bank details fallback map (by vendor_name)
+  const { data: partiesMap } = useQuery({
+    queryKey: ['parties_bank_map'],
     queryFn: async () => {
-      const { data } = await supabase.from('bank_accounts')
-        .select('id,bank_name').ilike('bank_name', '%kotak%').eq('is_active', true).limit(1)
-      return data?.[0] ?? null
+      const { data } = await supabase.from('parties')
+        .select('name,bank_name,branch,ifsc,account_no')
+      const map: Record<string, any> = {}
+      for (const p of (data ?? [])) map[p.name] = p
+      return map
     }
   })
 
-  const { data: uploadHistory, isLoading: historyLoading } = useQuery({
-    queryKey: ['cms_uploads'],
-    queryFn: async () => {
-      const { data } = await supabase.from('cms_uploads')
-        .select('*').order('created_at', { ascending: false }).limit(30)
-      return (data ?? []) as UploadRecord[]
+  const toggleSelect = (id: string) =>
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  const selectAll = () =>
+    setSelected(selected.size === (payments?.length ?? 0) ? new Set() : new Set((payments ?? []).map((p: any) => p.id)))
+
+  const selectedPayments = useMemo(() =>
+    (payments ?? []).filter((p: any) => selected.has(p.id)), [payments, selected])
+
+  const totalSelected = selectedPayments.reduce((s: number, p: any) => s + (p.net_payable ?? p.invoice_amount ?? 0), 0)
+
+  const downloadCMS = () => {
+    if (!selectedPayments.length) { toast.error('Select at least one vendor to include'); return }
+
+    const wb = XLSX.utils.book_new()
+    const rows: any[][] = [
+      [COMPANY_NAME],
+      [COMPANY_ADDR1],
+      [COMPANY_ADDR2],
+      ['Request for RTGS & NEFT Transfer'],
+      ['Remitter Account :', '', '', '            '],
+      [
+        'DATE', 'PYMT TYPE', '', 'NAME OF THE BENEFICIARY',
+        'BENEFICIARY BANK NAME', 'BRANCH NAME', 'BRANCH IFSC',
+        'CA/SB BANK ACC NO', 'AMOUNT RS.', 'DISCOUNT/OTHER DEDUCTION',
+        'PAYABLE AMOUNT', 'UNIT/ BRANCH', 'PAYMENT REFERENCES', 'GRN NO', 'GRN DATE',
+      ],
+    ]
+
+    for (const p of selectedPayments) {
+      const party = p.parties ?? partiesMap?.[p.vendor_name] ?? {}
+      const grossAmt = p.invoice_amount ?? 0
+      const tdsAmt   = p.tds_amount ?? 0
+      const discAmt  = p.discount_amount ?? 0
+      const payable  = p.net_payable ?? (grossAmt - tdsAmt - discAmt)
+      rows.push([
+        new Date(paymentDate),
+        p.payment_type ?? 'NEFT',
+        '',
+        p.vendor_name,
+        party.bank_name ?? '',
+        party.branch ?? '',
+        party.ifsc ?? '',
+        party.account_no ?? '',
+        grossAmt,
+        tdsAmt + discAmt,
+        payable,
+        p.po_raised_by ?? 'Hyderabad',
+        p.invoice_no ?? p.po_no ?? '',
+        p.grn_no ?? '-',
+        p.grn_date ? new Date(p.grn_date) : '-',
+      ])
     }
-  })
 
-  const parseFile = async (file: File) => {
-    const buf = await file.arrayBuffer()
-    const wb = XLSX.read(buf, { type: 'array', cellDates: true })
-    const ws = wb.Sheets[wb.SheetNames[0]]
-    const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null })
+    // Totals row
+    const firstData = 7
+    const lastData  = firstData + selectedPayments.length - 1
+    rows.push([
+      '', '', '', 'TOTAL AMOUNT', '', '', '', '',
+      { f: `SUM(I${firstData}:I${lastData})` },
+      { f: `SUM(J${firstData}:J${lastData})` },
+      { f: `SUM(K${firstData}:K${lastData})` },
+      '', '', '', '',
+    ])
 
-    // Find header row (contains 'NAME OF THE BENEFICIARY')
-    const headerIdx = raw.findIndex(row =>
-      row.some((c: any) => typeof c === 'string' && c.includes('BENEFICIARY'))
-    )
-    if (headerIdx < 0) { toast.error('Cannot find header row in CMS file'); return }
-
-    const dataRows = raw.slice(headerIdx + 1).filter((row: any[]) =>
-      row[3] && row[3] !== 'TOTAL AMOUNT' && row[0]
-    )
-
-    const rows: ParsedRow[] = dataRows.map((r: any[]) => {
-      const dateVal = r[0]
-      let dateStr = today()
-      if (dateVal instanceof Date) dateStr = dateVal.toISOString().slice(0, 10)
-      else if (typeof dateVal === 'string') dateStr = dateVal
-
-      const grossAmt  = typeof r[8] === 'number' ? r[8] : parseFloat(r[8]) || 0
-      const tdsAmt    = typeof r[9] === 'number' ? r[9] : parseFloat(r[9]) || 0
-      const payable   = typeof r[10] === 'number' ? r[10] : (grossAmt - tdsAmt)
-      const beneficiary = r[3]?.toString().trim() ?? ''
-
-      // Try to match to pending_payments by vendor name
-      const matched = (pendingPayments ?? []).find((p: any) =>
-        p.vendor_name?.toLowerCase().trim() === beneficiary.toLowerCase()
-      )
-
-      const grnDateVal = r[14]
-      let grnDateStr = ''
-      if (grnDateVal instanceof Date) grnDateStr = grnDateVal.toISOString().slice(0, 10)
-      else if (typeof grnDateVal === 'string' && grnDateVal !== '-') grnDateStr = grnDateVal
-
-      return {
-        date: dateStr,
-        paymentType: r[1]?.toString() ?? 'NEFT',
-        beneficiary,
-        bankName: r[4]?.toString() ?? '',
-        branch: r[5]?.toString() ?? '',
-        ifsc: r[6]?.toString() ?? '',
-        accountNo: r[7]?.toString() ?? '',
-        grossAmount: grossAmt,
-        tdsAmount: tdsAmt,
-        payableAmount: payable,
-        unit: r[11]?.toString() ?? '',
-        reference: r[12]?.toString() ?? '',
-        grnNo: r[13]?.toString() ?? '',
-        grnDate: grnDateStr,
-        matchedPaymentId: matched?.id ?? null,
-        matchedVendor: matched?.vendor_name ?? null,
-        status: matched ? 'matched' : 'unmatched',
-      }
-    })
-
-    setParsed(rows)
-    setFilename(file.name)
-  }
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    try {
-      await parseFile(file)
-    } catch (err: any) {
-      toast.error('Failed to parse file: ' + err.message)
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [
+      {wch:12},{wch:10},{wch:2},{wch:30},{wch:22},{wch:18},{wch:14},
+      {wch:20},{wch:14},{wch:20},{wch:14},{wch:14},{wch:22},{wch:10},{wch:12},
+    ]
+    // Format date column
+    for (let i = 0; i < selectedPayments.length; i++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: 6 + i, c: 0 })]
+      if (cell) cell.t = 'd'
     }
-    e.target.value = ''
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+    XLSX.writeFile(wb, `CMS_${paymentDate.replace(/-/g, '')}.xlsx`)
+    toast.success(`CMS file downloaded — ${selectedPayments.length} payments, ${inr(totalSelected)}`)
   }
-
-  const applyPayments = async () => {
-    if (!parsed || !parsed.length) return
-    setApplying(true)
-    try {
-      const paymentDate = parsed[0]?.date ?? today()
-      const totalAmount = parsed.reduce((s, r) => s + r.payableAmount, 0)
-
-      // 1. Save upload record
-      const { data: uploadRec, error: upErr } = await supabase.from('cms_uploads').insert({
-        upload_date: today(),
-        filename,
-        payment_date: paymentDate,
-        total_payments: parsed.length,
-        total_amount: totalAmount,
-        applied: true,
-      }).select('id').single()
-      if (upErr) throw upErr
-
-      // 2. Mark matched pending_payments as Paid
-      const matchedIds = parsed.filter(r => r.matchedPaymentId).map(r => r.matchedPaymentId!)
-      if (matchedIds.length > 0) {
-        await supabase.from('pending_payments')
-          .update({ payment_status: 'Paid', paid_date: paymentDate })
-          .in('id', matchedIds)
-      }
-
-      // 3. Create bank_transactions (Debit) for each payment
-      if (kotakAccount?.id) {
-        const txns = parsed.map(r => ({
-          bank_account_id: kotakAccount.id,
-          txn_date: r.date,
-          txn_type: 'Debit',
-          category: 'Vendor Payment',
-          reference_no: r.reference || r.grnNo || null,
-          description: r.beneficiary,
-          amount: r.payableAmount,
-          linked_payment_id: r.matchedPaymentId ?? null,
-        }))
-        await supabase.from('bank_transactions').insert(txns)
-      }
-
-      qc.invalidateQueries({ queryKey: ['pending_payments_plan', 'pending_payments_for_cms', 'cms_uploads', 'kotak_balance'] })
-      toast.success(`Applied ${parsed.length} payments — ${matchedIds.length} matched to pending payments`)
-      setParsed(null)
-      setFilename('')
-    } catch (err: any) {
-      toast.error(err.message)
-    } finally {
-      setApplying(false)
-    }
-  }
-
-  const matchedCount   = (parsed ?? []).filter(r => r.status === 'matched').length
-  const unmatchedCount = (parsed ?? []).filter(r => r.status === 'unmatched').length
-  const totalPayable   = (parsed ?? []).reduce((s, r) => s + r.payableAmount, 0)
 
   return (
     <div className="space-y-4">
       <CardHeader
-        title="CMS Upload"
-        subtitle="Upload management-approved CMS payment Excel to mark payments as paid"
+        title="Generate CMS File"
+        subtitle="Select vendors, choose payment date, download bank CMS file for submission"
         action={
-          <>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
-            <Button icon={<Upload size={16} />} onClick={() => fileRef.current?.click()}>
-              Upload CMS Excel
+          <div className="flex items-center gap-3">
+            <DateInput value={paymentDate} onChange={setPaymentDate} />
+            <Button
+              icon={<Download size={16} />}
+              onClick={downloadCMS}
+              disabled={selected.size === 0}
+            >
+              Download CMS ({selected.size})
             </Button>
-          </>
+          </div>
         }
       />
 
-      {/* Parsed preview */}
-      {parsed && (
-        <Card padding={false}>
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <h3 className="font-semibold text-gray-900">{filename}</h3>
-              <div className="flex gap-3 mt-1 text-xs">
-                <span className="text-green-600 flex items-center gap-1"><CheckCircle size={12}/> {matchedCount} matched</span>
-                <span className="text-orange-500 flex items-center gap-1"><AlertCircle size={12}/> {unmatchedCount} unmatched</span>
-                <span className="text-gray-600 font-medium">Total: {inr(totalPayable)}</span>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" size="sm" onClick={() => { setParsed(null); setFilename('') }}>Cancel</Button>
-              <Button loading={applying} onClick={applyPayments}>
-                Apply Payments
-              </Button>
-            </div>
-          </div>
+      {selected.size > 0 && (
+        <div className="bg-brand-50 border border-brand-200 rounded-lg px-4 py-2 text-sm text-brand-800 flex items-center gap-2">
+          <FileSpreadsheet size={16} />
+          <span><strong>{selected.size}</strong> vendor(s) selected — Total payable: <strong>{inr(totalSelected)}</strong></span>
+        </div>
+      )}
+
+      <Card padding={false}>
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900">Pending Payments</h3>
+          <Button variant="outline" size="sm" onClick={selectAll}>
+            {selected.size === (payments?.length ?? 0) ? 'Deselect All' : 'Select All'}
+          </Button>
+        </div>
+
+        {isLoading ? (
+          <div className="p-8 text-center"><Spinner /></div>
+        ) : (
           <div className="overflow-x-auto">
             <Table>
-              <thead><tr>
-                <Th>Status</Th>
-                <Th>Date</Th>
-                <Th>Beneficiary</Th>
-                <Th>Bank</Th>
-                <Th>IFSC</Th>
-                <Th>Account No</Th>
-                <Th right>Gross</Th>
-                <Th right>TDS</Th>
-                <Th right>Payable</Th>
-                <Th>Reference</Th>
-                <Th>GRN</Th>
-              </tr></thead>
+              <thead>
+                <tr>
+                  <Th></Th>
+                  <Th>Vendor</Th>
+                  <Th>Bank</Th>
+                  <Th>IFSC</Th>
+                  <Th>Account No</Th>
+                  <Th>Invoice / GRN</Th>
+                  <Th right>Gross Amt</Th>
+                  <Th right>TDS / Disc</Th>
+                  <Th right>Net Payable</Th>
+                  <Th>Due Date</Th>
+                  <Th>Type</Th>
+                </tr>
+              </thead>
               <tbody>
-                {parsed.map((r, i) => (
-                  <tr key={i} className={r.status === 'unmatched' ? 'bg-orange-50' : 'hover:bg-gray-50'}>
-                    <Td>
-                      {r.status === 'matched'
-                        ? <span className="flex items-center gap-1 text-green-600 text-xs"><CheckCircle size={12}/> Matched</span>
-                        : <span className="flex items-center gap-1 text-orange-500 text-xs"><XCircle size={12}/> Unmatched</span>
-                      }
-                    </Td>
-                    <Td className="text-xs">{fmtDate(r.date)}</Td>
-                    <Td>
-                      <span className="font-medium text-sm">{r.beneficiary}</span>
-                      {r.matchedVendor && r.matchedVendor !== r.beneficiary && (
-                        <span className="block text-xs text-gray-400">→ {r.matchedVendor}</span>
-                      )}
-                    </Td>
-                    <Td className="text-xs">{r.bankName}</Td>
-                    <Td className="text-xs font-mono">{r.ifsc}</Td>
-                    <Td className="text-xs font-mono">{r.accountNo}</Td>
-                    <Td right className="text-xs">{inr(r.grossAmount)}</Td>
-                    <Td right className="text-xs text-orange-600">{r.tdsAmount > 0 ? inr(r.tdsAmount) : '—'}</Td>
-                    <Td right className="font-semibold">{inr(r.payableAmount)}</Td>
-                    <Td className="text-xs">{r.reference || '—'}</Td>
-                    <Td className="text-xs">{r.grnNo || '—'}</Td>
-                  </tr>
-                ))}
+                {(payments ?? []).map((p: any) => {
+                  const isSelected = selected.has(p.id)
+                  const party = p.parties ?? partiesMap?.[p.vendor_name] ?? {}
+                  const tdsDisc = (p.tds_amount ?? 0) + (p.discount_amount ?? 0)
+                  const isOD = p.pay_before_date && p.pay_before_date < today()
+                  return (
+                    <tr key={p.id}
+                      onClick={() => toggleSelect(p.id)}
+                      className={`cursor-pointer transition-colors ${isSelected ? 'bg-brand-50 border-l-2 border-brand-500' : 'hover:bg-gray-50'}`}
+                    >
+                      <Td>
+                        <input type="checkbox" checked={isSelected}
+                          onChange={() => toggleSelect(p.id)}
+                          onClick={e => e.stopPropagation()}
+                          className="rounded border-gray-300 text-brand-600" />
+                      </Td>
+                      <Td>
+                        <span className="font-medium text-sm">{p.vendor_name}</span>
+                      </Td>
+                      <Td className="text-xs text-gray-600">{party.bank_name ?? <span className="text-red-400">No bank</span>}</Td>
+                      <Td className="text-xs font-mono">{party.ifsc ?? '—'}</Td>
+                      <Td className="text-xs font-mono">{party.account_no ?? '—'}</Td>
+                      <Td className="text-xs">{p.invoice_no ?? p.grn_no ?? p.po_no ?? '—'}</Td>
+                      <Td right>{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
+                      <Td right className="text-xs text-orange-600">{tdsDisc > 0 ? inr(tdsDisc) : '—'}</Td>
+                      <Td right className="font-semibold">{inr(p.net_payable ?? p.invoice_amount ?? 0)}</Td>
+                      <Td>
+                        <span className={`text-xs ${isOD ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                          {p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}{isOD && ' ⚠️'}
+                        </span>
+                      </Td>
+                      <Td><Badge color="blue">{p.payment_type ?? 'NEFT'}</Badge></Td>
+                    </tr>
+                  )
+                })}
+                {!(payments?.length) && (
+                  <tr><td colSpan={11} className="text-center py-8 text-gray-400 text-sm">No pending payments</td></tr>
+                )}
               </tbody>
             </Table>
           </div>
-        </Card>
-      )}
-
-      {/* Upload history */}
-      <Card padding={false}>
-        <div className="px-4 py-2 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-900 text-sm">Upload History</h3>
-        </div>
-        {historyLoading ? <div className="p-6 text-center"><Spinner /></div> : (
-          <Table>
-            <thead><tr>
-              <Th>Upload Date</Th>
-              <Th>Filename</Th>
-              <Th>Payment Date</Th>
-              <Th right>Payments</Th>
-              <Th right>Total Amount</Th>
-              <Th>Status</Th>
-            </tr></thead>
-            <tbody>
-              {(uploadHistory ?? []).map((u: UploadRecord) => (
-                <tr key={u.id} className="hover:bg-gray-50">
-                  <Td className="text-xs">{fmtDate(u.upload_date)}</Td>
-                  <Td className="text-xs font-medium">{u.filename}</Td>
-                  <Td className="text-xs">{fmtDate(u.payment_date)}</Td>
-                  <Td right>{u.total_payments}</Td>
-                  <Td right className="font-semibold">{inr(u.total_amount)}</Td>
-                  <Td><Badge color={u.applied ? 'green' : 'gray'}>{u.applied ? 'Applied' : 'Preview'}</Badge></Td>
-                </tr>
-              ))}
-              {!uploadHistory?.length && (
-                <tr><td colSpan={6} className="text-center py-8 text-gray-400 text-sm">No uploads yet</td></tr>
-              )}
-            </tbody>
-          </Table>
         )}
       </Card>
     </div>
