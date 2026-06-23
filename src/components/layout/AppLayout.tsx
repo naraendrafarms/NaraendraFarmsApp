@@ -114,7 +114,7 @@ const NAV: NavItem[] = [
       { label: 'Cash Book', to: '/accounts/cash-book' },
       { label: 'Bank Ledger', to: '/accounts/bank-ledger' },
       { label: 'Daily Payment Planning', to: '/accounts/payment-planning' },
-      { label: 'CMS Upload', to: '/accounts/cms-upload' },
+      { label: 'Generate CMS File', to: '/accounts/cms-upload' },
       { label: 'Sales Invoice Register', to: '/accounts/sales-invoices' },
       { label: 'Purchase Invoice Register', to: '/accounts/invoices' },
       { label: 'Invoice Series / Counters', to: '/accounts/invoice-series' },

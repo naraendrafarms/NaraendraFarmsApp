@@ -23,7 +23,7 @@ export const CMSUploadPage: React.FC = () => {
         .from('pending_payments')
         .select('*, parties(name,bank_name,branch,ifsc,account_no)')
         .or('payment_status.in.(Pending,HOLD),payment_status.is.null')
-        .order('vendor_name', { ascending: true })
+        .order('pay_before_date', { ascending: true })
       return data ?? []
     }
   })
