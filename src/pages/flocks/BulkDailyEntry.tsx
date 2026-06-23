@@ -7,16 +7,22 @@ import { Save } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK','MALE']
+
 type FlockRow = {
   je_eggs: string; te_eggs: string; be_eggs: string
   mortality_female: string; mortality_male: string
-  feed_female_kg: string; feed_male_kg: string; med_id: string; med_qty: string
+  feed_female_kg: string; feed_type_f: string
+  feed_male_kg: string; feed_type_m: string
+  med_id: string; med_qty: string
   existingDailyId: string | null; existingMedId: string | null
 }
 const emptyFlockRow = (): FlockRow => ({
   je_eggs: '', te_eggs: '', be_eggs: '',
   mortality_female: '', mortality_male: '',
-  feed_female_kg: '', feed_male_kg: '', med_id: '', med_qty: '',
+  feed_female_kg: '', feed_type_f: 'BCM',
+  feed_male_kg: '', feed_type_m: 'BCM',
+  med_id: '', med_qty: '',
   existingDailyId: null, existingMedId: null,
 })
 
@@ -24,7 +30,8 @@ type ShedRow = {
   opening_female: string; opening_male: string
   he_eggs: string; je_eggs: string; te_eggs: string; be_eggs: string
   mortality_female: string; mortality_male: string
-  feed_female_kg: string; feed_male_kg: string
+  feed_female_kg: string; feed_type_f: string
+  feed_male_kg: string; feed_type_m: string
   transfer_female: string; transfer_male: string
   cull_female: string; cull_male: string
   closing_female: string; closing_male: string
@@ -36,7 +43,8 @@ const emptyShedRow = (): ShedRow => ({
   opening_female: '', opening_male: '',
   he_eggs: '', je_eggs: '', te_eggs: '', be_eggs: '',
   mortality_female: '', mortality_male: '',
-  feed_female_kg: '', feed_male_kg: '',
+  feed_female_kg: '', feed_type_f: 'BCM',
+  feed_male_kg: '', feed_type_m: 'BCM',
   transfer_female: '', transfer_male: '',
   cull_female: '', cull_male: '',
   closing_female: '', closing_male: '',
@@ -133,7 +141,7 @@ export const BulkDailyEntry: React.FC = () => {
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase.from('daily_records')
-        .select('id,flock_id,shed_id,opening_female,opening_male,he_eggs,je_eggs,te_eggs,be_eggs,mortality_female,mortality_male,feed_female_kg,feed_male_kg,transfer_female,transfer_male,cull_female,cull_male,closing_female,closing_male,lighting_hrs,remarks')
+        .select('id,flock_id,shed_id,opening_female,opening_male,he_eggs,je_eggs,te_eggs,be_eggs,mortality_female,mortality_male,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,transfer_female,transfer_male,cull_female,cull_male,closing_female,closing_male,lighting_hrs,remarks')
         .eq('record_date', date)
       if (selectedFlock) q = q.eq('flock_id', selectedFlock)
       const { data } = await q
@@ -196,7 +204,9 @@ export const BulkDailyEntry: React.FC = () => {
         mortality_female: dr?.mortality_female?.toString() ?? '',
         mortality_male: dr?.mortality_male?.toString() ?? '',
         feed_female_kg: dr?.feed_female_kg?.toString() ?? '',
+        feed_type_f: dr?.feed_type_f ?? 'BCM',
         feed_male_kg: dr?.feed_male_kg?.toString() ?? '',
+        feed_type_m: dr?.feed_type_m ?? 'BCM',
         med_id: mu?.medicine_id ?? '', med_qty: mu?.quantity?.toString() ?? '',
         existingDailyId: dr?.id ?? null, existingMedId: mu?.id ?? null,
       }
@@ -231,7 +241,9 @@ export const BulkDailyEntry: React.FC = () => {
         mortality_female: dr?.mortality_female?.toString() ?? '',
         mortality_male: dr?.mortality_male?.toString() ?? '',
         feed_female_kg: dr?.feed_female_kg?.toString() ?? '',
+        feed_type_f: dr?.feed_type_f ?? 'BCM',
         feed_male_kg: dr?.feed_male_kg?.toString() ?? '',
+        feed_type_m: dr?.feed_type_m ?? 'BCM',
         transfer_female: dr?.transfer_female?.toString() ?? '',
         transfer_male: dr?.transfer_male?.toString() ?? '',
         cull_female: dr?.cull_female?.toString() ?? '',
@@ -291,7 +303,8 @@ export const BulkDailyEntry: React.FC = () => {
         he_eggs: he, je_eggs: je, te_eggs: te, be_eggs: be,
         total_eggs: he + je + te + be,
         mortality_female: mf, mortality_male: mm,
-        feed_female_kg: ff, feed_male_kg: fm,
+        feed_female_kg: ff, feed_type_f: r.feed_type_f || 'BCM',
+        feed_male_kg: fm, feed_type_m: r.feed_type_m || 'BCM',
         transfer_female: tf, transfer_male: tm,
         cull_female: cf, cull_male: cm,
         trcull_female: tf + cf, trcull_male: tm + cm,
@@ -306,10 +319,23 @@ export const BulkDailyEntry: React.FC = () => {
 
       // Mirror feed to daily_feed so Flock → Feed tab shows it
       if (ff > 0 || fm > 0) {
-        await supabase.from('daily_feed').upsert(
-          { flock_id: selectedFlock, feed_date: date, feed_type: 'BCM', female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
-          { onConflict: 'flock_id,feed_date,feed_type' }
-        )
+        const ftF = r.feed_type_f || 'BCM'
+        const ftM = r.feed_type_m || 'BCM'
+        if (ftF === ftM) {
+          await supabase.from('daily_feed').upsert(
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
+            { onConflict: 'flock_id,feed_date,feed_type' }
+          )
+        } else {
+          if (ff > 0) await supabase.from('daily_feed').upsert(
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: 0, male_cost: 0 },
+            { onConflict: 'flock_id,feed_date,feed_type' }
+          )
+          if (fm > 0) await supabase.from('daily_feed').upsert(
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: 0 },
+            { onConflict: 'flock_id,feed_date,feed_type' }
+          )
+        }
       }
 
       // medicine per shed
@@ -349,7 +375,8 @@ export const BulkDailyEntry: React.FC = () => {
             je_eggs: je, te_eggs: te, be_eggs: be, total_eggs: je + te + be,
             mortality_female: parseInt(r.mortality_female) || 0,
             mortality_male: parseInt(r.mortality_male) || 0,
-            feed_female_kg: ff, feed_male_kg: fm,
+            feed_female_kg: ff, feed_type_f: r.feed_type_f || 'BCM',
+            feed_male_kg: fm, feed_type_m: r.feed_type_m || 'BCM',
           }
           const { error } = r.existingDailyId
             ? await supabase.from('daily_records').update(payload).eq('id', r.existingDailyId)
@@ -357,10 +384,23 @@ export const BulkDailyEntry: React.FC = () => {
           if (error) { console.error(error); errors++ }
         }
         if (ff || fm) {
-          await supabase.from('daily_feed').upsert(
-            { flock_id: flock.id, feed_date: date, feed_type: 'BCM', female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
-            { onConflict: 'flock_id,feed_date,feed_type' }
-          )
+          const ftF = r.feed_type_f || 'BCM'
+          const ftM = r.feed_type_m || 'BCM'
+          if (ftF === ftM) {
+            await supabase.from('daily_feed').upsert(
+              { flock_id: flock.id, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
+              { onConflict: 'flock_id,feed_date,feed_type' }
+            )
+          } else {
+            if (ff) await supabase.from('daily_feed').upsert(
+              { flock_id: flock.id, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: 0, male_cost: 0 },
+              { onConflict: 'flock_id,feed_date,feed_type' }
+            )
+            if (fm) await supabase.from('daily_feed').upsert(
+              { flock_id: flock.id, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: 0 },
+              { onConflict: 'flock_id,feed_date,feed_type' }
+            )
+          }
         }
         if (r.med_id && r.med_qty) {
           const medPayload = { flock_id: flock.id, usage_date: date, medicine_id: r.med_id, quantity: parseFloat(r.med_qty) || 0, unit: 'ml' }
@@ -457,8 +497,10 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-1 py-2 text-center">BE</th>
                       <th className="px-1 py-2 text-center">Death ♀</th>
                       <th className="px-1 py-2 text-center">Death ♂</th>
-                      <th className="px-1 py-2 text-center">Feed ♀</th>
-                      <th className="px-1 py-2 text-center">Feed ♂</th>
+                      <th className="px-1 py-2 text-center">Feed ♀ kg</th>
+                      <th className="px-1 py-2 text-center">Type ♀</th>
+                      <th className="px-1 py-2 text-center">Feed ♂ kg</th>
+                      <th className="px-1 py-2 text-center">Type ♂</th>
                       <th className="px-1 py-2 text-center">Trf ♀</th>
                       <th className="px-1 py-2 text-center">Trf ♂</th>
                       <th className="px-1 py-2 text-center">Cull ♀</th>
@@ -489,7 +531,19 @@ export const BulkDailyEntry: React.FC = () => {
                           <td className="px-1 py-1">{numInput(r.mortality_female, u('mortality_female'))}</td>
                           <td className="px-1 py-1">{numInput(r.mortality_male, u('mortality_male'))}</td>
                           <td className="px-1 py-1">{numInput(r.feed_female_kg, u('feed_female_kg'))}</td>
+                          <td className="px-1 py-1">
+                            <select value={r.feed_type_f} onChange={e => updateShedRow(shed.id, 'feed_type_f', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
+                              {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </td>
                           <td className="px-1 py-1">{numInput(r.feed_male_kg, u('feed_male_kg'))}</td>
+                          <td className="px-1 py-1">
+                            <select value={r.feed_type_m} onChange={e => updateShedRow(shed.id, 'feed_type_m', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
+                              {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </td>
                           <td className="px-1 py-1">{numInput(r.transfer_female, u('transfer_female'))}</td>
                           <td className="px-1 py-1">{numInput(r.transfer_male, u('transfer_male'))}</td>
                           <td className="px-1 py-1">{numInput(r.cull_female, u('cull_female'))}</td>
@@ -544,7 +598,9 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-2 py-2 text-center">Death ♀</th>
                       <th className="px-2 py-2 text-center">Death ♂</th>
                       <th className="px-2 py-2 text-center">Feed ♀ kg</th>
+                      <th className="px-2 py-2 text-center">Type ♀</th>
                       <th className="px-2 py-2 text-center">Feed ♂ kg</th>
+                      <th className="px-2 py-2 text-center">Type ♂</th>
                       <th className="px-2 py-2 text-left" style={{ minWidth: 160 }}>Medicine</th>
                       <th className="px-2 py-2 text-center">Qty</th>
                     </tr>
@@ -558,13 +614,35 @@ export const BulkDailyEntry: React.FC = () => {
                             F-{flock.flock_no}
                             {flock.breed && <span className="text-xs text-gray-400 ml-1">{flock.breed}</span>}
                           </td>
-                          {(['je_eggs','te_eggs','be_eggs','mortality_female','mortality_male','feed_female_kg','feed_male_kg'] as const).map(field => (
+                          {(['je_eggs','te_eggs','be_eggs','mortality_female','mortality_male'] as const).map(field => (
                             <td key={field} className="px-1 py-1">
-                              <input type="number" min="0" value={r[field] as string} placeholder="0"
+                              <input type="number" min="0" value={r[field]} placeholder="0"
                                 onChange={e => updateFlockRow(flock.id, field, e.target.value)}
                                 className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
                             </td>
                           ))}
+                          <td className="px-1 py-1">
+                            <input type="number" min="0" value={r.feed_female_kg} placeholder="0"
+                              onChange={e => updateFlockRow(flock.id, 'feed_female_kg', e.target.value)}
+                              className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
+                          </td>
+                          <td className="px-1 py-1">
+                            <select value={r.feed_type_f} onChange={e => updateFlockRow(flock.id, 'feed_type_f', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
+                              {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </td>
+                          <td className="px-1 py-1">
+                            <input type="number" min="0" value={r.feed_male_kg} placeholder="0"
+                              onChange={e => updateFlockRow(flock.id, 'feed_male_kg', e.target.value)}
+                              className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
+                          </td>
+                          <td className="px-1 py-1">
+                            <select value={r.feed_type_m} onChange={e => updateFlockRow(flock.id, 'feed_type_m', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
+                              {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </td>
                           <td className="px-1 py-1">
                             <select value={r.med_id} onChange={e => updateFlockRow(flock.id, 'med_id', e.target.value)}
                               className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
