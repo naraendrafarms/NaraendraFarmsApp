@@ -6,6 +6,7 @@ import {
   BarChart2, Database, Shield, ShoppingCart, BookOpen
 } from 'lucide-react'
 import { useAuth, can, type Role } from '@/lib/auth'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 interface NavChild { label: string; to: string }
 interface NavItem {
@@ -424,7 +425,9 @@ export const AppLayout: React.FC = () => {
           </span>
         </header>
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <Outlet />
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

@@ -89,7 +89,7 @@ export const PaymentPlanningPage: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from('pending_payments')
-        .select('*, parties(name,bank_name,account_no,ifsc,branch)')
+        .select('*')
         .or('payment_status.in.(Pending,HOLD),payment_status.is.null')
         .order('pay_before_date', { ascending: true })
       return data ?? []
@@ -374,7 +374,7 @@ export const PaymentPlanningPage: React.FC = () => {
                       </Td>
                       <Td>
                         <span className="font-medium text-sm">{p.vendor_name}</span>
-                        {p.parties?.bank_name && <span className="block text-xs text-gray-400">{p.parties.bank_name}</span>}
+                        {partiesMap?.[p.vendor_name]?.bank_name && <span className="block text-xs text-gray-400">{partiesMap[p.vendor_name].bank_name}</span>}
                       </Td>
                       <Td><Badge color="blue">{p.payment_type ?? 'NEFT'}</Badge></Td>
                       <Td className="text-xs">{p.po_no ?? p.invoice_no ?? '—'}</Td>
