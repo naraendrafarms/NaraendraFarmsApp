@@ -222,7 +222,15 @@ export const IngredientsMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
-  const rows = data??[]
+  const [search, setSearch] = useState('')
+  const [filterCat, setFilterCat] = useState('')
+
+  const allRows = data??[]
+  const rows = allRows.filter((r:any)=>{
+    if(search && !r.name.toLowerCase().includes(search.toLowerCase()) && !r.code.toLowerCase().includes(search.toLowerCase()) && !(r.short_name??'').toLowerCase().includes(search.toLowerCase())) return false
+    if(filterCat && r.category !== filterCat) return false
+    return true
+  })
   const ids = rows.map((r:any)=>r.id)
   const allSel = ids.length>0 && ids.every((id:string)=>sel.has(id))
   const someSel = ids.some((id:string)=>sel.has(id))
@@ -231,7 +239,7 @@ export const IngredientsMaster: React.FC = () => {
 
   const handleExport=()=>exportCSV('feed_ingredients.csv',
     ['code','name','short_name','category','unit','protein_pct','moisture_pct'],
-    rows.map((r:any)=>[r.code,r.name,r.short_name,r.category,r.unit,r.protein_pct,r.moisture_pct])
+    allRows.map((r:any)=>[r.code,r.name,r.short_name,r.category,r.unit,r.protein_pct,r.moisture_pct])
   )
 
   const handleImport=async(file:File)=>{
@@ -261,7 +269,7 @@ export const IngredientsMaster: React.FC = () => {
             Changes here affect ingredient lookups in <strong>Feed Mill → Formula &amp; Production</strong> and <strong>GRN Entry</strong>.
           </p>
         </div>
-        <SectionHeader title="Feed Ingredients" subtitle="Raw materials for feed production"
+        <SectionHeader title="Feed Ingredients" subtitle="Master list of raw materials used in Feed Mill formulas and GRN purchase entries"
           action={
             <div className="flex gap-2">
               <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('ingredients_template.csv',['code','name','short_name','category','unit','protein_pct','moisture_pct'],[['MAIZE','Maize Grain','Maize','grain','kg','9.0','14.0']])}>Template</Button>
@@ -272,6 +280,12 @@ export const IngredientsMaster: React.FC = () => {
             </div>
           }
         />
+        <div className="flex gap-3 flex-wrap">
+          <Input label="" placeholder="Search by name / code…" value={search} onChange={e=>setSearch(e.target.value)} className="w-52"/>
+          <Select label="" placeholder="All Categories" options={catOptions} value={filterCat} onChange={e=>setFilterCat(e.target.value)} className="w-40"/>
+          {(search||filterCat)&&<Button variant="ghost" size="sm" onClick={()=>{setSearch('');setFilterCat('')}}>Clear</Button>}
+          <span className="text-xs text-gray-400 self-end pb-2">{rows.length} of {allRows.length}</span>
+        </div>
         <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
           onMerge={()=>{const first=[...sel][0];setMergeKeepId(first);setMergeOpen(true)}}/>
         {isLoading?<Spinner/>:(
@@ -694,7 +708,15 @@ export const MedicinesMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
-  const rows=data??[]
+  const [medSearch, setMedSearch] = useState('')
+  const [medTypeFilter, setMedTypeFilter] = useState('')
+
+  const allMedRows=data??[]
+  const rows=allMedRows.filter((r:any)=>{
+    if(medSearch && !r.name.toLowerCase().includes(medSearch.toLowerCase()) && !(r.manufacturer??'').toLowerCase().includes(medSearch.toLowerCase())) return false
+    if(medTypeFilter && r.type !== medTypeFilter) return false
+    return true
+  })
   const ids=rows.map((r:any)=>r.id)
   const allSel=ids.length>0&&ids.every((id:string)=>sel.has(id))
   const someSel=ids.some((id:string)=>sel.has(id))
@@ -706,7 +728,7 @@ export const MedicinesMaster: React.FC = () => {
   const handleExportMeds = () => {
     exportCSV('medicines_master.csv',
       ['name','type','unit','manufacturer','rate','batch_no','expiry_date'],
-      rows.map((r:any)=>[r.name,r.type,r.unit,r.manufacturer,r.rate,r.batch_no,r.expiry_date])
+      allMedRows.map((r:any)=>[r.name,r.type,r.unit,r.manufacturer,r.rate,r.batch_no,r.expiry_date])
     )
   }
 
@@ -740,6 +762,12 @@ export const MedicinesMaster: React.FC = () => {
             </div>
           }
         />
+        <div className="flex gap-3 flex-wrap">
+          <Input label="" placeholder="Search by name / manufacturer…" value={medSearch} onChange={e=>setMedSearch(e.target.value)} className="w-56"/>
+          <Select label="" placeholder="All Types" options={['medicine','vaccine','supplement','disinfectant','other']} value={medTypeFilter} onChange={e=>setMedTypeFilter(e.target.value)} className="w-36"/>
+          {(medSearch||medTypeFilter)&&<Button variant="ghost" size="sm" onClick={()=>{setMedSearch('');setMedTypeFilter('')}}>Clear</Button>}
+          <span className="text-xs text-gray-400 self-end pb-2">{rows.length} of {allMedRows.length}</span>
+        </div>
         <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
           onMerge={()=>{const first=[...sel][0];setMergeKeepId(first);setMergeOpen(true)}}/>
         {isLoading?<Spinner/>:(
