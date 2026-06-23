@@ -10,13 +10,13 @@ import toast from 'react-hot-toast'
 type FlockRow = {
   je_eggs: string; te_eggs: string; be_eggs: string
   mortality_female: string; mortality_male: string
-  feed_female_kg: string; med_id: string; med_qty: string
+  feed_female_kg: string; feed_male_kg: string; med_id: string; med_qty: string
   existingDailyId: string | null; existingMedId: string | null
 }
 const emptyFlockRow = (): FlockRow => ({
   je_eggs: '', te_eggs: '', be_eggs: '',
   mortality_female: '', mortality_male: '',
-  feed_female_kg: '', med_id: '', med_qty: '',
+  feed_female_kg: '', feed_male_kg: '', med_id: '', med_qty: '',
   existingDailyId: null, existingMedId: null,
 })
 
@@ -196,6 +196,7 @@ export const BulkDailyEntry: React.FC = () => {
         mortality_female: dr?.mortality_female?.toString() ?? '',
         mortality_male: dr?.mortality_male?.toString() ?? '',
         feed_female_kg: dr?.feed_female_kg?.toString() ?? '',
+        feed_male_kg: dr?.feed_male_kg?.toString() ?? '',
         med_id: mu?.medicine_id ?? '', med_qty: mu?.quantity?.toString() ?? '',
         existingDailyId: dr?.id ?? null, existingMedId: mu?.id ?? null,
       }
@@ -337,27 +338,27 @@ export const BulkDailyEntry: React.FC = () => {
       if (!r) continue
       const hasEggs = r.je_eggs || r.te_eggs || r.be_eggs
       const hasDeaths = r.mortality_female || r.mortality_male
-      if (!hasEggs && !hasDeaths && !r.feed_female_kg && !(r.med_id && r.med_qty)) continue
+      if (!hasEggs && !hasDeaths && !r.feed_female_kg && !r.feed_male_kg && !(r.med_id && r.med_qty)) continue
       try {
         const je = parseInt(r.je_eggs) || 0, te = parseInt(r.te_eggs) || 0, be = parseInt(r.be_eggs) || 0
-        const ff = parseFloat(r.feed_female_kg) || 0
-        if (hasEggs || hasDeaths || ff) {
+        const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
+        if (hasEggs || hasDeaths || ff || fm) {
           const payload: any = {
             flock_id: flock.id, record_date: date,
             farm_id: (flock as any).laying_farm_id ?? (flock as any).rearing_farm_id ?? null,
             je_eggs: je, te_eggs: te, be_eggs: be, total_eggs: je + te + be,
             mortality_female: parseInt(r.mortality_female) || 0,
             mortality_male: parseInt(r.mortality_male) || 0,
-            feed_female_kg: ff, feed_male_kg: 0,
+            feed_female_kg: ff, feed_male_kg: fm,
           }
           const { error } = r.existingDailyId
             ? await supabase.from('daily_records').update(payload).eq('id', r.existingDailyId)
             : await supabase.from('daily_records').upsert(payload, { onConflict: 'flock_id,record_date,farm_id' })
           if (error) { console.error(error); errors++ }
         }
-        if (ff) {
+        if (ff || fm) {
           await supabase.from('daily_feed').upsert(
-            { flock_id: flock.id, feed_date: date, feed_type: 'BCM', female_kg: ff, male_kg: 0, female_cost: 0, male_cost: 0 },
+            { flock_id: flock.id, feed_date: date, feed_type: 'BCM', female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
             { onConflict: 'flock_id,feed_date,feed_type' }
           )
         }
@@ -542,7 +543,8 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-2 py-2 text-center">BE</th>
                       <th className="px-2 py-2 text-center">Death ♀</th>
                       <th className="px-2 py-2 text-center">Death ♂</th>
-                      <th className="px-2 py-2 text-center">Feed kg</th>
+                      <th className="px-2 py-2 text-center">Feed ♀ kg</th>
+                      <th className="px-2 py-2 text-center">Feed ♂ kg</th>
                       <th className="px-2 py-2 text-left" style={{ minWidth: 160 }}>Medicine</th>
                       <th className="px-2 py-2 text-center">Qty</th>
                     </tr>
@@ -556,7 +558,7 @@ export const BulkDailyEntry: React.FC = () => {
                             F-{flock.flock_no}
                             {flock.breed && <span className="text-xs text-gray-400 ml-1">{flock.breed}</span>}
                           </td>
-                          {(['je_eggs','te_eggs','be_eggs','mortality_female','mortality_male','feed_female_kg'] as const).map(field => (
+                          {(['je_eggs','te_eggs','be_eggs','mortality_female','mortality_male','feed_female_kg','feed_male_kg'] as const).map(field => (
                             <td key={field} className="px-1 py-1">
                               <input type="number" min="0" value={r[field] as string} placeholder="0"
                                 onChange={e => updateFlockRow(flock.id, field, e.target.value)}
