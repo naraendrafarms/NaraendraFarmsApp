@@ -2237,8 +2237,8 @@ export const NHESales: React.FC = () => {
             </label>
             {form.is_employee_sale && (
               <div className="space-y-2">
-                <Select label="Employee" required placeholder="— Select employee —"
-                  value={form.employee_id} onChange={e => sv('employee_id', e.target.value)}
+                <SearchableSelect label="Employee" required placeholder="— Select employee —"
+                  value={form.employee_id} onChange={v => sv('employee_id', v)}
                   options={(employees ?? []).map((e: any) => ({ value: e.id, label: `${e.name}${e.emp_id ? ' ('+e.emp_id+')' : ''}` }))} />
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={!!form.deduct_salary}
