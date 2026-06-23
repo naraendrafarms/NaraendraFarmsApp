@@ -154,6 +154,7 @@ export const DailyEntry: React.FC = () => {
     feed_type_f: 'L1', feed_type_m: 'MALE',
     total_eggs: '', he_eggs: '', he_grade_a: '', he_grade_b: '', he_grade_c: '',
     je_eggs: '0', te_eggs: '0', be_eggs: '0', le_eggs: '0', wastage_eggs: '0',
+    wastage_he: '', wastage_je: '', wastage_te: '', wastage_be: '',
     transfer_female: '0', transfer_male: '0',
     cull_female: '0', cull_male: '0',
     mortality_female: '0', mortality_male: '0',
@@ -182,6 +183,10 @@ export const DailyEntry: React.FC = () => {
         be_eggs:        existing.be_eggs?.toString() ?? '0',
         le_eggs:        existing.le_eggs?.toString() ?? '0',
         wastage_eggs:   existing.wastage_eggs?.toString() ?? '0',
+        wastage_he:     existing.wastage_he?.toString() ?? '',
+        wastage_je:     existing.wastage_je?.toString() ?? '',
+        wastage_te:     existing.wastage_te?.toString() ?? '',
+        wastage_be:     existing.wastage_be?.toString() ?? '',
         transfer_female: existing.transfer_female?.toString() ?? existing.trcull_female?.toString() ?? '0',
         transfer_male:   existing.transfer_male?.toString() ?? existing.trcull_male?.toString() ?? '0',
         cull_female:     existing.cull_female?.toString() ?? '0',
@@ -299,6 +304,10 @@ export const DailyEntry: React.FC = () => {
         be_eggs:          parseInt(form.be_eggs) || 0,
         le_eggs:          parseInt(form.le_eggs) || 0,
         wastage_eggs:     parseInt(form.wastage_eggs) || null,
+        wastage_he:       parseInt(form.wastage_he) || null,
+        wastage_je:       parseInt(form.wastage_je) || null,
+        wastage_te:       parseInt(form.wastage_te) || null,
+        wastage_be:       parseInt(form.wastage_be) || null,
         transfer_female:  parseInt(form.transfer_female) || 0,
         transfer_male:    parseInt(form.transfer_male) || 0,
         cull_female:      parseInt(form.cull_female) || 0,
@@ -648,8 +657,21 @@ export const DailyEntry: React.FC = () => {
                 <FormRow cols={3}>
                   <Input label="Leached Eggs (LE)" type="number"
                     value={form.le_eggs} onChange={e => set('le_eggs', e.target.value)} />
-                  <Input label="Wastage" type="number"
+                  <Input label="Wastage (unspecified)" type="number"
                     value={form.wastage_eggs} onChange={e => set('wastage_eggs', e.target.value)} />
+                </FormRow>
+              </div>
+              <div className="mt-3">
+                <p className="text-xs font-medium text-gray-500 mb-2">Wastage by Type</p>
+                <FormRow cols={4}>
+                  <Input label="Wastage HE" type="number"
+                    value={form.wastage_he} onChange={e => set('wastage_he', e.target.value)} />
+                  <Input label="Wastage JE" type="number"
+                    value={form.wastage_je} onChange={e => set('wastage_je', e.target.value)} />
+                  <Input label="Wastage TE" type="number"
+                    value={form.wastage_te} onChange={e => set('wastage_te', e.target.value)} />
+                  <Input label="Wastage BE" type="number"
+                    value={form.wastage_be} onChange={e => set('wastage_be', e.target.value)} />
                 </FormRow>
               </div>
             </div>

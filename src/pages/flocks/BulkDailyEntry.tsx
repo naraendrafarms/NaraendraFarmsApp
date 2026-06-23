@@ -10,6 +10,7 @@ import toast from 'react-hot-toast'
 type FlockRow = {
   he_eggs: string; je_eggs: string; te_eggs: string; be_eggs: string; le_eggs: string
   he_grade_a: string; he_grade_b: string; he_grade_c: string
+  wastage_he: string; wastage_je: string; wastage_te: string; wastage_be: string
   mortality_female: string; mortality_male: string
   feed_female_kg: string; feed_type_f: string
   feed_male_kg: string; feed_type_m: string
@@ -19,6 +20,7 @@ type FlockRow = {
 const emptyFlockRow = (): FlockRow => ({
   he_eggs: '', je_eggs: '', te_eggs: '', be_eggs: '', le_eggs: '',
   he_grade_a: '', he_grade_b: '', he_grade_c: '',
+  wastage_he: '', wastage_je: '', wastage_te: '', wastage_be: '',
   mortality_female: '', mortality_male: '',
   feed_female_kg: '', feed_type_f: 'BCM',
   feed_male_kg: '', feed_type_m: 'BCM',
@@ -30,6 +32,7 @@ type ShedRow = {
   opening_female: string; opening_male: string
   he_eggs: string; je_eggs: string; te_eggs: string; be_eggs: string; le_eggs: string
   he_grade_a: string; he_grade_b: string; he_grade_c: string
+  wastage_he: string; wastage_je: string; wastage_te: string; wastage_be: string
   mortality_female: string; mortality_male: string
   feed_female_kg: string; feed_type_f: string
   feed_male_kg: string; feed_type_m: string
@@ -44,6 +47,7 @@ const emptyShedRow = (): ShedRow => ({
   opening_female: '', opening_male: '',
   he_eggs: '', je_eggs: '', te_eggs: '', be_eggs: '', le_eggs: '',
   he_grade_a: '', he_grade_b: '', he_grade_c: '',
+  wastage_he: '', wastage_je: '', wastage_te: '', wastage_be: '',
   mortality_female: '', mortality_male: '',
   feed_female_kg: '', feed_type_f: 'BCM',
   feed_male_kg: '', feed_type_m: 'BCM',
@@ -152,7 +156,7 @@ export const BulkDailyEntry: React.FC = () => {
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase.from('daily_records')
-        .select('id,flock_id,shed_id,opening_female,opening_male,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,he_grade_a,he_grade_b,he_grade_c,mortality_female,mortality_male,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,transfer_female,transfer_male,cull_female,cull_male,closing_female,closing_male,lighting_hrs,remarks')
+        .select('id,flock_id,shed_id,opening_female,opening_male,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_he,wastage_je,wastage_te,wastage_be,mortality_female,mortality_male,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,transfer_female,transfer_male,cull_female,cull_male,closing_female,closing_male,lighting_hrs,remarks')
         .eq('record_date', date)
       if (selectedFlock) q = q.eq('flock_id', selectedFlock)
       const { data } = await q
@@ -216,6 +220,10 @@ export const BulkDailyEntry: React.FC = () => {
         he_grade_a: dr?.he_grade_a?.toString() ?? '',
         he_grade_b: dr?.he_grade_b?.toString() ?? '',
         he_grade_c: dr?.he_grade_c?.toString() ?? '',
+        wastage_he: dr?.wastage_he?.toString() ?? '',
+        wastage_je: dr?.wastage_je?.toString() ?? '',
+        wastage_te: dr?.wastage_te?.toString() ?? '',
+        wastage_be: dr?.wastage_be?.toString() ?? '',
         mortality_female: dr?.mortality_female?.toString() ?? '',
         mortality_male: dr?.mortality_male?.toString() ?? '',
         feed_female_kg: dr?.feed_female_kg?.toString() ?? '',
@@ -257,6 +265,10 @@ export const BulkDailyEntry: React.FC = () => {
         he_grade_a: dr?.he_grade_a?.toString() ?? '',
         he_grade_b: dr?.he_grade_b?.toString() ?? '',
         he_grade_c: dr?.he_grade_c?.toString() ?? '',
+        wastage_he: dr?.wastage_he?.toString() ?? '',
+        wastage_je: dr?.wastage_je?.toString() ?? '',
+        wastage_te: dr?.wastage_te?.toString() ?? '',
+        wastage_be: dr?.wastage_be?.toString() ?? '',
         mortality_female: dr?.mortality_female?.toString() ?? '',
         mortality_male: dr?.mortality_male?.toString() ?? '',
         feed_female_kg: dr?.feed_female_kg?.toString() ?? '',
@@ -317,6 +329,8 @@ export const BulkDailyEntry: React.FC = () => {
       const he = parseInt(r.he_eggs) || 0, je = parseInt(r.je_eggs) || 0
       const te = parseInt(r.te_eggs) || 0, be = parseInt(r.be_eggs) || 0
       const le = parseInt(r.le_eggs) || 0
+      const whe = parseInt(r.wastage_he) || null, wje = parseInt(r.wastage_je) || null
+      const wte = parseInt(r.wastage_te) || null, wbe = parseInt(r.wastage_be) || null
       const mf = parseInt(r.mortality_female) || 0, mm = parseInt(r.mortality_male) || 0
       const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
@@ -334,6 +348,7 @@ export const BulkDailyEntry: React.FC = () => {
         opening_female: of_, opening_male: om,
         he_eggs: he, je_eggs: je, te_eggs: te, be_eggs: be, le_eggs: le,
         total_eggs: he + je + te + be + le,
+        wastage_he: whe, wastage_je: wje, wastage_te: wte, wastage_be: wbe,
         mortality_female: mf, mortality_male: mm,
         feed_female_kg: ff, feed_type_f: r.feed_type_f || 'BCM',
         feed_male_kg: fm, feed_type_m: r.feed_type_m || 'BCM',
@@ -434,6 +449,10 @@ export const BulkDailyEntry: React.FC = () => {
             he_grade_a: parseInt(r.he_grade_a) || null,
             he_grade_b: parseInt(r.he_grade_b) || null,
             he_grade_c: parseInt(r.he_grade_c) || null,
+            wastage_he: parseInt(r.wastage_he) || null,
+            wastage_je: parseInt(r.wastage_je) || null,
+            wastage_te: parseInt(r.wastage_te) || null,
+            wastage_be: parseInt(r.wastage_be) || null,
             mortality_female: parseInt(r.mortality_female) || 0,
             mortality_male: parseInt(r.mortality_male) || 0,
             feed_female_kg: ff, feed_type_f: r.feed_type_f || 'BCM',
@@ -557,6 +576,10 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-1 py-2 text-center">TE</th>
                       <th className="px-1 py-2 text-center">BE</th>
                       <th className="px-1 py-2 text-center">LE</th>
+                      <th className="px-1 py-2 text-center bg-red-50">Wst HE</th>
+                      <th className="px-1 py-2 text-center bg-red-50">Wst JE</th>
+                      <th className="px-1 py-2 text-center bg-red-50">Wst TE</th>
+                      <th className="px-1 py-2 text-center bg-red-50">Wst BE</th>
                       <th className="px-1 py-2 text-center">Death ♀</th>
                       <th className="px-1 py-2 text-center">Death ♂</th>
                       <th className="px-1 py-2 text-center">Feed ♀ kg</th>
@@ -591,6 +614,10 @@ export const BulkDailyEntry: React.FC = () => {
                           <td className="px-1 py-1">{numInput(r.te_eggs, u('te_eggs'))}</td>
                           <td className="px-1 py-1">{numInput(r.be_eggs, u('be_eggs'))}</td>
                           <td className="px-1 py-1">{numInput(r.le_eggs, u('le_eggs'))}</td>
+                          <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_he, u('wastage_he'))}</td>
+                          <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_je, u('wastage_je'))}</td>
+                          <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_te, u('wastage_te'))}</td>
+                          <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_be, u('wastage_be'))}</td>
                           <td className="px-1 py-1">{numInput(r.mortality_female, u('mortality_female'))}</td>
                           <td className="px-1 py-1">{numInput(r.mortality_male, u('mortality_male'))}</td>
                           <td className="px-1 py-1">{numInput(r.feed_female_kg, u('feed_female_kg'))}</td>
@@ -699,6 +726,10 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-2 py-2 text-center bg-green-50">Grd A</th>
                       <th className="px-2 py-2 text-center bg-green-50">Grd B</th>
                       <th className="px-2 py-2 text-center bg-green-50">Grd C</th>
+                      <th className="px-2 py-2 text-center bg-red-50">Wst HE</th>
+                      <th className="px-2 py-2 text-center bg-red-50">Wst JE</th>
+                      <th className="px-2 py-2 text-center bg-red-50">Wst TE</th>
+                      <th className="px-2 py-2 text-center bg-red-50">Wst BE</th>
                       <th className="px-2 py-2 text-center">Death ♀</th>
                       <th className="px-2 py-2 text-center">Death ♂</th>
                       <th className="px-2 py-2 text-center">Feed ♀ kg</th>
@@ -718,7 +749,7 @@ export const BulkDailyEntry: React.FC = () => {
                             F-{flock.flock_no}
                             {flock.breed && <span className="text-xs text-gray-400 ml-1">{flock.breed}</span>}
                           </td>
-                          {(['he_eggs','je_eggs','te_eggs','be_eggs','le_eggs','mortality_female','mortality_male'] as const).map(field => (
+                          {(['he_eggs','je_eggs','te_eggs','be_eggs','le_eggs'] as const).map(field => (
                             <td key={field} className="px-1 py-1">
                               <input type="number" min="0" value={r[field]} placeholder="0"
                                 onChange={e => updateFlockRow(flock.id, field, e.target.value)}
@@ -730,6 +761,20 @@ export const BulkDailyEntry: React.FC = () => {
                               <input type="number" min="0" value={r[field]} placeholder="0"
                                 onChange={e => updateFlockRow(flock.id, field, e.target.value)}
                                 className="w-full text-center border border-green-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-green-400 bg-white" />
+                            </td>
+                          ))}
+                          {(['wastage_he','wastage_je','wastage_te','wastage_be'] as const).map(field => (
+                            <td key={field} className="px-1 py-1 bg-red-50/30">
+                              <input type="number" min="0" value={r[field]} placeholder="0"
+                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
+                                className="w-full text-center border border-red-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-red-400 bg-white" />
+                            </td>
+                          ))}
+                          {(['mortality_female','mortality_male'] as const).map(field => (
+                            <td key={field} className="px-1 py-1">
+                              <input type="number" min="0" value={r[field]} placeholder="0"
+                                onChange={e => updateFlockRow(flock.id, field, e.target.value)}
+                                className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
                             </td>
                           ))}
                           <td className="px-1 py-1">
