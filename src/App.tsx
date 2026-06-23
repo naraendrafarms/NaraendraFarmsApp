@@ -198,6 +198,7 @@ export const App: React.FC = () => {
             <Route path="purchases/rate-compare" element={<RequireRole check={can.viewPurchase}><RateCompare /></RequireRole>} />
             <Route path="purchases/vendor-statement" element={<RequireRole check={can.viewPurchase}><VendorStatement /></RequireRole>} />
             <Route path="purchase-orders" element={<RequireRole check={can.viewPurchase}><PurchaseOrdersPage /></RequireRole>} />
+            <Route path="procurement" element={<RequireRole check={can.viewPurchase}><PurchaseOrdersPage /></RequireRole>} />
             <Route path="pending-payments" element={<RequireRole check={can.viewPurchase}><PendingPaymentsPage /></RequireRole>} />
 
             {/* Import */}

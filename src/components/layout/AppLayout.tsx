@@ -123,15 +123,11 @@ const NAV: NavItem[] = [
     ]
   },
   {
-    label: 'Purchase & Payments', icon: <ShoppingCart size={18}/>,
+    label: 'Procurement', icon: <ShoppingCart size={18}/>,
     children: [
-      { label: 'GRN — Goods Received',  to: '/feed/grn' },
+      { label: 'Bills & GRN / Payments', to: '/purchase-orders' },
       { label: 'Medicine Receipts (GRN)', to: '/flocks/medicine-purchases' },
-      { label: 'New Purchase',         to: '/purchases/new' },
-      { label: 'Purchase Orders',      to: '/purchase-orders' },
-      { label: 'Rate Comparison',      to: '/purchases/rate-compare' },
-      { label: 'Vendor Statement',     to: '/purchases/vendor-statement' },
-      { label: 'Farm Expenses',        to: '/expenses' },
+      { label: 'Farm Expenses',          to: '/expenses' },
     ]
   },
   {

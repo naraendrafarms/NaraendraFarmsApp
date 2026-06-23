@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useCallback } from 'react'
+import { GRNEntry } from '@/pages/feed/FeedPages'
 import * as XLSX from 'xlsx'
 import * as pdfjsLib from 'pdfjs-dist'
 // Use CDN worker to avoid Vite bundling issues with dynamic import in production
@@ -78,15 +79,16 @@ const exportCSV = (filename: string, rows: any[], cols: { key: string; label: st
 }
 
 // ── TABS ──────────────────────────────────────────────────────────
-type Tab = 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Vendors Master' | 'Bank Ledger' | 'Rate Analysis'
+type Tab = 'Bills & GRN' | 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Vendors Master' | 'Bank Ledger' | 'Rate Analysis'
 
 // ── MAIN EXPORT ───────────────────────────────────────────────────
 export const PurchaseOrdersPage: React.FC = () => {
   const { profile } = useAuth()
   const role = profile?.role
-  const [tab, setTab] = useState<Tab>('Purchase Orders')
+  const [tab, setTab] = useState<Tab>('Bills & GRN')
 
   const TABS: { id: Tab; icon: any; locked?: boolean }[] = [
+    { id: 'Bills & GRN',     icon: <PackageCheck size={14}/> },
     { id: 'Purchase Orders', icon: <ShoppingCart size={14}/> },
     { id: 'Payments',        icon: <Clock size={14}/> },
     { id: 'Aging Report',    icon: <BarChart3 size={14}/> },
@@ -99,7 +101,7 @@ export const PurchaseOrdersPage: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="Purchase & Payments" subtitle="POs · Payments · Vendors · Bank Ledger" />
+      <SectionHeader title="Procurement" subtitle="Bills & GRN · POs · Payments · Vendors · Bank Ledger" />
       <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
         {TABS.map(t => (
           <button key={t.id} onClick={() => !t.locked && setTab(t.id)}
@@ -110,6 +112,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           </button>
         ))}
       </div>
+      {tab === 'Bills & GRN'      && <GRNEntry />}
       {tab === 'Purchase Orders'  && <POTab />}
       {tab === 'Payments'         && <PaymentsTab />}
       {tab === 'Aging Report'     && <AgingReportTab />}
