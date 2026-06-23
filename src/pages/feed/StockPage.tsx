@@ -32,7 +32,7 @@ export const StockPage: React.FC = () => {
 
   const { data: medStock, isLoading: loadMed } = useQuery({
     queryKey: ['v_medicine_stock'],
-    queryFn: async () => { const { data } = await supabase.from('v_medicine_stock').select('*').order('medicine_name'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('v_medicine_stock').select('*').order('name'); return data ?? [] }
   })
 
   const stockMap = React.useMemo(() => {
@@ -146,46 +146,52 @@ export const StockPage: React.FC = () => {
 
       {tab === 'medicine' && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <Card><p className="text-xs text-gray-400">Total Items</p><p className="text-xl font-bold">{(medStock ?? []).filter((r: any) => r.is_active).length}</p></Card>
-            <Card><p className="text-xs text-gray-400">In Stock</p><p className="text-xl font-bold text-green-700">{(medStock ?? []).filter((r: any) => (r.balance_qty ?? 0) > 0).length}</p></Card>
-            <Card><p className="text-xs text-gray-400">Zero/Out</p><p className="text-xl font-bold text-red-600">{(medStock ?? []).filter((r: any) => r.is_active && (r.balance_qty ?? 0) <= 0).length}</p></Card>
-          </div>
-          {loadMed ? <Spinner/> : (
-            <Card padding={false}>
-              <Table>
-                <thead><tr>
-                  <Th>Medicine / Vaccine</Th><Th>Category</Th><Th>Unit</Th>
-                  <Th right>Total In</Th><Th right>Balance</Th>
-                  <Th right>Last Rate</Th><Th>Last GRN</Th>
-                </tr></thead>
-                <tbody>
-                  {(medStock ?? []).map((r: any) => (
-                    <tr key={r.medicine_id} className="hover:bg-gray-50">
-                      <Td className="font-medium">{r.name}</Td>
-                      <Td>
-                        <Badge color={r.type === 'vaccine' ? 'blue' : 'gray'}>
-                          {r.type === 'vaccine' ? 'Vaccine' : 'Medicine'}
-                        </Badge>
-                      </Td>
-                      <Td>{r.unit ?? '—'}</Td>
-                      <Td right>{(r.purchased_qty ?? 0).toLocaleString('en-IN')}</Td>
-                      <Td right>
-                        <Badge color={(r.balance_qty ?? 0) > 0 ? 'green' : 'red'}>
-                          {(r.balance_qty ?? 0).toLocaleString('en-IN')}
-                        </Badge>
-                      </Td>
-                      <Td right className="text-xs">{r.master_rate > 0 ? `Rs ${Number(r.master_rate).toFixed(2)}` : '—'}</Td>
-                      <Td className="text-xs text-gray-400">{r.last_purchase_date ?? '—'}</Td>
-                    </tr>
-                  ))}
-                  {(medStock ?? []).length === 0 && (
-                    <tr><Td colSpan={7} className="text-center text-gray-400 py-6">No medicine/vaccine stock found</Td></tr>
-                  )}
-                </tbody>
-              </Table>
-            </Card>
-          )}
+          {(() => {
+            const purchased = (medStock ?? []).filter((r: any) => (r.purchased_qty ?? 0) > 0)
+            const inStock   = purchased.filter((r: any) => (r.balance_qty ?? 0) > 0)
+            const outStock  = purchased.filter((r: any) => (r.balance_qty ?? 0) <= 0)
+            return <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <Card><p className="text-xs text-gray-400">Items Purchased</p><p className="text-xl font-bold">{purchased.length}</p></Card>
+                <Card><p className="text-xs text-gray-400">In Stock</p><p className="text-xl font-bold text-green-700">{inStock.length}</p></Card>
+                <Card><p className="text-xs text-gray-400">Zero/Out</p><p className="text-xl font-bold text-red-600">{outStock.length}</p></Card>
+              </div>
+              {loadMed ? <Spinner/> : (
+                <Card padding={false}>
+                  <Table>
+                    <thead><tr>
+                      <Th>Medicine / Vaccine</Th><Th>Type</Th><Th>Unit</Th>
+                      <Th right>Total In</Th><Th right>Used</Th><Th right>Balance</Th>
+                      <Th right>Last Rate</Th><Th>Last GRN</Th>
+                    </tr></thead>
+                    <tbody>
+                      {purchased.map((r: any) => (
+                        <tr key={r.medicine_id} className="hover:bg-gray-50">
+                          <Td className="font-medium">{r.name}</Td>
+                          <Td><Badge color={r.type === 'vaccine' ? 'blue' : 'purple'}>{r.type ?? 'Medicine'}</Badge></Td>
+                          <Td>{r.unit ?? '—'}</Td>
+                          <Td right>{(r.purchased_qty ?? 0).toLocaleString('en-IN')}</Td>
+                          <Td right className="text-orange-600">{(r.used_qty ?? 0).toLocaleString('en-IN')}</Td>
+                          <Td right>
+                            <Badge color={(r.balance_qty ?? 0) > 0 ? 'green' : 'red'}>
+                              {(r.balance_qty ?? 0).toLocaleString('en-IN')}
+                            </Badge>
+                          </Td>
+                          <Td right className="text-xs">{r.master_rate > 0 ? `Rs ${Number(r.master_rate).toFixed(2)}` : '—'}</Td>
+                          <Td className="text-xs text-gray-400">{r.last_purchase_date ?? '—'}</Td>
+                        </tr>
+                      ))}
+                      {purchased.length === 0 && (
+                        <tr><Td colSpan={8} className="text-center text-gray-400 py-6">
+                          No medicine/vaccine GRN found. Enter medicine receipts in GRN — Goods Received (category = Medicine/Vaccine).
+                        </Td></tr>
+                      )}
+                    </tbody>
+                  </Table>
+                </Card>
+              )}
+            </>
+          })()}
         </>
       )}
     </div>
