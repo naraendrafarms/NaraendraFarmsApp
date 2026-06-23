@@ -245,7 +245,7 @@ export const PaymentPlanningPage: React.FC = () => {
         subtitle="Select pending payments, review bank balance, export CMS file"
         action={
           <div className="flex items-center gap-3">
-            <DateInput value={planDate} onChange={setPlanDate} />
+            <DateInput value={planDate} onChange={e => setPlanDate(e.target.value)} />
             {selected.size > 0 && (
               <Button variant="secondary" icon={<CheckCircle size={16} />} onClick={() => { setMarkPaidForm({ paid_date: planDate, utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online' }); setMarkPaidOpen(true) }}>
                 Mark Paid ({selected.size})

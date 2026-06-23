@@ -416,7 +416,7 @@ export const BulkDailyEntry: React.FC = () => {
                 options={[{ value: '', label: '— All Farms —' }, ...(farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))]}
                 className="w-44" />
             )}
-            <DateInput value={date} onChange={setDate} />
+            <DateInput value={date} onChange={e => setDate(e.target.value)} />
             <Button icon={<Save size={16} />} loading={saving}
               onClick={isSheedMode ? handleSaveShedMode : handleSaveFlockMode}>
               Save All

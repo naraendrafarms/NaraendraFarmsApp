@@ -193,11 +193,11 @@ export const BankLedgerPage: React.FC = () => {
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">From Date</label>
-          <DateInput value={fromDate} onChange={setFromDate} />
+          <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)} />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">To Date</label>
-          <DateInput value={toDate} onChange={setToDate} />
+          <DateInput value={toDate} onChange={e => setToDate(e.target.value)} />
         </div>
         {(fromDate || toDate) && (
           <Button variant="outline" size="sm" onClick={() => { setFromDate(''); setToDate('') }}>Clear</Button>

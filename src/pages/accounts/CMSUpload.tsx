@@ -128,7 +128,7 @@ export const CMSUploadPage: React.FC = () => {
         subtitle="Select vendors, choose payment date, download bank CMS file for submission"
         action={
           <div className="flex items-center gap-3">
-            <DateInput value={paymentDate} onChange={setPaymentDate} />
+            <DateInput value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
             <Button
               icon={<Download size={16} />}
               onClick={downloadCMS}

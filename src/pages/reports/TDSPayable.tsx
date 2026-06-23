@@ -96,8 +96,8 @@ export const TDSPayable: React.FC = () => {
       {/* Filters */}
       <Card>
         <div className="flex flex-wrap gap-3 items-end">
-          <DateInput label="From Date" value={dateFrom} onChange={setDateFrom} />
-          <DateInput label="To Date" value={dateTo} onChange={setDateTo} />
+          <DateInput label="From Date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          <DateInput label="To Date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
           <Select label="TDS Rate" value={rateFilter} onChange={e => setRateFilter(e.target.value)}
             options={TDS_RATE_OPTIONS} />
           <Select label="Status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
