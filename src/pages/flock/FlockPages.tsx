@@ -1766,6 +1766,13 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 // ── NHE SALES TAB (egg sales — JE/TE/BE/LE/Gunny) ───────────────────────────
 
 const NHE_EGG_TYPES = ['je', 'te', 'be', 'je_eggs', 'te_eggs', 'be_eggs', 'le_eggs', 'gunny_bags', 'maize_bags', 'plastic_bags', 'gas', 'manure', 'other', 'gun_bags']
+const NHE_TYPE_LABELS: Record<string, string> = {
+  je: 'Jumbo Eggs (JE)', te: 'Table Eggs (TE)', be: 'Broken/Crack Eggs (BE)',
+  je_eggs: 'Jumbo Eggs (JE)', te_eggs: 'Table Eggs (TE)', be_eggs: 'Broken/Crack Eggs (BE)',
+  le_eggs: 'Leached Eggs (LE)', gunny_bags: 'Gunny Bags', gun_bags: 'Gunny Bags',
+  maize_bags: 'Maize Bags', plastic_bags: 'Plastic Bags',
+  gas: 'Gas', manure: 'Manure', other: 'Other',
+}
 
 const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const [fFrom, setFFrom] = useState('')
@@ -1793,7 +1800,7 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const totalAmount = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
-  const typeOptions = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))].map(t => ({ value: t as string, label: t as string }))
+  const typeOptions = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))].map(t => ({ value: t as string, label: NHE_TYPE_LABELS[t as string] ?? (t as string) }))
 
   return (
     <div className="space-y-4">
@@ -1824,7 +1831,7 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                 <tr key={r.id} className="hover:bg-gray-50">
                   <Td className="text-xs">{fmtDate(r.sale_date)}</Td>
                   <Td className="text-xs font-mono">{r.dc_no ?? '—'}</Td>
-                  <Td><Badge color="green">{r.sale_type ?? '—'}</Badge></Td>
+                  <Td><Badge color="green">{NHE_TYPE_LABELS[r.sale_type] ?? r.sale_type ?? '—'}</Badge></Td>
                   <Td right className="text-xs">{numFmt(r.quantity)}</Td>
                   <Td className="text-xs text-gray-400">{r.unit ?? '—'}</Td>
                   <Td right className="text-xs">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
