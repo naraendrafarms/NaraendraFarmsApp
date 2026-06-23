@@ -520,8 +520,9 @@ export const BulkDailyEntry: React.FC = () => {
 
   if (isLoading) return <div className="p-8 text-center"><Spinner /></div>
 
-  const numInput = (val: string, onChange: (v: string) => void, w = 'w-14') => (
+  const numInput = (val: string, onChange: (v: string) => void, w = 'w-14', tabIndex?: number) => (
     <input type="number" min="0" value={val} onChange={e => onChange(e.target.value)} placeholder="0"
+      tabIndex={tabIndex}
       className={`${w} text-center border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white`} />
   )
 
@@ -604,59 +605,69 @@ export const BulkDailyEntry: React.FC = () => {
                     {flockSheds.map((shed: any, idx: number) => {
                       const r = shedRows[shed.id] ?? emptyShedRow()
                       const u = (f: keyof ShedRow) => (v: string) => updateShedRow(shed.id, f, v)
+                      // Two-phase tab order:
+                      // Phase 1 (bird mgmt, 12 cols): Open♀ Open♂ Feed♀ FeedType♀ Feed♂ FeedType♂ Trf♀ Trf♂ Cull♀ Cull♂ Death♀ Death♂
+                      // Phase 2 (eggs, 11 cols):      HE JE TE BE LE Close♀ Close♂ Light Med MedQty Remarks
+                      const P1 = 12, P2 = 11, N = flockSheds.length
+                      const t1 = (col: number) => idx * P1 + col
+                      const t2 = (col: number) => N * P1 + idx * P2 + col
                       return (
-                        <tr key={shed.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                          <td className="px-2 py-1.5 sticky left-0 bg-inherit z-10 font-semibold text-brand-700 whitespace-nowrap">
-                            Shed {shed.shed_no}{shed.shed_name ? ` · ${shed.shed_name}` : ''}
-                          </td>
-                          <td className="px-1 py-1">{numInput(r.opening_female, u('opening_female'))}</td>
-                          <td className="px-1 py-1">{numInput(r.opening_male, u('opening_male'))}</td>
-                          <td className="px-1 py-1">{numInput(r.feed_female_kg, u('feed_female_kg'))}</td>
-                          <td className="px-1 py-1">
-                            <select value={r.feed_type_f} onChange={e => updateShedRow(shed.id, 'feed_type_f', e.target.value)}
-                              className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
-                              {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
-                          </td>
-                          <td className="px-1 py-1">{numInput(r.feed_male_kg, u('feed_male_kg'))}</td>
-                          <td className="px-1 py-1">
-                            <select value={r.feed_type_m} onChange={e => updateShedRow(shed.id, 'feed_type_m', e.target.value)}
-                              className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
-                              {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
-                          </td>
-                          <td className="px-1 py-1">{numInput(r.transfer_female, u('transfer_female'))}</td>
-                          <td className="px-1 py-1">{numInput(r.transfer_male, u('transfer_male'))}</td>
-                          <td className="px-1 py-1">{numInput(r.cull_female, u('cull_female'))}</td>
-                          <td className="px-1 py-1">{numInput(r.cull_male, u('cull_male'))}</td>
-                          <td className="px-1 py-1">{numInput(r.mortality_female, u('mortality_female'))}</td>
-                          <td className="px-1 py-1">{numInput(r.mortality_male, u('mortality_male'))}</td>
-                          <td className="px-1 py-1">{numInput(r.he_eggs, u('he_eggs'))}</td>
-                          <td className="px-1 py-1">{numInput(r.je_eggs, u('je_eggs'))}</td>
-                          <td className="px-1 py-1">{numInput(r.te_eggs, u('te_eggs'))}</td>
-                          <td className="px-1 py-1">{numInput(r.be_eggs, u('be_eggs'))}</td>
-                          <td className="px-1 py-1">{numInput(r.le_eggs, u('le_eggs'))}</td>
-                          {showWastage && <><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_he, u('wastage_he'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_je, u('wastage_je'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_te, u('wastage_te'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_be, u('wastage_be'))}</td></>}
-                          <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_female, u('closing_female'))}</td>
-                          <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_male, u('closing_male'))}</td>
-                          <td className="px-1 py-1">{numInput(r.lighting_hrs, u('lighting_hrs'))}</td>
-                          <td className="px-1 py-1">
-                            <select value={r.med_id} onChange={e => updateShedRow(shed.id, 'med_id', e.target.value)}
-                              className="w-full border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
-                              {medOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
-                          </td>
-                          <td className="px-1 py-1">
-                            <input type="number" min="0" value={r.med_qty} placeholder="qty" disabled={!r.med_id}
-                              onChange={e => updateShedRow(shed.id, 'med_qty', e.target.value)}
-                              className="w-14 text-center border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
-                          </td>
-                          <td className="px-1 py-1">
-                            <input type="text" value={r.remarks} placeholder="remarks"
-                              onChange={e => updateShedRow(shed.id, 'remarks', e.target.value)}
-                              className="w-24 border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
-                          </td>
-                        </tr>
+                            <tr key={shed.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                              <td className="px-2 py-1.5 sticky left-0 bg-inherit z-10 font-semibold text-brand-700 whitespace-nowrap">
+                                Shed {shed.shed_no}{shed.shed_name ? ` · ${shed.shed_name}` : ''}
+                              </td>
+                              {/* Phase 1 — bird management */}
+                              <td className="px-1 py-1">{numInput(r.opening_female, u('opening_female'), 'w-14', t1(1))}</td>
+                              <td className="px-1 py-1">{numInput(r.opening_male, u('opening_male'), 'w-14', t1(2))}</td>
+                              <td className="px-1 py-1">{numInput(r.feed_female_kg, u('feed_female_kg'), 'w-14', t1(3))}</td>
+                              <td className="px-1 py-1">
+                                <select tabIndex={t1(4)} value={r.feed_type_f} onChange={e => updateShedRow(shed.id, 'feed_type_f', e.target.value)}
+                                  className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
+                                  {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </td>
+                              <td className="px-1 py-1">{numInput(r.feed_male_kg, u('feed_male_kg'), 'w-14', t1(5))}</td>
+                              <td className="px-1 py-1">
+                                <select tabIndex={t1(6)} value={r.feed_type_m} onChange={e => updateShedRow(shed.id, 'feed_type_m', e.target.value)}
+                                  className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
+                                  {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </td>
+                              <td className="px-1 py-1">{numInput(r.transfer_female, u('transfer_female'), 'w-14', t1(7))}</td>
+                              <td className="px-1 py-1">{numInput(r.transfer_male, u('transfer_male'), 'w-14', t1(8))}</td>
+                              <td className="px-1 py-1">{numInput(r.cull_female, u('cull_female'), 'w-14', t1(9))}</td>
+                              <td className="px-1 py-1">{numInput(r.cull_male, u('cull_male'), 'w-14', t1(10))}</td>
+                              <td className="px-1 py-1">{numInput(r.mortality_female, u('mortality_female'), 'w-14', t1(11))}</td>
+                              <td className="px-1 py-1">{numInput(r.mortality_male, u('mortality_male'), 'w-14', t1(12))}</td>
+                              {/* Phase 2 — egg production */}
+                              <td className="px-1 py-1">{numInput(r.he_eggs, u('he_eggs'), 'w-14', t2(1))}</td>
+                              <td className="px-1 py-1">{numInput(r.je_eggs, u('je_eggs'), 'w-14', t2(2))}</td>
+                              <td className="px-1 py-1">{numInput(r.te_eggs, u('te_eggs'), 'w-14', t2(3))}</td>
+                              <td className="px-1 py-1">{numInput(r.be_eggs, u('be_eggs'), 'w-14', t2(4))}</td>
+                              <td className="px-1 py-1">{numInput(r.le_eggs, u('le_eggs'), 'w-14', t2(5))}</td>
+                              {showWastage && <><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_he, u('wastage_he'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_je, u('wastage_je'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_te, u('wastage_te'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_be, u('wastage_be'))}</td></>}
+                              <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_female, u('closing_female'), 'w-14', t2(6))}</td>
+                              <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_male, u('closing_male'), 'w-14', t2(7))}</td>
+                              <td className="px-1 py-1">{numInput(r.lighting_hrs, u('lighting_hrs'), 'w-14', t2(8))}</td>
+                              <td className="px-1 py-1">
+                                <select tabIndex={t2(9)} value={r.med_id} onChange={e => updateShedRow(shed.id, 'med_id', e.target.value)}
+                                  className="w-full border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
+                                  {medOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                </select>
+                              </td>
+                              <td className="px-1 py-1">
+                                <input type="number" min="0" value={r.med_qty} placeholder="qty" disabled={!r.med_id}
+                                  tabIndex={t2(10)}
+                                  onChange={e => updateShedRow(shed.id, 'med_qty', e.target.value)}
+                                  className="w-14 text-center border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
+                              </td>
+                              <td className="px-1 py-1">
+                                <input type="text" value={r.remarks} placeholder="remarks"
+                                  tabIndex={t2(11)}
+                                  onChange={e => updateShedRow(shed.id, 'remarks', e.target.value)}
+                                  className="w-24 border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
+                              </td>
+                            </tr>
                       )
                     })}
                   </tbody>
