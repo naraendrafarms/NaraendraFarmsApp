@@ -129,7 +129,7 @@ export const BulkDailyEntry: React.FC = () => {
   // ── Existing daily records for date ─────────────────────────────────────────
   const { data: existingDR, isLoading: existingLoading, isFetching: existingFetching } = useQuery({
     queryKey: ['bulk_existing_dr', date, selectedFlock],
-    enabled: !!date,
+    enabled: !!date && date.length === 10,
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase.from('daily_records')
@@ -143,8 +143,13 @@ export const BulkDailyEntry: React.FC = () => {
 
   // Previous day closing for opening balance
   const prevDate = useMemo(() => {
-    const d = new Date(date); d.setDate(d.getDate() - 1)
-    return d.toISOString().slice(0, 10)
+    if (!date || date.length < 10) return ''
+    try {
+      const d = new Date(date)
+      if (isNaN(d.getTime())) return ''
+      d.setDate(d.getDate() - 1)
+      return d.toISOString().slice(0, 10)
+    } catch { return '' }
   }, [date])
 
   const { data: prevDR } = useQuery({
@@ -167,7 +172,7 @@ export const BulkDailyEntry: React.FC = () => {
 
   const { data: existingMed } = useQuery({
     queryKey: ['bulk_existing_med', date, selectedFlock],
-    enabled: !!date,
+    enabled: !!date && date.length === 10,
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase.from('medicine_usage').select('id,flock_id,shed_id,medicine_id,quantity').eq('usage_date', date)
