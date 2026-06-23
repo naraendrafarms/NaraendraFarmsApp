@@ -292,7 +292,7 @@ export const BankLedgerPage: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
-              <DateInput value={form.txn_date} onChange={v => setForm(f => ({ ...f, txn_date: v }))} />
+              <DateInput value={form.txn_date} onChange={e => setForm(f => ({ ...f, txn_date: e.target.value }))} />
             </div>
             <Select
               label="Type"
