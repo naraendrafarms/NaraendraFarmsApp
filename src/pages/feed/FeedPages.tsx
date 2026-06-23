@@ -73,6 +73,8 @@ export const GRNEntry: React.FC = () => {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkDelConfirm, setBulkDelConfirm] = useState(false)
   const [delId, setDelId] = useState<string|null>(null)
+  const [bulkCat, setBulkCat] = useState('')
+  const [bulkCatSaving, setBulkCatSaving] = useState(false)
 
   // PO alert state
   const [openPOs, setOpenPOs] = useState<any[]>([])
@@ -346,6 +348,21 @@ export const GRNEntry: React.FC = () => {
     finally { setImporting(false); if (importRef.current) importRef.current.value = '' }
   }
 
+  const handleBulkCategory = async () => {
+    if (!bulkCat || !sel.size) { toast.error('Select rows and a category'); return }
+    setBulkCatSaving(true)
+    const ids = Array.from(sel)
+    for (let i = 0; i < ids.length; i += 50) {
+      const { error } = await supabase.from('grn').update({ category: bulkCat }).in('id', ids.slice(i, i + 50))
+      if (error) { toast.error(error.message); setBulkCatSaving(false); return }
+    }
+    toast.success(`Updated ${sel.size} GRN(s) to "${bulkCat}"`)
+    setSel(new Set())
+    setBulkCat('')
+    qc.invalidateQueries({ queryKey: ['grns'] })
+    setBulkCatSaving(false)
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="GRN — Goods Received"
@@ -404,10 +421,22 @@ export const GRNEntry: React.FC = () => {
       </div>
 
       {sel.size > 0 && (
-        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
-          <span className="text-sm font-medium text-blue-700">{sel.size} selected</span>
+        <div className="flex flex-wrap items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-semibold text-blue-700">{sel.size} selected</span>
+          <div className="flex items-center gap-2">
+            <select value={bulkCat} onChange={e => setBulkCat(e.target.value)}
+              className="border border-blue-300 rounded-lg px-2 py-1 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+              <option value="">— Change Category —</option>
+              {categoryOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <button onClick={handleBulkCategory} disabled={!bulkCat || bulkCatSaving}
+              className="px-3 py-1 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
+              {bulkCatSaving ? 'Saving…' : 'Apply'}
+            </button>
+          </div>
+          <div className="h-4 w-px bg-blue-300" />
           <button onClick={() => setBulkDelConfirm(true)} className="text-sm text-red-600 hover:underline font-medium">Delete selected</button>
-          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline ml-auto">Clear</button>
+          <button onClick={() => { setSel(new Set()); setBulkCat('') }} className="text-xs text-gray-500 hover:text-gray-700 underline ml-auto">Clear</button>
         </div>
       )}
 
