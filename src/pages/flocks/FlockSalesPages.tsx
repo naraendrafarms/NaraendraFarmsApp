@@ -1400,7 +1400,7 @@ export const NHESales: React.FC = () => {
       const eggTotalQty = egg ? nheLines.reduce((s, l) => s + (parseFloat(l.quantity)||0), 0) : null
       const payload: any = {
         flock_id: form.flock_id, sale_date: form.sale_date,
-        sale_type: bird ? 'bird_sale' : (egg ? (nheLines[0]?.sale_type ?? 'je') : form.sale_type),
+        sale_type: bird ? 'bird_sale' : (egg ? (nheLines.length > 1 ? 'je' : (nheLines[0]?.sale_type ?? 'je')) : form.sale_type),
         party_id: form.party_id || null, dc_no: form.dc_no || null,
         invoice_no: finalInvoiceNo,
         quantity: egg ? (eggTotalQty || null) : (parseFloat(form.quantity) || null),

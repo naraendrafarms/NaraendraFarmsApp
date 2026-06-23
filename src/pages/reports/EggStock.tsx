@@ -84,15 +84,29 @@ export const EggStockPage: React.FC = () => {
     enabled: !!asOfDate
   })
 
-  // NHE sold
+  // NHE sold — use nhe_sale_lines for per-type quantities on multi-line sales
   const { data: nheSales } = useQuery({
     queryKey: ['egg_stock_nhe_sales', asOfDate],
     queryFn: async () => {
       const { data } = await supabase
         .from('nhe_sales')
-        .select('flock_id, sale_type, quantity')
+        .select('id, flock_id, sale_type, quantity, nhe_sale_lines(sale_type, quantity)')
         .lte('sale_date', asOfDate)
-      return data ?? []
+        .in('sale_type', ['je','te','be','je_eggs','te_eggs','be_eggs'])
+      const rows: { flock_id: string; sale_type: string; quantity: number }[] = []
+      for (const s of (data ?? [])) {
+        const lines: any[] = (s as any).nhe_sale_lines ?? []
+        if (lines.length > 0) {
+          // multi-line sale: use per-line quantities
+          for (const l of lines) {
+            rows.push({ flock_id: s.flock_id, sale_type: l.sale_type, quantity: l.quantity ?? 0 })
+          }
+        } else {
+          // single-line sale: use header quantity
+          rows.push({ flock_id: s.flock_id, sale_type: s.sale_type, quantity: s.quantity ?? 0 })
+        }
+      }
+      return rows
     },
     enabled: !!asOfDate
   })
