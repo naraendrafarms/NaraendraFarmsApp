@@ -163,12 +163,7 @@ export const BulkDailyEntry: React.FC = () => {
     }
   })
 
-  const { data: existingFeed } = useQuery({
-    queryKey: ['bulk_existing_feed', date],
-    enabled: !!date && !selectedFlock,
-    placeholderData: keepPreviousData,
-    queryFn: async () => { const { data } = await supabase.from('daily_feed').select('id,flock_id,female_kg').eq('feed_date', date); return data ?? [] }
-  })
+  // existingFeed removed — feed is now read from daily_records.feed_female_kg for consistency
 
   const { data: existingMed } = useQuery({
     queryKey: ['bulk_existing_med', date, selectedFlock],
@@ -194,20 +189,19 @@ export const BulkDailyEntry: React.FC = () => {
     const newRows: Record<string, FlockRow> = {}
     for (const f of visibleFlocks) {
       const dr = (existingDR ?? []).find((r: any) => r.flock_id === f.id && !r.shed_id)
-      const fd = (existingFeed ?? []).find((r: any) => r.flock_id === f.id)
       const mu = (existingMed ?? []).find((r: any) => r.flock_id === f.id && !r.shed_id)
       newRows[f.id] = {
         je_eggs: dr?.je_eggs?.toString() ?? '', te_eggs: dr?.te_eggs?.toString() ?? '',
         be_eggs: dr?.be_eggs?.toString() ?? '',
         mortality_female: dr?.mortality_female?.toString() ?? '',
         mortality_male: dr?.mortality_male?.toString() ?? '',
-        feed_female_kg: fd?.female_kg?.toString() ?? '',
+        feed_female_kg: dr?.feed_female_kg?.toString() ?? '',
         med_id: mu?.medicine_id ?? '', med_qty: mu?.quantity?.toString() ?? '',
         existingDailyId: dr?.id ?? null, existingMedId: mu?.id ?? null,
       }
     }
     setFlockRows(newRows)
-  }, [visibleFlocks.length, existingDR, existingFeed, existingMed, selectedFlock])
+  }, [visibleFlocks.length, existingDR, existingMed, selectedFlock])
 
   // ── Init shed rows ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -345,25 +339,27 @@ export const BulkDailyEntry: React.FC = () => {
       const hasDeaths = r.mortality_female || r.mortality_male
       if (!hasEggs && !hasDeaths && !r.feed_female_kg && !(r.med_id && r.med_qty)) continue
       try {
-        if (hasEggs || hasDeaths) {
-          const je = parseInt(r.je_eggs) || 0, te = parseInt(r.te_eggs) || 0, be = parseInt(r.be_eggs) || 0
+        const je = parseInt(r.je_eggs) || 0, te = parseInt(r.te_eggs) || 0, be = parseInt(r.be_eggs) || 0
+        const ff = parseFloat(r.feed_female_kg) || 0
+        if (hasEggs || hasDeaths || ff) {
           const payload: any = {
             flock_id: flock.id, record_date: date,
             farm_id: (flock as any).laying_farm_id ?? (flock as any).rearing_farm_id ?? null,
             je_eggs: je, te_eggs: te, be_eggs: be, total_eggs: je + te + be,
             mortality_female: parseInt(r.mortality_female) || 0,
             mortality_male: parseInt(r.mortality_male) || 0,
+            feed_female_kg: ff, feed_male_kg: 0,
           }
           const { error } = r.existingDailyId
             ? await supabase.from('daily_records').update(payload).eq('id', r.existingDailyId)
             : await supabase.from('daily_records').upsert(payload, { onConflict: 'flock_id,record_date,farm_id' })
           if (error) { console.error(error); errors++ }
         }
-        if (r.feed_female_kg) {
-          const { error } = await supabase.from('daily_feed')
-            .upsert({ flock_id: flock.id, feed_date: date, feed_type: 'L1', female_kg: parseFloat(r.feed_female_kg) || 0, female_cost: 0, male_kg: 0, male_cost: 0 },
-              { onConflict: 'flock_id,feed_date,feed_type' })
-          if (error) { console.error(error); errors++ }
+        if (ff) {
+          await supabase.from('daily_feed').upsert(
+            { flock_id: flock.id, feed_date: date, feed_type: 'BCM', female_kg: ff, male_kg: 0, female_cost: 0, male_cost: 0 },
+            { onConflict: 'flock_id,feed_date,feed_type' }
+          )
         }
         if (r.med_id && r.med_qty) {
           const medPayload = { flock_id: flock.id, usage_date: date, medicine_id: r.med_id, quantity: parseFloat(r.med_qty) || 0, unit: 'ml' }
