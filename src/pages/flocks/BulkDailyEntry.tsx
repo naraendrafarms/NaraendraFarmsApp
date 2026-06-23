@@ -309,6 +309,14 @@ export const BulkDailyEntry: React.FC = () => {
         : await supabase.from('daily_records').insert(payload)
       if (error) { console.error(error); errors++ } else saved++
 
+      // Mirror feed to daily_feed so Flock → Feed tab shows it
+      if (ff > 0 || fm > 0) {
+        await supabase.from('daily_feed').upsert(
+          { flock_id: selectedFlock, feed_date: date, feed_type: 'BCM', female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
+          { onConflict: 'flock_id,feed_date,feed_type' }
+        )
+      }
+
       // medicine per shed
       if (r.med_id && r.med_qty) {
         const medPayload = { flock_id: selectedFlock, shed_id: shed.id, usage_date: date, medicine_id: r.med_id, quantity: parseFloat(r.med_qty) || 0, unit: 'ml' }
@@ -321,6 +329,7 @@ export const BulkDailyEntry: React.FC = () => {
     setSaving(false)
     qc.invalidateQueries({ queryKey: ['bulk_existing_dr', date, selectedFlock] })
     qc.invalidateQueries({ queryKey: ['bulk_existing_med', date, selectedFlock] })
+    qc.invalidateQueries({ queryKey: ['flock_daily_feed', selectedFlock] })
     if (errors === 0) toast.success(`Saved ${saved} shed(s) for ${date}`)
     else toast.error(`Saved ${saved} with ${errors} error(s)`)
   }

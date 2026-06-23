@@ -314,6 +314,28 @@ export const DailyEntry: React.FC = () => {
         const { error } = await supabase.from('daily_records').insert({ ...payload })
         if (error) throw error
       }
+      // Mirror feed to daily_feed so the Flock → Feed tab shows it
+      const ff = parseFloat(form.feed_female_kg) || 0
+      const fm = parseFloat(form.feed_male_kg) || 0
+      if (ff > 0 || fm > 0) {
+        const ftF = form.feed_type_f || 'BCM'
+        const ftM = form.feed_type_m || 'BCM'
+        if (ftF === ftM) {
+          await supabase.from('daily_feed').upsert(
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
+            { onConflict: 'flock_id,feed_date,feed_type' }
+          )
+        } else {
+          if (ff > 0) await supabase.from('daily_feed').upsert(
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: 0, male_cost: 0 },
+            { onConflict: 'flock_id,feed_date,feed_type' }
+          )
+          if (fm > 0) await supabase.from('daily_feed').upsert(
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: 0 },
+            { onConflict: 'flock_id,feed_date,feed_type' }
+          )
+        }
+      }
       // Save medicine usage rows — delete existing then re-insert
       await supabase.from('medicine_usage').delete().eq('flock_id', selectedFlock).eq('usage_date', date)
       const validMedRows = medRows.filter(r => r.medicine_id && r.qty)
@@ -339,6 +361,7 @@ export const DailyEntry: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['recent_records', selectedFlock] })
       qc.invalidateQueries({ queryKey: ['flock_summary'] })
       qc.invalidateQueries({ queryKey: ['v_medicine_stock'] })
+      qc.invalidateQueries({ queryKey: ['flock_daily_feed', selectedFlock] })
     },
     onError: (e: any) => toast.error(e.message)
   })
