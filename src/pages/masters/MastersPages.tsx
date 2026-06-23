@@ -131,7 +131,7 @@ export const FarmsMaster: React.FC = () => {
         columns={[
           {label:'Code',key:'code',render:r=><span className="font-mono text-xs font-bold text-brand-700">{r.code}</span>},
           {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
-          {label:'Type',key:'site_type',render:r=><Badge color={r.site_type==='laying'?'green':r.site_type==='rearing'?'yellow':'blue'}>{r.site_type}</Badge>},
+          {label:'Type',key:'site_type',render:r=><Badge color={r.site_type==='laying'?'green':r.site_type==='rearing'?'yellow':'blue'}>{{laying:'Laying',rearing:'Rearing',feedmill:'Feed Mill',hatchery:'Hatchery',office:'Office'}[r.site_type as string]??r.site_type}</Badge>},
           {label:'Taluka',key:'taluka'},
           {label:'Meter 1 (USC)',key:'elec_usc_1',render:r=><span className="text-xs text-gray-500">{r.elec_usc_1??'—'}</span>},
           {label:'Meter 2 (USC)',key:'elec_usc_2',render:r=><span className="text-xs text-gray-500">{r.elec_usc_2??'—'}</span>},
@@ -921,8 +921,8 @@ export const ShedsMaster: React.FC = () => {
                   <Td><span className="text-xs font-mono text-brand-700">{r.farms?.code}</span></Td>
                   <Td><span className="font-semibold">{r.shed_no}</span></Td>
                   <Td>{r.shed_name??'—'}</Td>
-                  <Td><Badge color="blue">{r.shed_type}</Badge></Td>
-                  <Td><Badge color="gray">{r.sex}</Badge></Td>
+                  <Td><Badge color="blue">{{brooding:'Brooding',grower:'Grower',laying:'Laying',rearing:'Rearing',pullet:'Pullet',chick:'Chick'}[r.shed_type as string]??r.shed_type}</Badge></Td>
+                  <Td><Badge color="gray">{{male:'Male',female:'Female',mixed:'Mixed'}[r.sex as string]??r.sex}</Badge></Td>
                   <Td right>{r.capacity_female?.toLocaleString('en-IN')??'—'}</Td>
                   <Td right>{r.capacity_male?.toLocaleString('en-IN')??'—'}</Td>
                   <Td right>{r.a_side_boxes??'—'}</Td>
@@ -1375,7 +1375,7 @@ export const FeedTypesMaster: React.FC = () => {
                   <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
                   <Td><span className="font-mono text-sm font-bold text-brand-700">{r.code}</span></Td>
                   <Td><span className="font-medium">{r.name}</span></Td>
-                  <Td><Badge color={catColors[r.category]??'gray'}>{r.category}</Badge></Td>
+                  <Td><Badge color={catColors[r.category]??'gray'}>{{starter:'Starter',grower:'Grower',developer:'Developer',pre_breeder:'Pre-Breeder',layer:'Layer',male:'Male'}[r.category as string]??r.category}</Badge></Td>
                   <Td>{(r.week_from||r.week_to)?`Wk ${r.week_from??'?'}–${r.week_to??'?'}`:'—'}</Td>
                   <Td>{r.sex}</Td>
                   <Td right>{r.sort_order}</Td>

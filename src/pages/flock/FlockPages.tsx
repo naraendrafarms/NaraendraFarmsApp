@@ -1856,6 +1856,10 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 // ── CULL SALES TAB (bird sales — income generating) ──────────────────────────
 
 const CULL_TYPES = ['bird_sale', 'cull_birds', 'litter', 'manure', 'gunny_bags', 'maize_bags', 'plastic_bags']
+const CULL_TYPE_LABELS: Record<string, string> = {
+  bird_sale: 'Bird Sale', cull_birds: 'Cull Birds', litter: 'Litter',
+  manure: 'Manure', gunny_bags: 'Gunny Bags', maize_bags: 'Maize Bags', plastic_bags: 'Plastic Bags',
+}
 
 const CULL_SALES_FIELDS: FieldDef[] = [
   { key: 'sale_date',  label: 'Date',        type: 'date' },
@@ -1900,7 +1904,7 @@ const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_cull_sales', flockId] }); setEditRow(null) }
   })
 
-  const typeOptions = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))].map(t => ({ value: t as string, label: t as string }))
+  const typeOptions = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))].map(t => ({ value: t as string, label: CULL_TYPE_LABELS[t as string] ?? (t as string) }))
 
   const filtered = (sales ?? []).filter((r: any) => {
     if (fFrom && r.sale_date < fFrom) return false
@@ -1962,7 +1966,7 @@ const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                     <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
                     <Td className="text-xs">{fmtDate(r.sale_date)}</Td>
                     <Td className="text-xs font-mono">{r.dc_no ?? '—'}</Td>
-                    <Td><Badge color="yellow">{r.sale_type ?? '—'}</Badge></Td>
+                    <Td><Badge color="yellow">{CULL_TYPE_LABELS[r.sale_type] ?? r.sale_type ?? '—'}</Badge></Td>
                     <Td right className="text-xs">{numFmt(r.quantity)}</Td>
                     <Td className="text-xs text-gray-400">{r.unit ?? '—'}</Td>
                     <Td right className="text-xs">{r.rate != null ? `₹${r.rate}` : '—'}</Td>

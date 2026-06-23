@@ -69,7 +69,7 @@ const Overview: React.FC = () => {
             <Card key={f.id} className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs font-bold text-brand-700">{f.code}</span>
-                <Badge color={f.site_type==='laying'?'green':f.site_type==='rearing'?'yellow':'blue'}>{f.site_type}</Badge>
+                <Badge color={f.site_type==='laying'?'green':f.site_type==='rearing'?'yellow':'blue'}>{{laying:'Laying',rearing:'Rearing',feedmill:'Feed Mill',hatchery:'Hatchery',office:'Office'}[f.site_type as string]??f.site_type}</Badge>
               </div>
               <p className="font-semibold text-gray-800 text-sm">{f.name}</p>
               <div className="text-xs text-gray-500 space-y-0.5">

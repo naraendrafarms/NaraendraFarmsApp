@@ -394,7 +394,7 @@ export const PurchaseEntry: React.FC = () => {
                   <Td>{r.vendor_name}</Td>
                   <Td>{r.grn_no ?? '—'}</Td>
                   <Td>{r.invoice_amount != null ? inr(r.invoice_amount) : '—'}</Td>
-                  <Td><Badge color={r.payment_status === 'Paid' ? 'green' : r.payment_status === 'HOLD' ? 'red' : 'yellow'}>{r.payment_status}</Badge></Td>
+                  <Td><Badge color={r.payment_status === 'Paid' ? 'green' : r.payment_status === 'HOLD' ? 'red' : 'yellow'}>{{Paid:'Paid',HOLD:'On Hold',Pending:'Pending',Partial:'Partial'}[r.payment_status as string]??r.payment_status}</Badge></Td>
                   <Td>{r.pay_before_date ? fmtDate(r.pay_before_date) : '—'}</Td>
                 </tr>
               ))}
