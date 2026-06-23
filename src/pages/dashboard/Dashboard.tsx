@@ -41,7 +41,7 @@ const AlertsWidget: React.FC = () => {
   const { data: grnData } = useQuery({
     queryKey: ['alerts_grn'],
     queryFn: async () => {
-      const { data } = await supabase.from('grn').select('ingredient_id, qty')
+      const { data } = await supabase.from('grn').select('ingredient_id, qty').eq('category', 'Feed')
       return data ?? []
     }
   })

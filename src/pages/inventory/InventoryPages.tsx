@@ -64,6 +64,7 @@ function useGrn() {
       while (true) {
         const { data } = await supabase.from('grn')
           .select('item_name,qty,unit,grn_date,price_per_unit')
+          .eq('category', 'Feed')
           .order('grn_date', { ascending: true }).range(from, from + 999)
         if (!data || !data.length) break
         all = all.concat(data); if (data.length < 1000) break; from += 1000

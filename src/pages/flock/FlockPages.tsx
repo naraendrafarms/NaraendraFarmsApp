@@ -1364,6 +1364,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       const { data } = await supabase
         .from('grn')
         .select('item_name,price_per_unit,grn_date,feed_ingredients(name)')
+        .eq('category', 'Feed')
         .order('grn_date', { ascending: false })
       if (!data) return {} as Record<string, number>
       const map: Record<string, number> = {}
@@ -1605,6 +1606,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       const { data } = await supabase
         .from('grn')
         .select('item_name,price_per_unit,grn_date')
+        .in('category', ['Medicine', 'Vaccine'])
         .order('grn_date', { ascending: false })
       if (!data) return {} as Record<string, number>
       const map: Record<string, number> = {}
