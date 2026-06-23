@@ -19,7 +19,6 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
 const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','total_eggs','he_eggs','he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs','wastage_eggs','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male','closing_female','closing_male','lighting_hrs','age_weeks','remarks']
 const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',450,440,400,30,10,0,0,5,5,0,0,0,0,0,1,0,499,20,16,25,'']
 
-const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK']
 
 export const DailyEntry: React.FC = () => {
   const qc = useQueryClient()
@@ -70,6 +69,13 @@ export const DailyEntry: React.FC = () => {
     },
     enabled: !!selectedFlock && !!flocks
   })
+
+  const { data: feedTypesData = [] } = useQuery({
+    queryKey: ['feed_types'],
+    queryFn: async () => { const { data } = await supabase.from('feed_types').select('code').eq('is_active', true).order('sort_order'); return (data ?? []).map((r: any) => r.code as string) },
+    staleTime: 10 * 60 * 1000,
+  })
+  const FEED_TYPES = feedTypesData.length ? feedTypesData : ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK','MALE']
 
   const { data: existing, isLoading: loadingExisting } = useQuery({
     queryKey: ['daily_record', selectedFlock, date, selectedShed],
@@ -586,7 +592,7 @@ export const DailyEntry: React.FC = () => {
               <Input label="Male Feed (kg)" type="number" step="0.001"
                 value={form.feed_male_kg} onChange={e => set('feed_male_kg', e.target.value)} />
               <Select label="Male Feed Type"
-                options={['MALE','BCM','PBM']} value={form.feed_type_m}
+                options={FEED_TYPES} value={form.feed_type_m}
                 onChange={e => set('feed_type_m', e.target.value)} />
             </FormRow>
           </Card>

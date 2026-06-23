@@ -7,8 +7,6 @@ import { Save } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-const FEED_TYPES = ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK','MALE']
-
 type FlockRow = {
   je_eggs: string; te_eggs: string; be_eggs: string
   mortality_female: string; mortality_male: string
@@ -71,6 +69,13 @@ export const BulkDailyEntry: React.FC = () => {
   const [shedRows, setShedRows] = useState<Record<string, ShedRow>>({})
 
   // ── Master data ──────────────────────────────────────────────────────────────
+  const { data: feedTypesRaw = [] } = useQuery({
+    queryKey: ['feed_types'],
+    queryFn: async () => { const { data } = await supabase.from('feed_types').select('code').eq('is_active', true).order('sort_order'); return (data ?? []).map((r: any) => r.code as string) },
+    staleTime: 10 * 60 * 1000,
+  })
+  const FEED_TYPES = feedTypesRaw.length ? feedTypesRaw : ['BCM','BGM','BDM','PBM','L1','L2','L3','CHICK','MALE']
+
   const { data: farms } = useQuery({
     queryKey: ['farms_list'],
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
