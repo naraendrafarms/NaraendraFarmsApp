@@ -80,7 +80,7 @@ const exportCSV = (filename: string, rows: any[], cols: { key: string; label: st
 }
 
 // ── TABS ──────────────────────────────────────────────────────────
-type Tab = 'Bills & GRN' | 'Purchase Orders' | 'Payments' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Vendors Master' | 'Bank Ledger' | 'Rate Analysis'
+type Tab = 'Bills & GRN' | 'Purchase Orders' | 'Payments' | 'Hatchery Advances' | 'Aging Report' | 'Vendor Statement' | 'Vendor Banks' | 'Vendors Master' | 'Bank Ledger' | 'Rate Analysis'
 
 // ── MAIN EXPORT ───────────────────────────────────────────────────
 export const PurchaseOrdersPage: React.FC = () => {
@@ -102,6 +102,7 @@ export const PurchaseOrdersPage: React.FC = () => {
     { id: 'Vendor Banks',    icon: <Building2 size={14}/> },
     { id: 'Vendors Master',  icon: <Users size={14}/> },
     { id: 'Bank Ledger',     icon: <Landmark size={14}/>, locked: !can.viewBankLedger(role) },
+    { id: 'Hatchery Advances', icon: <PackageCheck size={14}/> },
     { id: 'Rate Analysis',   icon: <LineChart size={14}/> },
   ]
 
@@ -130,6 +131,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           <Lock size={32}/><p className="text-sm">Bank Ledger is restricted to Admin and Accounts roles.</p>
         </div>
       ))}
+      {tab === 'Hatchery Advances' && <HatcheryAdvancesTab />}
       {tab === 'Rate Analysis'    && <RateAnalysisTab />}
     </div>
   )
@@ -3503,6 +3505,136 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+
+// ── HATCHERY ADVANCES TAB ─────────────────────────────────────────
+const HatcheryAdvancesTab: React.FC = () => {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [delId, setDelId] = useState<string|null>(null)
+
+  const { data: flocks = [] } = useQuery({
+    queryKey: ['flocks_adv'],
+    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').order('flock_no',{ascending:false}); return data ?? [] }
+  })
+  const { data: parties = [] } = useQuery({
+    queryKey: ['parties_supp'],
+    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type',['supplier','both']).order('name'); return data ?? [] }
+  })
+  const { data: advances = [], isLoading } = useQuery({
+    queryKey: ['hatchery_advances'],
+    queryFn: async () => {
+      const { data } = await supabase.from('hatchery_advances')
+        .select('*, flocks(flock_no), parties(name)')
+        .order('advance_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  const emptyAdv = () => ({
+    advance_date: today(), flock_id: '', party_id: '', hatchery_name: '',
+    amount: '', payment_mode: 'Online', reference_no: '', remarks: '', adjusted: false
+  })
+  const [form, setForm] = useState(emptyAdv())
+  const sv = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!form.advance_date || !form.amount) throw new Error('Date and amount required')
+      const { error } = await supabase.from('hatchery_advances').insert({
+        advance_date: form.advance_date,
+        flock_id: form.flock_id || null,
+        party_id: form.party_id || null,
+        hatchery_name: form.hatchery_name || null,
+        amount: parseFloat(form.amount),
+        payment_mode: form.payment_mode,
+        reference_no: form.reference_no || null,
+        remarks: form.remarks || null,
+        adjusted: form.adjusted,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Advance recorded'); qc.invalidateQueries({queryKey:['hatchery_advances']}); setForm(emptyAdv()); setShowForm(false) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => { const { error } = await supabase.from('hatchery_advances').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { toast.success('Deleted'); setDelId(null); qc.invalidateQueries({queryKey:['hatchery_advances']}) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const totalAdv = (advances as any[]).reduce((s, a) => s + (a.amount ?? 0), 0)
+  const pendingAdj = (advances as any[]).filter((a: any) => !a.adjusted).reduce((s, a) => s + (a.amount ?? 0), 0)
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader title="Hatchery Advances"
+        subtitle="Advance payments made to hatcheries before chick arrival"
+        action={<Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add Advance</Button>}
+      />
+      <div className="grid grid-cols-2 gap-4">
+        <StatCard title="Total Advances Paid" value={inr(totalAdv)} icon={<TrendingUp size={18}/>} color="text-blue-600" />
+        <StatCard title="Pending Adjustment" value={inr(pendingAdj)} subtitle="Not yet matched to GRN invoice" icon={<AlertCircle size={18}/>} color="text-amber-600" />
+      </div>
+      {isLoading ? <Spinner /> : (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Date</Th><Th>Flock</Th><Th>Hatchery / Party</Th>
+              <Th right>Amount</Th><Th>Mode</Th><Th>Ref No</Th><Th>Status</Th><Th></Th>
+            </tr></thead>
+            <tbody>
+              {(advances as any[]).map((a: any) => (
+                <tr key={a.id} className="hover:bg-gray-50">
+                  <Td className="text-xs">{fmtDate(a.advance_date)}</Td>
+                  <Td className="text-xs font-medium">{a.flocks?.flock_no ? `Flock ${a.flocks.flock_no}` : '—'}</Td>
+                  <Td className="text-xs">{a.parties?.name ?? a.hatchery_name ?? '—'}</Td>
+                  <Td right className="font-semibold">{inr(a.amount)}</Td>
+                  <Td className="text-xs">{a.payment_mode}</Td>
+                  <Td className="text-xs text-gray-400">{a.reference_no ?? '—'}</Td>
+                  <Td><span className={`px-2 py-0.5 rounded text-xs font-medium ${a.adjusted ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{a.adjusted ? 'Adjusted' : 'Pending'}</span></Td>
+                  <Td><button onClick={() => setDelId(a.id)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button></Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {(advances as any[]).length === 0 && <EmptyState title="No advance payments recorded" action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add Advance</Button>} />}
+        </Card>
+      )}
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Record Hatchery Advance" size="md"
+        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button></>}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <DateInput label="Payment Date" value={form.advance_date} onChange={e => sv('advance_date', e.target.value)} />
+            <Sel label="For Flock" value={form.flock_id} onChange={(e: any) => sv('flock_id', e.target.value)}
+              options={[{value:'',label:'— Optional —'}, ...(flocks as any[]).map((f: any) => ({value:f.id,label:`Flock ${f.flock_no}`}))]} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Sel label="Hatchery Party" value={form.party_id} onChange={(e: any) => sv('party_id', e.target.value)}
+              options={[{value:'',label:'— Select —'}, ...(parties as any[]).map((p: any) => ({value:p.id,label:p.name}))]} />
+            <Input label="Hatchery Name (free text)" value={form.hatchery_name} onChange={e => sv('hatchery_name', e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Amount (₹)" type="number" step="0.01" required value={form.amount} onChange={e => sv('amount', e.target.value)} />
+            <Sel label="Payment Mode" value={form.payment_mode} onChange={(e: any) => sv('payment_mode', e.target.value)}
+              options={['Online','NEFT','RTGS','IMPS','Cheque','Cash'].map(v => ({value:v,label:v}))} />
+          </div>
+          <Input label="Reference / UTR No" value={form.reference_no} onChange={e => sv('reference_no', e.target.value)} />
+          <Input label="Remarks" value={form.remarks} onChange={e => sv('remarks', e.target.value)} />
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" checked={form.adjusted} onChange={e => sv('adjusted', e.target.checked)} className="rounded text-brand-600" />
+            Already adjusted against invoice / GRN
+          </label>
+        </div>
+      </Modal>
+      <Modal open={!!delId} onClose={() => setDelId(null)} title="Delete Advance"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setDelId(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={() => delId && delMut.mutate(delId)}>Delete</Button></div>}>
+        <p className="text-sm text-gray-600">Delete this advance record? Cannot be undone.</p>
+      </Modal>
     </div>
   )
 }

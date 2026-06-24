@@ -29,7 +29,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
     flock_no: '', breed: 'VENCO-430',
     rearing_farm_id: '', laying_farm_id: '',
     placement_date: '', paid_female: '', paid_male: '',
-    free_female: '0', free_male: '0', chick_rate: '320',
+    free_female: '0', free_male: '0', chick_rate: '',
     laying_start_date: '', supplier: 'Venkateshwara Hatcheries', remarks: '',
     chick_invoice_no: '', chick_invoice_date: '',
   })
@@ -73,7 +73,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
       if (error) throw error
       // Auto-create supplier_invoice record if invoice details provided
       if (form.chick_invoice_no && newFlock) {
-        const chickCost = ((parseInt(form.paid_female)||0)+(parseInt(form.paid_male)||0)) * (parseFloat(form.chick_rate)||320)
+        const chickCost = ((parseInt(form.paid_female)||0)+(parseInt(form.paid_male)||0)) * (parseFloat(form.chick_rate)||0)
         await supabase.from('supplier_invoices').insert({
           invoice_no:   form.chick_invoice_no,
           invoice_date: form.chick_invoice_date || form.placement_date,
@@ -147,7 +147,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
         {((parseInt(form.paid_female)||0)+(parseInt(form.free_female)||0)).toLocaleString('en-IN')} F + {' '}
         {((parseInt(form.paid_male)||0)+(parseInt(form.free_male)||0)).toLocaleString('en-IN')} M
         {' '} | <strong>Chick Cost:</strong>{' '}
-        {inr(((parseInt(form.paid_female)||0)+(parseInt(form.paid_male)||0)) * (parseFloat(form.chick_rate)||320))}
+        {inr(((parseInt(form.paid_female)||0)+(parseInt(form.paid_male)||0)) * (parseFloat(form.chick_rate)||0))}
       </div>
 
       <Divider label="Chick Invoice" />
@@ -205,7 +205,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
       status: flock.status ?? 'rearing',
       placement_date: flock.placement_date ?? '',
       laying_start_date: flock.laying_start_date ?? '',
-      chick_rate: flock.chick_rate?.toString() ?? '320',
+      chick_rate: flock.chick_rate?.toString() ?? '',
       supplier: flock.supplier ?? '',
       remarks: flock.remarks ?? '',
     })

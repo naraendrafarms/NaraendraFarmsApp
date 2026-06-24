@@ -92,6 +92,7 @@ export const GRNEntry: React.FC = () => {
   const { data: parties } = useQuery({ queryKey: ['parties_supp'], queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type',['supplier','both']).order('name'); return data ?? [] } })
   const { data: ingredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,code,name').eq('is_active',true).order('name'); return data ?? [] } })
   const { data: medicines } = useQuery({ queryKey: ['medicines_master'], queryFn: async () => { const { data } = await supabase.from('medicines_master').select('id,name,type,unit').eq('is_active',true).order('name'); return data ?? [] } })
+  const { data: allFlocks } = useQuery({ queryKey: ['flocks_all_grn'], queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no,status').order('flock_no',{ascending:false}); return data ?? [] } })
 
   const { data: allGrns, isLoading } = useQuery({
     queryKey: ['grns'],
@@ -139,6 +140,7 @@ export const GRNEntry: React.FC = () => {
   const [form, setForm] = useState({
     grn_no: '', grn_date: today(), farm_id: '', party_id: '', invoice_no: '',
     invoice_date: today(), category: 'Feed', ingredient_id: '', medicine_id: '',
+    flock_id: '',
     item_name: '', qty: '', unit: 'kg',
     bags: '', price_per_unit: '', basic_amount: '', gst_pct: '0', total_amount: '',
     batch_no: '', expiry_date: '', vehicle_no: '', remarks: ''
@@ -151,6 +153,7 @@ export const GRNEntry: React.FC = () => {
 
   const isFeed = form.category === 'Feed'
   const isMedOrVax = form.category === 'Medicine' || form.category === 'Vaccine'
+  const isChick = form.category === 'Chicks'
 
   const payload = () => ({
     grn_no: form.grn_no, grn_date: form.grn_date,
@@ -169,6 +172,7 @@ export const GRNEntry: React.FC = () => {
     total_amount: parseFloat(form.total_amount) || total || null,
     batch_no: isMedOrVax ? (form.batch_no || null) : null,
     expiry_date: isMedOrVax ? (form.expiry_date || null) : null,
+    flock_id: isChick ? (form.flock_id || null) : null,
     vehicle_no: form.vehicle_no || null, remarks: form.remarks || null
   })
 
@@ -193,6 +197,7 @@ export const GRNEntry: React.FC = () => {
     setOpenPOs([])
     setForm({ grn_no:'', grn_date:today(), farm_id:'', party_id:'', invoice_no:'',
       invoice_date:today(), category:'Feed', ingredient_id:'', medicine_id:'',
+      flock_id:'',
       item_name:'', qty:'', unit:'kg',
       bags:'', price_per_unit:'', basic_amount:'', gst_pct:'0', total_amount:'',
       batch_no:'', expiry_date:'', vehicle_no:'', remarks:'' })
@@ -208,6 +213,7 @@ export const GRNEntry: React.FC = () => {
       invoice_no: g.invoice_no ?? '', invoice_date: g.invoice_date ?? today(),
       category: g.category ?? 'Feed',
       ingredient_id: g.ingredient_id ?? '', medicine_id: g.medicine_id ?? '',
+      flock_id: g.flock_id ?? '',
       item_name: g.item_name ?? '',
       qty: g.qty?.toString() ?? '', unit: g.unit ?? 'kg',
       bags: g.bags?.toString() ?? '',
@@ -224,15 +230,35 @@ export const GRNEntry: React.FC = () => {
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.grn_no || !form.grn_date || !form.farm_id) throw new Error('GRN No, date and site required')
+      if (isChick && !form.flock_id) throw new Error('Select the flock for this chick GRN')
       if (editing) {
         const { error } = await supabase.from('grn').update(payload()).eq('id', editing.id)
         if (error) throw error
+        // If chick GRN edited, re-sync flock chick_rate
+        if (isChick && form.flock_id) {
+          const qty = parseFloat(form.qty) || 0
+          const totalAmt = parseFloat(form.total_amount) || total
+          const ratePerChick = qty > 0 ? +(totalAmt / qty).toFixed(2) : null
+          if (ratePerChick) await supabase.from('flocks').update({ chick_rate: ratePerChick }).eq('id', form.flock_id)
+        }
       } else {
-        const { error } = await supabase.from('grn').insert(payload())
+        const { data: inserted, error } = await supabase.from('grn').insert(payload()).select('id').single()
         if (error) throw error
+        // Auto-update flock chick_rate from this GRN
+        if (isChick && form.flock_id && inserted) {
+          const qty = parseFloat(form.qty) || 0
+          const totalAmt = parseFloat(form.total_amount) || total
+          const ratePerChick = qty > 0 ? +(totalAmt / qty).toFixed(2) : null
+          if (ratePerChick) await supabase.from('flocks').update({ chick_rate: ratePerChick }).eq('id', form.flock_id)
+        }
       }
     },
-    onSuccess: () => { toast.success(editing ? 'GRN updated!' : 'GRN saved!'); qc.invalidateQueries({ queryKey: ['grns'] }); setShowForm(false) },
+    onSuccess: () => {
+      toast.success(editing ? 'GRN updated!' : isChick ? 'Chick GRN saved & flock rate updated!' : 'GRN saved!')
+      qc.invalidateQueries({ queryKey: ['grns'] })
+      qc.invalidateQueries({ queryKey: ['flocks'] })
+      setShowForm(false)
+    },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -266,11 +292,13 @@ export const GRNEntry: React.FC = () => {
   const medOptions  = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.type})` })) ?? []
   const categoryOptions = [
     { value: 'Feed',       label: 'Feed / Raw Material' },
+    { value: 'Chicks',     label: 'Chicks (Day-Old Birds)' },
     { value: 'Medicine',   label: 'Medicine / Oral' },
     { value: 'Vaccine',    label: 'Vaccine' },
     { value: 'Packaging',  label: 'Packaging Material' },
     { value: 'Other',      label: 'Other' },
   ]
+  const flockOptions = (allFlocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}${f.status === 'closed' ? ' (closed)' : ''}` }))
 
   const totalQty = grns.reduce((s: number, g: any) => s + (g.qty ?? 0), 0)
   const totalVal = grns.reduce((s: number, g: any) => s + (g.total_amount ?? 0), 0)
@@ -571,11 +599,25 @@ export const GRNEntry: React.FC = () => {
               <Input label="Batch No" value={form.batch_no} onChange={e => s('batch_no', e.target.value)} />
               <DateInput label="Expiry Date" value={form.expiry_date} onChange={e => s('expiry_date', e.target.value)} />
             </FormRow>
+          ) : isChick ? (
+            <FormRow cols={3}>
+              <Select label="Flock *" required placeholder="— Select Flock —"
+                options={flockOptions}
+                value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+              <Input label="Hatchery / Item Name" value={form.item_name} onChange={e => s('item_name', e.target.value)} placeholder="e.g. Day-old broiler chicks" />
+              <Select label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)}
+                options={[{value:'nos',label:'Nos (birds)'},{value:'kg',label:'kg'}]} />
+            </FormRow>
           ) : (
             <FormRow>
               <Input label="Item Name" value={form.item_name} onChange={e => s('item_name', e.target.value)} />
               <Input label="Item Code / Part No" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
             </FormRow>
+          )}
+          {isChick && form.flock_id && (parseFloat(form.qty) > 0) && (parseFloat(form.price_per_unit) > 0) && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800">
+              ✓ Rate per chick: <strong>₹{(+(parseFloat(form.price_per_unit)).toFixed(2)).toLocaleString('en-IN')}</strong> — will auto-update Flock chick rate on save
+            </div>
           )}
           {/* PO Alert */}
           {poLoading && <p className="text-xs text-blue-500">Checking open POs…</p>}
