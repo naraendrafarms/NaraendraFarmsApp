@@ -568,10 +568,10 @@ export const DailyEntry: React.FC = () => {
                   hint="Moved to another farm" />
                 <Input label="Cull Female" type="number"
                   value={form.cull_female} onChange={e => set('cull_female', e.target.value)}
-                  hint="Sold/disposed as culls" />
+                  hint="⚠ Only culls NOT in NHE Bird Sales — Bird Sales auto-deduct" />
                 <Input label="Cull Male" type="number"
                   value={form.cull_male} onChange={e => set('cull_male', e.target.value)}
-                  hint="Sold/disposed as culls" />
+                  hint="⚠ Only culls NOT in NHE Bird Sales — Bird Sales auto-deduct" />
               </FormRow>
               <FormRow cols={4}>
                 <Input label="Mortality Female" type="number"

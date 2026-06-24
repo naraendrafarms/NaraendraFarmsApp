@@ -599,8 +599,8 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-1 py-2 text-center">Type ♂</th>
                       <th className="px-1 py-2 text-center">Trf ♀</th>
                       <th className="px-1 py-2 text-center">Trf ♂</th>
-                      <th className="px-1 py-2 text-center">Cull ♀</th>
-                      <th className="px-1 py-2 text-center">Cull ♂</th>
+                      <th className="px-1 py-2 text-center text-amber-700 bg-amber-50" title="Only enter culls NOT recorded in NHE Bird Sales. Birds sold via NHE Bird Sales are auto-deducted — entering here too will double-count.">Cull ♀ ⚠</th>
+                      <th className="px-1 py-2 text-center text-amber-700 bg-amber-50" title="Only enter culls NOT recorded in NHE Bird Sales. Birds sold via NHE Bird Sales are auto-deducted — entering here too will double-count.">Cull ♂ ⚠</th>
                       <th className="px-1 py-2 text-center">Death ♀</th>
                       <th className="px-1 py-2 text-center">Death ♂</th>
                       <th className="px-1 py-2 text-center">HE</th>
