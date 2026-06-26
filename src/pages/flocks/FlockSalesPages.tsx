@@ -1367,10 +1367,10 @@ export const NHESales: React.FC = () => {
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
-      // Fetch sale details BEFORE deleting so we can clean up unlinked cash_book entries
+      // Fetch sale details BEFORE deleting so we can clean up cash_book and daily_records
       const { data: sales } = await supabase
         .from('nhe_sales')
-        .select('id, flock_id, sale_date, dc_no, amount, payment_cash')
+        .select('id, flock_id, sale_date, dc_no, amount, payment_cash, sale_type, quantity, bird_sex')
         .in('id', ids)
 
       // 1. Delete cash_book rows linked by nhe_sale_id (FK CASCADE handles this automatically,
@@ -1401,10 +1401,35 @@ export const NHESales: React.FC = () => {
         }
       }
 
+      // Reverse daily_records cull for bird sales being deleted
+      if (sales) {
+        const birdSales = sales.filter(s => isBirdSale(s.sale_type) && (s.quantity ?? 0) > 0)
+        for (const s of birdSales) {
+          const qty = parseFloat(s.quantity) || 0
+          const sex = s.bird_sex ?? 'female'
+          if (qty <= 0 || sex === 'mixed') continue
+          const { data: dr } = await supabase.from('daily_records')
+            .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
+            .eq('flock_id', s.flock_id).eq('record_date', s.sale_date).maybeSingle()
+          if (!dr) continue
+          const newCullF = sex === 'female' || sex === 'sex_error' ? Math.max(0, (dr.cull_female ?? 0) - qty) : (dr.cull_female ?? 0)
+          const newCullM = sex === 'male' ? Math.max(0, (dr.cull_male ?? 0) - qty) : (dr.cull_male ?? 0)
+          const trcullF = (dr.transfer_female ?? 0) + newCullF
+          const trcullM = (dr.transfer_male ?? 0) + newCullM
+          const closingF = Math.max(0, (dr.opening_female ?? 0) - trcullF - (dr.mortality_female ?? 0))
+          const closingM = Math.max(0, (dr.opening_male ?? 0) - trcullM - (dr.mortality_male ?? 0))
+          await supabase.from('daily_records').update({
+            cull_female: newCullF, cull_male: newCullM,
+            trcull_female: trcullF, trcull_male: trcullM,
+            ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+          }).eq('id', dr.id)
+        }
+      }
+
       const { error } = await supabase.from('nhe_sales').delete().in('id', ids)
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['nhe_sales'] }); setSel(new Set()); setBulkConfirm(false) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['nhe_sales'] }); qc.invalidateQueries({ queryKey: ['daily_record'] }); qc.invalidateQueries({ queryKey: ['flock_daily'] }); setSel(new Set()); setBulkConfirm(false) },
     onError: (e: any) => toast.error(e.message),
   })
 
