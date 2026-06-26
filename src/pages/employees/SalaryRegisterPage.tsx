@@ -99,23 +99,19 @@ export const SalaryRegisterPage: React.FC = () => {
 
   return (
     <div className="p-4 space-y-4">
-      <CardHeader title={`Salary Register — ${monthLabel(month)}`} subtitle="All employees, one row per person">
-        <Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button>
-      </CardHeader>
+      <CardHeader title={`Salary Register — ${monthLabel(month)}`} subtitle="All employees, one row per person"
+        action={<Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button>} />
 
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div>
           <label className="block text-xs text-gray-500 mb-1">Month</label>
-          <Select value={month} onChange={e => setMonth(e.target.value)}>
-            {monthOptions().map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
-          </Select>
+          <Select value={month} onChange={e => setMonth(e.target.value)}
+            options={monthOptions().map(m => ({ value: m, label: monthLabel(m) }))} />
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">Farm</label>
-          <Select value={filterFarm} onChange={e => setFilterFarm(e.target.value)}>
-            <option value="">All Farms</option>
-            {farmNames.map((n: any) => <option key={n} value={n}>{n}</option>)}
-          </Select>
+          <Select value={filterFarm} onChange={e => setFilterFarm(e.target.value)}
+            options={[{ value: '', label: 'All Farms' }, ...(farmNames as string[]).map(n => ({ value: n, label: n }))]} />
         </div>
       </Card>
 

@@ -63,19 +63,17 @@ export const SalaryHistoryPage: React.FC = () => {
 
   return (
     <div className="p-4 space-y-4">
-      <CardHeader title="Employee Salary History" subtitle="View all months for one employee">
-        {empId && <Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button>}
-      </CardHeader>
+      <CardHeader title="Employee Salary History" subtitle="View all months for one employee"
+        action={empId ? <Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button> : undefined} />
 
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div className="min-w-[220px]">
           <label className="block text-xs text-gray-500 mb-1">Employee</label>
-          <Select value={empId} onChange={e => setEmpId(e.target.value)}>
-            <option value="">— Select Employee —</option>
-            {(employees as any[] ?? []).map((e: any) => (
-              <option key={e.id} value={e.id}>{e.name} ({e.emp_id})</option>
-            ))}
-          </Select>
+          <Select value={empId} onChange={e => setEmpId(e.target.value)}
+            options={[
+              { value: '', label: '— Select Employee —' },
+              ...(employees as any[] ?? []).map((e: any) => ({ value: e.id, label: `${e.name} (${e.emp_id})` }))
+            ]} />
         </div>
       </Card>
 
