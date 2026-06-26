@@ -7,7 +7,7 @@ import {
 } from '@/components/ui'
 import {
   Plus, Edit2, Search, Package, ToggleLeft, ToggleRight,
-  Trash2, Download, Upload, FileDown, CheckSquare, Square
+  Trash2, Download, Upload, FileDown, CheckSquare, Square, GitMerge
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
@@ -40,6 +40,9 @@ export const ItemsMasterPage: React.FC = () => {
   const [form, setForm]             = useState(emptyForm())
   const [selected, setSelected]     = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState<any>(null) // single item or 'bulk'
+  const [mergeModal, setMergeModal] = useState(false)
+  const [keepId, setKeepId]         = useState<string>('')
+  const [merging, setMerging]       = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const categoryOptions = useConfigOptions('item_category')
@@ -114,6 +117,44 @@ export const ItemsMasterPage: React.FC = () => {
     },
     onError: (e: any) => toast.error(e.message),
   })
+
+  const handleMerge = async () => {
+    if (!keepId || selected.size < 2) return
+    const dupeIds = [...selected].filter(id => id !== keepId)
+    setMerging(true)
+    try {
+      // Remap item_id in all child tables from duplicates → kept item
+      const TABLES = [
+        'grn', 'medicine_usage', 'medicine_purchases',
+        'feed_production_ingredients', 'purchase_orders', 'stock_ledger',
+      ]
+      for (const table of TABLES) {
+        const { error } = await supabase
+          .from(table)
+          .update({ item_id: keepId })
+          .in('item_id', dupeIds)
+        if (error && !error.message.includes('does not exist')) throw error
+      }
+      // Delete the duplicates
+      const { error: delErr } = await supabase.from('items').delete().in('id', dupeIds)
+      if (delErr) throw delErr
+
+      toast.success(`Merged ${dupeIds.length} item${dupeIds.length > 1 ? 's' : ''} into the selected item`)
+      setSelected(new Set())
+      setMergeModal(false)
+      setKeepId('')
+      qc.invalidateQueries({ queryKey: ['items_master'] })
+    } catch (e: any) {
+      toast.error('Merge failed: ' + e.message)
+    } finally {
+      setMerging(false)
+    }
+  }
+
+  const openMerge = () => {
+    setKeepId([...selected][0])
+    setMergeModal(true)
+  }
 
   const openNew  = () => { setEditing(null); setForm(emptyForm()); setShowForm(true) }
   const openEdit = (item: any) => {
@@ -278,6 +319,12 @@ export const ItemsMasterPage: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             <Download size={15}/> Export
           </button>
+          {selected.size >= 2 && (
+            <button onClick={openMerge}
+              className="flex items-center gap-1.5 px-3 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700">
+              <GitMerge size={15}/> Merge ({selected.size})
+            </button>
+          )}
           {someSelected && (
             <button onClick={() => setConfirmDelete('bulk')}
               className="flex items-center gap-1.5 px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
@@ -469,6 +516,54 @@ export const ItemsMasterPage: React.FC = () => {
                 disabled={saveMut.isPending}
                 className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
                 {saveMut.isPending ? 'Saving...' : editing ? 'Update Item' : 'Add Item'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Merge Modal */}
+      {mergeModal && (
+        <Modal open={mergeModal} title="Merge Items" onClose={() => setMergeModal(false)}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Select which item to <strong>keep</strong>. All GRN, stock, purchase orders, and usage records linked to the other items will be remapped to the kept item. The duplicate items will then be deleted.
+            </p>
+            <div className="space-y-2">
+              {[...(items ?? [])].filter((i: any) => selected.has(i.id)).map((item: any) => (
+                <label key={item.id}
+                  className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${
+                    keepId === item.id ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-gray-300'
+                  }`}>
+                  <input type="radio" name="keepItem" value={item.id}
+                    checked={keepId === item.id}
+                    onChange={() => setKeepId(item.id)}
+                    className="accent-purple-600"/>
+                  <div className="flex-1">
+                    <div className="font-semibold text-gray-900">{item.name}</div>
+                    <div className="text-xs text-gray-500">
+                      {item.category} · {item.unit}
+                      {item.code ? ` · Code: ${item.code}` : ''}
+                      {item.manufacturer ? ` · ${item.manufacturer}` : ''}
+                    </div>
+                  </div>
+                  {keepId === item.id && (
+                    <span className="text-xs font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">KEEP</span>
+                  )}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+              The {selected.size - 1} other item{selected.size > 2 ? 's' : ''} will be permanently deleted after remapping. This cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end pt-2 border-t">
+              <button onClick={() => setMergeModal(false)}
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={handleMerge} disabled={!keepId || merging}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
+                {merging ? 'Merging…' : 'Confirm Merge'}
               </button>
             </div>
           </div>
