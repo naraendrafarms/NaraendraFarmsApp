@@ -396,88 +396,40 @@ export const EggStockPage: React.FC = () => {
     const wb = XLSX.utils.book_new()
 
     if (flockFilter && dayRows.length > 0) {
-      // ── Day-wise sheet ──
-      // Columns: A=Date B=OpA C=OpB D=OpC E=OpHE F=OpJE G=OpTE H=OpBE I=OpNHE
-      //          J=ProdA K=ProdB L=ProdC M=ProdHE N=JE O=TE P=BE Q=LE
-      //          R=SaleA S=SaleB T=SaleC U=SaleHE V=SaleJE W=SaleTE X=SaleBE
-      //          Y=ClA Z=ClB AA=ClC AB=ClHE AC=ClJE AD=ClTE AE=ClBE
-      const header = [
-        'Date',
-        'Open A', 'Open B', 'Open C', 'Open HE',
-        'Open JE', 'Open TE', 'Open BE', 'Open NHE',
-        'Prod A', 'Prod B', 'Prod C', 'Prod HE', 'JE', 'TE', 'BE', 'LE',
-        'Sale A', 'Sale B', 'Sale C', 'Sale HE', 'Sale JE', 'Sale TE', 'Sale BE',
-        'Cl A', 'Cl B', 'Cl C', 'Cl HE', 'Cl JE', 'Cl TE', 'Cl BE',
-      ]
-      const dataRows = dayRows.map((r, i) => {
-        const row = i + 2 // row 1 = header, data starts at row 2
-        return [
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['Date', 'Open A', 'Open B', 'Open C', 'Open JE', 'Open TE', 'Open BE',
+          'Prod A', 'Prod B', 'Prod C', 'JE', 'TE', 'BE', 'LE',
+          'Sale A', 'Sale B', 'Sale C', 'Sale JE', 'Sale TE', 'Sale BE',
+          'Cl A', 'Cl B', 'Cl C', 'Cl JE', 'Cl TE', 'Cl BE'],
+        ...dayRows.map(r => [
           r.date.split('-').reverse().join('/'),
-          r.opA, r.opB, r.opC, { f: `B${row}+C${row}+D${row}` },
-          r.opJE, r.opTE, r.opBE, { f: `F${row}+G${row}+H${row}` },
-          r.pA, r.pB, r.pC, { f: `J${row}+K${row}+L${row}` }, r.pJE, r.pTE, r.pBE, r.pLE,
-          r.sA, r.sB, r.sC, { f: `R${row}+S${row}+T${row}` }, r.sJE, r.sTE, r.sBE,
-          r.clA, r.clB, r.clC, { f: `Y${row}+Z${row}+AA${row}` }, r.clJE, r.clTE, r.clBE,
-        ]
-      })
-      const totalRow = dataRows.length + 2
-      const n = dayRows.length
-      const totalsRow = [
-        'TOTAL',
-        { f: `SUM(B2:B${n+1})` }, { f: `SUM(C2:C${n+1})` }, { f: `SUM(D2:D${n+1})` }, { f: `SUM(E2:E${n+1})` },
-        { f: `SUM(F2:F${n+1})` }, { f: `SUM(G2:G${n+1})` }, { f: `SUM(H2:H${n+1})` }, { f: `SUM(I2:I${n+1})` },
-        { f: `SUM(J2:J${n+1})` }, { f: `SUM(K2:K${n+1})` }, { f: `SUM(L2:L${n+1})` }, { f: `SUM(M2:M${n+1})` },
-        { f: `SUM(N2:N${n+1})` }, { f: `SUM(O2:O${n+1})` }, { f: `SUM(P2:P${n+1})` }, { f: `SUM(Q2:Q${n+1})` },
-        { f: `SUM(R2:R${n+1})` }, { f: `SUM(S2:S${n+1})` }, { f: `SUM(T2:T${n+1})` }, { f: `SUM(U2:U${n+1})` },
-        { f: `SUM(V2:V${n+1})` }, { f: `SUM(W2:W${n+1})` }, { f: `SUM(X2:X${n+1})` },
-        '', '', '', '', '', '', '',
-      ]
-      const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows, totalsRow])
-      ws['!cols'] = [{ wch: 12 }, ...Array(30).fill({ wch: 10 })]
+          r.opA, r.opB, r.opC, r.opJE, r.opTE, r.opBE,
+          r.pA, r.pB, r.pC, r.pJE, r.pTE, r.pBE, r.pLE,
+          r.sA, r.sB, r.sC, r.sJE, r.sTE, r.sBE,
+          r.clA, r.clB, r.clC, r.clJE, r.clTE, r.clBE,
+        ])
+      ])
+      ws['!cols'] = [{ wch: 12 }, ...Array(25).fill({ wch: 9 })]
       XLSX.utils.book_append_sheet(wb, ws, flockLabel)
       XLSX.writeFile(wb, `egg_stock_daily_${flockLabel.replace(/\s+/g, '_')}_${fromDate || 'start'}_to_${toDate}.xlsx`)
     } else {
-      // ── Summary sheet (all flocks) ──
-      // Cols: A=Flock B=Farm C=OpA D=OpB E=OpC F=OpHE G=OpJE H=OpTE I=OpBE J=OpNHE
-      //       K=RcvA L=RcvB M=RcvC N=RcvHE O=RcvJE P=RcvTE Q=RcvBE R=RcvLE S=RcvNHE
-      //       T=WstHE U=WstJE V=WstTE W=WstBE X=TotWst
-      //       Y=SlA Z=SlB AA=SlC AB=SlHE AC=SlJE AD=SlTE AE=SlBE AF=SlNHE
-      //       AG=ClA AH=ClB AI=ClC AJ=ClHE AK=ClJE AL=ClTE AM=ClBE AN=ClNHE
-      const header = [
-        'Flock', 'Farm',
-        'Open HE-A', 'Open HE-B', 'Open HE-C', 'Open HE', 'Open JE', 'Open TE', 'Open BE', 'Open NHE',
-        'Rcv HE-A', 'Rcv HE-B', 'Rcv HE-C', 'Rcv HE', 'Rcv JE', 'Rcv TE', 'Rcv BE', 'Rcv LE', 'Rcv NHE',
-        'Wst HE', 'Wst JE', 'Wst TE', 'Wst BE', 'Total Wst',
-        'Sale HE-A', 'Sale HE-B', 'Sale HE-C', 'Sale HE', 'Sale JE', 'Sale TE', 'Sale BE', 'Sale NHE',
-        'Cl HE-A', 'Cl HE-B', 'Cl HE-C', 'Cl HE', 'Cl JE', 'Cl TE', 'Cl BE', 'Cl NHE',
-      ]
-      const dataRows = stockRows.map((r, i) => {
-        const row = i + 2
-        return [
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['Flock', 'Farm',
+          'Open HE-A', 'Open HE-B', 'Open HE-C', 'Open JE', 'Open TE', 'Open BE',
+          'Rcv HE-A', 'Rcv HE-B', 'Rcv HE-C', 'Rcv JE', 'Rcv TE', 'Rcv BE', 'Rcv LE',
+          'Wst HE', 'Wst JE', 'Wst TE', 'Wst BE',
+          'Sale HE-A', 'Sale HE-B', 'Sale HE-C', 'Sale JE', 'Sale TE', 'Sale BE',
+          'Cl HE-A', 'Cl HE-B', 'Cl HE-C', 'Cl JE', 'Cl TE', 'Cl BE'],
+        ...stockRows.map(r => [
           `F-${r.flockNo}`, r.farm,
-          r.opA, r.opB, r.opC, { f: `C${row}+D${row}+E${row}` },
-          r.opJE, r.opTE, r.opBE, { f: `G${row}+H${row}+I${row}` },
-          r.recA, r.recB, r.recC, { f: `K${row}+L${row}+M${row}` },
-          r.recJE, r.recTE, r.recBE, r.recLE, { f: `O${row}+P${row}+Q${row}` },
-          r.wsHE, r.wsJE, r.wsTE, r.wsBE, { f: `T${row}+U${row}+V${row}+W${row}` },
-          r.slA, r.slB, r.slC, { f: `Y${row}+Z${row}+AA${row}` },
-          r.slJE, r.slTE, r.slBE, { f: `AC${row}+AD${row}+AE${row}` },
-          r.clA, r.clB, r.clC, { f: `AG${row}+AH${row}+AI${row}` },
-          r.clJE, r.clTE, r.clBE, { f: `AK${row}+AL${row}+AM${row}` },
-        ]
-      })
-      const n = stockRows.length
-      const totalsRow = [
-        'TOTAL', '',
-        ...['C','D','E','F','G','H','I','J',
-            'K','L','M','N','O','P','Q','R','S',
-            'T','U','V','W','X',
-            'Y','Z','AA','AB','AC','AD','AE','AF',
-            'AG','AH','AI','AJ','AK','AL','AM','AN',
-          ].map(col => ({ f: `SUM(${col}2:${col}${n+1})` })),
-      ]
-      const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows, totalsRow])
-      ws['!cols'] = [{ wch: 10 }, { wch: 18 }, ...Array(38).fill({ wch: 10 })]
+          r.opA, r.opB, r.opC, r.opJE, r.opTE, r.opBE,
+          r.recA, r.recB, r.recC, r.recJE, r.recTE, r.recBE, r.recLE,
+          r.wsHE, r.wsJE, r.wsTE, r.wsBE,
+          r.slA, r.slB, r.slC, r.slJE, r.slTE, r.slBE,
+          r.clA, r.clB, r.clC, r.clJE, r.clTE, r.clBE,
+        ])
+      ])
+      ws['!cols'] = [{ wch: 10 }, { wch: 18 }, ...Array(29).fill({ wch: 9 })]
       XLSX.utils.book_append_sheet(wb, ws, 'Egg Stock Summary')
       XLSX.writeFile(wb, `egg_stock_register_${toDate}.xlsx`)
     }
