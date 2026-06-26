@@ -62,6 +62,7 @@ const NAV: NavItem[] = [
     hideRoles: ['site_incharge', 'viewer'],
     children: [
       { label: 'Employee List',   to: '/employees' },
+      { label: 'Bulk Salary',      to: '/employees/bulk-salary' },
       { label: 'Salary Entry',    to: '/employees/salary' },
       { label: 'Salary Abstract', to: '/employees/abstract' },
       { label: 'Bonus',           to: '/employees/bonus' },
