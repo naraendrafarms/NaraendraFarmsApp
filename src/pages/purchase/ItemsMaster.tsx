@@ -1,19 +1,28 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import {
   Card, CardHeader, Input, Select, FormRow, Modal,
   EmptyState, Spinner, Td, Th
 } from '@/components/ui'
-import { Plus, Edit2, Search, Package, ToggleLeft, ToggleRight, X } from 'lucide-react'
+import {
+  Plus, Edit2, Search, Package, ToggleLeft, ToggleRight,
+  Trash2, Download, Upload, FileDown, CheckSquare, Square
+} from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import * as XLSX from 'xlsx'
 
-// ─── Category grouping (values match item_category config_options) ────────────
+// ─── Category grouping ────────────────────────────────────────────────────────
 const FEED_CATS = ['Feed Ingredient']
 const MED_CATS  = ['Medicine', 'Vaccine', 'Supplement', 'Sanitizer', 'Injectable', 'Disinfectant', 'Pesticide']
 const PKG_CATS  = ['Packaging']
 const EQP_CATS  = ['Equipment', 'Spares', 'Chemical', 'Other']
+
+const TEMPLATE_HEADERS = [
+  'name', 'code', 'short_name', 'category', 'sub_type', 'unit',
+  'hsn_code', 'manufacturer', 'protein_pct', 'moisture_pct', 'reorder_level'
+]
 
 const emptyForm = () => ({
   code: '', name: '', short_name: '', category: '', sub_type: '',
@@ -24,16 +33,19 @@ const emptyForm = () => ({
 // ─── Component ────────────────────────────────────────────────────────────────
 export const ItemsMasterPage: React.FC = () => {
   const qc = useQueryClient()
-  const [search, setSearch] = useState('')
-  const [catFilter, setCatFilter] = useState('')
-  const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing] = useState<any>(null)
-  const [form, setForm] = useState(emptyForm())
+  const [search, setSearch]         = useState('')
+  const [catFilter, setCatFilter]   = useState('')
+  const [showForm, setShowForm]     = useState(false)
+  const [editing, setEditing]       = useState<any>(null)
+  const [form, setForm]             = useState(emptyForm())
+  const [selected, setSelected]     = useState<Set<string>>(new Set())
+  const [confirmDelete, setConfirmDelete] = useState<any>(null) // single item or 'bulk'
+  const fileRef = useRef<HTMLInputElement>(null)
 
-  const categoryOptions  = useConfigOptions('item_category')
-  const unitOptions      = useConfigOptions('unit')
-  const feedSubOptions   = useConfigOptions('ingredient_category')
-  const medSubOptions    = useConfigOptions('medicine_subtype')
+  const categoryOptions = useConfigOptions('item_category')
+  const unitOptions     = useConfigOptions('unit')
+  const feedSubOptions  = useConfigOptions('ingredient_category')
+  const medSubOptions   = useConfigOptions('medicine_subtype')
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['items_master'],
@@ -64,7 +76,6 @@ export const ItemsMasterPage: React.FC = () => {
       }
       if (!payload.name)     throw new Error('Name is required')
       if (!payload.category) throw new Error('Category is required')
-
       if (editing) {
         const { error } = await supabase.from('items').update(payload).eq('id', editing.id)
         if (error) throw error
@@ -90,9 +101,21 @@ export const ItemsMasterPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
-  const openNew = () => {
-    setEditing(null); setForm(emptyForm()); setShowForm(true)
-  }
+  const deleteMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('items').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: (_d, ids) => {
+      toast.success(`${ids.length} item${ids.length > 1 ? 's' : ''} deleted`)
+      setSelected(new Set())
+      setConfirmDelete(null)
+      qc.invalidateQueries({ queryKey: ['items_master'] })
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const openNew  = () => { setEditing(null); setForm(emptyForm()); setShowForm(true) }
   const openEdit = (item: any) => {
     setEditing(item)
     setForm({
@@ -122,7 +145,6 @@ export const ItemsMasterPage: React.FC = () => {
     })
   }, [items, search, catFilter])
 
-  // Group by category for display
   const grouped = useMemo(() => {
     const map: Record<string, any[]> = {}
     for (const i of filtered) {
@@ -132,21 +154,146 @@ export const ItemsMasterPage: React.FC = () => {
     return map
   }, [filtered])
 
+  const filteredIds = filtered.map((i: any) => i.id)
+  const allSelected = filteredIds.length > 0 && filteredIds.every(id => selected.has(id))
+  const someSelected = selected.size > 0
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelected(prev => { const s = new Set(prev); filteredIds.forEach(id => s.delete(id)); return s })
+    } else {
+      setSelected(prev => new Set([...prev, ...filteredIds]))
+    }
+  }
+  const toggleOne = (id: string) => {
+    setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  }
+
+  // ── Export Excel ─────────────────────────────────────────────────────────────
+  const exportExcel = () => {
+    const rows = (items ?? []).map((i: any) => ({
+      Code: i.code ?? '',
+      Name: i.name,
+      'Short Name': i.short_name ?? '',
+      Category: i.category,
+      'Sub Type': i.sub_type ?? '',
+      Unit: i.unit,
+      'HSN Code': i.hsn_code ?? '',
+      Manufacturer: i.manufacturer ?? '',
+      'Protein %': i.protein_pct ?? '',
+      'Moisture %': i.moisture_pct ?? '',
+      'Reorder Level': i.reorder_level ?? '',
+      Status: i.is_active ? 'Active' : 'Inactive',
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Items Master')
+    XLSX.writeFile(wb, 'items_master.xlsx')
+  }
+
+  // ── Download Template ─────────────────────────────────────────────────────────
+  const downloadTemplate = () => {
+    const sample = [{
+      name: 'Maize 12% Moisture', code: 'MAIZE', short_name: 'Maize',
+      category: 'Feed Ingredient', sub_type: 'grain', unit: 'kg',
+      hsn_code: '10059010', manufacturer: '', protein_pct: 8.5,
+      moisture_pct: 12.0, reorder_level: 1000,
+    }]
+    const ws = XLSX.utils.json_to_sheet(sample, { header: TEMPLATE_HEADERS })
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Items Import Template')
+    XLSX.writeFile(wb, 'items_import_template.xlsx')
+  }
+
+  // ── Import Excel ──────────────────────────────────────────────────────────────
+  const importExcel = async (file: File) => {
+    try {
+      const buf  = await file.arrayBuffer()
+      const wb   = XLSX.read(buf)
+      const ws   = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json<any>(ws)
+      if (!rows.length) { toast.error('No data found in file'); return }
+
+      const records = rows.map((r: any) => ({
+        name:          String(r.name ?? '').trim(),
+        code:          r.code ? String(r.code).trim() : null,
+        short_name:    r.short_name ? String(r.short_name).trim() : null,
+        category:      String(r.category ?? 'Other').trim(),
+        sub_type:      r.sub_type ? String(r.sub_type).trim() : null,
+        unit:          String(r.unit ?? 'kg').trim(),
+        hsn_code:      r.hsn_code ? String(r.hsn_code).trim() : null,
+        manufacturer:  r.manufacturer ? String(r.manufacturer).trim() : null,
+        protein_pct:   r.protein_pct  ? parseFloat(r.protein_pct)  : null,
+        moisture_pct:  r.moisture_pct ? parseFloat(r.moisture_pct) : null,
+        reorder_level: r.reorder_level ? parseFloat(r.reorder_level) : 0,
+        is_active:     true,
+      })).filter(r => r.name)
+
+      if (!records.length) { toast.error('No valid rows (name is required)'); return }
+
+      // Check existing names to avoid duplicates
+      const names = records.map(r => r.name.toLowerCase())
+      const { data: existing } = await supabase.from('items').select('name').in('name', records.map(r => r.name))
+      const existingNames = new Set((existing ?? []).map((i: any) => i.name.toLowerCase()))
+      const newRecords = records.filter(r => !existingNames.has(r.name.toLowerCase()))
+      const skipCount  = records.length - newRecords.length
+
+      if (!newRecords.length) {
+        toast('All items already exist — nothing imported', { icon: 'ℹ️' })
+        return
+      }
+
+      const { error } = await supabase.from('items').insert(newRecords)
+      if (error) throw error
+
+      toast.success(`Imported ${newRecords.length} items${skipCount ? ` (${skipCount} skipped — already exist)` : ''}`)
+      qc.invalidateQueries({ queryKey: ['items_master'] })
+    } catch (e: any) {
+      toast.error('Import failed: ' + e.message)
+    } finally {
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
   if (isLoading) return <Spinner />
 
   return (
     <div className="p-4 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Items Master</h1>
           <p className="text-sm text-gray-500">{(items ?? []).length} items · Feed ingredients, medicines, packaging, equipment and all</p>
         </div>
-        <button onClick={openNew}
-          className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700">
-          <Plus size={16}/> Add Item
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={downloadTemplate}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+            <FileDown size={15}/> Template
+          </button>
+          <button onClick={() => fileRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+            <Upload size={15}/> Import
+          </button>
+          <button onClick={exportExcel}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+            <Download size={15}/> Export
+          </button>
+          {someSelected && (
+            <button onClick={() => setConfirmDelete('bulk')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
+              <Trash2 size={15}/> Delete ({selected.size})
+            </button>
+          )}
+          <button onClick={openNew}
+            className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700">
+            <Plus size={16}/> Add Item
+          </button>
+        </div>
       </div>
+
+      {/* Hidden file input */}
+      <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden"
+        onChange={e => { if (e.target.files?.[0]) importExcel(e.target.files[0]) }}/>
 
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">
@@ -173,6 +320,11 @@ export const ItemsMasterPage: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-left">
+                    <Th>
+                      <button onClick={toggleAll} className="text-gray-400 hover:text-gray-600">
+                        {allSelected ? <CheckSquare size={15} className="text-brand-600"/> : <Square size={15}/>}
+                      </button>
+                    </Th>
                     <Th>Code</Th><Th>Name</Th><Th>Short Name</Th>
                     <Th>Sub Type</Th><Th>Unit</Th><Th>HSN</Th>
                     {FEED_CATS.includes(cat) && <><Th>Protein%</Th><Th>Moisture%</Th></>}
@@ -182,7 +334,15 @@ export const ItemsMasterPage: React.FC = () => {
                 </thead>
                 <tbody>
                   {rows.map((item: any) => (
-                    <tr key={item.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={item.id}
+                      className={`border-b border-gray-50 hover:bg-gray-50 ${selected.has(item.id) ? 'bg-brand-50' : ''}`}>
+                      <Td>
+                        <button onClick={() => toggleOne(item.id)} className="text-gray-400 hover:text-gray-600">
+                          {selected.has(item.id)
+                            ? <CheckSquare size={15} className="text-brand-600"/>
+                            : <Square size={15}/>}
+                        </button>
+                      </Td>
                       <Td className="font-mono text-xs text-gray-500">{item.code ?? '—'}</Td>
                       <Td className="font-medium">{item.name}</Td>
                       <Td className="text-gray-500">{item.short_name ?? '—'}</Td>
@@ -203,10 +363,14 @@ export const ItemsMasterPage: React.FC = () => {
                         </button>
                       </Td>
                       <Td>
-                        <button onClick={() => openEdit(item)}
-                          className="text-brand-600 hover:text-brand-800">
-                          <Edit2 size={14}/>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => openEdit(item)} className="text-brand-600 hover:text-brand-800">
+                            <Edit2 size={14}/>
+                          </button>
+                          <button onClick={() => setConfirmDelete(item)} className="text-red-400 hover:text-red-600">
+                            <Trash2 size={14}/>
+                          </button>
+                        </div>
                       </Td>
                     </tr>
                   ))}
@@ -244,7 +408,6 @@ export const ItemsMasterPage: React.FC = () => {
                 onChange={e => s('hsn_code', e.target.value)} placeholder="e.g. 10059010"/>
             </FormRow>
 
-            {/* Feed Ingredient fields */}
             {isFeed && (
               <>
                 <Select label="Sub Type"
@@ -259,26 +422,21 @@ export const ItemsMasterPage: React.FC = () => {
               </>
             )}
 
-            {/* Medicine / Vaccine fields */}
             {isMed && (
-              <>
-                <FormRow>
-                  <Select label="Form / Type"
-                    options={medSubOptions} value={form.sub_type}
-                    onChange={e => s('sub_type', e.target.value)} placeholder="— Select —"/>
-                  <Input label="Manufacturer" value={form.manufacturer}
-                    onChange={e => s('manufacturer', e.target.value)} placeholder="e.g. Zoetis"/>
-                </FormRow>
-              </>
+              <FormRow>
+                <Select label="Form / Type"
+                  options={medSubOptions} value={form.sub_type}
+                  onChange={e => s('sub_type', e.target.value)} placeholder="— Select —"/>
+                <Input label="Manufacturer" value={form.manufacturer}
+                  onChange={e => s('manufacturer', e.target.value)} placeholder="e.g. Zoetis"/>
+              </FormRow>
             )}
 
-            {/* Packaging fields */}
             {isPkg && (
               <Input label="Description / Size" value={form.description}
                 onChange={e => s('description', e.target.value)} placeholder="e.g. 50kg Gunny Bag"/>
             )}
 
-            {/* Equipment / Spares fields */}
             {isEqp && (
               <FormRow>
                 <Input label="Make / Model" value={form.manufacturer}
@@ -311,6 +469,35 @@ export const ItemsMasterPage: React.FC = () => {
                 disabled={saveMut.isPending}
                 className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
                 {saveMut.isPending ? 'Saving...' : editing ? 'Update Item' : 'Add Item'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {confirmDelete && (
+        <Modal open={!!confirmDelete}
+          title={confirmDelete === 'bulk' ? `Delete ${selected.size} Items?` : `Delete "${confirmDelete.name}"?`}
+          onClose={() => setConfirmDelete(null)}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              {confirmDelete === 'bulk'
+                ? `This will permanently delete ${selected.size} selected item${selected.size > 1 ? 's' : ''}. This cannot be undone.`
+                : 'This will permanently delete this item. This cannot be undone.'}
+            </p>
+            <div className="flex gap-3 justify-end pt-2 border-t">
+              <button onClick={() => setConfirmDelete(null)}
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteMut.mutate(
+                  confirmDelete === 'bulk' ? [...selected] : [confirmDelete.id]
+                )}
+                disabled={deleteMut.isPending}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50">
+                {deleteMut.isPending ? 'Deleting...' : 'Yes, Delete'}
               </button>
             </div>
           </div>
