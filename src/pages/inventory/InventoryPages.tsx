@@ -683,10 +683,15 @@ const LedgerTab: React.FC = () => {
     queryKey: ['sl_moves', selectedItem, fromDate, toDate],
     enabled: !!selectedItem,
     queryFn: async () => {
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selectedItem)
       let q = supabase.from('stock_ledger')
         .select('txn_date,txn_type,qty,unit,unit_price,total_value,reference_no,remarks,flock_id')
-        .or(`item_id.eq.${selectedItem},item_name.eq.${selectedItem}`)
         .order('txn_date').order('created_at')
+      if (isUUID) {
+        q = q.or(`item_id.eq.${selectedItem},item_name.eq.${selectedItem}`)
+      } else {
+        q = q.eq('item_name', selectedItem)
+      }
       if (fromDate) q = q.gte('txn_date', fromDate)
       if (toDate)   q = q.lte('txn_date', toDate)
       const { data } = await q
@@ -788,7 +793,7 @@ const ClosingStockReportTab: React.FC = () => {
   const filtered = useMemo(() => rows.filter(r => {
     if (cat && r.category !== cat) return false
     if (q && !r.item_name.toLowerCase().includes(q.toLowerCase())) return false
-    return r.closing !== 0 || r.received > 0 // only show items that have had activity
+    return r.closing !== 0 || r.received > 0 || r.opening > 0 || r.used > 0 || r.adjusted !== 0
   }), [rows, cat, q])
 
   const totalOpeningValue  = filtered.reduce((s, r) => s + r.opening * (r.rate || 0), 0)
