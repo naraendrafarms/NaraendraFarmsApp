@@ -5,7 +5,7 @@ import { today } from '@/lib/utils'
 import {
   Card, SectionHeader, Spinner, Badge, Select
 } from '@/components/ui'
-import { AlertCircle, Clock, CheckCircle, Search } from 'lucide-react'
+import { AlertCircle, Search, Link2, X, CheckCircle2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { Download } from 'lucide-react'
 
@@ -40,8 +40,201 @@ type PayModal = {
   remarks: string
 }
 
+// ── Waiting to Link ──────────────────────────────────────────────────────────
+
+type WaitingTxn = {
+  id: string
+  txn_date: string
+  description: string | null
+  reference_no: string | null
+  amount: number
+  category: string | null
+  statement_balance: number | null
+}
+
+const WaitingToLink: React.FC = () => {
+  const qc = useQueryClient()
+  const [linkModal, setLinkModal] = useState<WaitingTxn | null>(null)
+  const [selectedPaymentId, setSelectedPaymentId] = useState('')
+  const [linking, setLinking] = useState(false)
+
+  const { data: waitingTxns, isLoading } = useQuery({
+    queryKey: ['bank_txn_waiting'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('bank_transactions')
+        .select('id,txn_date,description,reference_no,amount,category,statement_balance')
+        .eq('imported', true)
+        .eq('match_status', 'waiting')
+        .eq('txn_type', 'Debit')
+        .order('txn_date', { ascending: false })
+      if (error) throw error
+      return (data ?? []) as WaitingTxn[]
+    }
+  })
+
+  const { data: openPayments } = useQuery({
+    queryKey: ['pending_payments_open'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('pending_payments')
+        .select('id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount')
+        .neq('payment_status', 'Paid')
+        .order('vendor_name')
+      return (data ?? []) as any[]
+    }
+  })
+
+  const getBalance = (p: any) => Math.max(0, (p.net_payable ?? p.invoice_amount ?? 0) - (p.paid_amount ?? 0) - (p.discount_amount ?? 0))
+  const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const paymentOptions = (openPayments ?? []).map((p: any) => ({
+    value: p.id,
+    label: `${p.vendor_name} — ${p.invoice_no ?? p.grn_no ?? ''} — ₹${fmt(getBalance(p))}`,
+  }))
+
+  const handleIgnore = async (id: string) => {
+    await supabase.from('bank_transactions').update({ match_status: 'ignored' }).eq('id', id)
+    qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+    toast.success('Marked as ignored')
+  }
+
+  const handleLink = async () => {
+    if (!linkModal || !selectedPaymentId) return
+    setLinking(true)
+    try {
+      const payment = (openPayments ?? []).find((p: any) => p.id === selectedPaymentId)
+      const balance = payment ? getBalance(payment) : 0
+
+      await supabase.from('bank_transactions').update({
+        match_status: 'manually_matched',
+        linked_payment_id: selectedPaymentId,
+      }).eq('id', linkModal.id)
+
+      if (payment) {
+        await supabase.from('pending_payments').update({
+          paid_amount: (payment.paid_amount ?? 0) + balance,
+          paid_date: linkModal.txn_date,
+          payment_status: 'Paid',
+          transaction_ref: linkModal.reference_no || null,
+        }).eq('id', selectedPaymentId)
+      }
+
+      qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      setLinkModal(null)
+      setSelectedPaymentId('')
+      toast.success('Linked and marked as paid')
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>
+
+  return (
+    <div className="space-y-4">
+      <div className="text-sm text-gray-500 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
+        <AlertCircle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+        <span>These are bank debit transactions imported from your statement that could not be automatically matched to a vendor payment. Link each one manually or ignore it if not relevant.</span>
+      </div>
+
+      {(waitingTxns ?? []).length === 0 ? (
+        <div className="text-center py-10 text-gray-400">
+          <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
+          <div>No transactions waiting to be linked</div>
+        </div>
+      ) : (
+        <Card padding={false}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase text-left">
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Description</th>
+                  <th className="px-3 py-2">Reference</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2">Category</th>
+                  <th className="px-3 py-2 text-right">Stmt Balance</th>
+                  <th className="px-3 py-2 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(waitingTxns ?? []).map((t, i) => (
+                  <tr key={t.id} className={`border-b border-gray-100 hover:bg-gray-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                    <td className="px-3 py-2 text-gray-600">{t.txn_date}</td>
+                    <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate">{t.description || '—'}</td>
+                    <td className="px-3 py-2 text-gray-500">{t.reference_no || '—'}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-red-600">₹{fmt(t.amount)}</td>
+                    <td className="px-3 py-2 text-gray-500">{t.category || '—'}</td>
+                    <td className="px-3 py-2 text-right text-gray-500">{t.statement_balance != null ? `₹${fmt(t.statement_balance)}` : '—'}</td>
+                    <td className="px-3 py-2 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => { setLinkModal(t); setSelectedPaymentId('') }}
+                          className="flex items-center gap-1 px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                        >
+                          <Link2 size={11} /> Link
+                        </button>
+                        <button
+                          onClick={() => { if (confirm('Mark as ignored?')) handleIgnore(t.id) }}
+                          className="flex items-center gap-1 px-2 py-1 bg-gray-200 text-gray-600 text-xs rounded hover:bg-gray-300"
+                        >
+                          <X size={11} /> Ignore
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Link modal */}
+      {linkModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <h3 className="font-bold text-gray-900 text-lg">Link to Vendor Payment</h3>
+            <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+              <div className="text-gray-500">{linkModal.txn_date} · {linkModal.reference_no || linkModal.description}</div>
+              <div className="font-semibold text-red-600">₹{fmt(linkModal.amount)}</div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Select Vendor Bill</label>
+              <select
+                value={selectedPaymentId}
+                onChange={e => setSelectedPaymentId(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">— Select —</option>
+                {paymentOptions.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setLinkModal(null)} className="flex-1 py-2 border border-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+              <button onClick={handleLink} disabled={!selectedPaymentId || linking} className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                {linking ? 'Linking…' : 'Confirm Link'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+import toast from 'react-hot-toast'
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
 export const PendingPaymentsPage: React.FC = () => {
   const qc = useQueryClient()
+  const [tab, setTab] = useState<'outstanding' | 'waiting'>('outstanding')
   const [vendorFilter, setVendorFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('unpaid')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -176,11 +369,36 @@ export const PendingPaymentsPage: React.FC = () => {
         title="Pending Payments"
         subtitle="Vendor bills received (GRN done) — outstanding amounts to pay"
         action={
-          <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700">
-            <Download size={14} /> Export Excel
-          </button>
+          tab === 'outstanding' ? (
+            <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700">
+              <Download size={14} /> Export Excel
+            </button>
+          ) : null
         }
       />
+
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200">
+        {([
+          { key: 'outstanding', label: 'Outstanding Bills' },
+          { key: 'waiting', label: 'Waiting to Link' },
+        ] as const).map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.key
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'waiting' && <WaitingToLink />}
+      {tab === 'outstanding' && (<>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -350,6 +568,7 @@ export const PendingPaymentsPage: React.FC = () => {
           </div>
         </div>
       )}
+      </>)}
     </div>
   )
 }
