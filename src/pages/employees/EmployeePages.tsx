@@ -2940,6 +2940,44 @@ export const BulkSalaryPage: React.FC = () => {
     }
   })
 
+  // Daily attendance for the month → to auto-calculate absent days
+  const { data: dailyAtt, refetch: refetchDailyAtt } = useQuery({
+    queryKey: ['bulk_daily_att', month],
+    queryFn: async () => {
+      const [yr, mn] = month.split('-').map(Number)
+      const lastDay = new Date(yr, mn, 0).getDate()
+      const start = `${month}-01`, end = `${month}-${String(lastDay).padStart(2,'0')}`
+      const { data } = await supabase.from('attendance_daily')
+        .select('employee_id,status').gte('attendance_date', start).lte('attendance_date', end)
+      // Per employee: count A=1 absent, H=0.5 absent, P/OT/WO = 0 absent
+      const agg: Record<string,number> = {}
+      for (const r of (data ?? [])) {
+        const absent = r.status === 'A' ? 1 : r.status === 'H' ? 0.5 : 0
+        agg[r.employee_id] = (agg[r.employee_id] ?? 0) + absent
+      }
+      return agg
+    }
+  })
+
+  // Track how many daily records exist per employee for the month
+  const dailyAttCounts = React.useMemo(() => {
+    const counts: Record<string,number> = {}
+    if (!dailyAtt) return counts
+    for (const [id] of Object.entries(dailyAtt)) counts[id] = 1
+    return counts
+  }, [dailyAtt])
+
+  const autoFillFromDaily = () => {
+    if (!dailyAtt || !employees?.length) { toast.error('No daily attendance found for this month'); return }
+    const map: Record<string,string> = { ...absentMap }
+    let filled = 0
+    for (const emp of (employees as any[])) {
+      if (dailyAtt[emp.id] !== undefined) { map[emp.id] = String(dailyAtt[emp.id]); filled++ }
+    }
+    setAbsentMap(map)
+    toast.success(`Auto-filled absent days for ${filled} employees from daily attendance`)
+  }
+
   React.useEffect(() => {
     if (!salaries) return
     const map: Record<string,string> = {}
@@ -3104,34 +3142,60 @@ export const BulkSalaryPage: React.FC = () => {
       {/* ── Tab 1: Attendance ── */}
       {tab==='attendance' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-sm text-gray-600">Enter absent days for <strong>{monthLabel}</strong>. Advances and flock deductions are pulled automatically.</p>
-            <Button onClick={saveAttendance} loading={saving}>Save & Calculate Salaries</Button>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <p className="text-sm text-gray-600">Enter absent days for <strong>{monthLabel}</strong>.</p>
+              <p className="text-xs text-gray-400 mt-0.5">Advances and flock deductions are pulled automatically. You can also auto-fill from daily attendance records.</p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <Button variant="outline" onClick={autoFillFromDaily}>📋 Auto-fill from Daily Attendance</Button>
+              <Button onClick={saveAttendance} loading={saving}>Save & Calculate Salaries</Button>
+            </div>
           </div>
+
+          {/* Info banner if daily attendance exists */}
+          {dailyAtt && Object.keys(dailyAtt).length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm text-blue-700">
+              Daily attendance found for {Object.keys(dailyAtt).length} employees in {monthLabel} — click <strong>Auto-fill from Daily Attendance</strong> to calculate absent days automatically.
+            </div>
+          )}
+
           <Card padding={false}>
             <Table>
               <thead><tr>
                 <Th>Code</Th><Th>Name</Th><Th>Site</Th><Th>Designation</Th>
-                <Th right>Base Salary</Th><Th right>Advances</Th><Th right>Flock Ded.</Th><Th right>Absent Days</Th>
+                <Th right>Base Salary</Th><Th right>Advances</Th><Th right>Flock Ded.</Th>
+                <Th right>From Daily Att.</Th><Th right>Absent Days</Th>
               </tr></thead>
               <tbody>
-                {(employees as any[]??[]).map((emp:any)=>(
-                  <tr key={emp.id} className="hover:bg-gray-50">
-                    <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
-                    <Td className="font-medium text-sm">{emp.name}</Td>
-                    <Td className="text-xs text-gray-500">{emp.farms?.name??'—'}</Td>
-                    <Td className="text-xs">{emp.designation??'—'}</Td>
-                    <Td right className="text-sm">{emp.base_salary?inr(emp.base_salary):'—'}</Td>
-                    <Td right className="text-orange-600 text-xs">{((advances as any)||{})[emp.id]>0?inr(((advances as any)||{})[emp.id]):'—'}</Td>
-                    <Td right className="text-purple-600 text-xs">{((deductions as any)||{})[emp.id]>0?inr(((deductions as any)||{})[emp.id]):'—'}</Td>
-                    <Td right>
-                      <input type="number" min={0} max={31} step={0.5} value={absentMap[emp.id]??'0'}
-                        onChange={e=>setAbsentMap(m=>({...m,[emp.id]:e.target.value}))}
-                        className="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-brand-500"/>
-                    </Td>
-                  </tr>
-                ))}
-                {!employees?.length && <tr><Td colSpan={8} className="text-center text-gray-400 py-6">No employees found</Td></tr>}
+                {(employees as any[]??[]).map((emp:any)=>{
+                  const dailyAbsent = (dailyAtt as any)?.[emp.id]
+                  return (
+                    <tr key={emp.id} className="hover:bg-gray-50">
+                      <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
+                      <Td className="font-medium text-sm">{emp.name}</Td>
+                      <Td className="text-xs text-gray-500">{emp.farms?.name??'—'}</Td>
+                      <Td className="text-xs">{emp.designation??'—'}</Td>
+                      <Td right className="text-sm">{emp.base_salary?inr(emp.base_salary):'—'}</Td>
+                      <Td right className="text-orange-600 text-xs">{((advances as any)||{})[emp.id]>0?inr(((advances as any)||{})[emp.id]):'—'}</Td>
+                      <Td right className="text-purple-600 text-xs">{((deductions as any)||{})[emp.id]>0?inr(((deductions as any)||{})[emp.id]):'—'}</Td>
+                      <Td right className="text-xs text-blue-600">
+                        {dailyAbsent !== undefined ? (
+                          <button onClick={()=>setAbsentMap(m=>({...m,[emp.id]:String(dailyAbsent)}))}
+                            className="px-2 py-0.5 bg-blue-50 border border-blue-200 rounded text-blue-700 hover:bg-blue-100" title="Click to use this value">
+                            {dailyAbsent}
+                          </button>
+                        ) : '—'}
+                      </Td>
+                      <Td right>
+                        <input type="number" min={0} max={31} step={0.5} value={absentMap[emp.id]??'0'}
+                          onChange={e=>setAbsentMap(m=>({...m,[emp.id]:e.target.value}))}
+                          className="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-brand-500"/>
+                      </Td>
+                    </tr>
+                  )
+                })}
+                {!employees?.length && <tr><Td colSpan={9} className="text-center text-gray-400 py-6">No employees found</Td></tr>}
               </tbody>
             </Table>
           </Card>
