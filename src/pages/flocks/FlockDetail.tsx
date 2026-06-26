@@ -426,17 +426,18 @@ export const FlockDetail: React.FC = () => {
   if (isLoading) return <Spinner />
   if (!flock) return <div className="p-8 text-center text-gray-500">Flock not found</div>
 
-  // Computed totals (always from full ascending daily array)
-  const totalEggs = daily?.reduce((s, d) => s + (d.total_eggs ?? 0), 0) ?? 0
-  const totalHE   = daily?.reduce((s, d) => s + (d.he_eggs ?? 0), 0) ?? 0
-  const totalMortF = daily?.reduce((s, d) => s + (d.mortality_female ?? 0), 0) ?? 0
-  const totalMortM = daily?.reduce((s, d) => s + (d.mortality_male ?? 0), 0) ?? 0
-  const totalTrF   = daily?.reduce((s, d) => s + (d.transfer_female ?? d.trcull_female ?? 0), 0) ?? 0
-  const totalTrM   = daily?.reduce((s, d) => s + (d.transfer_male   ?? d.trcull_male   ?? 0), 0) ?? 0
-  const totalCullF = daily?.reduce((s, d) => s + (d.cull_female ?? 0), 0) ?? 0
-  const totalCullM = daily?.reduce((s, d) => s + (d.cull_male   ?? 0), 0) ?? 0
-  const totalFeedF = daily?.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0) ?? 0
-  const totalFeedM = daily?.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0) ?? 0
+  // Computed totals from dailyAggregated (one row per date, sheds already summed)
+  // Using aggregated avoids double-counting multi-shed flocks
+  const totalEggs  = dailyAggregated.reduce((s, d) => s + (d.total_eggs ?? 0), 0)
+  const totalHE    = dailyAggregated.reduce((s, d) => s + (d.he_eggs ?? 0), 0)
+  const totalMortF = dailyAggregated.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
+  const totalMortM = dailyAggregated.reduce((s, d) => s + (d.mortality_male ?? 0), 0)
+  const totalTrF   = dailyAggregated.reduce((s, d) => s + (d.transfer_female ?? d.trcull_female ?? 0), 0)
+  const totalTrM   = dailyAggregated.reduce((s, d) => s + (d.transfer_male   ?? d.trcull_male   ?? 0), 0)
+  const totalCullF = dailyAggregated.reduce((s, d) => s + (d.cull_female ?? 0), 0)
+  const totalCullM = dailyAggregated.reduce((s, d) => s + (d.cull_male   ?? 0), 0)
+  const totalFeedF = dailyAggregated.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0)
+  const totalFeedM = dailyAggregated.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0)
   const hePct = totalEggs > 0 ? totalHE / totalEggs : 0
 
   // Bulk selection helpers for daily tab (select by date, delete all shed rows for that date)

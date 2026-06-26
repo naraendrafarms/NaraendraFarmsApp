@@ -1425,19 +1425,35 @@ export const NHESales: React.FC = () => {
           s + ((x.bird_sex === 'female' || x.bird_sex === 'sex_error' || !x.bird_sex) ? (parseFloat(x.quantity) || 0) : 0), 0)
         const totalM = (remaining ?? []).reduce((s, x) =>
           s + (x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
-        const { data: dr } = await supabase.from('daily_records')
+        const { data: drRows } = await supabase.from('daily_records')
           .select('id,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
-          .eq('flock_id', flock_id).eq('record_date', sale_date).maybeSingle()
-        if (!dr) continue
+          .eq('flock_id', flock_id).eq('record_date', sale_date).order('id')
+        if (!drRows || drRows.length === 0) continue
+        const dr = drRows[0]
         const trcullF = (dr.transfer_female ?? 0) + totalF
         const trcullM = (dr.transfer_male ?? 0) + totalM
-        const closingF = Math.max(0, (dr.opening_female ?? 0) - trcullF - (dr.mortality_female ?? 0))
-        const closingM = Math.max(0, (dr.opening_male ?? 0) - trcullM - (dr.mortality_male ?? 0))
         await supabase.from('daily_records').update({
           cull_female: totalF, cull_male: totalM,
           trcull_female: trcullF, trcull_male: trcullM,
-          ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+          ...(dr.opening_female ? {
+            closing_female: Math.max(0, (dr.opening_female ?? 0) - trcullF - (dr.mortality_female ?? 0)),
+            closing_male:   Math.max(0, (dr.opening_male   ?? 0) - trcullM - (dr.mortality_male   ?? 0)),
+          } : {})
         }).eq('id', dr.id)
+        for (const other of drRows.slice(1)) {
+          if ((other.cull_female ?? 0) !== 0 || (other.cull_male ?? 0) !== 0) {
+            const trF = other.transfer_female ?? 0
+            const trM = other.transfer_male ?? 0
+            await supabase.from('daily_records').update({
+              cull_female: 0, cull_male: 0,
+              trcull_female: trF, trcull_male: trM,
+              ...(other.opening_female ? {
+                closing_female: Math.max(0, (other.opening_female ?? 0) - trF - (other.mortality_female ?? 0)),
+                closing_male:   Math.max(0, (other.opening_male   ?? 0) - trM - (other.mortality_male   ?? 0)),
+              } : {})
+            }).eq('id', other.id)
+          }
+        }
       }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['nhe_sales'] }); qc.invalidateQueries({ queryKey: ['daily_record'] }); qc.invalidateQueries({ queryKey: ['flock_daily'] }); setSel(new Set()); setBulkConfirm(false) },
@@ -1632,21 +1648,37 @@ export const NHESales: React.FC = () => {
         const totalM = (allSales ?? []).reduce((s, x) =>
           s + (x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
 
-        const { data: dr } = await supabase.from('daily_records')
+        const { data: drRows } = await supabase.from('daily_records')
           .select('id,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
-          .eq('flock_id', flockId).eq('record_date', saleDate).maybeSingle()
+          .eq('flock_id', flockId).eq('record_date', saleDate).order('id')
 
-        const trcullF = (dr?.transfer_female ?? 0) + totalF
-        const trcullM = (dr?.transfer_male ?? 0) + totalM
-        const closingF = Math.max(0, (dr?.opening_female ?? 0) - trcullF - (dr?.mortality_female ?? 0))
-        const closingM = Math.max(0, (dr?.opening_male ?? 0) - trcullM - (dr?.mortality_male ?? 0))
-
-        if (dr) {
+        if (drRows && drRows.length > 0) {
+          // Write cull to first shed record, zero cull on all others (avoid double-counting)
+          const dr = drRows[0]
+          const trcullF = (dr.transfer_female ?? 0) + totalF
+          const trcullM = (dr.transfer_male ?? 0) + totalM
+          const closingF = Math.max(0, (dr.opening_female ?? 0) - trcullF - (dr.mortality_female ?? 0))
+          const closingM = Math.max(0, (dr.opening_male ?? 0) - trcullM - (dr.mortality_male ?? 0))
           await supabase.from('daily_records').update({
             cull_female: totalF, cull_male: totalM,
             trcull_female: trcullF, trcull_male: trcullM,
             ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
           }).eq('id', dr.id)
+          // Zero cull on remaining shed records for this date
+          for (const other of drRows.slice(1)) {
+            if ((other.cull_female ?? 0) !== 0 || (other.cull_male ?? 0) !== 0) {
+              const trF = (other.transfer_female ?? 0)
+              const trM = (other.transfer_male ?? 0)
+              await supabase.from('daily_records').update({
+                cull_female: 0, cull_male: 0,
+                trcull_female: trF, trcull_male: trM,
+                ...(other.opening_female ? {
+                  closing_female: Math.max(0, (other.opening_female ?? 0) - trF - (other.mortality_female ?? 0)),
+                  closing_male:   Math.max(0, (other.opening_male   ?? 0) - trM - (other.mortality_male   ?? 0)),
+                } : {})
+              }).eq('id', other.id)
+            }
+          }
         } else {
           await supabase.from('daily_records').insert({
             flock_id: flockId, record_date: saleDate,
