@@ -51,15 +51,22 @@ export const EggStockPage: React.FC = () => {
     enabled: !!toDate
   })
 
-  // HE dispatched (sales)
+  // HE dispatched (sales) — use lines for accurate per-grade data, join dispatch for date+flock
   const { data: heDisp } = useQuery({
     queryKey: ['egg_stock_he_disp', toDate],
     queryFn: async () => {
       const { data } = await supabase
-        .from('he_dispatch')
-        .select('flock_id, dispatch_date, grade_a, grade_b, grade_c')
-        .lte('dispatch_date', toDate)
-      return data ?? []
+        .from('he_dispatch_lines')
+        .select('flock_id, grade_a, grade_b, grade_c, he_dispatch!inner(flock_id, dispatch_date)')
+        .lte('he_dispatch.dispatch_date', toDate)
+      // Flatten: use line's flock_id (same as dispatch's), dispatch_date from parent
+      return (data ?? []).map((l: any) => ({
+        flock_id: l.flock_id,
+        dispatch_date: l.he_dispatch?.dispatch_date,
+        grade_a: l.grade_a ?? 0,
+        grade_b: l.grade_b ?? 0,
+        grade_c: l.grade_c ?? 0,
+      })).filter((l: any) => l.dispatch_date && l.dispatch_date <= toDate)
     },
     enabled: !!toDate
   })
@@ -308,6 +315,78 @@ export const EggStockPage: React.FC = () => {
 
   const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))
 
+  // Day-wise view when a single flock is selected
+  const dayRows = useMemo(() => {
+    if (!flockFilter || !dailyRecs) return []
+    const fd = fromDate || null
+    const inPeriod = (d: string) => (!fd || d >= fd) && d <= toDate
+
+    // Opening stock for this flock
+    const op = (openingStock ?? []).find((o: any) => o.flock_id === flockFilter)
+    let balA = op?.he_grade_a ?? 0, balB = op?.he_grade_b ?? 0, balC = op?.he_grade_c ?? 0
+    let balJE = op?.nhe_je ?? 0, balTE = op?.nhe_te ?? 0, balBE = op?.nhe_be ?? 0
+
+    // Carry forward everything before fromDate into opening
+    for (const r of (dailyRecs ?? []).filter((r: any) => r.flock_id === flockFilter)) {
+      if (fd && r.record_date < fd) {
+        balA += r.he_grade_a ?? 0; balB += r.he_grade_b ?? 0; balC += r.he_grade_c ?? 0
+        balJE += r.je_eggs ?? 0; balTE += r.te_eggs ?? 0; balBE += r.be_eggs ?? 0
+      }
+    }
+    for (const d of (heDisp ?? []).filter((d: any) => d.flock_id === flockFilter)) {
+      if (fd && d.dispatch_date < fd) {
+        balA -= d.grade_a ?? 0; balB -= d.grade_b ?? 0; balC -= d.grade_c ?? 0
+      }
+    }
+    for (const s of (nheSales ?? []).filter((s: any) => s.flock_id === flockFilter)) {
+      if (fd && s.sale_date < fd) {
+        const isJE = s.sale_type === 'je' || s.sale_type === 'je_eggs'
+        const isTE = s.sale_type === 'te' || s.sale_type === 'te_eggs'
+        const isBE = s.sale_type === 'be' || s.sale_type === 'be_eggs'
+        if (isJE) balJE -= s.quantity; else if (isTE) balTE -= s.quantity; else if (isBE) balBE -= s.quantity
+      }
+    }
+
+    // Collect all dates in period that have any activity
+    const dateSet = new Set<string>()
+    ;(dailyRecs ?? []).filter((r: any) => r.flock_id === flockFilter && inPeriod(r.record_date)).forEach((r: any) => dateSet.add(r.record_date))
+    ;(heDisp ?? []).filter((d: any) => d.flock_id === flockFilter && inPeriod(d.dispatch_date)).forEach((d: any) => dateSet.add(d.dispatch_date))
+    ;(nheSales ?? []).filter((s: any) => s.flock_id === flockFilter && inPeriod(s.sale_date)).forEach((s: any) => dateSet.add(s.sale_date))
+    const dates = [...dateSet].sort()
+
+    return dates.map(date => {
+      // Opening for this day = current running balance
+      const opA = balA, opB = balB, opC = balC, opJE = balJE, opTE = balTE, opBE = balBE
+
+      // Production
+      const dayProd = (dailyRecs ?? []).filter((r: any) => r.flock_id === flockFilter && r.record_date === date)
+      const pA = dayProd.reduce((s: number, r: any) => s + (r.he_grade_a ?? 0), 0)
+      const pB = dayProd.reduce((s: number, r: any) => s + (r.he_grade_b ?? 0), 0)
+      const pC = dayProd.reduce((s: number, r: any) => s + (r.he_grade_c ?? 0), 0)
+      const pJE = dayProd.reduce((s: number, r: any) => s + (r.je_eggs ?? 0), 0)
+      const pTE = dayProd.reduce((s: number, r: any) => s + (r.te_eggs ?? 0), 0)
+      const pBE = dayProd.reduce((s: number, r: any) => s + (r.be_eggs ?? 0), 0)
+      const pLE = dayProd.reduce((s: number, r: any) => s + (r.le_eggs ?? 0), 0)
+      const wHE = dayProd.reduce((s: number, r: any) => s + (r.wastage_he ?? 0), 0)
+
+      // Sales / dispatch for this day
+      const dayDisp = (heDisp ?? []).filter((d: any) => d.flock_id === flockFilter && d.dispatch_date === date)
+      const sA = dayDisp.reduce((s: number, d: any) => s + (d.grade_a ?? 0), 0)
+      const sB = dayDisp.reduce((s: number, d: any) => s + (d.grade_b ?? 0), 0)
+      const sC = dayDisp.reduce((s: number, d: any) => s + (d.grade_c ?? 0), 0)
+      const daySales = (nheSales ?? []).filter((s: any) => s.flock_id === flockFilter && s.sale_date === date)
+      const sJE = daySales.filter((s: any) => s.sale_type === 'je' || s.sale_type === 'je_eggs').reduce((a: number, s: any) => a + s.quantity, 0)
+      const sTE = daySales.filter((s: any) => s.sale_type === 'te' || s.sale_type === 'te_eggs').reduce((a: number, s: any) => a + s.quantity, 0)
+      const sBE = daySales.filter((s: any) => s.sale_type === 'be' || s.sale_type === 'be_eggs').reduce((a: number, s: any) => a + s.quantity, 0)
+
+      // Update running balance
+      balA += pA - sA - wHE; balB += pB - sB; balC += pC - sC
+      balJE += pJE - sJE; balTE += pTE - sTE; balBE += pBE - sBE
+
+      return { date, opA, opB, opC, opJE, opTE, opBE, pA, pB, pC, pJE, pTE, pBE, pLE, wHE, sA, sB, sC, sJE, sTE, sBE, clA: balA, clB: balB, clC: balC, clJE: balJE, clTE: balTE, clBE: balBE }
+    })
+  }, [flockFilter, dailyRecs, heDisp, nheSales, openingStock, fromDate, toDate])
+
   const totals = useMemo(() => ({
     opHE: stockRows.reduce((s, r) => s + r.totalOpenHE, 0),
     opNHE: stockRows.reduce((s, r) => s + r.totalOpenNHE, 0),
@@ -414,6 +493,81 @@ export const EggStockPage: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Day-wise table when a flock is selected */}
+      {flockFilter && dayRows.length > 0 && (
+        <Card padding={false}>
+          <div className="px-4 py-2 border-b bg-blue-50 text-sm text-blue-700 font-medium">
+            Day-wise Stock Register — {flockOptions.find(f => f.value === flockFilter)?.label}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-100 border-b border-gray-200 text-gray-500">
+                  <th className="px-2 py-1.5 text-left">Date</th>
+                  <th className="px-1 py-1.5 text-right bg-sky-50/60">Op A</th>
+                  <th className="px-1 py-1.5 text-right bg-sky-50/60">Op B</th>
+                  <th className="px-1 py-1.5 text-right bg-sky-50/60">Op C</th>
+                  <th className="px-1 py-1.5 text-right bg-sky-50/60">Op JE</th>
+                  <th className="px-1 py-1.5 text-right bg-sky-50/60">Op TE</th>
+                  <th className="px-1 py-1.5 text-right bg-sky-50/60">Op BE</th>
+                  <th className="px-1 py-1.5 text-right bg-green-50/60">Prod A</th>
+                  <th className="px-1 py-1.5 text-right bg-green-50/60">Prod B</th>
+                  <th className="px-1 py-1.5 text-right bg-green-50/60">Prod C</th>
+                  <th className="px-1 py-1.5 text-right bg-green-50/60">JE</th>
+                  <th className="px-1 py-1.5 text-right bg-green-50/60">TE</th>
+                  <th className="px-1 py-1.5 text-right bg-green-50/60">BE</th>
+                  <th className="px-1 py-1.5 text-right bg-green-100/60">LE</th>
+                  <th className="px-1 py-1.5 text-right bg-orange-50/60">Sale A</th>
+                  <th className="px-1 py-1.5 text-right bg-orange-50/60">Sale B</th>
+                  <th className="px-1 py-1.5 text-right bg-orange-50/60">Sale C</th>
+                  <th className="px-1 py-1.5 text-right bg-orange-50/60">JE</th>
+                  <th className="px-1 py-1.5 text-right bg-orange-50/60">TE</th>
+                  <th className="px-1 py-1.5 text-right bg-orange-50/60">BE</th>
+                  <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">Cl A</th>
+                  <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">Cl B</th>
+                  <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">Cl C</th>
+                  <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">JE</th>
+                  <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">TE</th>
+                  <th className="px-1 py-1.5 text-right bg-purple-50/60 font-semibold">BE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dayRows.map((r, i) => (
+                  <tr key={r.date} className={`border-b border-gray-100 hover:bg-gray-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                    <td className="px-2 py-1.5 font-medium">{r.date.split('-').reverse().join('/')}</td>
+                    <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opA)}</td>
+                    <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opB)}</td>
+                    <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opC)}</td>
+                    <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opJE)}</td>
+                    <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opTE)}</td>
+                    <td className="px-1 py-1.5 text-right text-sky-700 bg-sky-50/20">{fmt(r.opBE)}</td>
+                    <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.pA)}</td>
+                    <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.pB)}</td>
+                    <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.pC)}</td>
+                    <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.pJE)}</td>
+                    <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.pTE)}</td>
+                    <td className="px-1 py-1.5 text-right text-green-700 bg-green-50/20">{fmt(r.pBE)}</td>
+                    <td className="px-1 py-1.5 text-right text-green-600 bg-green-100/20">{fmt(r.pLE)}</td>
+                    <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.sA)}</td>
+                    <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.sB)}</td>
+                    <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.sC)}</td>
+                    <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.sJE)}</td>
+                    <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.sTE)}</td>
+                    <td className="px-1 py-1.5 text-right text-orange-700 bg-orange-50/20">{fmt(r.sBE)}</td>
+                    <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clA < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clA)}</td>
+                    <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clB < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clB)}</td>
+                    <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clC < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clC)}</td>
+                    <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clJE < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clJE)}</td>
+                    <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clTE < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clTE)}</td>
+                    <td className={`px-1 py-1.5 text-right font-semibold bg-purple-50/20 ${r.clBE < 0 ? 'text-red-700' : 'text-purple-800'}`}>{fmtN(r.clBE)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

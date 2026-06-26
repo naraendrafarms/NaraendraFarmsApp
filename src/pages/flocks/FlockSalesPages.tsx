@@ -414,7 +414,7 @@ export const HEDispatch: React.FC = () => {
         prod_date: prodDateFrom, prod_date_to: prodDateTo,
         dc_no: parseInt(form.dc_no) || null, invoice_no: finalInvoiceNo,
         party_id: form.party_id || null,
-        grade_a: gradeA, grade_b: gradeB,
+        grade_a: gradeA, grade_b: gradeB, grade_c: gradeC,
         total_dispatched: totalFromLines,
         free_eggs: parseInt(form.free_eggs) || 0,
         invoice_eggs: inv, rate: effectiveRate,
@@ -544,10 +544,12 @@ export const HEDispatch: React.FC = () => {
           flockBal[r.flock_id] = { a: op.a, b: op.b, c: op.c }
         }
         const fb = flockBal[r.flock_id]
+        // Capture opening (before today's transactions) for display
+        const open_a = fb.a, open_b = fb.b, open_c = fb.c
         fb.a += r.prod_a - r.disp_a
         fb.b += r.prod_b - r.disp_b
         fb.c += r.prod_c - r.disp_c
-        return { ...r, bal_a: fb.a, bal_b: fb.b, bal_c: fb.c, bal_total: fb.a + fb.b + fb.c }
+        return { ...r, open_a, open_b, open_c, bal_a: fb.a, bal_b: fb.b, bal_c: fb.c, bal_total: fb.a + fb.b + fb.c }
       })
 
       return withBal.reverse()
@@ -876,17 +878,19 @@ export const HEDispatch: React.FC = () => {
             <thead>
               <tr>
                 <Th>Date</Th><Th>Flock</Th>
+                <Th right className="text-sky-700">Open A</Th>
+                <Th right className="text-sky-700">Open B</Th>
+                <Th right className="text-sky-700">Open C</Th>
                 <Th right className="text-green-700">Prod A</Th>
-                <Th right className="text-blue-700">Prod B</Th>
-                <Th right className="text-orange-700">Prod C</Th>
-                <Th right className="text-green-600">Prod Total</Th>
+                <Th right className="text-green-700">Prod B</Th>
+                <Th right className="text-green-700">Prod C</Th>
                 <Th right className="text-red-500">Disp A</Th>
                 <Th right className="text-red-500">Disp B</Th>
                 <Th right className="text-red-500">Disp C</Th>
                 <Th right>Broken</Th><Th right>Leached</Th>
-                <Th right className="text-green-700">Bal A</Th>
-                <Th right className="text-blue-700">Bal B</Th>
-                <Th right className="text-orange-700">Bal C</Th>
+                <Th right className="text-purple-700">Bal A</Th>
+                <Th right className="text-purple-700">Bal B</Th>
+                <Th right className="text-purple-700">Bal C</Th>
                 <Th right className="text-gray-800">Total Stock</Th>
               </tr>
             </thead>
@@ -895,23 +899,25 @@ export const HEDispatch: React.FC = () => {
                 <tr key={i} className={`hover:bg-gray-50 text-xs ${r.bal_total < 0 ? 'bg-red-50' : ''}`}>
                   <Td className="text-xs">{fmtDate(r.date)}</Td>
                   <Td><Badge color="green">{r.flock}</Badge></Td>
+                  <Td right className="text-sky-700 bg-sky-50/30">{r.open_a.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sky-700 bg-sky-50/30">{r.open_b.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sky-700 bg-sky-50/30">{r.open_c.toLocaleString('en-IN')}</Td>
                   <Td right className="text-green-700">{r.prod_a > 0 ? r.prod_a.toLocaleString('en-IN') : '—'}</Td>
-                  <Td right className="text-blue-700">{r.prod_b > 0 ? r.prod_b.toLocaleString('en-IN') : '—'}</Td>
-                  <Td right className="text-orange-700">{r.prod_c > 0 ? r.prod_c.toLocaleString('en-IN') : '—'}</Td>
-                  <Td right className="text-green-600 font-medium">{r.prod_total > 0 ? r.prod_total.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-green-700">{r.prod_b > 0 ? r.prod_b.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-green-700">{r.prod_c > 0 ? r.prod_c.toLocaleString('en-IN') : '—'}</Td>
                   <Td right className="text-red-500">{r.disp_a > 0 ? `-${r.disp_a.toLocaleString('en-IN')}` : '—'}</Td>
                   <Td right className="text-red-500">{r.disp_b > 0 ? `-${r.disp_b.toLocaleString('en-IN')}` : '—'}</Td>
                   <Td right className="text-red-500">{r.disp_c > 0 ? `-${r.disp_c.toLocaleString('en-IN')}` : '—'}</Td>
                   <Td right className="text-gray-500">{r.broken > 0 ? r.broken.toLocaleString('en-IN') : '—'}</Td>
                   <Td right className="text-gray-500">{r.leached > 0 ? r.leached.toLocaleString('en-IN') : '—'}</Td>
-                  <Td right className={`font-medium ${r.bal_a < 0 ? 'text-red-600' : 'text-green-700'}`}>{r.bal_a.toLocaleString('en-IN')}</Td>
-                  <Td right className={`font-medium ${r.bal_b < 0 ? 'text-red-600' : 'text-blue-700'}`}>{r.bal_b.toLocaleString('en-IN')}</Td>
-                  <Td right className={`font-medium ${r.bal_c < 0 ? 'text-red-600' : 'text-orange-700'}`}>{r.bal_c.toLocaleString('en-IN')}</Td>
-                  <Td right className={`font-semibold text-sm ${r.bal_total < 0 ? 'text-red-700' : 'text-gray-900'}`}>{r.bal_total.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-medium bg-purple-50/30 ${r.bal_a < 0 ? 'text-red-600' : 'text-purple-700'}`}>{r.bal_a.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-medium bg-purple-50/30 ${r.bal_b < 0 ? 'text-red-600' : 'text-purple-700'}`}>{r.bal_b.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-medium bg-purple-50/30 ${r.bal_c < 0 ? 'text-red-600' : 'text-purple-700'}`}>{r.bal_c.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-semibold text-sm bg-purple-50/50 ${r.bal_total < 0 ? 'text-red-700' : 'text-gray-900'}`}>{r.bal_total.toLocaleString('en-IN')}</Td>
                 </tr>
               ))}
               {(stockData ?? []).length === 0 && (
-                <tr><Td colSpan={14} className="text-center text-gray-400 py-8">No data — add daily records with grade breakdown and dispatches first</Td></tr>
+                <tr><Td colSpan={17} className="text-center text-gray-400 py-8">No data — add daily records with grade breakdown and dispatches first</Td></tr>
               )}
             </tbody>
           </Table>
