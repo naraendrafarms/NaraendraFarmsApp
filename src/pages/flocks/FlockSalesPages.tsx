@@ -27,6 +27,23 @@ const ReceivePaymentModal: React.FC<{
   const [utr, setUtr] = useState('')
   const [status, setStatus] = useState('Received')
   const [saving, setSaving] = useState(false)
+  const [selectedAdvanceId, setSelectedAdvanceId] = useState('')
+
+  // Load available advance balance for this party
+  const { data: partyAdvances = [] } = useQuery({
+    queryKey: ['party_advances_avail', sale?.party_id],
+    queryFn: async () => {
+      if (!sale?.party_id) return []
+      const { data } = await supabase
+        .from('party_advances')
+        .select('id,advance_date,amount,amount_used,payment_mode,reference_no')
+        .eq('party_id', sale.party_id)
+        .order('advance_date', { ascending: true })
+      return (data ?? []).filter((a: any) => (a.amount - a.amount_used) > 0)
+    },
+    enabled: !!sale?.party_id && open,
+  })
+  const totalAdvanceBalance = partyAdvances.reduce((s: number, a: any) => s + (a.amount - a.amount_used), 0)
 
   React.useEffect(() => {
     if (sale) {
@@ -36,6 +53,7 @@ const ReceivePaymentModal: React.FC<{
       setAmtReceived(sale.amount_received?.toString() ?? sale.amount?.toString() ?? '')
       setUtr(sale.utr_ref ?? '')
       setStatus(sale.payment_status === 'Pending' || !sale.payment_status ? 'Received' : sale.payment_status)
+      setSelectedAdvanceId('')
     }
   }, [sale])
 
@@ -44,6 +62,39 @@ const ReceivePaymentModal: React.FC<{
     setSaving(true)
     try {
       const amt = parseFloat(amtReceived) || 0
+      const isAdvance = mode === 'Advance'
+
+      if (isAdvance) {
+        if (!selectedAdvanceId) throw new Error('Select which advance to use')
+        const adv = (partyAdvances as any[]).find(a => a.id === selectedAdvanceId)
+        if (!adv) throw new Error('Advance not found')
+        const available = adv.amount - adv.amount_used
+        if (amt > available) throw new Error(`Only ${inr(available)} available in this advance`)
+        // update sale with advance adjustment
+        const advUpdate: any = {
+          payment_status: status,
+          payment_mode: 'Advance',
+          received_date: date || null,
+          amount_received: amt || null,
+          bank_account_id: null,
+          utr_ref: null,
+          advance_adjusted: amt,
+          party_advance_id: selectedAdvanceId,
+        }
+        const { error: sErr } = await supabase.from(table).update(advUpdate).eq('id', sale.id)
+        if (sErr) throw sErr
+        // deduct from party_advances.amount_used
+        const { error: aErr } = await supabase
+          .from('party_advances')
+          .update({ amount_used: adv.amount_used + amt })
+          .eq('id', selectedAdvanceId)
+        if (aErr) throw aErr
+        toast.success('Advance adjusted successfully')
+        onSaved()
+        setSaving(false)
+        return
+      }
+
       const update: any = {
         payment_status: status,
         payment_mode: mode,
@@ -108,6 +159,10 @@ const ReceivePaymentModal: React.FC<{
     { value: 'ho', label: 'Head Office' },
     ...farms.map((f: any) => ({ value: f.id, label: `${f.name} (Site)` })),
   ]
+  const paymentModeOptions = [
+    'Cash', 'NEFT', 'RTGS', 'Bank Transfer', 'UPI', 'Cheque',
+    ...(totalAdvanceBalance > 0 ? ['Advance'] : []),
+  ]
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -123,22 +178,50 @@ const ReceivePaymentModal: React.FC<{
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
         </div>
 
+        {totalAdvanceBalance > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800">
+            This party has <span className="font-bold">{inr(totalAdvanceBalance)}</span> advance balance available. Select <strong>Advance</strong> as payment mode to adjust.
+          </div>
+        )}
+
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Select label="Status" value={status} onChange={e => setStatus(e.target.value)}
               options={[{value:'Received',label:'Fully Received'},{value:'Partial',label:'Partial'},{value:'Pending',label:'Pending'}]} />
-            <Input label="Amount Received (₹)" type="number" step="0.01" value={amtReceived} onChange={e => setAmtReceived(e.target.value)} />
+            <Input label="Amount (₹)" type="number" step="0.01" value={amtReceived} onChange={e => setAmtReceived(e.target.value)} />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Select label="Payment Mode" value={mode} onChange={e => setMode(e.target.value)}
-              options={['Cash','NEFT','RTGS','Bank Transfer','UPI','Cheque']} />
-            <DateInput label="Date Received" value={date} onChange={e => setDate(e.target.value)} />
+            <Select label="Payment Mode" value={mode} onChange={e => { setMode(e.target.value); setSelectedAdvanceId('') }}
+              options={paymentModeOptions} />
+            <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
           </div>
+          {mode === 'Advance' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Select Advance Entry</label>
+              <select
+                value={selectedAdvanceId}
+                onChange={e => {
+                  setSelectedAdvanceId(e.target.value)
+                  const adv = (partyAdvances as any[]).find(a => a.id === e.target.value)
+                  if (adv) setAmtReceived(Math.min(adv.amount - adv.amount_used, parseFloat(amtReceived) || (sale.amount ?? 0)).toString())
+                }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="">— Select advance —</option>
+                {(partyAdvances as any[]).map((a: any) => (
+                  <option key={a.id} value={a.id}>
+                    {fmtDate(a.advance_date)} · {a.payment_mode} · Balance: {inr(a.amount - a.amount_used)}
+                    {a.reference_no ? ` (${a.reference_no})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {mode === 'Cash' && (
             <Select label="Cash Location" value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
               options={cashLocationOptions} />
           )}
-          {mode !== 'Cash' && (
+          {mode !== 'Cash' && mode !== 'Advance' && (
             <Select label="Bank Account" placeholder="— Select bank —" value={bankId} onChange={e => setBankId(e.target.value)}
               options={bankOptions} />
           )}
