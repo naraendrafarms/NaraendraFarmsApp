@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, inr, today } from '@/lib/utils'
 import {
-  Card, Button, Input, Select, Modal, Table, Th, Td, Badge,
+  Card, Button, Input, Select, SearchableSelect, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, DateInput
 } from '@/components/ui'
 import { Plus, Trash2 } from 'lucide-react'
@@ -137,12 +137,12 @@ export const BuyerAdvancesPage: React.FC = () => {
       </div>
 
       {/* Filter */}
-      <Card className="p-3">
-        <Select
+      <Card className="p-3 max-w-xs">
+        <SearchableSelect
+          placeholder="— All Parties —"
           value={filterParty}
-          onChange={e => setFilterParty(e.target.value)}
+          onChange={setFilterParty}
           options={partyOptions}
-          className="max-w-xs"
         />
       </Card>
 
@@ -205,10 +205,11 @@ export const BuyerAdvancesPage: React.FC = () => {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Party *</label>
-            <Select
+            <SearchableSelect
+              placeholder="— Select Party —"
               value={form.party_id}
-              onChange={e => set('party_id', e.target.value)}
-              options={partySelectOptions}
+              onChange={v => set('party_id', v)}
+              options={(parties as any[]).map((p: any) => ({ value: p.id, label: p.name }))}
             />
           </div>
           <div>

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, inr } from '@/lib/utils'
 import {
-  Card, Select, Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, DateInput
+  Card, SearchableSelect, Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, DateInput
 } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -112,13 +112,11 @@ export const PartyLedgerPage: React.FC = () => {
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-xs text-gray-500 mb-1">Party *</label>
-          <Select
+          <SearchableSelect
+            placeholder="— Select Party —"
             value={partyId}
-            onChange={e => setPartyId(e.target.value)}
-            options={[
-              { value: '', label: '— Select Party —' },
-              ...(parties as any[]).map(p => ({ value: p.id, label: `${p.name}${p.type ? ` (${p.type})` : ''}` }))
-            ]}
+            onChange={setPartyId}
+            options={(parties as any[]).map(p => ({ value: p.id, label: `${p.name}${p.type ? ` (${p.type})` : ''}` }))}
           />
         </div>
         <div>
