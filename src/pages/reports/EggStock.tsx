@@ -401,32 +401,54 @@ export const EggStockPage: React.FC = () => {
   }), [stockRows])
 
   const handleExport = () => {
-    exportCSV(
-      `egg_stock_register_${toDate}.csv`,
-      ['Flock', 'Farm',
-        'Open HE-A', 'Open HE-B', 'Open HE-C', 'Open HE',
-        'Open JE', 'Open TE', 'Open BE', 'Open NHE',
-        'Rcv HE-A', 'Rcv HE-B', 'Rcv HE-C', 'Rcv HE',
-        'Rcv JE', 'Rcv TE', 'Rcv BE', 'Rcv LE', 'Rcv NHE',
-        'Wst HE', 'Wst JE', 'Wst TE', 'Wst BE', 'Total Wst',
-        'Sale HE-A', 'Sale HE-B', 'Sale HE-C', 'Sale HE',
-        'Sale JE', 'Sale TE', 'Sale BE', 'Sale NHE',
-        'Close HE-A', 'Close HE-B', 'Close HE-C', 'Close HE',
-        'Close JE', 'Close TE', 'Close BE', 'Close NHE',
-      ],
-      stockRows.map(r => [
-        r.flockNo, r.farm,
-        r.opA, r.opB, r.opC, r.totalOpenHE,
-        r.opJE, r.opTE, r.opBE, r.totalOpenNHE,
-        r.recA, r.recB, r.recC, r.totalRecHE,
-        r.recJE, r.recTE, r.recBE, r.recLE, r.totalRecNHE,
-        r.wsHE, r.wsJE, r.wsTE, r.wsBE, r.totalWst,
-        r.slA, r.slB, r.slC, r.totalSlHE,
-        r.slJE, r.slTE, r.slBE, r.totalSlNHE,
-        r.clA, r.clB, r.clC, r.totalClHE,
-        r.clJE, r.clTE, r.clBE, r.totalClNHE,
-      ])
-    )
+    const flockLabel = flockOptions.find(f => f.value === flockFilter)?.label ?? 'all_flocks'
+    if (flockFilter && dayRows.length > 0) {
+      // Day-wise export for selected flock
+      exportCSV(
+        `egg_stock_daily_${flockLabel.replace(/\s+/g, '_')}_${fromDate || 'start'}_to_${toDate}.csv`,
+        ['Date',
+          'Op HE-A', 'Op HE-B', 'Op HE-C', 'Op JE', 'Op TE', 'Op BE',
+          'Prod A', 'Prod B', 'Prod C', 'JE', 'TE', 'BE', 'LE',
+          'Sale A', 'Sale B', 'Sale C', 'Sale JE', 'Sale TE', 'Sale BE',
+          'Cl HE-A', 'Cl HE-B', 'Cl HE-C', 'Cl JE', 'Cl TE', 'Cl BE',
+        ],
+        dayRows.map(r => [
+          r.date.split('-').reverse().join('/'),
+          r.opA, r.opB, r.opC, r.opJE, r.opTE, r.opBE,
+          r.pA, r.pB, r.pC, r.pJE, r.pTE, r.pBE, r.pLE,
+          r.sA, r.sB, r.sC, r.sJE, r.sTE, r.sBE,
+          r.clA, r.clB, r.clC, r.clJE, r.clTE, r.clBE,
+        ])
+      )
+    } else {
+      // Summary export for all flocks
+      exportCSV(
+        `egg_stock_register_${toDate}.csv`,
+        ['Flock', 'Farm',
+          'Open HE-A', 'Open HE-B', 'Open HE-C', 'Open HE',
+          'Open JE', 'Open TE', 'Open BE', 'Open NHE',
+          'Rcv HE-A', 'Rcv HE-B', 'Rcv HE-C', 'Rcv HE',
+          'Rcv JE', 'Rcv TE', 'Rcv BE', 'Rcv LE', 'Rcv NHE',
+          'Wst HE', 'Wst JE', 'Wst TE', 'Wst BE', 'Total Wst',
+          'Sale HE-A', 'Sale HE-B', 'Sale HE-C', 'Sale HE',
+          'Sale JE', 'Sale TE', 'Sale BE', 'Sale NHE',
+          'Close HE-A', 'Close HE-B', 'Close HE-C', 'Close HE',
+          'Close JE', 'Close TE', 'Close BE', 'Close NHE',
+        ],
+        stockRows.map(r => [
+          r.flockNo, r.farm,
+          r.opA, r.opB, r.opC, r.totalOpenHE,
+          r.opJE, r.opTE, r.opBE, r.totalOpenNHE,
+          r.recA, r.recB, r.recC, r.totalRecHE,
+          r.recJE, r.recTE, r.recBE, r.recLE, r.totalRecNHE,
+          r.wsHE, r.wsJE, r.wsTE, r.wsBE, r.totalWst,
+          r.slA, r.slB, r.slC, r.totalSlHE,
+          r.slJE, r.slTE, r.slBE, r.totalSlNHE,
+          r.clA, r.clB, r.clC, r.totalClHE,
+          r.clJE, r.clTE, r.clBE, r.totalClNHE,
+        ])
+      )
+    }
   }
 
   if (isLoading) return <Spinner />
