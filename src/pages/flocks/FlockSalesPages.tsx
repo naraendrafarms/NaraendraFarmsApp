@@ -488,20 +488,34 @@ export const HEDispatch: React.FC = () => {
     queryFn: async () => {
       let dq = supabase.from('daily_records')
         .select('record_date,flock_id,he_eggs,he_grade_a,he_grade_b,he_grade_c,be_eggs,le_eggs,wastage_eggs,flocks(flock_no)')
-        .order('record_date', { ascending: false })
+        .order('record_date', { ascending: true })
       let lq = supabase.from('he_dispatch_lines')
         .select('prod_date,flock_id,grade_a,grade_b,grade_c,he_dispatch(dispatch_date,invoice_no),flocks(flock_no)')
-        .order('prod_date', { ascending: false })
-      if (flockFilter) { dq = dq.eq('flock_id', flockFilter); lq = lq.eq('flock_id', flockFilter) }
-      const [{ data: prod }, { data: dispLines }] = await Promise.all([dq, lq])
-      type StockRow = { date: string; flock: string; prod_a: number; prod_b: number; prod_c: number; disp_a: number; disp_b: number; disp_c: number; broken: number; leached: number; wastage: number }
+        .order('prod_date', { ascending: true })
+      let oq = supabase.from('egg_opening_stock')
+        .select('flock_id,he_grade_a,he_grade_b,he_grade_c,flocks(flock_no)')
+      if (flockFilter) {
+        dq = dq.eq('flock_id', flockFilter)
+        lq = lq.eq('flock_id', flockFilter)
+        oq = oq.eq('flock_id', flockFilter)
+      }
+      const [{ data: prod }, { data: dispLines }, { data: opening }] = await Promise.all([dq, lq, oq])
+
+      type StockRow = { date: string; flock_id: string; flock: string; prod_a: number; prod_b: number; prod_c: number; prod_total: number; disp_a: number; disp_b: number; disp_c: number; broken: number; leached: number; wastage: number }
       const map = new Map<string, StockRow>()
+
       for (const r of (prod ?? [])) {
         const key = `${r.record_date}__${r.flock_id}`
-        const ex = map.get(key) ?? { date: r.record_date, flock: `F-${(r.flocks as any)?.flock_no}`, prod_a:0,prod_b:0,prod_c:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
-        ex.prod_a += r.he_grade_a ?? r.he_eggs ?? 0
-        ex.prod_b += r.he_grade_b ?? 0
-        ex.prod_c += r.he_grade_c ?? 0
+        const ex = map.get(key) ?? { date: r.record_date, flock_id: r.flock_id, flock: `F-${(r.flocks as any)?.flock_no}`, prod_a:0,prod_b:0,prod_c:0,prod_total:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
+        // Use grade split if entered, else total goes to prod_total (ungraded)
+        const hasGrades = (r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0) > 0
+        if (hasGrades) {
+          ex.prod_a += r.he_grade_a ?? 0
+          ex.prod_b += r.he_grade_b ?? 0
+          ex.prod_c += r.he_grade_c ?? 0
+        } else {
+          ex.prod_total += r.he_eggs ?? 0
+        }
         ex.broken += r.be_eggs ?? 0
         ex.leached += r.le_eggs ?? 0
         ex.wastage += r.wastage_eggs ?? 0
@@ -509,22 +523,41 @@ export const HEDispatch: React.FC = () => {
       }
       for (const l of (dispLines ?? [])) {
         const key = `${l.prod_date}__${l.flock_id}`
-        const ex = map.get(key) ?? { date: l.prod_date, flock: `F-${(l.flocks as any)?.flock_no ?? l.flock_id?.slice(0,4)}`, prod_a:0,prod_b:0,prod_c:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
+        const ex = map.get(key) ?? { date: l.prod_date, flock_id: l.flock_id, flock: `F-${(l.flocks as any)?.flock_no ?? l.flock_id?.slice(0,4)}`, prod_a:0,prod_b:0,prod_c:0,prod_total:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
         ex.disp_a += l.grade_a ?? 0
         ex.disp_b += l.grade_b ?? 0
         ex.disp_c += l.grade_c ?? 0
         map.set(key, ex)
       }
-      const rows = [...map.values()].sort((a,b) => b.date.localeCompare(a.date))
-      const asc = [...rows].reverse()
-      let balA=0, balB=0, balC=0
-      const withBal = asc.map(r => {
-        balA += r.prod_a - r.disp_a
-        balB += r.prod_b - r.disp_b
-        balC += r.prod_c - r.disp_c
-        return { ...r, bal_a: balA, bal_b: balB, bal_c: balC, bal_total: balA+balB+balC }
-      }).reverse()
-      return withBal
+
+      // Build per-flock opening stock map
+      const openMap: Record<string, { a: number; b: number; c: number }> = {}
+      for (const o of (opening ?? [])) {
+        openMap[o.flock_id] = { a: o.he_grade_a ?? 0, b: o.he_grade_b ?? 0, c: o.he_grade_c ?? 0 }
+      }
+
+      // Sort ascending by date then flock for correct running balance
+      const rows = [...map.values()].sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : a.flock.localeCompare(b.flock))
+
+      // Calculate running balance PER FLOCK separately
+      const flockBal: Record<string, { a: number; b: number; c: number }> = {}
+      const withBal = rows.map(r => {
+        if (!flockBal[r.flock_id]) {
+          // Start from opening stock for this flock
+          const op = openMap[r.flock_id] ?? { a: 0, b: 0, c: 0 }
+          flockBal[r.flock_id] = { a: op.a, b: op.b, c: op.c }
+        }
+        const fb = flockBal[r.flock_id]
+        // Ungraded production adds to total; graded adds to each grade
+        const prodA = r.prod_a + r.prod_total  // ungraded treated as grade-A for balance
+        fb.a += prodA - r.disp_a
+        fb.b += r.prod_b - r.disp_b
+        fb.c += r.prod_c - r.disp_c
+        const tot = fb.a + fb.b + fb.c
+        return { ...r, bal_a: fb.a, bal_b: fb.b, bal_c: fb.c, bal_total: tot }
+      })
+
+      return withBal.reverse()
     }
   })
 
@@ -844,7 +877,7 @@ export const HEDispatch: React.FC = () => {
       {tab === 'stock' && (
         <Card padding={false}>
           <div className="px-4 py-3 border-b border-gray-100 bg-blue-50 text-sm text-blue-700">
-            Stock = production (daily records by grade) minus dispatch lines. Broken/Leached/Wastage shown but not deducted from dispatch stock.
+            Running balance per flock = Opening stock + Production − Dispatched. Broken/Leached shown for reference only.
           </div>
           <Table>
             <thead>
@@ -853,6 +886,7 @@ export const HEDispatch: React.FC = () => {
                 <Th right className="text-green-700">Prod A</Th>
                 <Th right className="text-blue-700">Prod B</Th>
                 <Th right className="text-orange-700">Prod C</Th>
+                <Th right className="text-green-600">Prod Total</Th>
                 <Th right className="text-red-500">Disp A</Th>
                 <Th right className="text-red-500">Disp B</Th>
                 <Th right className="text-red-500">Disp C</Th>
@@ -871,6 +905,7 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="text-green-700">{r.prod_a > 0 ? r.prod_a.toLocaleString('en-IN') : '—'}</Td>
                   <Td right className="text-blue-700">{r.prod_b > 0 ? r.prod_b.toLocaleString('en-IN') : '—'}</Td>
                   <Td right className="text-orange-700">{r.prod_c > 0 ? r.prod_c.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-green-600 font-medium">{r.prod_total > 0 ? r.prod_total.toLocaleString('en-IN') : '—'}</Td>
                   <Td right className="text-red-500">{r.disp_a > 0 ? `-${r.disp_a.toLocaleString('en-IN')}` : '—'}</Td>
                   <Td right className="text-red-500">{r.disp_b > 0 ? `-${r.disp_b.toLocaleString('en-IN')}` : '—'}</Td>
                   <Td right className="text-red-500">{r.disp_c > 0 ? `-${r.disp_c.toLocaleString('en-IN')}` : '—'}</Td>
