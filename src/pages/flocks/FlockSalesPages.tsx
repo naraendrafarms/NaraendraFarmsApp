@@ -507,15 +507,12 @@ export const HEDispatch: React.FC = () => {
       for (const r of (prod ?? [])) {
         const key = `${r.record_date}__${r.flock_id}`
         const ex = map.get(key) ?? { date: r.record_date, flock_id: r.flock_id, flock: `F-${(r.flocks as any)?.flock_no}`, prod_a:0,prod_b:0,prod_c:0,prod_total:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
-        // Use grade split if entered, else total goes to prod_total (ungraded)
-        const hasGrades = (r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0) > 0
-        if (hasGrades) {
-          ex.prod_a += r.he_grade_a ?? 0
-          ex.prod_b += r.he_grade_b ?? 0
-          ex.prod_c += r.he_grade_c ?? 0
-        } else {
-          ex.prod_total += r.he_eggs ?? 0
-        }
+        // If grade split entered use it; else put total into Grade A
+        const ga = r.he_grade_a ?? 0, gb = r.he_grade_b ?? 0, gc = r.he_grade_c ?? 0
+        const hasGrades = ga + gb + gc > 0
+        ex.prod_a += hasGrades ? ga : (r.he_eggs ?? 0)
+        ex.prod_b += hasGrades ? gb : 0
+        ex.prod_c += hasGrades ? gc : 0
         ex.broken += r.be_eggs ?? 0
         ex.leached += r.le_eggs ?? 0
         ex.wastage += r.wastage_eggs ?? 0
@@ -539,42 +536,18 @@ export const HEDispatch: React.FC = () => {
       // Sort ascending by date then flock for correct running balance
       const rows = [...map.values()].sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : a.flock.localeCompare(b.flock))
 
-      // Calculate running balance PER FLOCK separately
-      // Track total + per-grade separately. Per-grade is only meaningful when ALL
-      // production for that flock has been entered as graded (prod_a/b/c, not prod_total).
-      const flockTotal: Record<string, number> = {}
-      const flockGrade: Record<string, { a: number; b: number; c: number } | null> = {}
-      // Determine which flocks have any ungraded production in this date range
-      const flockHasUngraded = new Set<string>()
-      for (const r of rows) {
-        if (r.prod_total > 0) flockHasUngraded.add(r.flock_id)
-      }
+      // Running balance per flock, per grade
+      const flockBal: Record<string, { a: number; b: number; c: number }> = {}
       const withBal = rows.map(r => {
-        if (flockTotal[r.flock_id] === undefined) {
-          // Start from opening stock for this flock
+        if (!flockBal[r.flock_id]) {
           const op = openMap[r.flock_id] ?? { a: 0, b: 0, c: 0 }
-          flockTotal[r.flock_id] = op.a + op.b + op.c
-          if (!flockHasUngraded.has(r.flock_id)) {
-            flockGrade[r.flock_id] = { a: op.a, b: op.b, c: op.c }
-          }
+          flockBal[r.flock_id] = { a: op.a, b: op.b, c: op.c }
         }
-        // Total balance = all production - all dispatch (always correct)
-        const prodAll = r.prod_a + r.prod_b + r.prod_c + r.prod_total
-        const dispAll = r.disp_a + r.disp_b + r.disp_c
-        flockTotal[r.flock_id] += prodAll - dispAll
-        const bal_total = flockTotal[r.flock_id]
-        // Per-grade balance only when flock has no ungraded rows
-        let bal_a: number | null = null
-        let bal_b: number | null = null
-        let bal_c: number | null = null
-        if (!flockHasUngraded.has(r.flock_id)) {
-          const fg = flockGrade[r.flock_id]!
-          fg.a += r.prod_a - r.disp_a
-          fg.b += r.prod_b - r.disp_b
-          fg.c += r.prod_c - r.disp_c
-          bal_a = fg.a; bal_b = fg.b; bal_c = fg.c
-        }
-        return { ...r, bal_a, bal_b, bal_c, bal_total }
+        const fb = flockBal[r.flock_id]
+        fb.a += r.prod_a - r.disp_a
+        fb.b += r.prod_b - r.disp_b
+        fb.c += r.prod_c - r.disp_c
+        return { ...r, bal_a: fb.a, bal_b: fb.b, bal_c: fb.c, bal_total: fb.a + fb.b + fb.c }
       })
 
       return withBal.reverse()
@@ -931,9 +904,9 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="text-red-500">{r.disp_c > 0 ? `-${r.disp_c.toLocaleString('en-IN')}` : '—'}</Td>
                   <Td right className="text-gray-500">{r.broken > 0 ? r.broken.toLocaleString('en-IN') : '—'}</Td>
                   <Td right className="text-gray-500">{r.leached > 0 ? r.leached.toLocaleString('en-IN') : '—'}</Td>
-                  <Td right className={`font-medium ${r.bal_a !== null && r.bal_a < 0 ? 'text-red-600' : 'text-green-700'}`}>{r.bal_a !== null ? r.bal_a.toLocaleString('en-IN') : '—'}</Td>
-                  <Td right className={`font-medium ${r.bal_b !== null && r.bal_b < 0 ? 'text-red-600' : 'text-blue-700'}`}>{r.bal_b !== null ? r.bal_b.toLocaleString('en-IN') : '—'}</Td>
-                  <Td right className={`font-medium ${r.bal_c !== null && r.bal_c < 0 ? 'text-red-600' : 'text-orange-700'}`}>{r.bal_c !== null ? r.bal_c.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className={`font-medium ${r.bal_a < 0 ? 'text-red-600' : 'text-green-700'}`}>{r.bal_a.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-medium ${r.bal_b < 0 ? 'text-red-600' : 'text-blue-700'}`}>{r.bal_b.toLocaleString('en-IN')}</Td>
+                  <Td right className={`font-medium ${r.bal_c < 0 ? 'text-red-600' : 'text-orange-700'}`}>{r.bal_c.toLocaleString('en-IN')}</Td>
                   <Td right className={`font-semibold text-sm ${r.bal_total < 0 ? 'text-red-700' : 'text-gray-900'}`}>{r.bal_total.toLocaleString('en-IN')}</Td>
                 </tr>
               ))}
