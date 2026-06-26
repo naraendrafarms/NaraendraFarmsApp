@@ -11,7 +11,7 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
 
   const { data: ingredients, isLoading: loadIng } = useQuery({
     queryKey: ['ingredients'],
-    queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit,category').eq('is_active', true).order('code'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('items').select('id,name,short_name,code,unit,category').eq('category', 'Feed Ingredient').eq('is_active', true).order('code'); return data ?? [] }
   })
 
   const { data: grns, isLoading: loadGrn } = useQuery({
