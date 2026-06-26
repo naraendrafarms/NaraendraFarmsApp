@@ -892,7 +892,7 @@ export const SalaryEntryPage: React.FC = () => {
     const otHours = (att ?? []).reduce((s, r: any) => s + (r.ot_hours ?? 0), 0)
 
     const { data: adv } = await supabase.from('employee_advances')
-      .select('amount').eq('employee_id', form.employee_id).eq('salary_month', form.month)
+      .select('amount,advance_type').eq('employee_id', form.employee_id).eq('salary_month', form.month).neq('advance_type','other')
     const totalAdv = (adv ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
 
     // Pull pending flock deductions (eggs/birds sold to employee)
@@ -2924,7 +2924,8 @@ export const BulkSalaryPage: React.FC = () => {
   const { data: advances } = useQuery({
     queryKey: ['emp_advances_bulk', month],
     queryFn: async () => {
-      const { data } = await supabase.from('employee_advances').select('employee_id,amount').eq('salary_month', month)
+      // exclude advance_type='other' — those are flock egg/bird sales tracked in employee_deductions
+      const { data } = await supabase.from('employee_advances').select('employee_id,amount,advance_type').eq('salary_month', month).neq('advance_type','other')
       const agg: Record<string,number> = {}
       for (const r of (data ?? [])) agg[r.employee_id] = (agg[r.employee_id]??0) + (r.amount??0)
       return agg
