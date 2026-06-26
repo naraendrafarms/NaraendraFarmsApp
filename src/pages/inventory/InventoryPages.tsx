@@ -9,21 +9,22 @@ import {
   Badge, StatCard, EmptyState, DateInput,
 } from '@/components/ui'
 import {
-  Boxes, Package, ArrowDownCircle, ArrowUpCircle, SlidersHorizontal,
+  Boxes, Package, SlidersHorizontal,
   ListTree, Plus, Pencil, Trash2, Download, Upload, AlertTriangle, Search, BarChart3,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
-import { useConfigValues } from '@/hooks/useConfigOptions'
+import { useConfigValues, useConfigOptions } from '@/hooks/useConfigOptions'
 
 // ── constants ──────────────────────────────────────────────────────
-const CATEGORIES_DEFAULT = ['Feed', 'Medicine', 'Vaccine', 'Packaging', 'Chemical', 'Spares', 'Other']
-const ADJ_TYPES  = ['Wastage', 'Damage', 'Correction', 'Found', 'Transfer Out', 'Transfer In']
+const CATEGORIES_DEFAULT = ['Feed Ingredient', 'Medicine', 'Vaccine', 'Packaging', 'Equipment', 'Spares', 'Chemical', 'Other']
+const ADJ_TYPES  = ['Opening Stock', 'Wastage', 'Damage', 'Correction', 'Found', 'Transfer Out', 'Transfer In']
 const UNITS_DEFAULT      = ['kg','MT','Quintal','Ltr','ML','Gms','Dose','Nos','Box','Mtrs','Bag']
 
-// ── DB-backed masters (fall back to defaults if tables not yet seeded) ──
+// ── DB-backed masters ──
 function useCategoryList() {
-  return useConfigValues('grn_category', CATEGORIES_DEFAULT)
+  const opts = useConfigOptions('item_category')
+  return opts.length ? opts.map(o => o.value) : CATEGORIES_DEFAULT
 }
 function useUnitList() {
   const { data } = useQuery({
@@ -44,7 +45,7 @@ const cleanNum = (v: any): number | null => {
   return isNaN(n) ? null : n
 }
 
-type Tab = 'Stock Status' | 'Opening Stock' | 'Adjustments' | 'Item Categories' | 'Stock Ledger' | 'Closing Stock Report'
+type Tab = 'Stock Balance' | 'Adjustments' | 'Stock Ledger' | 'Closing Stock Report'
 
 // ════════════════════════════════════════════════════════════════════
 // SHARED DATA HOOKS
@@ -104,18 +105,16 @@ function useItemMeta() {
 // MAIN
 // ════════════════════════════════════════════════════════════════════
 export const InventoryPage: React.FC = () => {
-  const [tab, setTab] = useState<Tab>('Stock Status')
+  const [tab, setTab] = useState<Tab>('Stock Balance')
   const TABS: { id: Tab; icon: any }[] = [
-    { id: 'Stock Status',        icon: <Boxes size={14}/> },
-    { id: 'Opening Stock',       icon: <ArrowDownCircle size={14}/> },
-    { id: 'Adjustments',         icon: <SlidersHorizontal size={14}/> },
-    { id: 'Item Categories',     icon: <ListTree size={14}/> },
-    { id: 'Stock Ledger',        icon: <ListTree size={14}/> },
-    { id: 'Closing Stock Report',icon: <BarChart3 size={14}/> },
+    { id: 'Stock Balance',        icon: <Boxes size={14}/> },
+    { id: 'Adjustments',          icon: <SlidersHorizontal size={14}/> },
+    { id: 'Stock Ledger',         icon: <ListTree size={14}/> },
+    { id: 'Closing Stock Report', icon: <BarChart3 size={14}/> },
   ]
   return (
     <div className="space-y-5">
-      <SectionHeader title="All Items Inventory" subtitle="Every GRN item across all categories — Feed, Medicine, Vaccine, Packaging, Spares, Other. Use Category filter to narrow down." />
+      <SectionHeader title="Inventory" subtitle="Stock balance per item — pulled from Items Master. All receipts (GRN), usage (Feed/Medicine), and adjustments are reflected automatically." />
       <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -125,10 +124,8 @@ export const InventoryPage: React.FC = () => {
           </button>
         ))}
       </div>
-      {tab === 'Stock Status'         && <StockStatusTab />}
-      {tab === 'Opening Stock'        && <MovementTab kind="Opening" />}
-      {tab === 'Adjustments'          && <MovementTab kind="Adjustment" />}
-      {tab === 'Item Categories'      && <CategoriesTab />}
+      {tab === 'Stock Balance'        && <StockStatusTab />}
+      {tab === 'Adjustments'          && <AdjustmentsTab />}
       {tab === 'Stock Ledger'         && <LedgerTab />}
       {tab === 'Closing Stock Report' && <ClosingStockReportTab />}
     </div>
@@ -141,8 +138,15 @@ export const InventoryPage: React.FC = () => {
 const OUT_TYPES = new Set(['production_out','medicine_out','adjustment_out','transfer_out'])
 
 function useStockRows(asOf: string) {
-  const meta = useItemMeta()
-  const adj = useAdjustments()
+  // Item master is the source of truth for names, category, unit, reorder_level
+  const { data: itemsMaster, isLoading: itemsLoading } = useQuery({
+    queryKey: ['items_master_inv'],
+    queryFn: async () => {
+      const { data } = await supabase.from('items').select('id,name,code,category,unit,reorder_level,is_active').order('name')
+      return data ?? []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
 
   const { data: slData, isLoading: slLoading } = useQuery({
     queryKey: ['sl_all', asOf],
@@ -162,15 +166,33 @@ function useStockRows(asOf: string) {
   })
 
   const rows = useMemo(() => {
+    // Seed the map with ALL active items from Items Master (show even if balance=0)
     const m: Record<string, any> = {}
-    const ensure = (id: string, name: string) => {
-      if (!m[id]) m[id] = { key: id, item_name: name, opening: 0, received: 0, used: 0, adjusted: 0, rate: 0, lastDate: '', unit: '' }
-      return m[id]
+    for (const item of itemsMaster ?? []) {
+      m[item.id] = {
+        key: item.id,
+        item_name: item.name,
+        item_code: item.code ?? '',
+        category: item.category ?? '',
+        unit: item.unit ?? '',
+        reorder_level: Number(item.reorder_level ?? 0),
+        is_active: item.is_active,
+        opening: 0, received: 0, used: 0, adjusted: 0, rate: 0, lastDate: '',
+      }
     }
 
+    // Aggregate stock_ledger movements
     for (const r of slData ?? []) {
       const key = r.item_id ?? norm(r.item_name)
-      const row = ensure(key, r.item_name)
+      if (!m[key]) {
+        // Item exists in ledger but not in items master (legacy GRN)
+        m[key] = {
+          key, item_name: r.item_name, item_code: '', category: '',
+          unit: r.unit ?? '', reorder_level: 0, is_active: true,
+          opening: 0, received: 0, used: 0, adjusted: 0, rate: 0, lastDate: '',
+        }
+      }
+      const row = m[key]
       const qty = Number(r.qty ?? 0)
       if (OUT_TYPES.has(r.txn_type)) {
         row.used += qty
@@ -179,50 +201,26 @@ function useStockRows(asOf: string) {
       } else if (r.txn_type === 'adjustment_in') {
         row.adjusted += qty
       } else {
-        // grn_in, transfer_in
         row.received += qty
         if ((r.txn_date ?? '') >= row.lastDate) {
-          row.rate = Number(r.unit_price ?? 0); row.lastDate = r.txn_date; if (r.unit) row.unit = r.unit
+          row.rate = Number(r.unit_price ?? 0); row.lastDate = r.txn_date
         }
       }
-      if (r.unit && !row.unit) row.unit = r.unit
+      // Prefer items master unit; fall back to ledger unit
+      if (!row.unit && r.unit) row.unit = r.unit
     }
-
-    // Also fold in manual adjustments from feed_stock_adjustments (legacy)
-    const within = (d?: string | null) => !d || !asOf || d <= asOf
-    for (const a of adj.data ?? []) {
-      if (!a.ingredient_name) continue
-      const k = norm(a.ingredient_name)
-      const row = ensure(k, a.ingredient_name)
-      if (within(a.adjustment_date)) {
-        if (a.adjustment_type === 'Opening') row.opening += Number(a.adjustment_kg ?? 0)
-        else row.adjusted += Number(a.adjustment_kg ?? 0)
-        if (a.unit && !row.unit) row.unit = a.unit
-      }
-    }
-
-    const metaMap: Record<string, any> = {}
-    for (const mm of meta.data ?? []) metaMap[mm.item_key] = mm
 
     return Object.values(m).map((r: any) => {
-      const mm = metaMap[r.key] ?? metaMap[norm(r.item_name)]
       const closing = r.opening + r.received + r.adjusted - r.used
-      return {
-        ...r,
-        category: mm?.category ?? '',
-        unit: mm?.unit || r.unit || 'kg',
-        reorder_level: Number(mm?.reorder_level ?? 0),
-        closing,
-        value: closing * (r.rate || 0),
-      }
-    }).sort((a, b) => a.item_name.localeCompare(b.item_name))
-  }, [slData, adj.data, meta.data, asOf])
+      return { ...r, closing, value: closing * (r.rate || 0) }
+    }).sort((a, b) => (a.category || 'zzz').localeCompare(b.category || 'zzz') || a.item_name.localeCompare(b.item_name))
+  }, [itemsMaster, slData, asOf])
 
-  return { rows, isLoading: slLoading || adj.isLoading || meta.isLoading }
+  return { rows, isLoading: itemsLoading || slLoading }
 }
 
 // ════════════════════════════════════════════════════════════════════
-// TAB 1: STOCK STATUS (automatic, computed)
+// TAB 1: STOCK BALANCE (from Items Master + Stock Ledger)
 // ════════════════════════════════════════════════════════════════════
 const StockStatusTab: React.FC = () => {
   const CATEGORIES = useCategoryList()
@@ -282,11 +280,11 @@ const StockStatusTab: React.FC = () => {
       </Card>
 
       <Card padding={false}>
-        {isLoading ? <Spinner /> : filtered.length === 0 ? <EmptyState icon={<Boxes size={28}/>} title="No stock items" subtitle="Import GRN or add opening stock to populate inventory" /> : (
+        {isLoading ? <Spinner /> : filtered.length === 0 ? <EmptyState icon={<Boxes size={28}/>} title="No items found" subtitle="Add items in Purchase → Items Master first. Stock balance is computed automatically from GRN receipts and usage." /> : (
           <div className="overflow-x-auto">
             <Table>
               <thead><tr>
-                <Th>Item</Th><Th>Category</Th><Th>Unit</Th>
+                <Th>Code</Th><Th>Item</Th><Th>Category</Th><Th>Unit</Th>
                 <Th right>Opening</Th><Th right>Received</Th><Th right>Used</Th><Th right>Adjust</Th>
                 <Th right>Closing</Th><Th right>Rate</Th><Th right>Value</Th>
               </tr></thead>
@@ -295,8 +293,9 @@ const StockStatusTab: React.FC = () => {
                   const low = r.reorder_level > 0 && r.closing <= r.reorder_level
                   return (
                     <tr key={r.key} className={`text-sm ${low ? 'bg-red-50' : 'hover:bg-gray-50'}`}>
-                      <Td className="font-medium max-w-[260px] truncate" >{r.item_name}</Td>
-                      <Td>{r.category ? <Badge color="blue">{r.category}</Badge> : <span className="text-gray-300 text-xs">unset</span>}</Td>
+                      <Td className="text-xs text-gray-400">{r.item_code || '—'}</Td>
+                      <Td className="font-medium max-w-[220px] truncate">{r.item_name}</Td>
+                      <Td>{r.category ? <Badge color="blue">{r.category}</Badge> : <span className="text-gray-300 text-xs">—</span>}</Td>
                       <Td className="text-xs">{r.unit}</Td>
                       <Td right className="text-xs text-gray-500">{Math.round(r.opening).toLocaleString('en-IN')}</Td>
                       <Td right className="text-xs text-green-600">{Math.round(r.received).toLocaleString('en-IN')}</Td>
@@ -311,7 +310,7 @@ const StockStatusTab: React.FC = () => {
                   )
                 })}
               </tbody>
-              <tfoot><tr className="bg-gray-50 font-semibold"><Td colSpan={9}>TOTAL STOCK VALUE</Td><Td right>{inr(totalValue)}</Td></tr></tfoot>
+              <tfoot><tr className="bg-gray-50 font-semibold"><Td colSpan={10}>TOTAL STOCK VALUE</Td><Td right>{inr(totalValue)}</Td></tr></tfoot>
             </Table>
           </div>
         )}
@@ -321,9 +320,9 @@ const StockStatusTab: React.FC = () => {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// TAB 2 & 3: OPENING STOCK + ADJUSTMENTS (manual CRUD, share one table)
+// TAB 2: ADJUSTMENTS (Opening Stock + manual corrections)
 // ════════════════════════════════════════════════════════════════════
-const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => {
+const AdjustmentsTab: React.FC = () => {
   const UNITS = useUnitList()
   const qc = useQueryClient()
   const { profile } = useAuth()
@@ -332,16 +331,18 @@ const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => 
   const canDel = can.delete(role)
   const importRef = useRef<HTMLInputElement>(null)
 
-  const isOpening = kind === 'Opening'
   const { data: rows = [], isLoading } = useAdjustments()
-  const list = useMemo(() => rows.filter((r: any) => isOpening ? r.adjustment_type === 'Opening' : r.adjustment_type !== 'Opening'), [rows, isOpening])
-
+  const [typeFilter, setTypeFilter] = useState('')
   const [q, setQ] = useState('')
-  const filtered = useMemo(() => list.filter((r: any) => !q || r.ingredient_name?.toLowerCase().includes(q.toLowerCase())), [list, q])
+  const filtered = useMemo(() => (rows as any[]).filter((r: any) => {
+    if (typeFilter && r.adjustment_type !== typeFilter) return false
+    if (q && !r.ingredient_name?.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  }), [rows, typeFilter, q])
 
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const blank = { adjustment_date: today(), ingredient_name: '', adjustment_kg: '', adjustment_type: isOpening ? 'Opening' : 'Wastage', unit: 'kg', rate: '', remarks: '' }
+  const blank = { adjustment_date: today(), ingredient_name: '', adjustment_kg: '', adjustment_type: 'Opening Stock', unit: 'kg', rate: '', remarks: '' }
   const [form, setForm] = useState<any>(blank)
   const s = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }))
 
@@ -364,31 +365,29 @@ const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => 
       if (editing) { const { error } = await supabase.from('feed_stock_adjustments').update(payload).eq('id', editing.id); if (error) throw error }
       else { const { error } = await supabase.from('feed_stock_adjustments').insert(payload); if (error) throw error }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inv_adjustments'] }); setOpen(false); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inv_adjustments'] }); qc.invalidateQueries({ queryKey: ['sl_all'] }); setOpen(false); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
 
   const del = useMutation({
     mutationFn: async (ids: string[]) => { const { error } = await supabase.from('feed_stock_adjustments').delete().in('id', ids); if (error) throw error },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inv_adjustments'] }); setSel(new Set()); setDelId(null); setBulkDel(false); toast.success('Deleted') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inv_adjustments'] }); qc.invalidateQueries({ queryKey: ['sl_all'] }); setSel(new Set()); setDelId(null); setBulkDel(false); toast.success('Deleted') },
     onError: (e: any) => toast.error(e.message),
   })
 
   const openAdd = () => { setEditing(null); setForm(blank); setOpen(true) }
   const openEdit = (r: any) => {
     setEditing(r)
-    setForm({ adjustment_date: r.adjustment_date ?? today(), ingredient_name: r.ingredient_name ?? '', adjustment_kg: String(r.adjustment_kg ?? ''), adjustment_type: r.adjustment_type ?? (isOpening ? 'Opening' : 'Wastage'), unit: r.unit ?? 'kg', rate: r.rate != null ? String(r.rate) : '', remarks: r.remarks ?? '' })
+    setForm({ adjustment_date: r.adjustment_date ?? today(), ingredient_name: r.ingredient_name ?? '', adjustment_kg: String(r.adjustment_kg ?? ''), adjustment_type: r.adjustment_type ?? 'Opening Stock', unit: r.unit ?? 'kg', rate: r.rate != null ? String(r.rate) : '', remarks: r.remarks ?? '' })
     setOpen(true)
   }
 
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const allSel = filtered.length > 0 && filtered.every((r: any) => sel.has(r.id))
 
-  const downloadTemplate = () => downloadXlsxTemplate(
-    isOpening ? 'opening_stock_template.xlsx' : 'stock_adjustments_template.xlsx',
+  const downloadTemplate = () => downloadXlsxTemplate('stock_adjustments_template.xlsx',
     ['date','item_name','qty','type','unit','rate','remarks'],
-    isOpening ? ['2026-04-01','Maize',50000,'Opening','kg',20.3,'opening balance']
-              : ['2026-04-15','Maize',-500,'Wastage','kg',20.3,'spillage'])
+    ['2026-04-01','Maize',50000,'Opening Stock','kg',20.3,'opening balance'])
 
   const handleImport = async (file: File) => {
     try {
@@ -396,11 +395,11 @@ const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => 
       const idx = (names: string[]) => headers.findIndex(h => names.includes(h))
       const ci = { date: idx(['date','adjustment_date']), name: idx(['item_name','ingredient_name','item','name']), qty: idx(['qty','quantity','adjustment_kg','kg']), type: idx(['type','adjustment_type']), unit: idx(['unit']), rate: idx(['rate','price']), remarks: idx(['remarks','notes']) }
       if (ci.name < 0 || ci.qty < 0) { toast.error('Need at least item_name and qty columns'); return }
-      const payload = rows.filter(r => r[ci.name]?.trim()).map(r => ({
+      const payload = (rows as any[]).filter(r => r[ci.name]?.trim()).map((r: any) => ({
         adjustment_date: r[ci.date] || today(),
         ingredient_name: r[ci.name].trim(),
         adjustment_kg: cleanNum(r[ci.qty]) ?? 0,
-        adjustment_type: ci.type >= 0 && r[ci.type] ? r[ci.type] : (isOpening ? 'Opening' : 'Correction'),
+        adjustment_type: ci.type >= 0 && r[ci.type] ? r[ci.type] : 'Opening Stock',
         unit: ci.unit >= 0 ? (r[ci.unit] || 'kg') : 'kg',
         rate: ci.rate >= 0 ? cleanNum(r[ci.rate]) : null,
         remarks: ci.remarks >= 0 ? (r[ci.remarks] || null) : null,
@@ -418,15 +417,18 @@ const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => 
     <div className="space-y-4">
       <Card>
         <div className="flex flex-wrap gap-2 items-center">
-          <p className="text-sm text-gray-500 flex-1">
-            {isOpening ? 'One-time opening balances per item (counted as stock-in).' : 'Manual +/- corrections: wastage, damage, physical-count fixes, transfers. Use a negative qty to reduce stock.'}
-          </p>
+          <p className="text-sm text-gray-500 flex-1">Opening stock entries and manual corrections (wastage, damage, found, transfers). Use "Opening Stock" type for initial balances.</p>
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-1 focus:ring-brand-500">
+            <option value="">All types</option>
+            {ADJ_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item…"
             className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-1 focus:ring-brand-500 w-48" />
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={downloadTemplate}>Template</Button>
           {canEdit && <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>}
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
-          {canEdit && <Button size="sm" icon={<Plus size={14}/>} onClick={openAdd}>Add {isOpening ? 'Opening' : 'Adjustment'}</Button>}
+          {canEdit && <Button size="sm" icon={<Plus size={14}/>} onClick={openAdd}>Add Entry</Button>}
         </div>
       </Card>
 
@@ -439,7 +441,7 @@ const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => 
       )}
 
       <Card padding={false}>
-        {isLoading ? <Spinner /> : filtered.length === 0 ? <EmptyState title={`No ${isOpening ? 'opening stock' : 'adjustments'} yet`} /> : (
+        {isLoading ? <Spinner /> : filtered.length === 0 ? <EmptyState title="No entries yet" subtitle="Add opening stock or manual adjustments here" /> : (
           <div className="overflow-x-auto">
             <Table>
               <thead><tr>
@@ -452,7 +454,7 @@ const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => 
                     <Td><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></Td>
                     <Td className="text-xs">{fmtDate(r.adjustment_date)}</Td>
                     <Td className="font-medium max-w-[240px] truncate">{r.ingredient_name}</Td>
-                    <Td><Badge color={r.adjustment_type === 'Opening' ? 'blue' : Number(r.adjustment_kg) < 0 ? 'red' : 'green'}>{r.adjustment_type}</Badge></Td>
+                    <Td><Badge color={r.adjustment_type === 'Opening Stock' || r.adjustment_type === 'Opening' ? 'blue' : Number(r.adjustment_kg) < 0 ? 'red' : 'green'}>{r.adjustment_type}</Badge></Td>
                     <Td right className={Number(r.adjustment_kg) < 0 ? 'text-red-600' : ''}>{Number(r.adjustment_kg).toLocaleString('en-IN')}</Td>
                     <Td className="text-xs">{r.unit ?? '—'}</Td>
                     <Td right className="text-xs">{r.rate != null ? Number(r.rate).toFixed(2) : '—'}</Td>
@@ -471,16 +473,14 @@ const MovementTab: React.FC<{ kind: 'Opening' | 'Adjustment' }> = ({ kind }) => 
         )}
       </Card>
 
-      <Modal open={open} onClose={() => setOpen(false)} title={`${editing ? 'Edit' : 'Add'} ${isOpening ? 'Opening Stock' : 'Adjustment'}`}
+      <Modal open={open} onClose={() => setOpen(false)} title={`${editing ? 'Edit' : 'Add'} Stock Entry`}
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Save</Button></div>}>
         <div className="grid grid-cols-2 gap-3">
           <DateInput label="Date" value={form.adjustment_date} onChange={e => s('adjustment_date', e.target.value)} />
           <Input label="Item Name" value={form.ingredient_name} onChange={e => s('ingredient_name', e.target.value)} />
-          <Input label={isOpening ? 'Opening Qty' : 'Qty (− to reduce)'} value={form.adjustment_kg} onChange={e => s('adjustment_kg', e.target.value)} />
-          {isOpening
-            ? <Select label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} options={UNITS.map(u => ({ value: u, label: u }))} />
-            : <Select label="Type" value={form.adjustment_type} onChange={e => s('adjustment_type', e.target.value)} options={ADJ_TYPES.map(t => ({ value: t, label: t }))} />}
-          {!isOpening && <Select label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} options={UNITS.map(u => ({ value: u, label: u }))} />}
+          <Select label="Type" value={form.adjustment_type} onChange={e => s('adjustment_type', e.target.value)} options={ADJ_TYPES.map(t => ({ value: t, label: t }))} />
+          <Select label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} options={UNITS.map(u => ({ value: u, label: u }))} />
+          <Input label="Qty (negative to reduce)" value={form.adjustment_kg} onChange={e => s('adjustment_kg', e.target.value)} />
           <Input label="Rate (₹/unit)" value={form.rate} onChange={e => s('rate', e.target.value)} />
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} className="col-span-2" />
         </div>

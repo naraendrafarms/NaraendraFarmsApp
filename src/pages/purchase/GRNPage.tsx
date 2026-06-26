@@ -5,12 +5,7 @@ import { inr, fmtDate, today } from '@/lib/utils'
 import { Card, CardHeader, Input, Select, FormRow, Modal, EmptyState, Spinner, Td, Th, DateInput, Badge } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, Edit2, Download, X } from 'lucide-react'
-
-const CATEGORIES = [
-  'Feed Ingredient', 'Medicine', 'Vaccine', 'Supplement', 'Injectable',
-  'Sanitizer', 'Disinfectant', 'Pesticide', 'Packaging', 'Equipment',
-  'Spares', 'Chemical', 'Chicks', 'Other'
-]
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 const GST_OPTIONS = [
   { value: '0', label: '0%' },
@@ -41,6 +36,8 @@ const emptyForm = () => ({
 
 export const GRNPage: React.FC = () => {
   const qc = useQueryClient()
+  const categoryOptions = useConfigOptions('item_category')
+  const CATEGORIES = categoryOptions.map(o => o.value)
 
   const [fFrom, setFFrom] = useState('')
   const [fTo, setFTo] = useState('')
@@ -321,7 +318,7 @@ export const GRNPage: React.FC = () => {
             label="Category"
             value={fCat}
             onChange={e => setFCat(e.target.value)}
-            options={[{ value: '', label: 'All Categories' }, ...CATEGORIES.map(c => ({ value: c, label: c }))]}
+            options={[{ value: '', label: 'All Categories' }, ...categoryOptions]}
           />
           <Input
             label="Item"
@@ -482,7 +479,7 @@ export const GRNPage: React.FC = () => {
                 setForm(f => ({ ...f, category: e.target.value, item_id: '', item_name: '', unit: '' }))
                 setItemSearch('')
               }}
-              options={CATEGORIES.map(c => ({ value: c, label: c }))}
+              options={categoryOptions}
             />
             <Input
               label="Vehicle No"
