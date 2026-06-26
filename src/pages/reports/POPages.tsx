@@ -3355,15 +3355,15 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           const vendorRecords = uniqueVendorNames.map(name => ({ name, type: 'supplier' }))
           await supabase.from('parties').upsert(vendorRecords, { onConflict: 'name,type', ignoreDuplicates: true })
         }
-        // Auto-create feed ingredients from all imported PO rows
+        // Auto-create items in unified items master from all imported PO rows
         const uniqueItemNames = [...new Set(rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
         if (uniqueItemNames.length > 0) {
-          const itemRecords = uniqueItemNames.map((name:string) => ({
-            name,
-            code: name.replace(/[^A-Z0-9]/gi,'').toUpperCase().slice(0,8) || name.slice(0,8).toUpperCase(),
-            unit: 'Kg',
-          }))
-          await supabase.from('feed_ingredients').upsert(itemRecords, { onConflict: 'code', ignoreDuplicates: true })
+          const { data: existing } = await supabase.from('items').select('name').in('name', uniqueItemNames)
+          const existingNames = new Set((existing ?? []).map((i: any) => i.name.trim().toLowerCase()))
+          const newItems = uniqueItemNames
+            .filter((name: string) => !existingNames.has(name.toLowerCase()))
+            .map((name: string) => ({ name, category: 'Feed Ingredient', unit: 'Kg' }))
+          if (newItems.length > 0) await supabase.from('items').insert(newItems)
         }
         toast.success(`Imported ${rows.length} PO records · ${uniqueVendorNames.length} vendors · ${uniqueItemNames.length} items added to masters`)
       } else {
@@ -3402,15 +3402,15 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
               { onConflict: 'name,type', ignoreDuplicates: false }
             )
           }
-          // Auto-create feed ingredients
+          // Auto-create items in unified items master from PDF PO rows
           const uniquePdfItems = [...new Set(rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
           if (uniquePdfItems.length > 0) {
-            const pdfItemRecords = uniquePdfItems.map((name:string) => ({
-              name,
-              code: name.replace(/[^A-Z0-9]/gi,'').toUpperCase().slice(0,8) || name.slice(0,8).toUpperCase(),
-              unit: 'Kg',
-            }))
-            await supabase.from('feed_ingredients').upsert(pdfItemRecords, { onConflict: 'code', ignoreDuplicates: true })
+            const { data: existingPdf } = await supabase.from('items').select('name').in('name', uniquePdfItems)
+            const existingPdfNames = new Set((existingPdf ?? []).map((i: any) => i.name.trim().toLowerCase()))
+            const newPdfItems = uniquePdfItems
+              .filter((name: string) => !existingPdfNames.has(name.toLowerCase()))
+              .map((name: string) => ({ name, category: 'Feed Ingredient', unit: 'Kg' }))
+            if (newPdfItems.length > 0) await supabase.from('items').insert(newPdfItems)
           }
           toast.success(`PO imported — ${rows.length} items · vendor & items added to masters`)
         }
