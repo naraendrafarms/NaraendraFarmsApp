@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, inr, today } from '@/lib/utils'
 import {
-  Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
+  Card, Button, Input, Select, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, DateInput
 } from '@/components/ui'
 import { Plus, Trash2 } from 'lucide-react'
@@ -18,7 +18,14 @@ const EMPTY = {
   remarks: '',
 }
 
-const MODES = ['cash', 'upi', 'cheque', 'bank_transfer', 'neft', 'rtgs']
+const MODES = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'upi', label: 'UPI' },
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'bank_transfer', label: 'Bank Transfer' },
+  { value: 'neft', label: 'NEFT' },
+  { value: 'rtgs', label: 'RTGS' },
+]
 
 export const BuyerAdvancesPage: React.FC = () => {
   const qc = useQueryClient()
@@ -40,6 +47,16 @@ export const BuyerAdvancesPage: React.FC = () => {
       return data ?? []
     }
   })
+
+  const partyOptions = [
+    { value: '', label: '— All Parties —' },
+    ...(parties as any[]).map((p: any) => ({ value: p.id, label: p.name }))
+  ]
+
+  const partySelectOptions = [
+    { value: '', label: '— Select Party —' },
+    ...(parties as any[]).map((p: any) => ({ value: p.id, label: p.name }))
+  ]
 
   const { data: advances = [], isLoading } = useQuery({
     queryKey: ['party_advances', filterParty],
@@ -124,19 +141,15 @@ export const BuyerAdvancesPage: React.FC = () => {
         <Select
           value={filterParty}
           onChange={e => setFilterParty(e.target.value)}
+          options={partyOptions}
           className="max-w-xs"
-        >
-          <option value="">— All Parties —</option>
-          {parties.map((p: any) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </Select>
+        />
       </Card>
 
       {/* Table */}
       <Card>
         {isLoading ? <Spinner /> : advances.length === 0 ? (
-          <EmptyState message="No advances recorded yet" />
+          <EmptyState title="No advances recorded yet" />
         ) : (
           <Table>
             <thead>
@@ -158,7 +171,7 @@ export const BuyerAdvancesPage: React.FC = () => {
                 return (
                   <tr key={a.id} className="hover:bg-gray-50">
                     <Td>{fmtDate(a.advance_date)}</Td>
-                    <Td className="font-medium">{a.parties?.name ?? '—'}</Td>
+                    <Td className="font-medium">{(a as any).parties?.name ?? '—'}</Td>
                     <Td><Badge color="blue">{a.payment_mode}</Badge></Td>
                     <Td className="text-xs text-gray-500">{a.reference_no ?? '—'}</Td>
                     <Td className="text-xs text-gray-500">{a.remarks ?? '—'}</Td>
@@ -186,36 +199,43 @@ export const BuyerAdvancesPage: React.FC = () => {
       {/* Add Modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Buyer Advance">
         <div className="space-y-4 p-1">
-          <FormRow label="Date *">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
             <DateInput value={form.advance_date} onChange={v => set('advance_date', v)} />
-          </FormRow>
-          <FormRow label="Party *">
-            <Select value={form.party_id} onChange={e => set('party_id', e.target.value)}>
-              <option value="">— Select Party —</option>
-              {parties.map((p: any) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </Select>
-          </FormRow>
-          <FormRow label="Amount *">
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Party *</label>
+            <Select
+              value={form.party_id}
+              onChange={e => set('party_id', e.target.value)}
+              options={partySelectOptions}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
             <Input
               type="number"
               value={form.amount}
               onChange={e => set('amount', e.target.value)}
               placeholder="0.00"
             />
-          </FormRow>
-          <FormRow label="Payment Mode">
-            <Select value={form.payment_mode} onChange={e => set('payment_mode', e.target.value)}>
-              {MODES.map(m => <option key={m} value={m}>{m.replace('_', ' ').toUpperCase()}</option>)}
-            </Select>
-          </FormRow>
-          <FormRow label="Reference No">
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Mode</label>
+            <Select
+              value={form.payment_mode}
+              onChange={e => set('payment_mode', e.target.value)}
+              options={MODES}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Reference No</label>
             <Input value={form.reference_no} onChange={e => set('reference_no', e.target.value)} placeholder="UTR / Cheque No" />
-          </FormRow>
-          <FormRow label="Remarks">
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Remarks</label>
             <Input value={form.remarks} onChange={e => set('remarks', e.target.value)} />
-          </FormRow>
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
             <Button

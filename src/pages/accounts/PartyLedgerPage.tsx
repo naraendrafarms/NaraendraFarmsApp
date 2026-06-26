@@ -112,12 +112,14 @@ export const PartyLedgerPage: React.FC = () => {
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-xs text-gray-500 mb-1">Party *</label>
-          <Select value={partyId} onChange={e => setPartyId(e.target.value)}>
-            <option value="">— Select Party —</option>
-            {(parties as any[]).map(p => (
-              <option key={p.id} value={p.id}>{p.name} {p.type ? `(${p.type})` : ''}</option>
-            ))}
-          </Select>
+          <Select
+            value={partyId}
+            onChange={e => setPartyId(e.target.value)}
+            options={[
+              { value: '', label: '— Select Party —' },
+              ...(parties as any[]).map(p => ({ value: p.id, label: `${p.name}${p.type ? ` (${p.type})` : ''}` }))
+            ]}
+          />
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">From Date</label>
@@ -152,11 +154,11 @@ export const PartyLedgerPage: React.FC = () => {
       {/* Ledger table */}
       <Card>
         {!partyId ? (
-          <EmptyState message="Select a party to view their ledger" />
+          <EmptyState title="Select a party to view their ledger" />
         ) : isLoading ? (
           <Spinner />
         ) : ledger.length === 0 ? (
-          <EmptyState message="No transactions found for this party" />
+          <EmptyState title="No transactions found for this party" />
         ) : (
           <div className="overflow-x-auto">
             <Table>
