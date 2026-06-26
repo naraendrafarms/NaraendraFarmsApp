@@ -60,6 +60,7 @@ export const PaymentPlanningPage: React.FC = () => {
           .select('id,sale_date,sale_type,amount,parties(name),flocks(flock_no)')
           .in('payment_status', ['Pending', null as any])
           .not('payment_status', 'eq', 'Received')
+          .or('is_employee_sale.is.null,is_employee_sale.eq.false')
           .order('sale_date', { ascending: false })
           .limit(100),
         supabase.from('he_dispatch')

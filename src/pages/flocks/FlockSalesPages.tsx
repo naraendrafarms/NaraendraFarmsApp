@@ -1324,7 +1324,7 @@ export const NHESales: React.FC = () => {
   const { data: sales, isLoading } = useQuery({
     queryKey: ['nhe_sales', flockFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), bank_accounts(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount)')
+      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount)')
         .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (fromDate) q = q.gte('sale_date', fromDate)
@@ -2014,7 +2014,11 @@ export const NHESales: React.FC = () => {
                       </span>
                     )}
                   </Td>
-                  <Td className="text-xs text-gray-500">{s.parties?.name ?? '—'}</Td>
+                  <Td className="text-xs text-gray-500">
+                    {s.is_employee_sale
+                      ? <span className="text-purple-700 font-medium">{s.employees?.name ?? '—'} <span className="text-gray-400 font-normal">(Emp)</span></span>
+                      : (s.parties?.name ?? '—')}
+                  </Td>
                   <Td right className="text-xs">{s.quantity != null ? s.quantity.toLocaleString('en-IN') : '—'}</Td>
                   <Td right className="text-xs text-gray-500">{s.total_weight_kg ? s.total_weight_kg.toFixed(1) : '—'}</Td>
                   <Td right className="text-xs">{s.rate_per_kg ? `₹${s.rate_per_kg}` : s.rate ? `₹${s.rate}` : '—'}</Td>
