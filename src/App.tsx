@@ -61,6 +61,7 @@ import { CMSUploadPage } from '@/pages/accounts/CMSUpload'
 import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
 import { HelpGuidePage } from '@/pages/help/HelpGuide'
 import { ItemsMasterPage } from '@/pages/purchase/ItemsMaster'
+import { GRNPage } from '@/pages/purchase/GRNPage'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -138,7 +139,7 @@ export const App: React.FC = () => {
             {/* Purchase */}
             <Route path="purchase/items" element={<ItemsMasterPage />} />
             <Route path="purchase/orders" element={<PurchaseOrdersPage />} />
-            <Route path="purchase/grn" element={<GRNEntry />} />
+            <Route path="purchase/grn" element={<GRNPage />} />
             <Route path="purchase/payments" element={<PendingPaymentsPage />} />
 
             {/* Inventory */}
