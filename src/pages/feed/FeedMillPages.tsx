@@ -620,7 +620,19 @@ const ProductionTab: React.FC = () => {
         logData.id = inserted.id
       }
       if (ings?.length) {
-        const rows = ings.map((i: any) => ({production_id: logData.id, ingredient_name: i.ingredient_name, quantity_kg: i.quantity_kg}))
+        // Resolve ingredient IDs so raw-material stock is properly decremented
+        const { data: ingrMaster } = await supabase.from('feed_ingredients').select('id,name,code')
+        const byName: Record<string, string> = {}
+        const byCode: Record<string, string> = {}
+        for (const fi of (ingrMaster ?? [])) {
+          byName[fi.name.toLowerCase().trim()] = fi.id
+          if (fi.code) byCode[fi.code.toLowerCase().trim()] = fi.id
+        }
+        const rows = ings.map((i: any) => {
+          const key = (i.ingredient_name ?? '').toLowerCase().trim()
+          const ingredient_id = byName[key] ?? byCode[key] ?? null
+          return { production_id: logData.id, ingredient_name: i.ingredient_name, quantity_kg: i.quantity_kg, ingredient_id }
+        })
         await supabase.from('feed_production_ingredients').insert(rows)
       }
     },

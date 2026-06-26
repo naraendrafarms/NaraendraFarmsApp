@@ -173,7 +173,8 @@ const POTab: React.FC = () => {
   const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set())
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [receiptPO, setReceiptPO]     = useState<any>(null)
-  const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', remarks: '' })
+  const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', farm_id: '', remarks: '' })
+  const { data: farms=[] } = useQuery({ queryKey: ['farms_po'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
   const rf = (k: string) => (e: any) => setReceiptForm((p: any) => ({...p,[k]:e.target.value}))
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
 
@@ -321,6 +322,59 @@ const POTab: React.FC = () => {
           })
         }
       }
+
+      // Auto-create GRN from PO receipt (eliminates double entry)
+      if (receiptPO.item_name && receiptForm.qty_received) {
+        const catMap: Record<string,string> = {
+          'Feed Raw Material': 'Feed', 'Medicine': 'Medicine',
+          'Oral Medicine': 'Medicine', 'Feed Medicine': 'Medicine',
+          'Vaccine': 'Vaccine', 'Larvender': 'Other',
+          'Feedmill Transport': 'Other', 'Other': 'Other',
+        }
+        const grnCat = catMap[receiptPO.material_type ?? ''] ?? 'Other'
+
+        // Look up party_id
+        const { data: partyRows } = await supabase.from('parties')
+          .select('id').ilike('name', receiptPO.vendor_name?.trim() ?? '').limit(1)
+        const party_id = partyRows?.[0]?.id ?? null
+
+        // Look up ingredient_id or medicine_id
+        let ingredient_id = null, medicine_id = null
+        if (grnCat === 'Feed') {
+          const { data: ir } = await supabase.from('feed_ingredients')
+            .select('id').ilike('name', receiptPO.item_name.trim()).limit(1)
+          ingredient_id = ir?.[0]?.id ?? null
+        } else if (grnCat === 'Medicine' || grnCat === 'Vaccine') {
+          const { data: mr } = await supabase.from('medicines_master')
+            .select('id').ilike('name', receiptPO.item_name.trim()).limit(1)
+          medicine_id = mr?.[0]?.id ?? null
+        }
+
+        const qty = Number(receiptForm.qty_received) || 0
+        const rate = receiptPO.rate ? Number(receiptPO.rate) : 0
+        const gst_pct = receiptPO.gst_pct ? Number(receiptPO.gst_pct) : 0
+        const basic_amount = qty * rate
+        const gst_amount   = basic_amount * gst_pct / 100
+        const total_amount = basic_amount + gst_amount
+        const grn_no = receiptPO.grn_no || `PO-${receiptPO.po_no}`
+        const farm_id = receiptForm.farm_id || (farms[0]?.id ?? null)
+
+        await supabase.from('grn').insert({
+          grn_no, grn_date: receiptForm.receipt_date,
+          farm_id, party_id, category: grnCat,
+          ingredient_id, medicine_id,
+          item_name: receiptPO.item_name,
+          invoice_no: receiptForm.invoice_no || null,
+          invoice_date: receiptForm.receipt_date,
+          qty, unit: receiptForm.unit || receiptPO.unit || 'kg',
+          price_per_unit: rate || null,
+          basic_amount: basic_amount || null,
+          gst_pct, gst_amount: gst_amount || null,
+          total_amount: total_amount || null,
+          vehicle_no: receiptForm.vehicle_no || null,
+          remarks: receiptForm.remarks || null,
+        })
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase_orders'] })
@@ -328,8 +382,11 @@ const POTab: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['po_receipts_sum'] })
       qc.invalidateQueries({ queryKey: ['parties'] })
       qc.invalidateQueries({ queryKey: ['feed_ingredients'] })
+      qc.invalidateQueries({ queryKey: ['grns'] })
+      qc.invalidateQueries({ queryKey: ['grn_stock'] })
+      qc.invalidateQueries({ queryKey: ['v_medicine_stock'] })
       setReceiptOpen(false)
-      toast.success('Stock receipt recorded. Enter the supplier invoice via Purchase Entry to create the payment record.')
+      toast.success('Stock receipt recorded & GRN auto-created. Now enter the invoice amount in Bills/GRN tab for payment tracking.')
     },
     onError: (e: any) => toast.error(e.message),
   })
@@ -467,7 +524,7 @@ const POTab: React.FC = () => {
                     <div className="flex gap-1">
                       {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
                       {canEdit && o.material_status !== 'Received' && (
-                        <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', remarks: '' }); setReceiptOpen(true) }}
+                        <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', farm_id: '', remarks: '' }); setReceiptOpen(true) }}
                           className="p-1 text-green-500 hover:text-green-700" title="Record Stock Receipt"><PackageCheck size={13}/></button>
                       )}
                       {canDel && <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600" title="Delete"><Trash2 size={13}/></button>}
@@ -548,7 +605,7 @@ const POTab: React.FC = () => {
                             <div className="flex gap-1">
                               {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
                               {canEdit && o.material_status !== 'Received' && (
-                                <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', remarks: '' }); setReceiptOpen(true) }}
+                                <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', farm_id: '', remarks: '' }); setReceiptOpen(true) }}
                                   className="p-1 text-green-500 hover:text-green-700" title="Record Stock Receipt"><PackageCheck size={13}/></button>
                               )}
                               {canDel && <button onClick={() => setDelId(o.id)} className="p-1 text-red-400 hover:text-red-600" title="Delete"><Trash2 size={13}/></button>}
@@ -714,11 +771,13 @@ const POTab: React.FC = () => {
                 <Input label="Supplier Invoice No" value={receiptForm.invoice_no} onChange={rf('invoice_no')} placeholder="Invoice no. on the bill" />
                 <Input label="Vehicle No" value={receiptForm.vehicle_no} onChange={rf('vehicle_no')} />
               </div>
+              <Sel label="Received At (Farm/Site)" value={receiptForm.farm_id} onChange={rf('farm_id')}
+                options={[{value:'',label:'Select farm (or auto-pick first)'}, ...(farms as any[]).map((fm:any)=>({value:fm.id,label:`${fm.name} (${fm.code})`}))]} />
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Received By" value={receiptForm.received_by} onChange={rf('received_by')} />
                 <Input label="Remarks" value={receiptForm.remarks} onChange={rf('remarks')} />
               </div>
-              <p className="text-xs text-green-600">✓ PO status → Received · GRN date recorded · Enter invoice via Purchase Entry to track payment</p>
+              <p className="text-xs text-green-600">✓ PO status → Received · GRN auto-created in stock → Update GRN with invoice details in Bills/GRN tab</p>
             </div>
           )
         })()}
