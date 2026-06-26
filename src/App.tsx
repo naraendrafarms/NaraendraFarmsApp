@@ -18,7 +18,7 @@ import { FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
 import { InventoryPage } from '@/pages/inventory/InventoryPages'
 import { FeedMillPage } from '@/pages/feed/FeedMillPages'
 import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
-import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage, PayslipGeneratorPage } from '@/pages/employees/EmployeePages'
+import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage, PayslipGeneratorPage, BulkSalaryPage } from '@/pages/employees/EmployeePages'
 import { DailyAttendancePage, MonthAttendancePage, EmployeeAdvancesPage } from '@/pages/employees/AttendancePages'
 import {
   FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster,
@@ -163,6 +163,7 @@ export const App: React.FC = () => {
             <Route path="employees/attendance-month" element={<MonthAttendancePage />} />
             <Route path="employees/advances" element={<EmployeeAdvancesPage />} />
             <Route path="employees/payslip" element={<PayslipGeneratorPage />} />
+            <Route path="employees/bulk-salary" element={<BulkSalaryPage />} />
 
             {/* Masters */}
             <Route path="masters/farms" element={<FarmsMaster />} />

@@ -11,6 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } fro
 import toast from 'react-hot-toast'
 import { useAuth, can } from '@/lib/auth'
 import { parseFile } from '@/lib/parseFile'
+import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 // ── CSV export helper ─────────────────────────────────────────────
@@ -102,6 +103,7 @@ export const EmployeeList: React.FC = () => {
     uan_no:'', is_active:'true',
     esi_applicable:'false', pf_applicable:'false', pt_applicable:'false',
     restrict_pf:'false', zone_area:'', emp_category:'', location_branch:'',
+    payment_mode:'own_account', shared_with_emp_id:'',
   })
   const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
 
@@ -126,6 +128,8 @@ export const EmployeeList: React.FC = () => {
         zone_area: emp.zone_area??'',
         emp_category: emp.emp_category??'',
         location_branch: emp.location_branch??'',
+        payment_mode: emp.payment_mode??'own_account',
+        shared_with_emp_id: emp.shared_with_emp_id??'',
       })
     } else {
       setEditing(null)
@@ -133,7 +137,8 @@ export const EmployeeList: React.FC = () => {
         base_salary:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
         joining_date:'',leaving_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',
         uan_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
-        restrict_pf:'false',zone_area:'',emp_category:'',location_branch:''})
+        restrict_pf:'false',zone_area:'',emp_category:'',location_branch:'',
+        payment_mode:'own_account',shared_with_emp_id:''})
     }
     setShowForm(true)
   }
@@ -161,6 +166,8 @@ export const EmployeeList: React.FC = () => {
         zone_area: form.zone_area || null,
         emp_category: form.emp_category || null,
         location_branch: form.location_branch || null,
+        payment_mode: form.payment_mode || 'own_account',
+        shared_with_emp_id: form.shared_with_emp_id || null,
       }
       if (editing) { const {error}=await supabase.from('employees').update(payload).eq('id',editing.id); if(error)throw error }
       else { const {error}=await supabase.from('employees').insert(payload); if(error)throw error }
@@ -476,6 +483,17 @@ export const EmployeeList: React.FC = () => {
             <Input label="Account No" value={form.account_no} onChange={e=>s('account_no',e.target.value)} />
             <Input label="IFSC Code" value={form.ifsc} onChange={e=>s('ifsc',e.target.value)} />
           </FormRow>
+          <FormRow>
+            <Select label="Salary Payment Mode"
+              options={[{value:'own_account',label:'Own Bank Account'},{value:'shared_account',label:'Shared (Other Employee Account)'},{value:'cash',label:'Cash'}]}
+              value={form.payment_mode} onChange={e=>s('payment_mode',e.target.value)}/>
+            {form.payment_mode==='shared_account' && (
+              <Select label="Salary Deposited Into (Employee)"
+                placeholder="— Select Account Holder —"
+                options={(employees??[]).filter((e:any)=>!editing||e.id!==editing.id).map((e:any)=>({value:e.id,label:`${e.name} (${e.emp_id??'—'})`}))}
+                value={form.shared_with_emp_id} onChange={e=>s('shared_with_emp_id',e.target.value)}/>
+            )}
+          </FormRow>
           <Divider label="Statutory" />
           <FormRow>
             <Input label="ESI No" value={form.esi_no} onChange={e=>s('esi_no',e.target.value)} hint="Employee State Insurance No" />
@@ -605,6 +623,84 @@ export const SalaryAbstractPage: React.FC = () => {
       {rows?.length===0&&<EmptyState icon={<IndianRupee size={32}/>} title="No salary data loaded" />}
     </div>
   )
+}
+
+// ── Module-level salary computation (used by BulkSalaryPage + SalaryEntryPage) ──
+const _EG1 = ['MANAGER FINANCE','ADMINISTRATIVE MANAGER','ACCOUNTANT','SITE MANAGER','STORE KEEPER','POULTRY ASSISTANT','ELECTRICIAN']
+const _EG2 = ['ASST.SUPERVISOR-MALE','ASST.SUPERVISOR-FEMALE','SECURITY-MALE','DRIVER-MALE','WORKER-MALE','WORKER-FEMALE','MEDIUM VECHICLE DRIVER','ATTENDER']
+
+function calcExtraDaysM(designation: string|null|undefined, paidDays: number): number {
+  if (!paidDays || !designation) return 0
+  const d = designation.toUpperCase().trim()
+  if (_EG1.includes(d)) return paidDays >= 15 ? 2 : 1
+  if (_EG2.includes(d)) return paidDays >= 15 ? 1 : 0
+  return 0
+}
+
+function computeSalaryForEmp(emp: any, opts: {
+  absentDays?: number; monthDays?: number; furtherAdvance?: number;
+  otherDeduction?: number; advanceOpening?: number; vpf?: number; lwf?: number; tds?: number;
+}) {
+  const monthDays  = opts.monthDays ?? 30
+  const absentDays = opts.absentDays ?? 0
+  const paidDays   = Math.max(0, monthDays - absentDays)
+  const extraDays  = calcExtraDaysM(emp.designation, paidDays)
+
+  const grossRate  = emp.base_salary ?? 0
+  const basicRate  = Math.round(grossRate * 0.5)
+  const hraRate    = Math.min(Math.round(grossRate * 0.3), grossRate - basicRate)
+  const otherDfr   = grossRate - basicRate - hraRate
+
+  const basicEarned  = Math.round(basicRate / monthDays * paidDays)
+  const hraEarned    = Math.round(hraRate / monthDays * paidDays)
+  const otherEarned  = Math.round(otherDfr / monthDays * paidDays)
+  const grossEarning = basicEarned + hraEarned + otherEarned
+  const extraPay     = Math.round(grossRate / monthDays * extraDays)
+  const totalEarning = grossEarning + extraPay
+
+  const esiEmp = emp.esi_applicable ? Math.ceil(basicEarned * 0.0075) : 0
+  const esiEr  = emp.esi_applicable ? Math.round(basicEarned * 0.0325) : 0
+
+  const pfBase  = emp.pf_applicable ? (emp.restrict_pf ? Math.min(basicEarned, 15000) : basicEarned) : 0
+  const pfEmp   = emp.pf_applicable ? Math.round(pfBase * 0.12) : 0
+  const vpf     = opts.vpf ?? 0
+  const eps     = emp.pf_applicable ? Math.round(Math.min(basicEarned, 15000) * 0.0833) : 0
+  const epfDiff = emp.pf_applicable ? Math.max(0, pfEmp - eps) : 0
+  const adminCh = emp.pf_applicable ? Math.round(Math.min(basicEarned, 15000) * 0.005) : 0
+  const edli    = emp.pf_applicable ? Math.round(Math.min(basicEarned, 15000) * 0.005) : 0
+
+  const pt        = emp.pt_applicable ? (totalEarning <= 15000 ? 0 : totalEarning <= 20000 ? 150 : 200) : 0
+  const lwf       = opts.lwf ?? 0
+  const tds       = opts.tds ?? 0
+  const otherDed  = opts.otherDeduction ?? 0
+  const furtherAdv = opts.furtherAdvance ?? 0
+  const advOpening = opts.advanceOpening ?? 0
+  // Default: deduct all advances + flock deductions this month
+  const advAdjusted = furtherAdv + otherDed
+  const advClosing  = Math.max(0, advOpening + furtherAdv - advAdjusted)
+
+  const netPayable = Math.max(0, totalEarning - pfEmp - vpf - esiEmp - pt - lwf - tds - otherDed - advAdjusted)
+  const monthlyCTC = totalEarning + eps + epfDiff + adminCh + edli + esiEr
+
+  return {
+    days_worked: paidDays, month_days: monthDays, absent_days: absentDays,
+    total_paid_days: paidDays, extra_days: extraDays,
+    gross_rate: grossRate || null, basic_rate: basicRate || null,
+    hra_rate: hraRate || null, other_defray: otherDfr,
+    basic_salary: basicEarned || null, hra: hraEarned,
+    gross_salary: grossEarning, extra_pay: extraPay,
+    total_earning: totalEarning, earned_salary: totalEarning,
+    esi_employee: esiEmp, esi_employer: esiEr,
+    pf_employee: pfEmp, pf_employer: eps + epfDiff,
+    vpf, employer_eps: eps, employer_epf_diff: epfDiff,
+    admin_charges: adminCh, edli_charge: edli,
+    pt, lwf, tds, other_deduction: otherDed,
+    net_salary: netPayable,
+    further_advance: furtherAdv, advance_opening: advOpening,
+    advance: advAdjusted, advance_closing: advClosing,
+    monthly_ctc: monthlyCTC || null,
+    is_paid: false,
+  }
 }
 
 // ── SALARY ENTRY ──────────────────────────────────────────────────
@@ -795,14 +891,22 @@ export const SalaryEntryPage: React.FC = () => {
       s + (r.status === 'P' ? 1 : r.status === 'H' ? 0.5 : r.status === 'OT' ? 1 : 0), 0)
     const otHours = (att ?? []).reduce((s, r: any) => s + (r.ot_hours ?? 0), 0)
 
-    const { data: adv, error: advErr } = await supabase.from('employee_advances')
+    const { data: adv } = await supabase.from('employee_advances')
       .select('amount').eq('employee_id', form.employee_id).eq('salary_month', form.month)
-    if (advErr) { toast.error(advErr.message); return }
     const totalAdv = (adv ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
 
-    setForm(f => ({ ...f, days_worked: String(days), advance: String(totalAdv) }))
+    // Pull pending flock deductions (eggs/birds sold to employee)
+    const { data: ded } = await supabase.from('employee_deductions')
+      .select('amount').eq('employee_id', form.employee_id).eq('deduction_month', start).eq('status','pending')
+    const totalDed = (ded ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+
+    setForm(f => ({ ...f, days_worked: String(days), further_advance: String(totalAdv), other_deduction: String(totalDed) }))
     setTimeout(() => calcPayroll(), 50)
-    toast.success(`Auto-filled: ${days} days worked${otHours > 0 ? `, ${otHours}h OT` : ''}, ₹${totalAdv.toLocaleString('en-IN')} advance`)
+    const parts = [`${days} days worked`]
+    if (otHours > 0) parts.push(`${otHours}h OT`)
+    if (totalAdv > 0) parts.push(`₹${totalAdv.toLocaleString('en-IN')} advance`)
+    if (totalDed > 0) parts.push(`₹${totalDed.toLocaleString('en-IN')} flock deductions`)
+    toast.success(`Auto-filled: ${parts.join(', ')}`)
   }
 
   const calcPT = (gross: number, ptApplicable: boolean, month?: string): number => {
@@ -2774,6 +2878,391 @@ export const PayslipGeneratorPage: React.FC = () => {
                 </tbody>
               </Table>
             </Card>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── BULK SALARY PAGE ──────────────────────────────────────────────
+export const BulkSalaryPage: React.FC = () => {
+  const qc = useQueryClient()
+  const today = new Date()
+  const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
+  const [tab, setTab] = useState<'attendance'|'salary'|'payment'>('attendance')
+  const [filterFarm, setFilterFarm] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [absentMap, setAbsentMap] = useState<Record<string,string>>({})
+
+  const monthDate = month + '-01'
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] }
+  })
+  const { data: employees } = useQuery({
+    queryKey: ['employees_bulk', filterFarm],
+    queryFn: async () => {
+      let q = supabase.from('employees')
+        .select('id,emp_id,name,designation,base_salary,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name,code)')
+        .eq('is_active',true).order('name')
+      if (filterFarm) q = q.eq('farm_id', filterFarm)
+      const { data } = await q; return data ?? []
+    }
+  })
+  const { data: salaries, refetch: refetchSalaries } = useQuery({
+    queryKey: ['bulk_salary', monthDate, filterFarm],
+    queryFn: async () => {
+      let q = supabase.from('salary_monthly')
+        .select('*, employees!inner(name,emp_id,farm_id,designation,esi_applicable,pf_applicable,pt_applicable,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name))')
+        .eq('month', monthDate)
+      if (filterFarm) q = q.eq('employees.farm_id', filterFarm)
+      const { data } = await q; return data ?? []
+    }
+  })
+  const { data: advances } = useQuery({
+    queryKey: ['emp_advances_bulk', month],
+    queryFn: async () => {
+      const { data } = await supabase.from('employee_advances').select('employee_id,amount').eq('salary_month', month)
+      const agg: Record<string,number> = {}
+      for (const r of (data ?? [])) agg[r.employee_id] = (agg[r.employee_id]??0) + (r.amount??0)
+      return agg
+    }
+  })
+  const { data: deductions } = useQuery({
+    queryKey: ['emp_deductions_bulk', monthDate],
+    queryFn: async () => {
+      const { data } = await supabase.from('employee_deductions').select('employee_id,amount').eq('deduction_month', monthDate).eq('status','pending')
+      const agg: Record<string,number> = {}
+      for (const r of (data ?? [])) agg[r.employee_id] = (agg[r.employee_id]??0) + (r.amount??0)
+      return agg
+    }
+  })
+
+  React.useEffect(() => {
+    if (!salaries) return
+    const map: Record<string,string> = {}
+    for (const s of (salaries as any[])) if (s.employee_id) map[s.employee_id] = String(s.absent_days ?? 0)
+    setAbsentMap(map)
+  }, [salaries, monthDate])
+
+  const saveAttendance = async () => {
+    if (!employees?.length) { toast.error('No employees loaded'); return }
+    setSaving(true)
+    try {
+      const records = (employees as any[]).map(emp => {
+        const absentDays = parseFloat(absentMap[emp.id] ?? '0') || 0
+        const calc = computeSalaryForEmp(emp, {
+          absentDays,
+          furtherAdvance: (advances as any)?.[emp.id] ?? 0,
+          otherDeduction: (deductions as any)?.[emp.id] ?? 0,
+        })
+        return { employee_id: emp.id, month: monthDate, ...calc }
+      })
+      const { error } = await supabase.from('salary_monthly').upsert(records, { onConflict: 'employee_id,month' })
+      if (error) throw error
+      await refetchSalaries()
+      qc.invalidateQueries({ queryKey: ['bulk_salary'] })
+      toast.success(`Salaries calculated for ${records.length} employees`)
+      setTab('salary')
+    } catch (e: any) { toast.error(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const exportPayrollExcel = () => {
+    if (!salaries?.length) { toast.error('No salary data — save attendance first'); return }
+    const headers = [
+      'Emp Code','Name','Zone/Area','Category','Designation','Location/Branch',
+      'Month Days','Absent Days','Paid Days','Extra Days',
+      'Gross Rate','Basic Rate','HRA Rate','Other Defray',
+      'Basic Earned','HRA Earned','Gross Earned','Extra Pay','Total Earning',
+      'ESI Emp @0.75%','ESI Er @3.25%','PF Emp @12%','VPF',
+      'EPS @8.33%','EPF Diff @3.67%','Admin @0.5%','EDLI @0.5%',
+      'PT','LWF','TDS','Other Deduction','Advance Adjusted','Net Payable',
+      'Adv Opening','Further Advance','Adv Closing','Monthly CTC'
+    ]
+    const rows = (salaries as any[]).map(r => {
+      const e = r.employees ?? {}
+      return [
+        e.emp_id??'', e.name??'', e.zone_area??'', e.emp_category??'', e.designation??'', e.location_branch??'',
+        r.month_days??30, r.absent_days??0, r.total_paid_days??30, r.extra_days??0,
+        r.gross_rate??0, r.basic_rate??0, r.hra_rate??0, r.other_defray??0,
+        r.basic_salary??0, r.hra??0, r.gross_salary??0, r.extra_pay??0, r.total_earning??r.gross_salary??0,
+        r.esi_employee??0, r.esi_employer??0, r.pf_employee??0, r.vpf??0,
+        r.employer_eps??0, r.employer_epf_diff??0, r.admin_charges??0, r.edli_charge??0,
+        r.pt??0, r.lwf??0, r.tds??0, r.other_deduction??0, r.advance??0, r.net_salary??0,
+        r.advance_opening??0, r.further_advance??0, r.advance_closing??0, r.monthly_ctc??0,
+      ]
+    })
+    const totRow = ['','TOTAL','','','','','','','','',
+      '','','','',
+      ...(['basic_salary','hra','gross_salary','extra_pay','total_earning',
+           'esi_employee','esi_employer','pf_employee','vpf',
+           'employer_eps','employer_epf_diff','admin_charges','edli_charge',
+           'pt','lwf','tds','other_deduction','advance','net_salary',
+           'advance_opening','further_advance','advance_closing','monthly_ctc'] as string[])
+        .map(k=>(salaries as any[]).reduce((s,r)=>s+(r[k]??0),0))
+    ]
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows, totRow])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Payroll')
+    XLSX.writeFile(wb, `Payroll_${month}.xlsx`)
+    toast.success(`Payroll_${month}.xlsx downloaded`)
+  }
+
+  const exportKotakCMS = () => {
+    if (!salaries?.length) { toast.error('No salary data'); return }
+    const payMap: Record<string,{name:string;ifsc:string;amount:number;empCodes:string[]}> = {}
+    for (const r of (salaries as any[])) {
+      const emp = r.employees ?? {}
+      const net = r.net_salary ?? 0
+      if (net <= 0) continue
+      const pm = emp.payment_mode ?? 'own_account'
+      if (pm === 'cash') continue
+      let acct = emp.account_no ?? ''
+      let ifsc  = emp.ifsc ?? ''
+      let beneName = emp.name ?? ''
+      if (pm === 'shared_account' && emp.shared_with_emp_id) {
+        const holder = (employees as any[])?.find((e:any) => e.id === emp.shared_with_emp_id)
+        if (holder) { acct = holder.account_no??''; ifsc = holder.ifsc??''; beneName = holder.name??'' }
+      }
+      if (!acct) continue
+      if (!payMap[acct]) payMap[acct] = { name: beneName, ifsc, amount: 0, empCodes: [] }
+      payMap[acct].amount += net
+      payMap[acct].empCodes.push(emp.emp_id ?? emp.name ?? '')
+    }
+    const cashList = (salaries as any[]).filter(r => (r.employees?.payment_mode??'own_account')==='cash' && (r.net_salary??0)>0)
+
+    // Kotak CIB salary upload format
+    const cmsHeaders = ['Record Type','TXN Amount','Beneficiary Account Number','IFSC Code','Payment Mode','Beneficiary Name','Debit Narration','Credit Narration','Reference No','Contact No','Email ID']
+    const cmsRows = Object.entries(payMap).map(([acct,v],i) => [
+      'D', v.amount.toFixed(2), acct, v.ifsc, 'NEFT',
+      v.name, `Salary ${month}`, `Salary ${month}`, `SAL${String(i+1).padStart(4,'0')}`, '', ''
+    ])
+    const total = Object.values(payMap).reduce((s,v)=>s+v.amount,0)
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([cmsHeaders, ...cmsRows])
+    XLSX.utils.book_append_sheet(wb, ws, 'CMS Upload')
+
+    if (cashList.length) {
+      const cashHdr = ['Emp Code','Name','Site','Net Salary (Cash)']
+      const cashRows = cashList.map((r:any)=>[r.employees?.emp_id??'',r.employees?.name??'',r.employees?.farms?.name??'',r.net_salary??0])
+      cashRows.push(['','TOTAL','',cashList.reduce((s:number,r:any)=>s+(r.net_salary??0),0)])
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([cashHdr,...cashRows]), 'Cash Payments')
+    }
+
+    // Summary sheet
+    const sumHdr = ['Employee Code','Employee Name','Payment Method','Account','Net Salary','Notes']
+    const sumRows = (salaries as any[]).filter(r=>(r.net_salary??0)>0).map((r:any)=>{
+      const emp=r.employees??{}
+      const pm=emp.payment_mode??'own_account'
+      const isShared=pm==='shared_account'
+      const holder=isShared?(employees as any[])?.find((e:any)=>e.id===emp.shared_with_emp_id):null
+      return [emp.emp_id??'',emp.name??'',pm==='cash'?'Cash':isShared?'Shared Account':'Own Account',
+        isShared?(holder?.account_no??''):(emp.account_no??''),r.net_salary??0,
+        isShared?`→ ${holder?.name??'?'}`:'']
+    })
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([sumHdr,...sumRows]), 'Payment Summary')
+
+    XLSX.writeFile(wb, `Kotak_CMS_Salary_${month}.xlsx`)
+    toast.success(`CMS file downloaded · Bank total: ₹${total.toLocaleString('en-IN')}`)
+  }
+
+  const farmOptions = (farms as any[]??[]).map((f:any)=>({value:f.id,label:f.name}))
+  const monthLabel = (() => { const [y,m] = month.split('-'); return `${MONTH_NAMES[parseInt(m)-1]} ${y}` })()
+  const salaryTotals = React.useMemo(() => (salaries??[]).reduce((acc:any,r:any)=>({
+    earning: acc.earning+(r.total_earning??r.gross_salary??0),
+    esi: acc.esi+(r.esi_employee??0), pf: acc.pf+(r.pf_employee??0),
+    pt: acc.pt+(r.pt??0), advance: acc.advance+(r.advance??0),
+    net: acc.net+(r.net_salary??0), ctc: acc.ctc+(r.monthly_ctc??0),
+  }),{earning:0,esi:0,pf:0,pt:0,advance:0,net:0,ctc:0}),[salaries])
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Bulk Salary Processing" subtitle="Enter attendance → auto-calculate salaries → export payroll Excel + Kotak CMS"/>
+
+      <div className="flex gap-3 flex-wrap items-end">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
+          <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"/>
+        </div>
+        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
+        {filterFarm && <Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
+      </div>
+
+      <div className="flex gap-1 border-b border-gray-200">
+        {([['attendance','1. Attendance'],['salary','2. Salary Review'],['payment','3. Payment / CMS']] as [string,string][]).map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k as any)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab===k?'border-brand-600 text-brand-700':'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab 1: Attendance ── */}
+      {tab==='attendance' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-sm text-gray-600">Enter absent days for <strong>{monthLabel}</strong>. Advances and flock deductions are pulled automatically.</p>
+            <Button onClick={saveAttendance} loading={saving}>Save & Calculate Salaries</Button>
+          </div>
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th>Code</Th><Th>Name</Th><Th>Site</Th><Th>Designation</Th>
+                <Th right>Base Salary</Th><Th right>Advances</Th><Th right>Flock Ded.</Th><Th right>Absent Days</Th>
+              </tr></thead>
+              <tbody>
+                {(employees as any[]??[]).map((emp:any)=>(
+                  <tr key={emp.id} className="hover:bg-gray-50">
+                    <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
+                    <Td className="font-medium text-sm">{emp.name}</Td>
+                    <Td className="text-xs text-gray-500">{emp.farms?.name??'—'}</Td>
+                    <Td className="text-xs">{emp.designation??'—'}</Td>
+                    <Td right className="text-sm">{emp.base_salary?inr(emp.base_salary):'—'}</Td>
+                    <Td right className="text-orange-600 text-xs">{((advances as any)||{})[emp.id]>0?inr(((advances as any)||{})[emp.id]):'—'}</Td>
+                    <Td right className="text-purple-600 text-xs">{((deductions as any)||{})[emp.id]>0?inr(((deductions as any)||{})[emp.id]):'—'}</Td>
+                    <Td right>
+                      <input type="number" min={0} max={31} step={0.5} value={absentMap[emp.id]??'0'}
+                        onChange={e=>setAbsentMap(m=>({...m,[emp.id]:e.target.value}))}
+                        className="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-brand-500"/>
+                    </Td>
+                  </tr>
+                ))}
+                {!employees?.length && <tr><Td colSpan={8} className="text-center text-gray-400 py-6">No employees found</Td></tr>}
+              </tbody>
+            </Table>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Tab 2: Salary Review ── */}
+      {tab==='salary' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-sm text-gray-600">{salaries?.length??0} employees · {monthLabel}</p>
+            <Button variant="outline" icon={<Download size={14}/>} onClick={exportPayrollExcel}>Export Payroll Excel</Button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card><p className="text-xs text-gray-400">Total Earning</p><p className="text-lg font-bold">{inr(salaryTotals.earning)}</p></Card>
+            <Card><p className="text-xs text-gray-400">ESI + PF + PT</p><p className="text-lg font-bold text-red-600">{inr(salaryTotals.esi+salaryTotals.pf+salaryTotals.pt)}</p></Card>
+            <Card><p className="text-xs text-gray-400">Net Payable</p><p className="text-lg font-bold text-green-700">{inr(salaryTotals.net)}</p></Card>
+            <Card><p className="text-xs text-gray-400">Monthly CTC</p><p className="text-lg font-bold text-brand-700">{inr(salaryTotals.ctc)}</p></Card>
+          </div>
+          <div className="overflow-x-auto">
+            <Card padding={false}>
+              <Table>
+                <thead><tr>
+                  <Th>Code</Th><Th>Name</Th><Th>Site</Th>
+                  <Th right>Paid Days</Th><Th right>Extra</Th><Th right>Total Earning</Th>
+                  <Th right>ESI</Th><Th right>PF</Th><Th right>PT</Th>
+                  <Th right>Advance</Th><Th right>Flock Ded.</Th><Th right>Net Payable</Th><Th right>CTC</Th>
+                </tr></thead>
+                <tbody>
+                  {(salaries as any[]??[]).map((r:any)=>{
+                    const emp=r.employees??{}
+                    return (
+                      <tr key={r.id} className="hover:bg-gray-50">
+                        <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
+                        <Td className="font-medium text-sm">{emp.name??'—'}</Td>
+                        <Td className="text-xs text-gray-500">{emp.farms?.name??'—'}</Td>
+                        <Td right>{r.total_paid_days??r.days_worked??'—'}</Td>
+                        <Td right className="text-green-600">{r.extra_days??0}</Td>
+                        <Td right className="font-medium">{inr(r.total_earning??r.gross_salary??0)}</Td>
+                        <Td right className="text-xs">{(r.esi_employee??0)>0?inr(r.esi_employee):'—'}</Td>
+                        <Td right className="text-xs">{(r.pf_employee??0)>0?inr(r.pf_employee):'—'}</Td>
+                        <Td right className="text-xs">{(r.pt??0)>0?inr(r.pt):'—'}</Td>
+                        <Td right className="text-orange-600">{(r.advance??0)>0?inr(r.advance):'—'}</Td>
+                        <Td right className="text-purple-600">{(r.other_deduction??0)>0?inr(r.other_deduction):'—'}</Td>
+                        <Td right className="font-semibold text-green-700">{inr(r.net_salary??0)}</Td>
+                        <Td right className="text-xs text-brand-700">{(r.monthly_ctc??0)>0?inr(r.monthly_ctc):'—'}</Td>
+                      </tr>
+                    )
+                  })}
+                  {(salaries as any[]??[]).length>0 && (
+                    <tr className="bg-gray-50 font-semibold">
+                      <Td colSpan={5}>TOTAL ({salaries?.length})</Td>
+                      <Td right>{inr(salaryTotals.earning)}</Td>
+                      <Td right className="text-xs">{inr(salaryTotals.esi)}</Td>
+                      <Td right className="text-xs">{inr(salaryTotals.pf)}</Td>
+                      <Td right className="text-xs">{inr(salaryTotals.pt)}</Td>
+                      <Td right className="text-orange-600">{inr(salaryTotals.advance)}</Td>
+                      <Td right></Td>
+                      <Td right className="text-green-700">{inr(salaryTotals.net)}</Td>
+                      <Td right className="text-brand-700">{inr(salaryTotals.ctc)}</Td>
+                    </tr>
+                  )}
+                  {!salaries?.length && <tr><Td colSpan={13} className="text-center text-gray-400 py-6">No salary data — go to Attendance tab and save first</Td></tr>}
+                </tbody>
+              </Table>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab 3: Payment / CMS ── */}
+      {tab==='payment' && (
+        <div className="space-y-5">
+          <div className="flex gap-2 flex-wrap">
+            <Button icon={<Download size={14}/>} onClick={exportKotakCMS}>Export Kotak CMS File</Button>
+          </div>
+
+          <div>
+            <h3 className="font-semibold text-gray-800 mb-3">Bank Transfers</h3>
+            <Card padding={false}>
+              <Table>
+                <thead><tr>
+                  <Th>Code</Th><Th>Name</Th><Th>Payment Mode</Th>
+                  <Th>Account No</Th><Th>IFSC</Th><Th right>Net Payable</Th><Th>Notes</Th>
+                </tr></thead>
+                <tbody>
+                  {(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')!=='cash'&&(r.net_salary??0)>0).map((r:any)=>{
+                    const emp=r.employees??{}
+                    const isShared=(emp.payment_mode??'own_account')==='shared_account'
+                    const holder=isShared?(employees as any[]??[]).find((e:any)=>e.id===emp.shared_with_emp_id):null
+                    return (
+                      <tr key={r.id} className="hover:bg-gray-50">
+                        <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
+                        <Td className="font-medium">{emp.name}</Td>
+                        <Td><Badge color={isShared?'yellow':'green'}>{isShared?'Shared':'Own Account'}</Badge></Td>
+                        <Td className="text-xs font-mono">{isShared?(holder?.account_no??'—'):(emp.account_no??'—')}</Td>
+                        <Td className="text-xs">{isShared?(holder?.ifsc??'—'):(emp.ifsc??'—')}</Td>
+                        <Td right className="font-semibold text-green-700">{inr(r.net_salary??0)}</Td>
+                        <Td className="text-xs text-gray-400">{isShared?`→ ${holder?.name??'?'}`:'—'}</Td>
+                      </tr>
+                    )
+                  })}
+                  {!(salaries as any[]??[]).some((r:any)=>(r.employees?.payment_mode??'own_account')!=='cash')&&
+                    <tr><Td colSpan={7} className="text-center text-gray-400 py-4">No bank transfer employees</Td></tr>}
+                </tbody>
+              </Table>
+            </Card>
+          </div>
+
+          {(salaries as any[]??[]).some(r=>(r.employees?.payment_mode??'own_account')==='cash') && (
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-3">Cash Payments</h3>
+              <Card padding={false}>
+                <Table>
+                  <thead><tr><Th>Code</Th><Th>Name</Th><Th>Site</Th><Th right>Net Payable</Th></tr></thead>
+                  <tbody>
+                    {(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash').map((r:any)=>{
+                      const emp=r.employees??{}
+                      return (
+                        <tr key={r.id} className="hover:bg-gray-50">
+                          <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
+                          <Td className="font-medium">{emp.name}</Td>
+                          <Td className="text-xs text-gray-500">{emp.farms?.name??'—'}</Td>
+                          <Td right className="font-semibold text-green-700">{inr(r.net_salary??0)}</Td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </Table>
+              </Card>
+            </div>
           )}
         </div>
       )}
