@@ -132,9 +132,7 @@ const NAV: NavItem[] = [
   {
     label: 'Inventory', icon: <Database size={18}/>,
     children: [
-      { label: 'Stock Balance',   to: '/inventory' },
-      { label: 'Stock Ledger',    to: '/inventory/ledger' },
-      { label: 'Adjustments',     to: '/inventory/adjustments' },
+      { label: 'Inventory', to: '/inventory' },
     ]
   },
   {
