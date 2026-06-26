@@ -1426,7 +1426,7 @@ export const NHESales: React.FC = () => {
         const totalM = (remaining ?? []).reduce((s, x) =>
           s + (x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
         const { data: drRows } = await supabase.from('daily_records')
-          .select('id,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
+          .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
           .eq('flock_id', flock_id).eq('record_date', sale_date).order('id')
         if (!drRows || drRows.length === 0) continue
         const dr = drRows[0]
@@ -1649,7 +1649,7 @@ export const NHESales: React.FC = () => {
           s + (x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
 
         const { data: drRows } = await supabase.from('daily_records')
-          .select('id,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
+          .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
           .eq('flock_id', flockId).eq('record_date', saleDate).order('id')
 
         if (drRows && drRows.length > 0) {
