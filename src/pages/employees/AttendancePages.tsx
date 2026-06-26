@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const escape = (v: string|number|null|undefined) => `"${String(v??'').replace(/"/g,'""')}"`
@@ -416,7 +417,7 @@ export const MonthAttendancePage: React.FC = () => {
 
 // ── EMPLOYEE ADVANCES ─────────────────────────────────────────────────────────
 
-const ADVANCE_TYPES = [
+const ADVANCE_TYPES_FB = [
   { value: 'cash', label: 'Cash Advance' },
   { value: 'egg', label: 'Egg Advance (eggs given)' },
   { value: 'other', label: 'Other Deduction' },
@@ -429,6 +430,7 @@ const EMPTY_FORM = {
 
 export const EmployeeAdvancesPage: React.FC = () => {
   const qc = useQueryClient()
+  const ADVANCE_TYPES = useConfigOptions('advance_type', ADVANCE_TYPES_FB)
   const today = new Date()
   const curMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
   const [farmId, setFarmId] = useState('')

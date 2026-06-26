@@ -11,16 +11,17 @@ import { Plus, Trash2, Download, Upload, Pencil, ArrowLeftRight } from 'lucide-r
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import { parseFile } from '@/lib/parseFile'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Fallback constants (used only if DB is empty) ─────────────────────────────
 
-const TXN_TYPES = [
+const TXN_TYPES_FB = [
   { value: 'receipt', label: 'Receipt' },
   { value: 'payment', label: 'Payment' },
   { value: 'contra',  label: 'Contra' },
 ]
 
-const CATEGORIES = [
+const CATEGORIES_FB = [
   { value: 'sales_collection', label: 'Sales Collection (General)' },
   { value: 'he_sale',          label: 'HE Egg Sale' },
   { value: 'je_sale',          label: 'Jumbo Egg Sale (JE)' },
@@ -35,7 +36,7 @@ const CATEGORIES = [
   { value: 'other',            label: 'Other' },
 ]
 
-const PAYMENT_MODES = [
+const PAYMENT_MODES_FB = [
   { value: 'cash',   label: 'Cash' },
   { value: 'upi',    label: 'UPI' },
   { value: 'cheque', label: 'Cheque' },
@@ -99,6 +100,10 @@ function emptyForm() {
 export const CashBookPage: React.FC = () => {
   const qc = useQueryClient()
   const importRef = useRef<HTMLInputElement>(null)
+
+  const TXN_TYPES    = useConfigOptions('txn_type', TXN_TYPES_FB)
+  const CATEGORIES   = useConfigOptions('cashbook_category', CATEGORIES_FB)
+  const PAYMENT_MODES = useConfigOptions('payment_method', PAYMENT_MODES_FB)
 
   // Date range filter — default current month
   const defaultRange = currentMonthRange()

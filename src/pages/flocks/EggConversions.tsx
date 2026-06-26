@@ -9,8 +9,9 @@ import {
 , DateInput } from '@/components/ui'
 import { Plus, ArrowRight } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
-const EGG_TYPES = [
+const EGG_TYPES_FB = [
   { value: 'he_grade_a', label: 'HE Grade A' },
   { value: 'he_grade_b', label: 'HE Grade B' },
   { value: 'he_grade_c', label: 'HE Grade C' },
@@ -23,6 +24,7 @@ const EGG_TYPES = [
 export const EggConversions: React.FC = () => {
   const qc = useQueryClient()
   const { applyFlockFarmFilter, farmId } = useFarmScope()
+  const EGG_TYPES = useConfigOptions('egg_type', EGG_TYPES_FB)
   const [showForm, setShowForm] = useState(false)
   const [flockFilter, setFlockFilter] = useState('')
 

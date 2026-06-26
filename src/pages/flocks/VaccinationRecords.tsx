@@ -8,6 +8,7 @@ import {
 , DateInput } from '@/components/ui'
 import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -22,11 +23,12 @@ const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCanc
   </div>
 )
 
-const ROUTES = ['drinking_water', 'eye_drop', 'injection', 'spray']
-const ROUTE_LABELS: Record<string, string> = {
-  drinking_water: 'Drinking Water', eye_drop: 'Eye Drop',
-  injection: 'Injection', spray: 'Spray'
-}
+const ROUTES_FB = [
+  { value: 'drinking_water', label: 'Drinking Water' },
+  { value: 'eye_drop',       label: 'Eye Drop' },
+  { value: 'injection',      label: 'Injection' },
+  { value: 'spray',          label: 'Spray' },
+]
 
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
   const ref = React.useRef<HTMLInputElement>(null)
@@ -43,6 +45,8 @@ const empty = () => ({
 
 export const VaccinationRecordsPage: React.FC = () => {
   const qc = useQueryClient()
+  const ROUTES = useConfigOptions('vaccine_route', ROUTES_FB)
+  const routeLabel = (v: string) => ROUTES.find(r => r.value === v)?.label ?? v
   const [editing, setEditing] = useState<any | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(empty())
@@ -157,7 +161,7 @@ export const VaccinationRecordsPage: React.FC = () => {
       vaccine_date: r.vaccine_date ?? '',
       vaccine_name: r.vaccine_name ?? '',
       dose_no: r.dose_no ?? '',
-      route: r.route ? (ROUTE_LABELS[r.route] ?? r.route) : '',
+      route: r.route ? routeLabel(r.route) : '',
       shed_site: r.sheds ? `Shed ${r.sheds.shed_no}` : r.farms?.name ?? '',
       quantity: r.quantity ?? '',
       unit: r.unit ?? '',
@@ -239,7 +243,7 @@ export const VaccinationRecordsPage: React.FC = () => {
               <Input label="Dose No." type="number" value={form.dose_no} onChange={e => s('dose_no', e.target.value)} />
             </FormRow>
             <FormRow>
-              <Select label="Route" placeholder="— Select Route —" options={ROUTES.map(r => ({ value: r, label: ROUTE_LABELS[r] }))} value={form.route} onChange={e => s('route', e.target.value)} />
+              <Select label="Route" placeholder="— Select Route —" options={ROUTES} value={form.route} onChange={e => s('route', e.target.value)} />
               <Input label="Quantity" type="number" value={form.quantity} onChange={e => s('quantity', e.target.value)} />
               <Input label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} placeholder="ml, doses…" />
             </FormRow>
@@ -291,7 +295,7 @@ export const VaccinationRecordsPage: React.FC = () => {
                     <Td className="text-xs">{fmtDate(r.vaccine_date)}</Td>
                     <Td className="text-sm font-medium">{r.vaccine_name}</Td>
                     <Td className="text-xs">#{r.dose_no}</Td>
-                    <Td className="text-xs">{r.route ? ROUTE_LABELS[r.route] ?? r.route : '—'}</Td>
+                    <Td className="text-xs">{r.route ? routeLabel(r.route) : '—'}</Td>
                     <Td className="text-xs">{r.sheds ? `Shed ${r.sheds.shed_no}` : r.farms?.name ?? '—'}</Td>
                     <Td right className="text-xs">{r.cost ? `₹${r.cost.toLocaleString('en-IN')}` : '—'}</Td>
                     <Td className="text-xs">
@@ -336,7 +340,7 @@ export const VaccinationRecordsPage: React.FC = () => {
                 <tr key={s.id} className="hover:bg-gray-50">
                   <Td className="text-xs font-semibold">Wk {s.week_no}</Td>
                   <Td className="text-sm">{s.vaccine_name}</Td>
-                  <Td className="text-xs">{s.route ? ROUTE_LABELS[s.route] ?? s.route : '—'}</Td>
+                  <Td className="text-xs">{s.route ? routeLabel(s.route) : '—'}</Td>
                   <Td className="text-xs">#{s.dose_no ?? 1}</Td>
                   <Td className="text-xs text-gray-500">{s.notes ?? '—'}</Td>
                 </tr>

@@ -30,7 +30,7 @@ const CAT_COLORS: Record<string, any> = {
   insurance: 'gray', admin: 'gray', veterinary: 'green', equipment: 'blue', other: 'gray'
 }
 
-const PAYMENT_MODES = [
+const PAYMENT_MODES_FB = [
   { value: 'cash',   label: 'Cash' },
   { value: 'bank',   label: 'Bank Transfer' },
   { value: 'credit', label: 'Credit/Pending' },
@@ -51,7 +51,8 @@ const emptyForm = () => ({
 export const FarmExpensesPage: React.FC = () => {
   const qc = useQueryClient()
   const importRef = useRef<HTMLInputElement>(null)
-  const CATEGORIES = useConfigOptions('farm_expense', CATEGORIES_FB)
+  const CATEGORIES    = useConfigOptions('farm_expense', CATEGORIES_FB)
+  const PAYMENT_MODES = useConfigOptions('expense_payment_mode', PAYMENT_MODES_FB)
 
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)

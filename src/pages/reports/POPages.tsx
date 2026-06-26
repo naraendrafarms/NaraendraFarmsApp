@@ -27,10 +27,10 @@ import toast from 'react-hot-toast'
 import { useConfigOptions, useConfigValues } from '@/hooks/useConfigOptions'
 
 // ── constants ─────────────────────────────────────────────────────
-const PAY_STATUS   = ['Paid', 'Pending', 'Not Paid', 'HOLD']
-const MAT_STATUS   = ['Received', 'Pending']
-const MAT_TYPES_FB = ['Feed Raw Material','Medicine','Oral Medicine','Feed Medicine','Vaccine','Larvender','Feedmill Transport','Other']
-const ACCT_TYPES   = ['Online','Cash','NEFT','RTGS','IMPS','Cheque']
+const PAY_STATUS_FB  = ['Paid', 'Pending', 'Not Paid', 'HOLD']
+const MAT_STATUS_FB  = ['Received', 'Pending']
+const MAT_TYPES_FB   = ['Feed Raw Material','Medicine','Oral Medicine','Feed Medicine','Vaccine','Larvender','Feedmill Transport','Other']
+const ACCT_TYPES_FB  = ['Online','Cash','NEFT','RTGS','IMPS','Cheque']
 const TXN_CATS     = ['Payment to Vendor','Sales Receipt','Salary','Electricity','Other Income','Other Expense']
 const FY_OPTIONS   = [{ value:'2024-25',label:'FY 2024-25'},{ value:'2025-26',label:'FY 2025-26'},{ value:'2026-27',label:'FY 2026-27'}]
 
@@ -155,7 +155,10 @@ const POTab: React.FC = () => {
   const { profile } = useAuth()
   const canEdit = can.editPurchase(profile?.role)
   const canDel  = can.delete(profile?.role)
-  const MAT_TYPES = useConfigValues('material_type', MAT_TYPES_FB)
+  const MAT_TYPES  = useConfigValues('material_type', MAT_TYPES_FB)
+  const PAY_STATUS = useConfigValues('payment_status', PAY_STATUS_FB)
+  const MAT_STATUS = useConfigValues('material_status', MAT_STATUS_FB)
+  const ACCT_TYPES = useConfigValues('payment_method', ACCT_TYPES_FB)
   const [importOpen, setImportOpen] = useState(false)
   const [fy, setFy]           = useState(currentFY)
   const [typeF, setTypeF]     = useState('')
@@ -861,7 +864,10 @@ const PaymentsTab: React.FC = () => {
   const { profile } = useAuth()
   const canEdit = can.editPurchase(profile?.role)
   const canDel  = can.delete(profile?.role)
-  const MAT_TYPES = useConfigValues('material_type', MAT_TYPES_FB)
+  const MAT_TYPES  = useConfigValues('material_type', MAT_TYPES_FB)
+  const PAY_STATUS = useConfigValues('payment_status', PAY_STATUS_FB)
+  const MAT_STATUS = useConfigValues('material_status', MAT_STATUS_FB)
+  const ACCT_TYPES = useConfigValues('payment_method', ACCT_TYPES_FB)
   const [statusF, setStatusF]   = useState('')
   const [typeF, setTypeF]       = useState('')
   const [monthF, setMonthF]     = useState('')
