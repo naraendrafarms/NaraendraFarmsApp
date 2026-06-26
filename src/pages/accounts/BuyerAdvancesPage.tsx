@@ -201,7 +201,7 @@ export const BuyerAdvancesPage: React.FC = () => {
         <div className="space-y-4 p-1">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
-            <DateInput value={form.advance_date} onChange={v => set('advance_date', v)} />
+            <DateInput value={form.advance_date} onChange={e => set('advance_date', e.target.value)} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Party *</label>

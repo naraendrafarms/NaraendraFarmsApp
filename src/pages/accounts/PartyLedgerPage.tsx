@@ -123,11 +123,11 @@ export const PartyLedgerPage: React.FC = () => {
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">From Date</label>
-          <DateInput value={fromDate} onChange={setFromDate} />
+          <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)} />
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">To Date</label>
-          <DateInput value={toDate} onChange={setToDate} />
+          <DateInput value={toDate} onChange={e => setToDate(e.target.value)} />
         </div>
       </Card>
 
