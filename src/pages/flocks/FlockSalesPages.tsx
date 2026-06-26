@@ -955,7 +955,7 @@ export const HEDispatch: React.FC = () => {
       {tab === 'stock' && (
         <Card padding={false}>
           <div className="px-4 py-3 border-b border-gray-100 bg-blue-50 text-sm text-blue-700">
-            Running balance per flock = Opening stock + Production − Dispatched. Broken/Leached shown for reference only.
+            Running balance per flock = Opening stock + Production (Grade A/B/C) − Dispatched (Grade A/B/C).
           </div>
           <Table>
             <thead>
@@ -970,7 +970,6 @@ export const HEDispatch: React.FC = () => {
                 <Th right className="text-red-500">Disp A</Th>
                 <Th right className="text-red-500">Disp B</Th>
                 <Th right className="text-red-500">Disp C</Th>
-                <Th right>Broken</Th><Th right>Leached</Th>
                 <Th right className="text-purple-700">Bal A</Th>
                 <Th right className="text-purple-700">Bal B</Th>
                 <Th right className="text-purple-700">Bal C</Th>
@@ -991,8 +990,6 @@ export const HEDispatch: React.FC = () => {
                   <Td right className="text-red-500">{r.disp_a > 0 ? `-${r.disp_a.toLocaleString('en-IN')}` : '—'}</Td>
                   <Td right className="text-red-500">{r.disp_b > 0 ? `-${r.disp_b.toLocaleString('en-IN')}` : '—'}</Td>
                   <Td right className="text-red-500">{r.disp_c > 0 ? `-${r.disp_c.toLocaleString('en-IN')}` : '—'}</Td>
-                  <Td right className="text-gray-500">{r.broken > 0 ? r.broken.toLocaleString('en-IN') : '—'}</Td>
-                  <Td right className="text-gray-500">{r.leached > 0 ? r.leached.toLocaleString('en-IN') : '—'}</Td>
                   <Td right className={`font-medium bg-purple-50/30 ${r.bal_a < 0 ? 'text-red-600' : 'text-purple-700'}`}>{r.bal_a.toLocaleString('en-IN')}</Td>
                   <Td right className={`font-medium bg-purple-50/30 ${r.bal_b < 0 ? 'text-red-600' : 'text-purple-700'}`}>{r.bal_b.toLocaleString('en-IN')}</Td>
                   <Td right className={`font-medium bg-purple-50/30 ${r.bal_c < 0 ? 'text-red-600' : 'text-purple-700'}`}>{r.bal_c.toLocaleString('en-IN')}</Td>
@@ -1000,7 +997,7 @@ export const HEDispatch: React.FC = () => {
                 </tr>
               ))}
               {(stockData ?? []).length === 0 && (
-                <tr><Td colSpan={17} className="text-center text-gray-400 py-8">No data — add daily records with grade breakdown and dispatches first</Td></tr>
+                <tr><Td colSpan={15} className="text-center text-gray-400 py-8">No data — add daily records with grade breakdown and dispatches first</Td></tr>
               )}
             </tbody>
           </Table>
