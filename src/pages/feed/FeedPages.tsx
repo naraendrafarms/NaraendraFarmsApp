@@ -288,7 +288,7 @@ export const GRNEntry: React.FC = () => {
 
   const farmOptions = farms?.map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
-  const ingrOptions = ingredients?.map((i: any) => ({ value: i.id, label: `${i.code} — ${i.name}` })) ?? []
+  const ingrOptions = ingredients?.map((i: any) => ({ value: i.id, label: i.code ? `${i.code} — ${i.name}` : i.name })) ?? []
   const medOptions  = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.type})` })) ?? []
   const categoryOptions = [
     { value: 'Feed',       label: 'Feed / Raw Material' },

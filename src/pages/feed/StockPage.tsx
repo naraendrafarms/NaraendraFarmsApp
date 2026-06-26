@@ -9,7 +9,7 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
 
   const { data: ingredients, isLoading: loadIng } = useQuery({
     queryKey: ['ingredients'],
-    queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit').eq('is_active', true).order('code'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit,category').eq('is_active', true).order('code'); return data ?? [] }
   })
 
   const { data: grns, isLoading: loadGrn } = useQuery({
@@ -56,21 +56,25 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
       dateMap[g.ingredient_id] = g.grn_date
     }
 
-    return ingredients.map((ing: any) => {
-      const totalIn = inMap[ing.id] ?? 0
-      const totalOut = outMap[ing.id] ?? 0
-      const balance = totalIn - totalOut
-      const rate = priceMap[ing.id] ?? 0
-      return {
-        ...ing,
-        total_in: totalIn,
-        total_out: totalOut,
-        balance,
-        rate,
-        value: balance * rate,
-        last_grn: dateMap[ing.id] ?? null,
-      }
-    })
+    const FEED_CATS = ['grain','protein','mineral','supplement','additive','other']
+    return ingredients
+      .map((ing: any) => {
+        const totalIn = inMap[ing.id] ?? 0
+        const totalOut = outMap[ing.id] ?? 0
+        const balance = totalIn - totalOut
+        const rate = priceMap[ing.id] ?? 0
+        return {
+          ...ing,
+          total_in: totalIn,
+          total_out: totalOut,
+          balance,
+          rate,
+          value: balance * rate,
+          last_grn: dateMap[ing.id] ?? null,
+        }
+      })
+      // Hide items with no category (auto-added/wrong table) that have zero stock
+      .filter((r: any) => FEED_CATS.includes(r.category) || r.total_in > 0)
   }, [ingredients, grns, productionUsage, latestGrns])
 
   const totalValue = stockMap.reduce((s, r) => s + (r.value ?? 0), 0)

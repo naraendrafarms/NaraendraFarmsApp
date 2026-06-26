@@ -309,8 +309,8 @@ const POTab: React.FC = () => {
         }
       }
 
-      // Auto-add item to feed_ingredients master if not already present
-      if (receiptPO.item_name) {
+      // Auto-add to feed_ingredients ONLY for Feed Raw Material type
+      if (receiptPO.item_name && receiptPO.material_type === 'Feed Raw Material') {
         const { data: existingIngr } = await supabase.from('feed_ingredients')
           .select('id').ilike('name', receiptPO.item_name.trim()).limit(1)
         if (!existingIngr || existingIngr.length === 0) {
