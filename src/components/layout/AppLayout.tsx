@@ -68,6 +68,7 @@ const NAV: NavItem[] = [
       { label: 'Bonus',           to: '/employees/bonus' },
       { label: 'ESI / PF Report', to: '/employees/esi-pf' },
       { label: 'Payroll Summary', to: '/employees/payroll-summary' },
+      { label: 'Monthly Attendance',    to: '/employees/monthly-attendance' },
       { label: 'Daily Attendance',     to: '/employees/attendance-daily' },
       { label: 'Month Attendance',     to: '/employees/attendance-month' },
       { label: 'Attendance Register',  to: '/employees/attendance' },

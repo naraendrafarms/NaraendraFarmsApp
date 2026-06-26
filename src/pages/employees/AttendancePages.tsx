@@ -648,3 +648,332 @@ export const EmployeeAdvancesPage: React.FC = () => {
     </div>
   )
 }
+
+// ── MONTHLY ATTENDANCE GRID ───────────────────────────────────────────────────
+// One page, all employees as rows, all days as columns. Mark P/A/H/WO/OT per cell.
+// OT cells show an hours input. Save → writes attendance_daily + updates salary_monthly.
+
+const STATUS_CYCLE: Record<string, string> = { P:'A', A:'H', H:'WO', WO:'OT', OT:'P' }
+const STATUS_SHORT: Record<string, string>  = { P:'P', A:'A', H:'H', WO:'WO', OT:'OT' }
+const CELL_COLORS: Record<string, string> = {
+  P:  'bg-green-100 text-green-800',
+  A:  'bg-red-100 text-red-700',
+  H:  'bg-amber-100 text-amber-700',
+  WO: 'bg-gray-100 text-gray-400',
+  OT: 'bg-blue-100 text-blue-700',
+}
+const DAY_NAMES = ['Su','Mo','Tu','We','Th','Fr','Sa']
+const MONTH_NAMES_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+type CellKey = string  // `${empId}_${day}`
+
+function computeAbsentDays(empId: string, days: number, grid: Record<CellKey, string>): number {
+  let absent = 0
+  for (let d = 1; d <= days; d++) {
+    const s = grid[`${empId}_${d}`] ?? 'P'
+    if (s === 'A') absent += 1
+    else if (s === 'H') absent += 0.5
+  }
+  return absent
+}
+
+export const MonthlyAttendanceGridPage: React.FC = () => {
+  const qc = useQueryClient()
+  const now = new Date()
+  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`)
+  const [farmId, setFarmId] = useState('')
+  const [grid, setGrid] = useState<Record<CellKey, string>>({})       // empId_day → status
+  const [otHours, setOtHours] = useState<Record<CellKey, string>>({}) // empId_day → hours
+  const [saving, setSaving] = useState(false)
+  const [loaded, setLoaded] = useState('')  // tracks which month+farm combo is loaded
+
+  const [yr, mn] = month.split('-').map(Number)
+  const totalDays = new Date(yr, mn, 0).getDate()
+  const monthDate = `${month}-01`
+  const days = Array.from({ length: totalDays }, (_, i) => i + 1)
+
+  // Day-of-week labels for header
+  const dayLabels = days.map(d => {
+    const dow = new Date(yr, mn - 1, d).getDay()
+    return { d, dow, label: DAY_NAMES[dow], isSun: dow === 0 }
+  })
+
+  const { data: farms = [] } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name,code').eq('is_active', true).order('name')
+      return data ?? []
+    }
+  })
+
+  const { data: employees = [], isLoading: empLoading } = useQuery({
+    queryKey: ['employees_att_grid', farmId],
+    queryFn: async () => {
+      let q = supabase.from('employees')
+        .select('id,emp_id,name,designation,farm_id,farms(name)')
+        .eq('is_active', true).order('name')
+      if (farmId) q = q.eq('farm_id', farmId)
+      const { data } = await q
+      return data ?? []
+    }
+  })
+
+  // Load existing attendance for the month
+  const { data: existingAtt, isLoading: attLoading, refetch: refetchAtt } = useQuery({
+    queryKey: ['monthly_att_grid', month, farmId],
+    queryFn: async () => {
+      const start = `${month}-01`
+      const end   = `${month}-${String(totalDays).padStart(2,'0')}`
+      let q = supabase.from('attendance_daily')
+        .select('employee_id,attendance_date,status,ot_hours')
+        .gte('attendance_date', start).lte('attendance_date', end)
+      if (farmId) {
+        const empIds = (employees as any[]).map(e => e.id)
+        if (empIds.length) q = q.in('employee_id', empIds)
+      }
+      const { data } = await q
+      return data ?? []
+    },
+    enabled: (employees as any[]).length > 0,
+  })
+
+  // When attendance loads, populate the grid
+  React.useEffect(() => {
+    const key = `${month}_${farmId}`
+    if (!existingAtt || loaded === key) return
+    const newGrid: Record<string, string> = {}
+    const newOT: Record<string, string> = {}
+    for (const r of existingAtt as any[]) {
+      const d = parseInt(r.attendance_date.slice(8, 10))
+      const empId = r.employee_id
+      newGrid[`${empId}_${d}`] = r.status
+      if (r.status === 'OT' && r.ot_hours) newOT[`${empId}_${d}`] = String(r.ot_hours)
+    }
+    setGrid(newGrid)
+    setOtHours(newOT)
+    setLoaded(key)
+  }, [existingAtt, month, farmId])
+
+  // Reset loaded when month/farm changes so grid reloads
+  React.useEffect(() => { setLoaded('') }, [month, farmId])
+
+  const toggleCell = (empId: string, day: number) => {
+    const key = `${empId}_${day}`
+    const cur = grid[key] ?? 'P'
+    const next = STATUS_CYCLE[cur] ?? 'P'
+    setGrid(g => ({ ...g, [key]: next }))
+    if (next !== 'OT') setOtHours(h => { const n = { ...h }; delete n[key]; return n })
+  }
+
+  const setOT = (empId: string, day: number, val: string) => {
+    setOtHours(h => ({ ...h, [`${empId}_${day}`]: val }))
+  }
+
+  const handleSave = async () => {
+    if (!(employees as any[]).length) { toast.error('No employees loaded'); return }
+    setSaving(true)
+    try {
+      // Build upsert rows for attendance_daily
+      const rows: any[] = []
+      for (const emp of employees as any[]) {
+        for (const d of days) {
+          const key = `${emp.id}_${d}`
+          const status = grid[key] ?? 'P'
+          const dateStr = `${month}-${String(d).padStart(2,'0')}`
+          rows.push({
+            employee_id: emp.id,
+            farm_id: emp.farm_id ?? null,
+            attendance_date: dateStr,
+            status,
+            ot_hours: status === 'OT' ? (parseFloat(otHours[key] ?? '0') || 0) : 0,
+          })
+        }
+      }
+
+      // Upsert in batches of 500
+      for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await supabase.from('attendance_daily')
+          .upsert(rows.slice(i, i + 500), { onConflict: 'employee_id,attendance_date' })
+        if (error) throw error
+      }
+
+      // Auto-update salary_monthly absent days for each employee
+      const salaryRows = (employees as any[]).map(emp => {
+        const absentDays = computeAbsentDays(emp.id, totalDays, grid)
+        const presentDays = days.filter(d => {
+          const s = grid[`${emp.id}_${d}`] ?? 'P'
+          return s === 'P' || s === 'OT'
+        }).length
+        const halfDays = days.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'H').length
+        const woDays   = days.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'WO').length
+        const otDays   = days.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'OT').length
+        const totalOtHrs = days.reduce((s, d) => s + (parseFloat(otHours[`${emp.id}_${d}`] ?? '0') || 0), 0)
+        return {
+          employee_id: emp.id,
+          month: monthDate,
+          absent_days: absentDays,
+          days_in_month: totalDays,
+          present_days: presentDays,
+          half_days: halfDays,
+          wo_days: woDays,
+          ot_days: otDays,
+          ot_hours: totalOtHrs,
+        }
+      })
+
+      const { error: salErr } = await supabase.from('salary_monthly')
+        .upsert(salaryRows, { onConflict: 'employee_id,month', ignoreDuplicates: false })
+      if (salErr) throw salErr
+
+      await refetchAtt()
+      qc.invalidateQueries({ queryKey: ['bulk_salary'] })
+      qc.invalidateQueries({ queryKey: ['bulk_daily_att'] })
+      toast.success(`Attendance saved for ${(employees as any[]).length} employees · ${monthDate}`)
+    } catch (e: any) {
+      toast.error(e.message)
+    }
+    setSaving(false)
+  }
+
+  const farmOptions = [
+    { value: '', label: '— All Sites —' },
+    ...(farms as any[]).map((f: any) => ({ value: f.id, label: f.name }))
+  ]
+
+  const isLoading = empLoading || attLoading
+
+  // Per-employee summary counts
+  const summary = React.useMemo(() => {
+    const out: Record<string, Record<string, number>> = {}
+    for (const emp of employees as any[]) {
+      const counts: Record<string, number> = { P: 0, A: 0, H: 0, WO: 0, OT: 0, ot_hrs: 0 }
+      for (const d of days) {
+        const key = `${emp.id}_${d}`
+        const s = grid[key] ?? 'P'
+        counts[s] = (counts[s] ?? 0) + 1
+        if (s === 'OT') counts.ot_hrs += parseFloat(otHours[key] ?? '0') || 0
+      }
+      out[emp.id] = counts
+    }
+    return out
+  }, [grid, otHours, employees, days])
+
+  const monthLabel = `${MONTH_NAMES_FULL[mn - 1]} ${yr}`
+
+  return (
+    <div className="p-3 space-y-3">
+      <SectionHeader
+        title="Monthly Attendance"
+        subtitle={`Mark attendance for all employees — saves to daily records and updates salary`}
+        action={
+          <Button onClick={handleSave} loading={saving} disabled={!(employees as any[]).length}>
+            <Save size={15} className="mr-1"/> Save Attendance
+          </Button>
+        }
+      />
+
+      {/* Controls */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
+          <input type="month" value={month} onChange={e => { setMonth(e.target.value) }}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"/>
+        </div>
+        <div className="w-48">
+          <Select label="" options={farmOptions} value={farmId} onChange={e => setFarmId(e.target.value)}/>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex gap-3 flex-wrap text-xs">
+        {Object.entries(CELL_COLORS).map(([s, cls]) => (
+          <span key={s} className={`px-2 py-0.5 rounded font-semibold ${cls}`}>
+            {s} — {STATUS_LABELS[s] ?? s}
+          </span>
+        ))}
+        <span className="text-gray-400 ml-2">Click a cell to cycle: P → A → H → WO → OT → P</span>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-16"><Spinner size={32}/></div>
+      ) : !(employees as any[]).length ? (
+        <div className="text-center text-gray-400 py-12">No employees found{farmId ? ' for this site' : ''}</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+          <table className="min-w-full text-xs border-collapse">
+            <thead>
+              {/* Day-of-week row */}
+              <tr className="bg-gray-50">
+                <th className="sticky left-0 z-20 bg-gray-50 border-b border-r border-gray-200 px-2 py-1 text-left w-8">#</th>
+                <th className="sticky left-8 z-20 bg-gray-50 border-b border-r border-gray-200 px-3 py-1 text-left min-w-[140px]">Employee</th>
+                {dayLabels.map(({ d, label, isSun }) => (
+                  <th key={d} className={`border-b border-r border-gray-200 px-1 py-1 text-center w-9 ${isSun ? 'bg-red-50 text-red-400' : 'text-gray-400'}`}>
+                    <div>{label}</div>
+                    <div className="font-bold text-gray-700">{d}</div>
+                  </th>
+                ))}
+                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-green-50 text-green-700 w-8">P</th>
+                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-red-50 text-red-600 w-8">A</th>
+                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-amber-50 text-amber-600 w-8">H</th>
+                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-gray-50 text-gray-500 w-9">WO</th>
+                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-blue-50 text-blue-600 w-8">OT</th>
+                <th className="border-b border-gray-200 px-1 py-1 text-center bg-blue-50 text-blue-500 w-12">OT Hrs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(employees as any[]).map((emp: any, idx: number) => {
+                const s = summary[emp.id] ?? {}
+                return (
+                  <tr key={emp.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                    <td className="sticky left-0 z-10 bg-inherit border-b border-r border-gray-100 px-2 py-1 text-gray-400 font-mono">{idx+1}</td>
+                    <td className="sticky left-8 z-10 bg-inherit border-b border-r border-gray-100 px-2 py-1 min-w-[140px]">
+                      <div className="font-semibold text-gray-800 truncate">{emp.name}</div>
+                      <div className="text-gray-400">{emp.emp_id ?? ''} {emp.designation ? `· ${emp.designation}` : ''}</div>
+                    </td>
+                    {dayLabels.map(({ d, isSun }) => {
+                      const key = `${emp.id}_${d}`
+                      const status = grid[key] ?? 'P'
+                      const isOT = status === 'OT'
+                      return (
+                        <td key={d} className={`border-b border-r border-gray-100 p-0 text-center ${isSun ? 'bg-red-50/30' : ''}`}>
+                          <button
+                            onClick={() => toggleCell(emp.id, d)}
+                            className={`w-full h-full min-h-[36px] flex flex-col items-center justify-center gap-0.5 font-bold transition-colors ${CELL_COLORS[status]}`}
+                            title={STATUS_LABELS[status]}
+                          >
+                            <span>{STATUS_SHORT[status]}</span>
+                          </button>
+                          {isOT && (
+                            <input
+                              type="number" min={0} max={12} step={0.5}
+                              value={otHours[key] ?? ''}
+                              onChange={e => setOT(emp.id, d, e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              placeholder="h"
+                              className="w-full border-t border-blue-200 bg-blue-50 text-blue-700 text-center text-xs px-0 py-0.5 focus:outline-none"
+                            />
+                          )}
+                        </td>
+                      )
+                    })}
+                    {/* Summary */}
+                    <td className="border-b border-r border-gray-100 text-center font-bold text-green-700 bg-green-50/40">{s.P ?? 0}</td>
+                    <td className="border-b border-r border-gray-100 text-center font-bold text-red-600 bg-red-50/40">{s.A ?? 0}</td>
+                    <td className="border-b border-r border-gray-100 text-center font-bold text-amber-600 bg-amber-50/40">{s.H ?? 0}</td>
+                    <td className="border-b border-r border-gray-100 text-center text-gray-500 bg-gray-50/60">{s.WO ?? 0}</td>
+                    <td className="border-b border-r border-gray-100 text-center font-bold text-blue-600 bg-blue-50/40">{s.OT ?? 0}</td>
+                    <td className="border-b border-gray-100 text-center text-blue-500 bg-blue-50/40">{s.ot_hrs > 0 ? s.ot_hrs.toFixed(1) : '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400">
+        Saving updates <strong>attendance_daily</strong> (one record per employee per day) and auto-calculates absent days in <strong>salary_monthly</strong> for {monthLabel}.
+      </p>
+    </div>
+  )
+}

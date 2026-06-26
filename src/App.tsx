@@ -19,7 +19,7 @@ import { InventoryPage } from '@/pages/inventory/InventoryPages'
 import { FeedMillPage } from '@/pages/feed/FeedMillPages'
 import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
 import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage, PayslipGeneratorPage, BulkSalaryPage } from '@/pages/employees/EmployeePages'
-import { DailyAttendancePage, MonthAttendancePage, EmployeeAdvancesPage } from '@/pages/employees/AttendancePages'
+import { DailyAttendancePage, MonthAttendancePage, EmployeeAdvancesPage, MonthlyAttendanceGridPage } from '@/pages/employees/AttendancePages'
 import {
   FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster,
   ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster, VaccinationSchedulePage
@@ -163,6 +163,7 @@ export const App: React.FC = () => {
             <Route path="employees/attendance" element={<AttendanceRegisterPage />} />
             <Route path="employees/attendance-daily" element={<DailyAttendancePage />} />
             <Route path="employees/attendance-month" element={<MonthAttendancePage />} />
+            <Route path="employees/monthly-attendance" element={<MonthlyAttendanceGridPage />} />
             <Route path="employees/advances" element={<EmployeeAdvancesPage />} />
             <Route path="employees/payslip" element={<PayslipGeneratorPage />} />
             <Route path="employees/bulk-salary" element={<BulkSalaryPage />} />
