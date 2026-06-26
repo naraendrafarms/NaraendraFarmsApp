@@ -1,9 +1,9 @@
-import React, { useState } from 'react'
-import { Link, useLocation, Outlet, Navigate, useSearchParams } from 'react-router-dom'
+import React, { useState, useRef, useEffect } from 'react'
+import { Link, useLocation, Outlet, Navigate, useSearchParams, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Bird, Factory, Zap, Users, Settings,
   ChevronDown, ChevronRight, LogOut, Menu, X,
-  BarChart2, Database, Shield, ShoppingCart, BookOpen
+  BarChart2, Database, Shield, ShoppingCart, BookOpen, Search
 } from 'lucide-react'
 import { useAuth, can, type Role } from '@/lib/auth'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -254,6 +254,72 @@ const NavLink: React.FC<{ item: NavItem; collapsed: boolean }> = ({ item, collap
   )
 }
 
+// Flatten all nav items into a searchable list
+function buildSearchIndex(nav: NavItem[]): { label: string; parent: string; to: string }[] {
+  const items: { label: string; parent: string; to: string }[] = []
+  for (const item of nav) {
+    if (item.to) {
+      items.push({ label: item.label, parent: '', to: item.to })
+    }
+    if (item.children) {
+      for (const child of item.children) {
+        items.push({ label: child.label, parent: item.label, to: child.to })
+      }
+    }
+  }
+  return items
+}
+
+const GlobalSearch: React.FC<{ nav: NavItem[] }> = ({ nav }) => {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
+  const index = buildSearchIndex(nav)
+
+  const results = query.trim().length > 0
+    ? index.filter(i => i.label.toLowerCase().includes(query.toLowerCase()) || i.parent.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
+    : []
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={ref} className="relative w-64 hidden sm:block">
+      <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-1.5">
+        <Search size={14} className="text-gray-400 shrink-0" />
+        <input
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          placeholder="Search pages..."
+          className="bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none w-full"
+        />
+        {query && <button onClick={() => { setQuery(''); setOpen(false) }}><X size={12} className="text-gray-400 hover:text-gray-600" /></button>}
+      </div>
+      {open && results.length > 0 && (
+        <div className="absolute top-full mt-1 left-0 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden">
+          {results.map((r, i) => (
+            <button key={i} onMouseDown={() => { navigate(r.to); setQuery(''); setOpen(false) }}
+              className="w-full text-left px-3 py-2 hover:bg-gray-50 flex flex-col border-b border-gray-100 last:border-0">
+              <span className="text-sm font-medium text-gray-800">{r.label}</span>
+              {r.parent && <span className="text-xs text-gray-400">{r.parent}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {open && query.trim().length > 0 && results.length === 0 && (
+        <div className="absolute top-full mt-1 left-0 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50 px-3 py-4 text-sm text-gray-400 text-center">
+          No pages found for "{query}"
+        </div>
+      )}
+    </div>
+  )
+}
+
 export const AppLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -424,6 +490,7 @@ export const AppLayout: React.FC = () => {
           <button className="lg:hidden p-1.5 rounded-lg hover:bg-gray-100" onClick={() => setMobileOpen(true)}>
             <Menu size={18} />
           </button>
+          <GlobalSearch nav={visibleNav} />
           <div className="flex-1" />
           <span className="text-xs text-gray-400 hidden sm:block">
             {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday:'long', day:'2-digit', month:'long', year:'numeric' })}

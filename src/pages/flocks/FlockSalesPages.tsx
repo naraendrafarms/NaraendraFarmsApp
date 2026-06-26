@@ -602,8 +602,9 @@ export const HEDispatch: React.FC = () => {
         map.set(key, ex)
       }
       for (const l of (dispLines ?? [])) {
-        const key = `${l.prod_date}__${l.flock_id}`
-        const ex = map.get(key) ?? { date: l.prod_date, flock_id: l.flock_id, flock: `F-${(l.flocks as any)?.flock_no ?? l.flock_id?.slice(0,4)}`, prod_a:0,prod_b:0,prod_c:0,prod_total:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
+        const dispDate = (l.he_dispatch as any)?.dispatch_date ?? l.prod_date
+        const key = `${dispDate}__${l.flock_id}`
+        const ex = map.get(key) ?? { date: dispDate, flock_id: l.flock_id, flock: `F-${(l.flocks as any)?.flock_no ?? l.flock_id?.slice(0,4)}`, prod_a:0,prod_b:0,prod_c:0,prod_total:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
         ex.disp_a += l.grade_a ?? 0
         ex.disp_b += l.grade_b ?? 0
         ex.disp_c += l.grade_c ?? 0

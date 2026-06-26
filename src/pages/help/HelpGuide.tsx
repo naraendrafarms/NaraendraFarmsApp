@@ -1,15 +1,24 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
   BookOpen, Bird, Calendar, ArrowRightLeft, ShoppingCart, Users, Zap,
   Package, FileSpreadsheet, BarChart2, Settings, ChevronRight, ChevronDown,
   AlertCircle, CheckCircle, Info, ArrowRight, Hash, MapPin, CreditCard,
-  Sparkles, Clock, Receipt, FileText, Egg
+  Sparkles, Clock, Receipt, FileText, Egg, Search, X
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-06-21'
+const LAST_UPDATED = '2026-06-26'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-06-26', tag: 'New',      text: 'Global Search added to the top header bar — type any page name to instantly find and jump to it from anywhere in the app.' },
+  { date: '2026-06-26', tag: 'New',      text: 'Accounts → Buyer Advances: Record advance payments received from buyers (party-wise). Supports Cash and Bank payment modes. Automatically posts to Cash Book or Bank Ledger on save.' },
+  { date: '2026-06-26', tag: 'New',      text: 'Accounts → Party Ledger: View a running debit/credit ledger per buyer — shows all HE Dispatch sales, NHE Sales, advance receipts, and payments in one timeline with running balance. Export to Excel.' },
+  { date: '2026-06-26', tag: 'New',      text: 'HE Dispatch & NHE Sales payment modal: "Advance" payment mode added. When a buyer has an advance balance, a blue banner shows the available amount. Selecting Advance deducts from that buyer\'s advance balance automatically.' },
+  { date: '2026-06-26', tag: 'New',      text: 'HR & Payroll → Monthly Attendance Grid: Enter attendance for all employees of a farm in a calendar-style grid (rows = employees, columns = days). Click each cell to cycle P / A / H / WO / OT. OT days show hours input. Saves to attendance and updates salary monthly summary in one click.' },
+  { date: '2026-06-26', tag: 'Fix',      text: 'Bulk Salary: Flock egg/bird sales to employees (Flock Ded.) were being double-counted — once in Flock Ded. column and again in the Advances column. Fixed: Advances column now correctly excludes flock deductions.' },
+  { date: '2026-06-26', tag: 'Improved', text: 'HE Dispatch → Daily Stock Register: Dispatches now grouped by Dispatch Date (when eggs left the farm) instead of Production Date. This matches the Egg Stock Balance report logic and shows correct running balances.' },
+  { date: '2026-06-26', tag: 'Improved', text: 'Reports → Egg Stock Balance: Export now generates XLSX. When a flock is selected (day-wise view), exports all daily rows. When no flock selected, exports the flock summary. Plain data rows, no formula bloat.' },
+  { date: '2026-06-26', tag: 'Fix',      text: 'HE Dispatch → Daily Stock Register: Broken Eggs and Leached Eggs columns removed — these do not belong in the HE grade stock register (they are tracked separately in Daily Entry).' },
   { date: '2026-06-21', tag: 'New',      text: 'HE Dispatch: Flock Age now shows per production date in the expandable lines breakdown. Click the invoice number to expand — each date shows age as e.g. "24w 3d".' },
   { date: '2026-06-21', tag: 'New',      text: 'HE Dispatch: Vehicle Type field added (AC / NON-AC). Shows in dispatch table and on invoice print in the Logistics section.' },
   { date: '2026-06-21', tag: 'Improved', text: 'HE Dispatch: Extra Trays split into Extra Trays (20LB) and Extra Trays (23LB) — tracked separately for each box type. Loading Details section now has 4 fields: Vehicle Type, Lorry No, Driver Phone, Out Time, and 4 box fields.' },
@@ -907,6 +916,108 @@ const SECTIONS: Section[] = [
     ]
   },
 
+  // ── BUYER ADVANCES & PARTY LEDGER ────────────────────────────────────────────
+  {
+    id: 'buyer-advances',
+    icon: <CreditCard size={20}/>,
+    label: 'Buyer Advances',
+    color: 'bg-teal-700',
+    intro: 'Record advance payments received from buyers before the actual sale. These advances can be deducted automatically when receiving payment for HE Dispatch or NHE Sales.',
+    workflows: [
+      {
+        title: 'Record an advance payment from a buyer',
+        path: 'Accounts → Buyer Advances → + Add Advance',
+        steps: [
+          { text: 'Select the Party (buyer) from the dropdown. Type to search.' },
+          { text: 'Advance Date — the date the money was received.' },
+          { text: 'Amount — the advance amount received.' },
+          { text: 'Payment Mode — Cash or Bank. If Bank, select the bank account.' },
+          { text: 'Reference / Remarks — optional (UTR, cheque no, etc.).' },
+          { text: 'Save. The advance is posted to Cash Book (if Cash) or Bank Ledger (if Bank) automatically.', note: 'The advance balance for this buyer is now available for deduction on future sales.' },
+        ]
+      },
+      {
+        title: 'Use advance when receiving payment for a sale',
+        path: 'Flock Management → HE Dispatch (or NHE Sales) → Receive Payment button',
+        steps: [
+          { text: 'Click "Receive Payment" on any unpaid HE dispatch or NHE sale.' },
+          { text: 'If the buyer has an advance balance, a blue banner shows the available advance amount.' },
+          { text: 'Select "Advance" as the payment mode.' },
+          { text: 'The advance amount is deducted from the buyer\'s advance balance and the sale is marked paid.', note: 'Partial advance use: if advance is less than the sale amount, use advance for part and another mode for the rest.' },
+        ]
+      },
+      {
+        title: 'View all advances for a buyer',
+        path: 'Accounts → Buyer Advances → filter by Party',
+        steps: [
+          { text: 'Use the Party filter dropdown to see all advance records for a specific buyer.' },
+          { text: 'Each row shows: Date, Amount, Amount Used, Balance Remaining, Payment Mode.' },
+          { text: 'Delete an advance only if it was entered by mistake and has not been used in any sale payment.' },
+        ]
+      },
+    ],
+    tips: [
+      'Advance balance = Amount − Amount Used. The blue banner in the payment modal shows this balance.',
+      'Advances are buyer-specific — they cannot be transferred between buyers.',
+      'To see the full picture of a buyer\'s transactions (advances + sales + payments), use Accounts → Party Ledger.',
+    ]
+  },
+
+  // ── PARTY LEDGER ─────────────────────────────────────────────────────────────
+  {
+    id: 'party-ledger',
+    icon: <FileText size={20}/>,
+    label: 'Party Ledger',
+    color: 'bg-violet-800',
+    intro: 'A running debit/credit account statement for any buyer. Shows all HE Dispatch sales, NHE Sales, advance receipts, and payments in one timeline with a running balance.',
+    workflows: [
+      {
+        title: 'View a buyer\'s ledger',
+        path: 'Accounts → Party Ledger → select Party',
+        steps: [
+          { text: 'Select the party (buyer) from the dropdown. Type to search.' },
+          { text: 'Set From Date and To Date to narrow the period.', note: 'Leave From Date blank to see all transactions from the beginning.' },
+          { text: 'The table shows: Date, Type (HE Dispatch / NHE Sale / Advance / Payment), Reference, Debit (amount billed), Credit (amount received/advanced), Balance.' },
+          { text: 'Debit = sales billed to the buyer. Credit = payments received or advances given.', note: 'Balance = cumulative Debit − cumulative Credit. Positive balance = buyer owes you money.' },
+          { text: 'Click "Export Excel" to download the full ledger for sharing with the buyer or your CA.' },
+        ]
+      },
+    ],
+    tips: [
+      'Use Party Ledger to answer "how much does [buyer] owe us?" instantly.',
+      'The running balance column matches what Party Outstanding report shows for that buyer.',
+      'If balance looks wrong, check that all advances and payments are correctly recorded.',
+    ]
+  },
+
+  // ── MONTHLY ATTENDANCE GRID ───────────────────────────────────────────────────
+  {
+    id: 'monthly-attendance',
+    icon: <Calendar size={20}/>,
+    label: 'Monthly Attendance Grid',
+    color: 'bg-indigo-700',
+    intro: 'Enter attendance for all employees of a farm in a fast calendar-style grid — one row per employee, one column per day. Much faster than entering day by day.',
+    workflows: [
+      {
+        title: 'Enter monthly attendance in grid view',
+        path: 'HR & Payroll → Monthly Attendance',
+        steps: [
+          { text: 'Select Farm and Month at the top.' },
+          { text: 'The grid loads with all active employees as rows and days 1-31 as columns. Sundays are highlighted in red.' },
+          { text: 'Click any cell to cycle through statuses: P (Present) → A (Absent) → H (Half Day) → WO (Week Off) → OT (Full OT Day) → back to P.' },
+          { text: 'For OT days: a small hours input appears below the OT badge. Enter the number of OT hours (e.g. 4.5).' },
+          { text: 'The Summary columns on the right update live — showing total P, A, H, WO, OT days + OT hours for each employee.' },
+          { text: 'Click "Save All" when done. All attendance records are saved and salary monthly summary is updated automatically.', note: 'Days beyond the month (e.g. day 31 in June) are disabled and greyed out.' },
+        ]
+      },
+    ],
+    tips: [
+      'Existing attendance records for the month pre-fill automatically when you open the grid — you can make changes and re-save without losing previous entries.',
+      'The grid calculates Absent Days for salary: A = 1 day, H = 0.5 day, P/WO/OT = 0 absent days.',
+      'After saving, you can still use Daily Attendance page for single-day corrections if needed.',
+    ]
+  },
+
   // ── REPORTS ───────────────────────────────────────────────────────────────────
   {
     id: 'reports',
@@ -1017,7 +1128,26 @@ const WorkflowCard: React.FC<{ wf: Workflow; accent: string }> = ({ wf, accent }
 
 export const HelpGuidePage: React.FC = () => {
   const [active, setActive] = useState('flock-setup')
+  const [searchQ, setSearchQ] = useState('')
   const section = SECTIONS.find(s => s.id === active)!
+
+  // Search across sections, workflows and steps
+  const searchResults = useMemo(() => {
+    const q = searchQ.trim().toLowerCase()
+    if (!q) return []
+    const hits: { sectionId: string; sectionLabel: string; workflowTitle: string; stepText: string }[] = []
+    for (const sec of SECTIONS) {
+      const secMatch = sec.label.toLowerCase().includes(q) || sec.intro.toLowerCase().includes(q)
+      for (const wf of sec.workflows) {
+        const wfMatch = wf.title.toLowerCase().includes(q) || wf.path.toLowerCase().includes(q)
+        const matchingSteps = wf.steps.filter(st => st.text.toLowerCase().includes(q) || (st.note ?? '').toLowerCase().includes(q))
+        if (secMatch || wfMatch || matchingSteps.length > 0) {
+          hits.push({ sectionId: sec.id, sectionLabel: sec.label, workflowTitle: wf.title, stepText: matchingSteps[0]?.text ?? wf.path })
+        }
+      }
+    }
+    return hits.slice(0, 10)
+  }, [searchQ])
 
   return (
     <div className="flex h-full min-h-screen bg-gray-50">
@@ -1028,7 +1158,35 @@ export const HelpGuidePage: React.FC = () => {
             <span className="font-bold text-gray-800">App Guide</span>
           </div>
           <p className="text-[10px] text-gray-400 mt-1">Updated: {LAST_UPDATED}</p>
+          {/* Search box */}
+          <div className="mt-3 flex items-center gap-2 bg-gray-100 rounded-lg px-2 py-1.5">
+            <Search size={13} className="text-gray-400 shrink-0"/>
+            <input
+              value={searchQ}
+              onChange={e => setSearchQ(e.target.value)}
+              placeholder="Search guide..."
+              className="bg-transparent text-xs text-gray-700 placeholder-gray-400 outline-none w-full"
+            />
+            {searchQ && <button onClick={() => setSearchQ('')}><X size={11} className="text-gray-400 hover:text-gray-600"/></button>}
+          </div>
         </div>
+
+        {/* Search results */}
+        {searchQ && (
+          <div className="border-b border-gray-100 bg-blue-50">
+            {searchResults.length === 0
+              ? <p className="px-4 py-3 text-xs text-gray-400">No results for "{searchQ}"</p>
+              : searchResults.map((r, i) => (
+                <button key={i} onClick={() => { setActive(r.sectionId); setSearchQ('') }}
+                  className="w-full text-left px-4 py-2 hover:bg-blue-100 border-b border-blue-100 last:border-0">
+                  <p className="text-xs font-semibold text-blue-800">{r.sectionLabel}</p>
+                  <p className="text-xs text-blue-600 truncate">{r.workflowTitle}</p>
+                </button>
+              ))
+            }
+          </div>
+        )}
+
         <nav className="py-2">
           {SECTIONS.map(s => (
             <button key={s.id} onClick={() => setActive(s.id)}
@@ -1062,6 +1220,9 @@ export const HelpGuidePage: React.FC = () => {
             <div className="flex items-center gap-1"><Hash size={10}/>RCM → GST</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Add breed/unit/category → Masters</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Pay salary → Employees</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Monthly attendance grid → Monthly Attendance Grid</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Buyer advance → Buyer Advances</div>
+            <div className="flex items-center gap-1"><Hash size={10}/>Party balance/statement → Party Ledger</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Electricity bill → Electricity</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Raise PO → Purchase & Payments</div>
             <div className="flex items-center gap-1"><Hash size={10}/>Import Excel → Import Data</div>
