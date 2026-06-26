@@ -565,16 +565,17 @@ export const HEDispatch: React.FC = () => {
   const totalFree = filtered.reduce((s: number, d: any) => s + (d.free_eggs ?? 0), 0)
   const noInvoiceCount = (dispatches ?? []).filter((d: any) => !d.invoice_no).length
 
-  // Stock register: grade-split production vs dispatch lines per flock
+  // Stock register — same logic as Reports → Egg Stock Balance day-wise view
   const { data: stockData } = useQuery({
     queryKey: ['he_stock_register', flockFilter],
     queryFn: async () => {
       let dq = supabase.from('daily_records')
-        .select('record_date,flock_id,he_eggs,he_grade_a,he_grade_b,he_grade_c,be_eggs,le_eggs,wastage_eggs,flocks(flock_no)')
+        .select('record_date,flock_id,he_grade_a,he_grade_b,he_grade_c,wastage_he,flocks(flock_no)')
         .order('record_date', { ascending: true })
+      // Use inner join so only lines with a valid dispatch are included (matches EggStock logic)
       let lq = supabase.from('he_dispatch_lines')
-        .select('prod_date,flock_id,grade_a,grade_b,grade_c,he_dispatch(dispatch_date,invoice_no),flocks(flock_no)')
-        .order('prod_date', { ascending: true })
+        .select('flock_id,grade_a,grade_b,grade_c,he_dispatch!inner(dispatch_date,flock_id)')
+        .order('he_dispatch(dispatch_date)', { ascending: true })
       let oq = supabase.from('egg_opening_stock')
         .select('flock_id,he_grade_a,he_grade_b,he_grade_c,flocks(flock_no)')
       if (flockFilter) {
@@ -582,61 +583,71 @@ export const HEDispatch: React.FC = () => {
         lq = lq.eq('flock_id', flockFilter)
         oq = oq.eq('flock_id', flockFilter)
       }
-      const [{ data: prod }, { data: dispLines }, { data: opening }] = await Promise.all([dq, lq, oq])
+      const [{ data: prod }, { data: rawLines }, { data: opening }] = await Promise.all([dq, lq, oq])
 
-      type StockRow = { date: string; flock_id: string; flock: string; prod_a: number; prod_b: number; prod_c: number; prod_total: number; disp_a: number; disp_b: number; disp_c: number; broken: number; leached: number; wastage: number }
-      const map = new Map<string, StockRow>()
+      // Flatten dispatch lines to use dispatch_date (same as EggStock heDisp)
+      const dispLines = (rawLines ?? []).map((l: any) => ({
+        flock_id: l.flock_id,
+        dispatch_date: l.he_dispatch?.dispatch_date as string,
+        grade_a: l.grade_a ?? 0,
+        grade_b: l.grade_b ?? 0,
+        grade_c: l.grade_c ?? 0,
+      })).filter((l: any) => !!l.dispatch_date)
 
-      for (const r of (prod ?? [])) {
-        const key = `${r.record_date}__${r.flock_id}`
-        const ex = map.get(key) ?? { date: r.record_date, flock_id: r.flock_id, flock: `F-${(r.flocks as any)?.flock_no}`, prod_a:0,prod_b:0,prod_c:0,prod_total:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
-        // If grade split entered use it; else put total into Grade A
-        const ga = r.he_grade_a ?? 0, gb = r.he_grade_b ?? 0, gc = r.he_grade_c ?? 0
-        const hasGrades = ga + gb + gc > 0
-        ex.prod_a += hasGrades ? ga : (r.he_eggs ?? 0)
-        ex.prod_b += hasGrades ? gb : 0
-        ex.prod_c += hasGrades ? gc : 0
-        ex.broken += r.be_eggs ?? 0
-        ex.leached += r.le_eggs ?? 0
-        ex.wastage += r.wastage_eggs ?? 0
-        map.set(key, ex)
-      }
-      for (const l of (dispLines ?? [])) {
-        const dispDate = (l.he_dispatch as any)?.dispatch_date ?? l.prod_date
-        const key = `${dispDate}__${l.flock_id}`
-        const ex = map.get(key) ?? { date: dispDate, flock_id: l.flock_id, flock: `F-${(l.flocks as any)?.flock_no ?? l.flock_id?.slice(0,4)}`, prod_a:0,prod_b:0,prod_c:0,prod_total:0,disp_a:0,disp_b:0,disp_c:0,broken:0,leached:0,wastage:0 }
-        ex.disp_a += l.grade_a ?? 0
-        ex.disp_b += l.grade_b ?? 0
-        ex.disp_c += l.grade_c ?? 0
-        map.set(key, ex)
-      }
-
-      // Build per-flock opening stock map
+      // Build per-flock opening stock
       const openMap: Record<string, { a: number; b: number; c: number }> = {}
       for (const o of (opening ?? [])) {
         openMap[o.flock_id] = { a: o.he_grade_a ?? 0, b: o.he_grade_b ?? 0, c: o.he_grade_c ?? 0 }
       }
 
-      // Sort ascending by date then flock for correct running balance
-      const rows = [...map.values()].sort((a, b) => a.date !== b.date ? a.date.localeCompare(b.date) : a.flock.localeCompare(b.flock))
+      // Get unique flock IDs
+      const flockIds = [...new Set([
+        ...(prod ?? []).map((r: any) => r.flock_id),
+        ...dispLines.map((l: any) => l.flock_id),
+      ])]
 
-      // Running balance per flock, per grade
-      const flockBal: Record<string, { a: number; b: number; c: number }> = {}
-      const withBal = rows.map(r => {
-        if (!flockBal[r.flock_id]) {
-          const op = openMap[r.flock_id] ?? { a: 0, b: 0, c: 0 }
-          flockBal[r.flock_id] = { a: op.a, b: op.b, c: op.c }
+      // Per-flock running balance — same formula as EggStock day-wise
+      const allRows: any[] = []
+      for (const fid of flockIds) {
+        const flockLabel = ((prod ?? []).find((r: any) => r.flock_id === fid) as any)?.flocks?.flock_no
+        const op = openMap[fid] ?? { a: 0, b: 0, c: 0 }
+        let balA = op.a, balB = op.b, balC = op.c
+
+        const dateSet = new Set<string>()
+        ;(prod ?? []).filter((r: any) => r.flock_id === fid).forEach((r: any) => dateSet.add(r.record_date))
+        dispLines.filter((l: any) => l.flock_id === fid).forEach((l: any) => dateSet.add(l.dispatch_date))
+        const dates = [...dateSet].sort()
+
+        for (const date of dates) {
+          const dayProd = (prod ?? []).filter((r: any) => r.flock_id === fid && r.record_date === date)
+          const pA = dayProd.reduce((s: number, r: any) => s + (r.he_grade_a ?? 0), 0)
+          const pB = dayProd.reduce((s: number, r: any) => s + (r.he_grade_b ?? 0), 0)
+          const pC = dayProd.reduce((s: number, r: any) => s + (r.he_grade_c ?? 0), 0)
+          const wHE = dayProd.reduce((s: number, r: any) => s + (r.wastage_he ?? 0), 0)
+
+          const dayDisp = dispLines.filter((l: any) => l.flock_id === fid && l.dispatch_date === date)
+          const dA = dayDisp.reduce((s: number, l: any) => s + l.grade_a, 0)
+          const dB = dayDisp.reduce((s: number, l: any) => s + l.grade_b, 0)
+          const dC = dayDisp.reduce((s: number, l: any) => s + l.grade_c, 0)
+
+          const open_a = balA, open_b = balB, open_c = balC
+          // Exactly matches EggStock: balA += pA - sA - wHE
+          balA += pA - dA - wHE
+          balB += pB - dB
+          balC += pC - dC
+
+          allRows.push({
+            date, flock_id: fid, flock: `F-${flockLabel ?? fid.slice(0,4)}`,
+            prod_a: pA, prod_b: pB, prod_c: pC, wastage: wHE,
+            disp_a: dA, disp_b: dB, disp_c: dC,
+            open_a, open_b, open_c,
+            bal_a: balA, bal_b: balB, bal_c: balC,
+            bal_total: balA + balB + balC,
+          })
         }
-        const fb = flockBal[r.flock_id]
-        // Capture opening (before today's transactions) for display
-        const open_a = fb.a, open_b = fb.b, open_c = fb.c
-        fb.a += r.prod_a - r.disp_a
-        fb.b += r.prod_b - r.disp_b
-        fb.c += r.prod_c - r.disp_c
-        return { ...r, open_a, open_b, open_c, bal_a: fb.a, bal_b: fb.b, bal_c: fb.c, bal_total: fb.a + fb.b + fb.c }
-      })
+      }
 
-      return withBal.reverse()
+      return allRows.sort((a, b) => b.date.localeCompare(a.date) || a.flock.localeCompare(b.flock))
     }
   })
 
