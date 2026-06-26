@@ -66,8 +66,7 @@ BEGIN
         sale_cull_f, sale_cull_m,
         sale_cull_f, sale_cull_m,
         0, 0, 0, 0
-      )
-      ON CONFLICT (flock_id, record_date) DO NOTHING;
+      );
     END IF;
   END LOOP;
 
