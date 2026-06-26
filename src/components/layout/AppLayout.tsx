@@ -63,6 +63,8 @@ const NAV: NavItem[] = [
     children: [
       { label: 'Employee List',   to: '/employees' },
       { label: 'Bulk Salary',      to: '/employees/bulk-salary' },
+      { label: 'Salary Register',  to: '/employees/salary-register' },
+      { label: 'Salary History',   to: '/employees/salary-history' },
       { label: 'Salary Entry',    to: '/employees/salary' },
       { label: 'Salary Abstract', to: '/employees/abstract' },
       { label: 'Bonus',           to: '/employees/bonus' },

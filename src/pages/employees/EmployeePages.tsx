@@ -2990,10 +2990,13 @@ export const BulkSalaryPage: React.FC = () => {
     if (!employees?.length) { toast.error('No employees loaded'); return }
     setSaving(true)
     try {
+      const [yr, mn] = month.split('-')
+      const daysInMonth = new Date(parseInt(yr), parseInt(mn), 0).getDate()
       const records = (employees as any[]).map(emp => {
         const absentDays = parseFloat(absentMap[emp.id] ?? '0') || 0
         const calc = computeSalaryForEmp(emp, {
           absentDays,
+          monthDays: daysInMonth,
           furtherAdvance: (advances as any)?.[emp.id] ?? 0,
           otherDeduction: (deductions as any)?.[emp.id] ?? 0,
         })
