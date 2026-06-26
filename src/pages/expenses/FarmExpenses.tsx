@@ -11,8 +11,9 @@ import { Plus, Trash2, Download, Upload, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import { parseFile } from '@/lib/parseFile'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
-const CATEGORIES = [
+const CATEGORIES_FB = [
   { value: 'maintenance',  label: 'Maintenance & Repairs' },
   { value: 'transport',    label: 'Transport / Logistics' },
   { value: 'water',        label: 'Water' },
@@ -50,6 +51,7 @@ const emptyForm = () => ({
 export const FarmExpensesPage: React.FC = () => {
   const qc = useQueryClient()
   const importRef = useRef<HTMLInputElement>(null)
+  const CATEGORIES = useConfigOptions('farm_expense', CATEGORIES_FB)
 
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)

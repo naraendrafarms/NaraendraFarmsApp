@@ -3,9 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, SectionHeader, Spinner, Table, Th, Td, Badge } from '@/components/ui'
+import { useConfigValues } from '@/hooks/useConfigOptions'
 
 export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }) => {
   const [tab, setTab] = useState<'feed' | 'medicine'>('feed')
+  const feedCats = useConfigValues('ingredient_category', ['grain','protein','mineral','supplement','additive','other'])
 
   const { data: ingredients, isLoading: loadIng } = useQuery({
     queryKey: ['ingredients'],
@@ -56,7 +58,7 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
       dateMap[g.ingredient_id] = g.grn_date
     }
 
-    const FEED_CATS = ['grain','protein','mineral','supplement','additive','other']
+    const FEED_CATS = feedCats.length ? feedCats : ['grain','protein','mineral','supplement','additive','other']
     return ingredients
       .map((ing: any) => {
         const totalIn = inMap[ing.id] ?? 0

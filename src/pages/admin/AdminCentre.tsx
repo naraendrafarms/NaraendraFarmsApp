@@ -647,9 +647,18 @@ const MastersHub: React.FC = () => (
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Purchase / GRN</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InlineConfig title="Material Types (PO / GRN)" grp="material_type" placeholder="e.g. Feed Raw Material" />
-        <InlineConfig title="Purchase Categories" grp="purchase_category" placeholder="e.g. Feed, Medicine" />
-        <InlineConfig title="Ingredient Categories (Feed Mill)" grp="ingredient_category" placeholder="e.g. grain, protein" />
+        <InlineConfig title="PO Material Types" grp="material_type" placeholder="e.g. Feed Raw Material" />
+        <InlineConfig title="GRN / Stock Receipt Categories" grp="grn_category" placeholder="e.g. Feed, Medicine, Vaccine" />
+        <InlineConfig title="Feed Ingredient Categories" grp="ingredient_category" placeholder="e.g. grain, protein, mineral" />
+        <InlineConfig title="Medicine / Vaccine Types" grp="medicine_type" placeholder="e.g. vaccine, injectable" />
+      </div>
+    </div>
+
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Expenses</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <InlineConfig title="Feed Mill Expense Categories" grp="feedmill_expense" placeholder="e.g. Labour, Electricity" />
+        <InlineConfig title="Farm Expense Categories" grp="farm_expense" placeholder="e.g. maintenance, transport" />
       </div>
     </div>
 

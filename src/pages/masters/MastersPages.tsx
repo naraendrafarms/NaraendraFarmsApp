@@ -10,6 +10,7 @@ import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info } from 'lu
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 import { parseGstin, GST_TYPE_OPTIONS, GST_RATE_OPTIONS } from '@/lib/gst'
+import { useConfigValues } from '@/hooks/useConfigOptions'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -659,6 +660,7 @@ export const MedicinesMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({name:'',type:'medicine',unit:'ml',manufacturer:'',rate:'',batch_no:'',expiry_date:''})
+  const medTypes = useConfigValues('medicine_type', ['medicine','vaccine','supplement','sanitizer','injectable','disinfectant','pesticide','other'])
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -764,7 +766,7 @@ export const MedicinesMaster: React.FC = () => {
         />
         <div className="flex gap-3 flex-wrap">
           <Input label="" placeholder="Search by name / manufacturer…" value={medSearch} onChange={e=>setMedSearch(e.target.value)} className="w-56"/>
-          <Select label="" placeholder="All Types" options={['medicine','vaccine','supplement','disinfectant','other']} value={medTypeFilter} onChange={e=>setMedTypeFilter(e.target.value)} className="w-36"/>
+          <Select label="" placeholder="All Types" options={medTypes} value={medTypeFilter} onChange={e=>setMedTypeFilter(e.target.value)} className="w-36"/>
           {(medSearch||medTypeFilter)&&<Button variant="ghost" size="sm" onClick={()=>{setMedSearch('');setMedTypeFilter('')}}>Clear</Button>}
           <span className="text-xs text-gray-400 self-end pb-2">{rows.length} of {allMedRows.length}</span>
         </div>
@@ -841,7 +843,7 @@ export const MedicinesMaster: React.FC = () => {
         <div className="space-y-4">
           <Input label="Medicine / Vaccine Name" required value={form.name} onChange={e=>s('name',e.target.value)} />
           <FormRow>
-            <Select label="Type" options={['medicine','vaccine','supplement','sanitizer','injectable','disinfectant','pesticide','other']} value={form.type} onChange={e=>s('type',e.target.value)} />
+            <Select label="Type" options={medTypes} value={form.type} onChange={e=>s('type',e.target.value)} />
             <Input label="Unit" value={form.unit} onChange={e=>s('unit',e.target.value)} hint="ml, litre, gm, kg, dose, vial..." />
           </FormRow>
           <FormRow>

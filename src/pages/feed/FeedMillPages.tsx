@@ -13,6 +13,7 @@ import {
 , DateInput } from '@/components/ui'
 import { Plus, Edit2, Trash2, Download, Upload, ChevronDown, ChevronUp } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useConfigValues } from '@/hooks/useConfigOptions'
 
 // ── helpers ───────────────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -1197,10 +1198,11 @@ const StockAdjForm: React.FC<{ initial: any; farms: any[]; onSave: (d:any)=>void
 // ══════════════════════════════════════════════════════════════════
 // EXPENSES TAB
 // ══════════════════════════════════════════════════════════════════
-const EXPENSE_CATEGORIES = ['Labour','Oral Medicine','Electricity','Fuel','Maintenance','Packaging','Transport','Other']
+const EXPENSE_CATEGORIES_FB = ['Labour','Oral Medicine','Electricity','Fuel','Maintenance','Packaging','Transport','Other']
 
 const ExpensesTab: React.FC = () => {
   const qc = useQueryClient()
+  const EXPENSE_CATEGORIES = useConfigValues('feedmill_expense', EXPENSE_CATEGORIES_FB)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [fCat,  setFCat]  = useState('')
@@ -1356,6 +1358,7 @@ const ExpensesTab: React.FC = () => {
 }
 
 const ExpenseForm: React.FC<{ initial: any; farms: any[]; onSave: (d:any) => void; loading: boolean }> = ({ initial, farms, onSave, loading }) => {
+  const EXPENSE_CATEGORIES = useConfigValues('feedmill_expense', EXPENSE_CATEGORIES_FB)
   const [form, setForm] = useState({
     expense_date: today(), category:'Other', description:'', amount:'', vendor_name:'', invoice_no:'', remarks:'',
     ...initial, farm_id: initial?.farm_id ?? ''

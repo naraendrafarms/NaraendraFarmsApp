@@ -11,6 +11,7 @@ import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2, Download
 import { QuickAddParty, QuickAddIngredient } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
 import { printGRN } from '@/lib/invoicePrint'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 // ── import value cleaners ─────────────────────────────────────────
 // Strip ₹ / ? / commas / spaces from money & number cells before parsing.
@@ -290,14 +291,14 @@ export const GRNEntry: React.FC = () => {
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
   const ingrOptions = ingredients?.map((i: any) => ({ value: i.id, label: i.code ? `${i.code} — ${i.name}` : i.name })) ?? []
   const medOptions  = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.type})` })) ?? []
-  const categoryOptions = [
-    { value: 'Feed',       label: 'Feed / Raw Material' },
-    { value: 'Chicks',     label: 'Chicks (Day-Old Birds)' },
-    { value: 'Medicine',   label: 'Medicine / Oral' },
-    { value: 'Vaccine',    label: 'Vaccine' },
-    { value: 'Packaging',  label: 'Packaging Material' },
-    { value: 'Other',      label: 'Other' },
-  ]
+  const categoryOptions = useConfigOptions('grn_category', [
+    { value: 'Feed',      label: 'Feed / Raw Material' },
+    { value: 'Chicks',    label: 'Chicks (Day-Old Birds)' },
+    { value: 'Medicine',  label: 'Medicine / Oral' },
+    { value: 'Vaccine',   label: 'Vaccine' },
+    { value: 'Packaging', label: 'Packaging Material' },
+    { value: 'Other',     label: 'Other' },
+  ])
   const flockOptions = (allFlocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}${f.status === 'closed' ? ' (closed)' : ''}` }))
 
   const totalQty = grns.reduce((s: number, g: any) => s + (g.qty ?? 0), 0)
