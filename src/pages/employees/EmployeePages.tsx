@@ -11,6 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } fro
 import toast from 'react-hot-toast'
 import { useAuth, can } from '@/lib/auth'
 import { parseFile } from '@/lib/parseFile'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 // ── CSV export helper ─────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -19,8 +20,6 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
 }
 
 // ── Constants ─────────────────────────────────────────────────────
-const DESIGNATIONS = ['Site Incharge','Farm Manager','Computer Operator','Site Supervisor',
-  'Feed Mill Operator','Store Keeper','Driver','Security','Hatchery Staff','Watchman','Helper','Other']
 
 const FY_OPTIONS = [
   {value:'2024-25',label:'FY 2024-25'},
@@ -254,6 +253,7 @@ export const EmployeeList: React.FC = () => {
 
   const toggle = (id:string) => setSel(s=>{const n=new Set(s);n.has(id)?n.delete(id):n.add(id);return n})
   const farmOptions = farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
+  const designationOptions = useConfigOptions('designation')
 
   // Client-side filtering: search + gender + designation + status
   const q = search.trim().toLowerCase()
@@ -414,7 +414,7 @@ export const EmployeeList: React.FC = () => {
           </FormRow>
           <FormRow>
             <Select label="Site / Farm" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={e=>s('farm_id',e.target.value)} />
-            <Select label="Designation" options={DESIGNATIONS} value={form.designation} onChange={e=>s('designation',e.target.value)} placeholder="— Select —" />
+            <Select label="Designation" options={designationOptions} value={form.designation} onChange={e=>s('designation',e.target.value)} placeholder="— Select —" />
           </FormRow>
           <FormRow>
             <Input label="Department" value={form.department} onChange={e=>s('department',e.target.value)} hint="e.g. Poultry, Admin" />
