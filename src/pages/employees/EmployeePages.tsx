@@ -68,10 +68,11 @@ export const EmployeeList: React.FC = () => {
   const [genderFilter,setGenderFilter]= useState('')
   const [desigFilter, setDesigFilter] = useState('')
   const [statusFilter,setStatusFilter]= useState('')
-  const [sel,         setSel]         = useState<Set<string>>(new Set())
-  const [bulkConfirm, setBulkConfirm] = useState(false)
-  const [mergeOpen,   setMergeOpen]   = useState(false)
-  const [mergeKeepId, setMergeKeepId] = useState('')
+  const [sel,           setSel]           = useState<Set<string>>(new Set())
+  const [bulkConfirm,   setBulkConfirm]   = useState(false)
+  const [mergeOpen,     setMergeOpen]     = useState(false)
+  const [mergeKeepId,   setMergeKeepId]   = useState('')
+  const [statutoryFilter, setStatutoryFilter] = useState<'epf'|'no_epf'|'esi'|'no_esi'|'pt'|'no_pt'|''>('')
   const importRef = useRef<HTMLInputElement>(null)
 
   const { data: farms } = useQuery({
@@ -99,7 +100,8 @@ export const EmployeeList: React.FC = () => {
     base_salary:'', increment:'0', bank_name:'', bank_branch:'', account_no:'', ifsc:'',
     joining_date:'', leaving_date:'', dob:'', gender:'', mobile:'', esi_no:'', pf_no:'',
     uan_no:'', is_active:'true',
-    esi_applicable:'false', pf_applicable:'false', pt_applicable:'false'
+    esi_applicable:'false', pf_applicable:'false', pt_applicable:'false',
+    restrict_pf:'false', zone_area:'', emp_category:'', location_branch:'',
   })
   const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
 
@@ -120,13 +122,18 @@ export const EmployeeList: React.FC = () => {
         esi_applicable: emp.esi_applicable?'true':'false',
         pf_applicable: emp.pf_applicable?'true':'false',
         pt_applicable: emp.pt_applicable?'true':'false',
+        restrict_pf: emp.restrict_pf?'true':'false',
+        zone_area: emp.zone_area??'',
+        emp_category: emp.emp_category??'',
+        location_branch: emp.location_branch??'',
       })
     } else {
       setEditing(null)
       setForm({emp_id:'',name:'',designation:'',farm_id:'',department:'',
         base_salary:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
         joining_date:'',leaving_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',
-        uan_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false'})
+        uan_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
+        restrict_pf:'false',zone_area:'',emp_category:'',location_branch:''})
     }
     setShowForm(true)
   }
@@ -150,6 +157,10 @@ export const EmployeeList: React.FC = () => {
         esi_applicable: form.esi_applicable === 'true',
         pf_applicable: form.pf_applicable === 'true',
         pt_applicable: form.pt_applicable === 'true',
+        restrict_pf: form.restrict_pf === 'true',
+        zone_area: form.zone_area || null,
+        emp_category: form.emp_category || null,
+        location_branch: form.location_branch || null,
       }
       if (editing) { const {error}=await supabase.from('employees').update(payload).eq('id',editing.id); if(error)throw error }
       else { const {error}=await supabase.from('employees').insert(payload); if(error)throw error }
@@ -255,7 +266,7 @@ export const EmployeeList: React.FC = () => {
   const farmOptions = farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
   const designationOptions = useConfigOptions('designation')
 
-  // Client-side filtering: search + gender + designation + status
+  // Client-side filtering: search + gender + designation + status + statutory
   const q = search.trim().toLowerCase()
   const filteredEmps = (employees??[]).filter((e:any)=>{
     if (q && !(`${e.name??''} ${e.emp_id??''} ${e.mobile??''} ${e.designation??''} ${e.department??''}`.toLowerCase().includes(q))) return false
@@ -263,6 +274,12 @@ export const EmployeeList: React.FC = () => {
     if (desigFilter && (e.designation??'')!==desigFilter) return false
     if (statusFilter==='active' && !e.is_active) return false
     if (statusFilter==='left' && e.is_active) return false
+    if (statutoryFilter==='epf'    &&  !e.pf_applicable)  return false
+    if (statutoryFilter==='no_epf' &&   e.pf_applicable)  return false
+    if (statutoryFilter==='esi'    &&  !e.esi_applicable) return false
+    if (statutoryFilter==='no_esi' &&   e.esi_applicable) return false
+    if (statutoryFilter==='pt'     &&  !e.pt_applicable)  return false
+    if (statutoryFilter==='no_pt'  &&   e.pt_applicable)  return false
     return true
   })
   const byFarm = filteredEmps.reduce((acc:any,e:any)=>{ const k=e.farms?.name||'Unknown'; (acc[k]??=[]).push(e); return acc; },{})
@@ -310,9 +327,25 @@ export const EmployeeList: React.FC = () => {
           value={desigFilter} onChange={e=>setDesigFilter(e.target.value)} className="w-44" />
         <Select label="" placeholder="All Status" options={[{value:'active',label:'Active'},{value:'left',label:'Left / Inactive'}]}
           value={statusFilter} onChange={e=>setStatusFilter(e.target.value)} className="w-36" />
-        {(farmFilter||search||genderFilter||desigFilter||statusFilter) &&
-          <Button variant="ghost" size="sm" onClick={()=>{setFarmFilter('');setSearch('');setGenderFilter('');setDesigFilter('');setStatusFilter('')}}>Clear</Button>}
+        {(farmFilter||search||genderFilter||desigFilter||statusFilter||statutoryFilter) &&
+          <Button variant="ghost" size="sm" onClick={()=>{setFarmFilter('');setSearch('');setGenderFilter('');setDesigFilter('');setStatusFilter('');setStatutoryFilter('')}}>Clear</Button>}
         <span className="text-xs text-gray-400 ml-auto self-center">{filteredEmps.length} shown</span>
+      </div>
+      {/* Statutory filter chips */}
+      <div className="flex gap-2 flex-wrap">
+        {([
+          {k:'epf',    label:'Has EPF',  color:'purple'},
+          {k:'no_epf', label:'No EPF',   color:'gray'},
+          {k:'esi',    label:'Has ESI',  color:'blue'},
+          {k:'no_esi', label:'No ESI',   color:'gray'},
+          {k:'pt',     label:'Has PT',   color:'orange'},
+          {k:'no_pt',  label:'No PT',    color:'gray'},
+        ] as const).map(({k,label})=>(
+          <button key={k} onClick={()=>setStatutoryFilter(s=>s===k?'':k)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statutoryFilter===k?'bg-brand-600 text-white border-brand-600':'bg-white text-gray-600 border-gray-300 hover:border-brand-400'}`}>
+            {label}
+          </button>
+        ))}
       </div>
       <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={()=>setSel(new Set())} onDelete={()=>setBulkConfirm(true)}
         onMerge={()=>{ const first=[...sel][0]; setMergeKeepId(first); setMergeOpen(true) }} />
@@ -453,6 +486,17 @@ export const EmployeeList: React.FC = () => {
             <Select label="PF Applicable" options={[{value:'true',label:'Yes'},{value:'false',label:'No'}]} value={form.pf_applicable} onChange={e=>s('pf_applicable',e.target.value)} />
             <Select label="PT Applicable" options={[{value:'true',label:'Yes'},{value:'false',label:'No'}]} value={form.pt_applicable} onChange={e=>s('pt_applicable',e.target.value)} />
           </FormRow>
+          {form.pf_applicable === 'true' && (
+            <Select label="Restrict PF (cap at ₹15,000 basic)" options={[{value:'false',label:'No — PF on full basic'},{value:'true',label:'Yes — cap basic at ₹15,000 for PF'}]} value={form.restrict_pf} onChange={e=>s('restrict_pf',e.target.value)} hint="If Yes, PF @12% is calculated on min(Basic, ₹15,000)"/>
+          )}
+          <Divider label="Employment Details" />
+          <FormRow>
+            <Input label="Location / Branch" value={form.location_branch} onChange={e=>s('location_branch',e.target.value)} placeholder="e.g. SITE, HO" />
+            <Input label="Zone / Area" value={form.zone_area} onChange={e=>s('zone_area',e.target.value)} placeholder="e.g. Zone A" />
+          </FormRow>
+          <Select label="Category" placeholder="— Select —"
+            options={[{value:'Unskilled',label:'Unskilled'},{value:'Semi-Skilled',label:'Semi-Skilled'},{value:'Skilled',label:'Skilled'},{value:'Highly Skilled',label:'Highly Skilled'}]}
+            value={form.emp_category} onChange={e=>s('emp_category',e.target.value)} />
         </div>
       </Modal>
     </div>
@@ -635,12 +679,31 @@ export const SalaryEntryPage: React.FC = () => {
     finally { setGenLoading(false) }
   }
 
+  const EXTRA_GROUP1 = ['MANAGER FINANCE','ADMINISTRATIVE MANAGER','ACCOUNTANT','SITE MANAGER','STORE KEEPER','POULTRY ASSISTANT','ELECTRICIAN']
+  const EXTRA_GROUP2 = ['ASST.SUPERVISOR-MALE','ASST.SUPERVISOR-FEMALE','SECURITY-MALE','DRIVER-MALE','WORKER-MALE','WORKER-FEMALE','MEDIUM VECHICLE DRIVER','ATTENDER']
+  const calcExtraDays = (designation: string|null|undefined, paidDays: number): number => {
+    if (!paidDays || !designation) return 0
+    const d = designation.toUpperCase().trim()
+    if (EXTRA_GROUP1.includes(d)) return paidDays >= 15 ? 2 : 1
+    if (EXTRA_GROUP2.includes(d)) return paidDays >= 15 ? 1 : 0
+    return 0
+  }
+
   const blankForm = () => ({
-    employee_id:'', month:'', days_worked:'',
-    basic_salary:'', hra:'0', advance:'0', tds:'0', hold:'0', arrears:'0', ot_bonus:'0',
-    esi_employee:'0', esi_employer:'0', pf_employee:'0', pf_employer:'0', pt:'0',
-    gross_salary:'', net_salary:'', remarks:'',
-    payment_mode:'Cash', payment_ref:'', is_paid:'false'
+    employee_id:'', month:'',
+    month_days:'30', absent_days:'0', total_paid_days:'30', extra_days:'0',
+    gross_rate:'',
+    basic_rate:'', hra_rate:'', other_defray:'0',
+    basic_salary:'', hra:'0', gross_salary:'', extra_pay:'0', total_earning:'',
+    esi_employee:'0', esi_employer:'0',
+    pf_employee:'0', vpf:'0',
+    employer_eps:'0', employer_epf_diff:'0', admin_charges:'0', edli_charge:'0',
+    pt:'0', lwf:'0', tds:'0', other_deduction:'0',
+    net_salary:'',
+    advance_opening:'0', further_advance:'0', advance:'0', advance_closing:'0',
+    other_reimbursement:'0', additional:'0', monthly_ctc:'',
+    hold:'0', arrears:'0',
+    remarks:'', payment_mode:'Cash', payment_ref:'', is_paid:'false',
   })
   const [form, setForm] = useState(blankForm())
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
@@ -652,7 +715,7 @@ export const SalaryEntryPage: React.FC = () => {
     queryKey:['employees_sal',filterFarm],
     queryFn:async()=>{
       let q=supabase.from('employees')
-        .select('id,name,emp_id,designation,base_salary,esi_applicable,pf_applicable,pt_applicable,farms(name,code)')
+        .select('id,name,emp_id,designation,base_salary,esi_applicable,pf_applicable,pt_applicable,restrict_pf,farms(name,code)')
         .eq('is_active',true).order('name')
       if(filterFarm)q=q.eq('farm_id',filterFarm)
       const{data}=await q;return data??[]
@@ -706,6 +769,18 @@ export const SalaryEntryPage: React.FC = () => {
     }
   })
 
+  // Auto-fill advance_opening from previous month's closing when employee+month changes
+  React.useEffect(() => {
+    if (!form.employee_id || !form.month || editingId) return
+    const [yr, mn] = form.month.split('-').map(Number)
+    const prevDate = new Date(yr, mn - 2, 1)
+    const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth()+1).padStart(2,'0')}-01`
+    supabase.from('salary_monthly').select('advance_closing').eq('employee_id', form.employee_id).eq('month', prevMonth).single()
+      .then(({ data }) => {
+        if (data?.advance_closing) setForm(f => ({...f, advance_opening: String(data.advance_closing)}))
+      })
+  }, [form.employee_id, form.month, editingId])
+
   const autoFillFromAttendance = async () => {
     if (!form.employee_id || !form.month) { toast.error('Select employee and month first'); return }
     const [yr, mn] = form.month.split('-')
@@ -739,44 +814,125 @@ export const SalaryEntryPage: React.FC = () => {
     return 200
   }
 
-  const calcPayroll = () => {
-    const emp = employees?.find((e:any) => e.id === form.employee_id)
-    const basic = parseFloat(form.basic_salary) || parseFloat(emp?.base_salary) || 0
-    const hra = parseFloat(form.hra) || 0
-    const gross = basic + hra + (parseFloat(form.arrears)||0) + (parseFloat(form.ot_bonus)||0)
-    const esi_emp = (emp?.esi_applicable && gross <= 21000) ? Math.round(gross * 0.0075) : 0
-    const pf_emp = emp?.pf_applicable ? Math.round(basic * 0.12) : 0
-    const pf_er = emp?.pf_applicable ? Math.round(basic * 0.12) : 0
-    const esi_er = (emp?.esi_applicable && gross <= 21000) ? Math.round(gross * 0.0325) : 0
-    const pt = calcPT(gross, emp?.pt_applicable ?? false, form.month)
-    const net = gross - esi_emp - pf_emp - pt - (parseFloat(form.advance)||0) - (parseFloat(form.tds)||0) - (parseFloat(form.hold)||0)
-    setForm(f => ({...f, gross_salary: gross.toFixed(0), esi_employee: esi_emp.toFixed(2), esi_employer: esi_er.toFixed(2), pf_employee: pf_emp.toFixed(2), pf_employer: pf_er.toFixed(2), pt: pt.toFixed(0), net_salary: net.toFixed(0)}))
+  const calcPayroll = (overrides?: Partial<typeof form>) => {
+    const f = { ...form, ...overrides }
+    const emp = employees?.find((e:any) => e.id === f.employee_id)
+    if (!emp) return
+
+    const monthDays  = parseInt(f.month_days) || 30
+    const absent     = parseFloat(f.absent_days) || 0
+    const paidDays   = Math.max(0, monthDays - absent)
+    const extraDays  = calcExtraDays(emp.designation, paidDays)
+
+    const grossRate  = parseFloat(f.gross_rate) || emp.base_salary || 0
+    const basicRate  = Math.round(grossRate * 0.5)
+    const hraRate    = Math.min(Math.round(grossRate * 0.3), grossRate - basicRate)
+    const otherDefray = grossRate - basicRate - hraRate
+
+    const basicEarned = Math.round(basicRate / monthDays * paidDays)
+    const hraEarned   = Math.round(hraRate   / monthDays * paidDays)
+    const otherEarned = Math.round(otherDefray / monthDays * paidDays)
+    const grossEarning = basicEarned + hraEarned + otherEarned
+    const extraPay     = Math.round(grossRate / monthDays * extraDays)
+    const totalEarning = grossEarning + extraPay
+
+    // ESI on Basic earned
+    const esiEmp = emp.esi_applicable ? Math.ceil(basicEarned * 0.0075) : 0
+    const esiEr  = emp.esi_applicable ? Math.round(basicEarned * 0.0325) : 0
+
+    // PF on Basic (capped at 15000 if restrict_pf)
+    const pfBase   = emp.pf_applicable ? (emp.restrict_pf ? Math.min(basicEarned, 15000) : basicEarned) : 0
+    const pfEmp    = emp.pf_applicable ? Math.round(pfBase * 0.12) : 0
+    const vpf      = parseFloat(f.vpf) || 0
+    const eps      = emp.pf_applicable ? Math.round(Math.min(basicEarned, 15000) * 0.0833) : 0
+    const epfDiff  = emp.pf_applicable ? Math.max(0, pfEmp - eps) : 0
+    const adminCh  = emp.pf_applicable ? Math.round(Math.min(basicEarned, 15000) * 0.005) : 0
+    const edli     = emp.pf_applicable ? Math.round(Math.min(basicEarned, 15000) * 0.005) : 0
+
+    const pt       = emp.pt_applicable ? calcPT(totalEarning, true) : 0
+    const lwf      = parseFloat(f.lwf) || 0
+    const tds      = parseFloat(f.tds) || 0
+    const otherDed = parseFloat(f.other_deduction) || 0
+
+    const netPayable = totalEarning - pfEmp - vpf - esiEmp - pt - lwf - tds - otherDed
+
+    const advOpening  = parseFloat(f.advance_opening) || 0
+    const furtherAdv  = parseFloat(f.further_advance) || 0
+    const advAdjusted = parseFloat(f.advance) || 0
+    const advClosing  = advOpening + furtherAdv - advAdjusted
+    const otherReimb  = parseFloat(f.other_reimbursement) || 0
+    const monthlyCTC  = totalEarning + eps + epfDiff + adminCh + edli + esiEr
+
+    setForm(prev => ({
+      ...prev, ...overrides,
+      total_paid_days: String(paidDays),
+      extra_days:      String(extraDays),
+      basic_rate:      String(basicRate),
+      hra_rate:        String(hraRate),
+      other_defray:    String(otherDefray),
+      basic_salary:    String(basicEarned),
+      hra:             String(hraEarned),
+      gross_salary:    String(grossEarning),
+      extra_pay:       String(extraPay),
+      total_earning:   String(totalEarning),
+      esi_employee:    String(esiEmp),
+      esi_employer:    String(esiEr),
+      pf_employee:     String(pfEmp),
+      employer_eps:    String(eps),
+      employer_epf_diff: String(epfDiff),
+      admin_charges:   String(adminCh),
+      edli_charge:     String(edli),
+      pt:              String(pt),
+      net_salary:      String(netPayable),
+      advance_closing: String(Math.max(0, advClosing)),
+      monthly_ctc:     String(monthlyCTC),
+    }))
   }
 
   const openEditEntry = (rec: any) => {
     setEditingId(rec.id)
     setForm({
-      employee_id: rec.employee_id,
-      month: rec.month?.slice(0,7) ?? '',
-      days_worked: rec.days_worked?.toString() ?? '',
-      basic_salary: rec.basic_salary?.toString() ?? '',
-      hra: rec.hra?.toString() ?? '0',
-      advance: rec.advance?.toString() ?? '0',
-      tds: rec.tds?.toString() ?? '0',
-      hold: rec.hold?.toString() ?? '0',
-      arrears: rec.arrears?.toString() ?? '0',
-      ot_bonus: rec.ot_bonus?.toString() ?? '0',
-      esi_employee: rec.esi_employee?.toString() ?? '0',
-      esi_employer: rec.esi_employer?.toString() ?? '0',
-      pf_employee: rec.pf_employee?.toString() ?? '0',
-      pf_employer: rec.pf_employer?.toString() ?? '0',
-      pt: rec.pt?.toString() ?? '0',
-      gross_salary: rec.gross_salary?.toString() ?? '',
-      net_salary: rec.net_salary?.toString() ?? '',
-      remarks: rec.remarks ?? '',
-      payment_mode: rec.payment_mode ?? 'Cash',
-      payment_ref: rec.payment_ref ?? '',
-      is_paid: rec.is_paid ? 'true' : 'false',
+      employee_id:    rec.employee_id,
+      month:          rec.month?.slice(0,7) ?? '',
+      month_days:     rec.month_days?.toString() ?? '30',
+      absent_days:    rec.absent_days?.toString() ?? '0',
+      total_paid_days: rec.total_paid_days?.toString() ?? '',
+      extra_days:     rec.extra_days?.toString() ?? '0',
+      gross_rate:     rec.gross_rate?.toString() ?? '',
+      basic_rate:     rec.basic_rate?.toString() ?? '',
+      hra_rate:       rec.hra_rate?.toString() ?? '',
+      other_defray:   rec.other_defray?.toString() ?? '0',
+      basic_salary:   rec.basic_salary?.toString() ?? '',
+      hra:            rec.hra?.toString() ?? '0',
+      gross_salary:   rec.gross_salary?.toString() ?? '',
+      extra_pay:      rec.extra_pay?.toString() ?? '0',
+      total_earning:  rec.total_earning?.toString() ?? '',
+      esi_employee:   rec.esi_employee?.toString() ?? '0',
+      esi_employer:   rec.esi_employer?.toString() ?? '0',
+      pf_employee:    rec.pf_employee?.toString() ?? '0',
+      vpf:            rec.vpf?.toString() ?? '0',
+      employer_eps:   rec.employer_eps?.toString() ?? '0',
+      employer_epf_diff: rec.employer_epf_diff?.toString() ?? '0',
+      admin_charges:  rec.admin_charges?.toString() ?? '0',
+      edli_charge:    rec.edli_charge?.toString() ?? '0',
+      pt:             rec.pt?.toString() ?? '0',
+      lwf:            rec.lwf?.toString() ?? '0',
+      tds:            rec.tds?.toString() ?? '0',
+      other_deduction: rec.other_deduction?.toString() ?? '0',
+      net_salary:     rec.net_salary?.toString() ?? '',
+      advance_opening: rec.advance_opening?.toString() ?? '0',
+      further_advance: rec.further_advance?.toString() ?? '0',
+      advance:        rec.advance?.toString() ?? '0',
+      advance_closing: rec.advance_closing?.toString() ?? '0',
+      other_reimbursement: rec.other_reimbursement?.toString() ?? '0',
+      additional:     rec.additional?.toString() ?? '0',
+      monthly_ctc:    rec.monthly_ctc?.toString() ?? '',
+      hold:           rec.hold?.toString() ?? '0',
+      arrears:        rec.arrears?.toString() ?? '0',
+      remarks:        rec.remarks ?? '',
+      payment_mode:   rec.payment_mode ?? 'Cash',
+      payment_ref:    rec.payment_ref ?? '',
+      is_paid:        rec.is_paid ? 'true' : 'false',
     })
     setShowForm(true)
   }
@@ -784,29 +940,53 @@ export const SalaryEntryPage: React.FC = () => {
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.employee_id||!form.month)throw new Error('Employee and month required')
-      const gross = parseFloat(form.gross_salary) || (parseFloat(form.basic_salary)||0) + (parseFloat(form.hra)||0)
+      const n = (k: string) => parseFloat((form as any)[k]) || 0
+      const totalEarning = n('total_earning') || n('gross_salary')
       const payload = {
-        employee_id:form.employee_id, month:form.month+'-01',
-        days_worked:parseInt(form.days_worked)||null,
-        basic_salary:parseFloat(form.basic_salary)||null,
-        hra:parseFloat(form.hra)||0,
-        gross_salary: gross,
-        earned_salary: gross,
-        advance:parseFloat(form.advance)||0,
-        tds:parseFloat(form.tds)||0,
-        hold:parseFloat(form.hold)||0,
-        arrears:parseFloat(form.arrears)||0,
-        ot_bonus:parseFloat(form.ot_bonus)||0,
-        esi_employee:parseFloat(form.esi_employee)||0,
-        esi_employer:parseFloat(form.esi_employer)||0,
-        pf_employee:parseFloat(form.pf_employee)||0,
-        pf_employer:parseFloat(form.pf_employer)||0,
-        pt:parseFloat(form.pt)||0,
-        net_salary:parseFloat(form.net_salary)||0,
-        payment_mode:form.payment_mode||'Cash',
-        payment_ref:form.payment_ref||null,
-        is_paid:form.is_paid==='true',
-        remarks:form.remarks||null,
+        employee_id:    form.employee_id,
+        month:          form.month+'-01',
+        days_worked:    parseInt(form.total_paid_days)||null,
+        month_days:     parseInt(form.month_days)||30,
+        absent_days:    n('absent_days'),
+        total_paid_days: n('total_paid_days'),
+        extra_days:     n('extra_days'),
+        gross_rate:     n('gross_rate') || null,
+        basic_rate:     n('basic_rate') || null,
+        hra_rate:       n('hra_rate') || null,
+        other_defray:   n('other_defray'),
+        basic_salary:   n('basic_salary') || null,
+        hra:            n('hra'),
+        gross_salary:   n('gross_salary'),
+        extra_pay:      n('extra_pay'),
+        total_earning:  totalEarning,
+        earned_salary:  totalEarning,
+        esi_employee:   n('esi_employee'),
+        esi_employer:   n('esi_employer'),
+        pf_employee:    n('pf_employee'),
+        pf_employer:    n('employer_eps') + n('employer_epf_diff'),
+        vpf:            n('vpf'),
+        employer_eps:   n('employer_eps'),
+        employer_epf_diff: n('employer_epf_diff'),
+        admin_charges:  n('admin_charges'),
+        edli_charge:    n('edli_charge'),
+        pt:             n('pt'),
+        lwf:            n('lwf'),
+        tds:            n('tds'),
+        other_deduction: n('other_deduction'),
+        net_salary:     n('net_salary'),
+        advance_opening: n('advance_opening'),
+        further_advance: n('further_advance'),
+        advance:        n('advance'),
+        advance_closing: n('advance_closing'),
+        other_reimbursement: n('other_reimbursement'),
+        additional:     n('additional'),
+        monthly_ctc:    n('monthly_ctc') || null,
+        hold:           n('hold'),
+        arrears:        n('arrears'),
+        payment_mode:   form.payment_mode||'Cash',
+        payment_ref:    form.payment_ref||null,
+        is_paid:        form.is_paid==='true',
+        remarks:        form.remarks||null,
       }
       const{data:upserted,error}=await supabase.from('salary_monthly').upsert(payload,{onConflict:'employee_id,month'}).select('id').single()
       if(error)throw error
@@ -1046,70 +1226,129 @@ export const SalaryEntryPage: React.FC = () => {
 
       <Modal open={showForm} onClose={()=>{setShowForm(false);setEditingId(null)}} title={editingId?'Edit Salary Entry':'Add Salary Entry'} size="lg"
         footer={<><Button variant="secondary" onClick={()=>{setShowForm(false);setEditingId(null)}}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
-        <div className="space-y-4">
-          <FormRow>
-            <Select label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)}/>
-            <Select label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={e=>s('employee_id',e.target.value)}/>
-          </FormRow>
-          <FormRow>
-            <Input label="Month" required type="month" value={form.month} onChange={e=>s('month',e.target.value)}/>
-            <Input label="Days Worked" type="number" value={form.days_worked} onChange={e=>s('days_worked',e.target.value)}/>
-            <div className="flex items-end">
-              <Button variant="secondary" size="sm" onClick={autoFillFromAttendance} title="Auto-fill days worked and advance from attendance records">
-                📋 Auto-fill Attendance
-              </Button>
+        {(() => {
+          const selEmp = employees?.find((e:any)=>e.id===form.employee_id)
+          const hasESI = selEmp?.esi_applicable
+          const hasPF  = selEmp?.pf_applicable
+          const hasPT  = selEmp?.pt_applicable
+          return (
+          <div className="space-y-4">
+            {/* ── Employee & Month ── */}
+            <FormRow>
+              <Select label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)}/>
+              <Select label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id}
+                onChange={e=>{ s('employee_id',e.target.value); const emp=employees?.find((x:any)=>x.id===e.target.value); if(emp) s('gross_rate', emp.base_salary?.toString()??'') }}/>
+            </FormRow>
+            <FormRow>
+              <Input label="Month" required type="month" value={form.month} onChange={e=>s('month',e.target.value)}/>
+              <div className="flex items-end">
+                <Button variant="secondary" size="sm" onClick={autoFillFromAttendance}>📋 Auto-fill Attendance</Button>
+              </div>
+            </FormRow>
+
+            {/* ── Attendance ── */}
+            <Divider label="Attendance"/>
+            <FormRow>
+              <Input label="Month Days" type="number" value={form.month_days}
+                onChange={e=>{ s('month_days',e.target.value); calcPayroll({month_days:e.target.value}) }}/>
+              <Input label="Absent Days" type="number" value={form.absent_days}
+                onChange={e=>{ s('absent_days',e.target.value); calcPayroll({absent_days:e.target.value}) }}/>
+              <Input label="Total Paid Days" type="number" value={form.total_paid_days} readOnly
+                className="bg-gray-50"/>
+              <Input label="Extra Days (auto)" type="number" value={form.extra_days} readOnly
+                className="bg-gray-50" hint="Based on designation"/>
+            </FormRow>
+
+            {/* ── Earnings ── */}
+            <Divider label="Earnings"/>
+            <FormRow>
+              <Input label="Gross Rate (monthly)" type="number" value={form.gross_rate}
+                onChange={e=>{ s('gross_rate',e.target.value); calcPayroll({gross_rate:e.target.value}) }}/>
+              <Input label="Basic Rate (50%)" type="number" value={form.basic_rate} readOnly className="bg-gray-50"/>
+              <Input label="HRA Rate (30%)" type="number" value={form.hra_rate} readOnly className="bg-gray-50"/>
+              <Input label="Other Defray" type="number" value={form.other_defray}
+                onChange={e=>s('other_defray',e.target.value)}/>
+            </FormRow>
+            <FormRow>
+              <Input label="Basic Earned" type="number" value={form.basic_salary} readOnly className="bg-gray-50"/>
+              <Input label="HRA Earned" type="number" value={form.hra} readOnly className="bg-gray-50"/>
+              <Input label="Gross Earning" type="number" value={form.gross_salary} readOnly className="bg-gray-50"/>
+              <Input label="Extra Pay" type="number" value={form.extra_pay} readOnly className="bg-gray-50"/>
+            </FormRow>
+            <div className="flex items-center gap-3 bg-brand-50 rounded-lg px-4 py-2">
+              <span className="text-sm text-gray-600">Total Earning</span>
+              <span className="text-lg font-bold text-brand-700">₹ {parseFloat(form.total_earning||'0').toLocaleString('en-IN')}</span>
+              <Button variant="secondary" size="sm" className="ml-auto" onClick={()=>calcPayroll()}>↻ Recalculate</Button>
             </div>
-          </FormRow>
-          <Divider label="Earnings"/>
-          <FormRow>
-            <Input label="Basic Salary" type="number" value={form.basic_salary} onChange={e=>s('basic_salary',e.target.value)}/>
-            <Input label="HRA" type="number" value={form.hra} onChange={e=>s('hra',e.target.value)}/>
-            <Input label="Gross Salary" type="number" value={form.gross_salary} onChange={e=>s('gross_salary',e.target.value)}/>
-          </FormRow>
-          {(() => {
-            const selEmp = employees?.find((e:any)=>e.id===form.employee_id)
-            const hasESI = selEmp?.esi_applicable
-            const hasPF  = selEmp?.pf_applicable
-            const hasPT  = selEmp?.pt_applicable
-            if (!selEmp) return null
-            if (!hasESI && !hasPF && !hasPT) return (
-              <div className="text-xs text-gray-400 bg-gray-50 rounded px-3 py-2">No statutory deductions (ESI/PF/PT) applicable for this employee</div>
-            )
-            return (<>
-              <Divider label="Statutory Deductions"/>
-              {hasESI && <FormRow>
-                <Input label="ESI Employee (0.75%)" type="number" value={form.esi_employee} onChange={e=>s('esi_employee',e.target.value)}/>
-                <Input label="ESI Employer (3.25%)" type="number" value={form.esi_employer} onChange={e=>s('esi_employer',e.target.value)}/>
-              </FormRow>}
-              {(hasPF||hasPT) && <FormRow>
-                {hasPF && <Input label="PF Employee (12%)" type="number" value={form.pf_employee} onChange={e=>s('pf_employee',e.target.value)}/>}
-                {hasPF && <Input label="PF Employer (12%)" type="number" value={form.pf_employer} onChange={e=>s('pf_employer',e.target.value)}/>}
-                {hasPT && <Input label="PT (Professional Tax)" type="number" value={form.pt} onChange={e=>s('pt',e.target.value)}/>}
-              </FormRow>}
-            </>)
-          })()}
-          <Divider label="Other Deductions &amp; Additions"/>
-          <FormRow>
-            <Input label="Advance" type="number" value={form.advance} onChange={e=>s('advance',e.target.value)}/>
-            <Input label="TDS" type="number" value={form.tds} onChange={e=>s('tds',e.target.value)}/>
-            <Input label="Hold" type="number" value={form.hold} onChange={e=>s('hold',e.target.value)}/>
-          </FormRow>
-          <FormRow>
-            <Input label="Arrears" type="number" value={form.arrears} onChange={e=>s('arrears',e.target.value)}/>
-            <Input label="OT / Bonus" type="number" value={form.ot_bonus} onChange={e=>s('ot_bonus',e.target.value)}/>
-          </FormRow>
-          <FormRow>
-            <Input label="Net Salary" required type="number" value={form.net_salary} onChange={e=>s('net_salary',e.target.value)}/>
-            <div className="flex items-end"><Button variant="secondary" onClick={calcPayroll}>Auto Calc</Button></div>
-          </FormRow>
-          <Divider label="Payment"/>
-          <FormRow>
-            <Select label="Payment Mode" options={['Cash','Bank Transfer','Cheque']} value={form.payment_mode} onChange={e=>s('payment_mode',e.target.value)}/>
-            <Input label="UTR / Cheque No" value={form.payment_ref} onChange={e=>s('payment_ref',e.target.value)}/>
-            <Select label="Paid?" options={[{value:'false',label:'Pending'},{value:'true',label:'Paid'}]} value={form.is_paid} onChange={e=>s('is_paid',e.target.value)}/>
-          </FormRow>
-          <Input label="Remarks" value={form.remarks} onChange={e=>s('remarks',e.target.value)}/>
-        </div>
+
+            {/* ── Statutory Deductions ── */}
+            <Divider label="Statutory Deductions"/>
+            {!selEmp && <p className="text-xs text-gray-400">Select an employee to see applicable deductions</p>}
+            {selEmp && !hasESI && !hasPF && !hasPT && (
+              <div className="text-xs text-gray-400 bg-gray-50 rounded px-3 py-2">No statutory deductions applicable for this employee</div>
+            )}
+            {hasPF && <>
+              <FormRow>
+                <Input label="PF Employee @12%" type="number" value={form.pf_employee} onChange={e=>s('pf_employee',e.target.value)}/>
+                <Input label="VPF (Voluntary)" type="number" value={form.vpf} onChange={e=>s('vpf',e.target.value)}/>
+              </FormRow>
+              <FormRow>
+                <Input label="Employer EPS @8.33%" type="number" value={form.employer_eps} readOnly className="bg-gray-50"/>
+                <Input label="Employer EPF @3.67%" type="number" value={form.employer_epf_diff} readOnly className="bg-gray-50"/>
+                <Input label="Admin Charges @0.5%" type="number" value={form.admin_charges} readOnly className="bg-gray-50"/>
+                <Input label="EDLI @0.5%" type="number" value={form.edli_charge} readOnly className="bg-gray-50"/>
+              </FormRow>
+            </>}
+            {hasESI && <FormRow>
+              <Input label="ESI Employee @0.75% (on Basic)" type="number" value={form.esi_employee} onChange={e=>s('esi_employee',e.target.value)}/>
+              <Input label="ESI Employer @3.25% (on Basic)" type="number" value={form.esi_employer} readOnly className="bg-gray-50"/>
+            </FormRow>}
+            {hasPT && <FormRow>
+              <Input label="Professional Tax" type="number" value={form.pt} onChange={e=>s('pt',e.target.value)}/>
+            </FormRow>}
+            <FormRow>
+              <Input label="LWF (Labour Welfare Fund)" type="number" value={form.lwf} onChange={e=>s('lwf',e.target.value)}/>
+              <Input label="TDS" type="number" value={form.tds} onChange={e=>s('tds',e.target.value)}/>
+              <Input label="Other Deduction" type="number" value={form.other_deduction} onChange={e=>s('other_deduction',e.target.value)}/>
+            </FormRow>
+
+            {/* ── Net Payable ── */}
+            <div className="flex items-center gap-3 bg-green-50 rounded-lg px-4 py-2">
+              <span className="text-sm text-gray-600">Net Payable</span>
+              <span className="text-lg font-bold text-green-700">₹ {parseFloat(form.net_salary||'0').toLocaleString('en-IN')}</span>
+            </div>
+
+            {/* ── Advance ── */}
+            <Divider label="Advance"/>
+            <FormRow>
+              <Input label="Opening Balance" type="number" value={form.advance_opening}
+                onChange={e=>{ s('advance_opening',e.target.value); const cl=parseFloat(e.target.value||'0')+(parseFloat(form.further_advance)||0)-(parseFloat(form.advance)||0); s('advance_closing',String(Math.max(0,cl))) }}/>
+              <Input label="Further Advance" type="number" value={form.further_advance}
+                onChange={e=>{ s('further_advance',e.target.value); const cl=(parseFloat(form.advance_opening)||0)+parseFloat(e.target.value||'0')-(parseFloat(form.advance)||0); s('advance_closing',String(Math.max(0,cl))) }}/>
+              <Input label="Advance Adjusted (deducted)" type="number" value={form.advance}
+                onChange={e=>{ s('advance',e.target.value); const cl=(parseFloat(form.advance_opening)||0)+(parseFloat(form.further_advance)||0)-parseFloat(e.target.value||'0'); s('advance_closing',String(Math.max(0,cl))) }}/>
+              <Input label="Closing Balance" type="number" value={form.advance_closing} readOnly className="bg-gray-50"/>
+            </FormRow>
+
+            {/* ── Disbursement & CTC ── */}
+            <Divider label="Disbursement"/>
+            <FormRow>
+              <Input label="Other Reimbursement" type="number" value={form.other_reimbursement} onChange={e=>s('other_reimbursement',e.target.value)}/>
+              <Input label="Additional" type="number" value={form.additional} onChange={e=>s('additional',e.target.value)}/>
+              <Input label="Monthly CTC" type="number" value={form.monthly_ctc} readOnly className="bg-gray-50"/>
+            </FormRow>
+
+            {/* ── Payment ── */}
+            <Divider label="Payment"/>
+            <FormRow>
+              <Select label="Payment Mode" options={['Cash','Bank Transfer','Cheque','UPI']} value={form.payment_mode} onChange={e=>s('payment_mode',e.target.value)}/>
+              <Input label="UTR / Cheque No" value={form.payment_ref} onChange={e=>s('payment_ref',e.target.value)}/>
+              <Select label="Status" options={[{value:'false',label:'Pending'},{value:'true',label:'Paid'}]} value={form.is_paid} onChange={e=>s('is_paid',e.target.value)}/>
+            </FormRow>
+            <Input label="Remarks" value={form.remarks} onChange={e=>s('remarks',e.target.value)}/>
+          </div>
+          )
+        })()}
       </Modal>
     </div>
   )
