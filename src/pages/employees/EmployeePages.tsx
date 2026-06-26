@@ -675,8 +675,8 @@ function computeSalaryForEmp(emp: any, opts: {
   const otherDed  = opts.otherDeduction ?? 0
   const furtherAdv = opts.furtherAdvance ?? 0
   const advOpening = opts.advanceOpening ?? 0
-  // Default: deduct all advances + flock deductions this month
-  const advAdjusted = furtherAdv + otherDed
+  // advAdjusted = advance deducted from salary this month (separate from otherDed)
+  const advAdjusted = furtherAdv
   const advClosing  = Math.max(0, advOpening + furtherAdv - advAdjusted)
 
   const netPayable = Math.max(0, totalEarning - pfEmp - vpf - esiEmp - pt - lwf - tds - otherDed - advAdjusted)
