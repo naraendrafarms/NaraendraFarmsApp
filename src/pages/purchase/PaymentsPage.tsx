@@ -8,9 +8,7 @@ import {
 } from '@/components/ui'
 import { CheckCircle, Clock, AlertCircle, IndianRupee, Edit2, Trash2, Plus, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
-
-const STATUS_OPTIONS = ['Pending', 'Paid', 'HOLD']
-const PAY_MODE = ['Cash', 'NEFT', 'RTGS', 'IMPS', 'UPI', 'Cheque']
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 const STATUS_CLS: Record<string, string> = {
   Paid:    'bg-green-100 text-green-700',
@@ -28,6 +26,10 @@ const emptyForm = () => ({
 
 export const PaymentsPage: React.FC = () => {
   const qc = useQueryClient()
+  const statusOptions = useConfigOptions('payment_status')
+  const payModeOptions = useConfigOptions('payment_method')
+  const STATUS_OPTIONS = statusOptions.map(o => o.value)
+  const PAY_MODE = payModeOptions.map(o => o.value)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState<any>(null)
   const [delId, setDelId]       = useState<string | null>(null)

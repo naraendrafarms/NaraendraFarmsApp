@@ -7,13 +7,7 @@ import toast from 'react-hot-toast'
 import { Plus, Trash2, Edit2, Download, X } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 
-const GST_OPTIONS = [
-  { value: '0', label: '0%' },
-  { value: '5', label: '5%' },
-  { value: '12', label: '12%' },
-  { value: '18', label: '18%' },
-]
-
+// BATCH_CATS: medicine-type categories that need batch/expiry tracking
 const BATCH_CATS = new Set(['Medicine', 'Vaccine', 'Supplement', 'Injectable'])
 
 function exportCSV(filename: string, headers: string[], rows: string[][]) {
@@ -38,6 +32,8 @@ export const GRNPage: React.FC = () => {
   const qc = useQueryClient()
   const categoryOptions = useConfigOptions('item_category')
   const CATEGORIES = categoryOptions.map(o => o.value)
+  const gstOptions  = useConfigOptions('gst_rate')
+  const unitOptions = useConfigOptions('unit')
 
   const [fFrom, setFFrom] = useState('')
   const [fTo, setFTo] = useState('')
@@ -541,7 +537,7 @@ export const GRNPage: React.FC = () => {
               label="GST %"
               value={form.gst_pct}
               onChange={e => s('gst_pct', e.target.value)}
-              options={GST_OPTIONS}
+              options={gstOptions}
             />
           </FormRow>
 

@@ -632,57 +632,70 @@ const InlineConfig: React.FC<{ title: string; grp: string; placeholder: string }
   )
 }
 
+const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <div>
+    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">{title}</p>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{children}</div>
+  </div>
+)
+
 const MastersHub: React.FC = () => (
-  <div className="space-y-6">
-    <p className="text-sm text-gray-500">Edit the dropdown lists used across all entry pages. Changes take effect immediately.</p>
+  <div className="space-y-8">
+    <p className="text-sm text-gray-500">
+      All dropdown lists used across every page are managed here. No hardcoded options exist in the app — add, edit, or remove values and they reflect immediately in all forms.
+    </p>
 
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Inventory</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InlineMaster title="Inventory Categories" queryKey="categories_master" table="categories_master" placeholder="Category name" />
-        <InlineMaster title="Units of Measure" queryKey="units_master" table="units_master" placeholder="Unit (kg, Ltr, Nos…)" />
-      </div>
-    </div>
+    <Section title="Items & Inventory">
+      <InlineConfig title="Item Categories" grp="item_category" placeholder="e.g. Feed Ingredient, Medicine" />
+      <InlineConfig title="Units of Measure" grp="unit" placeholder="e.g. kg, Ltr, Nos" />
+      <InlineConfig title="Stock Adjustment Types" grp="adjustment_type" placeholder="e.g. Wastage, Damage" />
+      <InlineConfig title="Feed Ingredient Sub-Types" grp="ingredient_category" placeholder="e.g. grain, protein, mineral" />
+      <InlineConfig title="Medicine Sub-Types" grp="medicine_subtype" placeholder="e.g. Tablet, Liquid, Vial" />
+      <InlineMaster title="Units Master (legacy)" queryKey="units_master" table="units_master" placeholder="Unit name" />
+    </Section>
 
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Purchase / GRN</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InlineConfig title="PO Material Types" grp="material_type" placeholder="e.g. Feed Raw Material" />
-        <InlineConfig title="GRN / Stock Receipt Categories" grp="grn_category" placeholder="e.g. Feed, Medicine, Vaccine" />
-        <InlineConfig title="Feed Ingredient Categories" grp="ingredient_category" placeholder="e.g. grain, protein, mineral" />
-        <InlineConfig title="Medicine / Vaccine Types" grp="medicine_type" placeholder="e.g. vaccine, injectable" />
-      </div>
-    </div>
+    <Section title="Purchase / GRN">
+      <InlineConfig title="PO Material Types" grp="material_type" placeholder="e.g. Feed Raw Material" />
+      <InlineConfig title="GRN Receipt Categories" grp="grn_category" placeholder="e.g. Feed, Medicine" />
+      <InlineConfig title="Material Status" grp="material_status" placeholder="e.g. Pending, Received" />
+      <InlineConfig title="GST Rates" grp="gst_rate" placeholder="e.g. 5, 12, 18" />
+      <InlineConfig title="GST Supplier Types" grp="gst_supplier_type" placeholder="e.g. Registered" />
+      <InlineConfig title="Purchase Nature" grp="purchase_nature" placeholder="e.g. Purchase, Expense" />
+    </Section>
 
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Expenses</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InlineConfig title="Feed Mill Expense Categories" grp="feedmill_expense" placeholder="e.g. Labour, Electricity" />
-        <InlineConfig title="Farm Expense Categories" grp="farm_expense" placeholder="e.g. maintenance, transport" />
-      </div>
-    </div>
+    <Section title="Payments">
+      <InlineConfig title="Payment Methods" grp="payment_method" placeholder="e.g. NEFT, Cash, UPI" />
+      <InlineConfig title="Payment Status" grp="payment_status" placeholder="e.g. Pending, Paid, HOLD" />
+      <InlineConfig title="Invoice Source Types" grp="invoice_source" placeholder="e.g. GRN, Chick Purchase" />
+    </Section>
 
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Payments</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InlineConfig title="Payment Methods" grp="payment_method" placeholder="e.g. NEFT, Cash" />
-      </div>
-    </div>
+    <Section title="Expenses">
+      <InlineConfig title="Farm Expense Categories" grp="farm_expense" placeholder="e.g. maintenance, transport" />
+      <InlineConfig title="Feed Mill Expense Categories" grp="feedmill_expense" placeholder="e.g. Labour, Electricity" />
+      <InlineConfig title="Feed Mill Adjustment Types" grp="feedmill_adjustment" placeholder="e.g. Opening, Write-off" />
+      <InlineConfig title="Expense Payment Modes" grp="expense_payment_mode" placeholder="e.g. Cash, Bank" />
+    </Section>
 
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Flocks</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InlineConfig title="Bird Breeds" grp="breed" placeholder="e.g. VENCO-430" />
-      </div>
-      <p className="text-xs text-gray-400 mt-2">Feed types are managed in <strong>Masters → Feed Types</strong> and apply to Daily Entry, Bulk Daily Entry, Feed Mill, and Feed Cost reports.</p>
-    </div>
+    <Section title="Accounts / Cash Book">
+      <InlineConfig title="Transaction Types" grp="txn_type" placeholder="e.g. receipt, payment" />
+      <InlineConfig title="Cash Book Categories" grp="cashbook_category" placeholder="e.g. je_sale, salary" />
+    </Section>
 
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Employees</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <InlineConfig title="Designations" grp="designation" placeholder="e.g. Farm Manager" />
-      </div>
-    </div>
+    <Section title="Flocks & Birds">
+      <InlineConfig title="Bird Breeds" grp="breed" placeholder="e.g. VENCO-430, Cobb-500" />
+      <InlineConfig title="Vaccine / Medicine Routes" grp="vaccine_route" placeholder="e.g. Drinking Water" />
+      <InlineConfig title="Egg Types" grp="egg_type" placeholder="e.g. HE Grade A, JE Eggs" />
+    </Section>
+
+    <Section title="Employees">
+      <InlineConfig title="Designations" grp="designation" placeholder="e.g. Farm Manager" />
+      <InlineConfig title="Attendance Status" grp="attendance_status" placeholder="e.g. P, A, H" />
+      <InlineConfig title="Advance Types" grp="advance_type" placeholder="e.g. Cash, Egg" />
+    </Section>
+
+    <p className="text-xs text-gray-400">
+      Feed Types are managed separately in <strong>Masters → Feed Types</strong>. Farms, Sites, Sheds, Hatcheries, and Vaccination Schedules have their own dedicated masters pages.
+    </p>
   </div>
 )
 

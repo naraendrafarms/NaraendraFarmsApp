@@ -18,24 +18,18 @@ import { useConfigValues, useConfigOptions } from '@/hooks/useConfigOptions'
 
 // ── constants ──────────────────────────────────────────────────────
 const CATEGORIES_DEFAULT = ['Feed Ingredient', 'Medicine', 'Vaccine', 'Packaging', 'Equipment', 'Spares', 'Chemical', 'Other']
-const ADJ_TYPES  = ['Opening Stock', 'Wastage', 'Damage', 'Correction', 'Found', 'Transfer Out', 'Transfer In']
-const UNITS_DEFAULT      = ['kg','MT','Quintal','Ltr','ML','Gms','Dose','Nos','Box','Mtrs','Bag']
-
 // ── DB-backed masters ──
 function useCategoryList() {
   const opts = useConfigOptions('item_category')
   return opts.length ? opts.map(o => o.value) : CATEGORIES_DEFAULT
 }
 function useUnitList() {
-  const { data } = useQuery({
-    queryKey: ['units_master'],
-    queryFn: async () => {
-      const { data } = await supabase.from('units_master').select('name').order('sort_order').order('name')
-      return (data ?? []).map((r: any) => r.name as string)
-    },
-    staleTime: 5 * 60 * 1000,
-  })
-  return data?.length ? data : UNITS_DEFAULT
+  const opts = useConfigOptions('unit')
+  return opts.length ? opts.map(o => o.value) : ['kg','Ltr','Nos','Dose','Box','Bag']
+}
+function useAdjTypeList() {
+  const opts = useConfigOptions('adjustment_type')
+  return opts.length ? opts.map(o => o.value) : ['Opening Stock','Wastage','Damage','Correction','Found','Transfer Out','Transfer In']
 }
 
 const norm = (s?: string | null) => (s ?? '').trim().toLowerCase()
@@ -323,7 +317,8 @@ const StockStatusTab: React.FC = () => {
 // TAB 2: ADJUSTMENTS (Opening Stock + manual corrections)
 // ════════════════════════════════════════════════════════════════════
 const AdjustmentsTab: React.FC = () => {
-  const UNITS = useUnitList()
+  const UNITS    = useUnitList()
+  const ADJ_TYPES = useAdjTypeList()
   const qc = useQueryClient()
   const { profile } = useAuth()
   const role = profile?.role

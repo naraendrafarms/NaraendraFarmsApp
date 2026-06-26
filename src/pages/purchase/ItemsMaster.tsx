@@ -9,49 +9,11 @@ import { Plus, Edit2, Search, Package, ToggleLeft, ToggleRight, X } from 'lucide
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 
-// ─── Category config — which extra fields to show ────────────────────────────
+// ─── Category grouping (values match item_category config_options) ────────────
 const FEED_CATS = ['Feed Ingredient']
 const MED_CATS  = ['Medicine', 'Vaccine', 'Supplement', 'Sanitizer', 'Injectable', 'Disinfectant', 'Pesticide']
 const PKG_CATS  = ['Packaging']
 const EQP_CATS  = ['Equipment', 'Spares', 'Chemical', 'Other']
-
-const UNIT_OPTIONS = [
-  { value: 'kg',     label: 'kg' },
-  { value: 'g',      label: 'g' },
-  { value: 'litre',  label: 'Litre' },
-  { value: 'ml',     label: 'ml' },
-  { value: 'nos',    label: 'Nos' },
-  { value: 'bag',    label: 'Bag' },
-  { value: 'box',    label: 'Box' },
-  { value: 'tablet', label: 'Tablet' },
-  { value: 'vial',   label: 'Vial' },
-  { value: 'sachet', label: 'Sachet' },
-  { value: 'bottle', label: 'Bottle' },
-  { value: 'strip',  label: 'Strip' },
-  { value: 'pair',   label: 'Pair' },
-  { value: 'set',    label: 'Set' },
-  { value: 'roll',   label: 'Roll' },
-]
-
-const FEED_SUB = [
-  { value: 'grain',      label: 'Grain' },
-  { value: 'protein',    label: 'Protein' },
-  { value: 'mineral',    label: 'Mineral' },
-  { value: 'supplement', label: 'Supplement' },
-  { value: 'additive',   label: 'Additive' },
-  { value: 'other',      label: 'Other' },
-]
-
-const MED_SUB = [
-  { value: 'tablet',   label: 'Tablet' },
-  { value: 'liquid',   label: 'Liquid' },
-  { value: 'powder',   label: 'Powder' },
-  { value: 'injection',label: 'Injection' },
-  { value: 'vial',     label: 'Vial' },
-  { value: 'sachet',   label: 'Sachet' },
-  { value: 'spray',    label: 'Spray' },
-  { value: 'other',    label: 'Other' },
-]
 
 const emptyForm = () => ({
   code: '', name: '', short_name: '', category: '', sub_type: '',
@@ -68,7 +30,10 @@ export const ItemsMasterPage: React.FC = () => {
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState(emptyForm())
 
-  const categoryOptions = useConfigOptions('item_category')
+  const categoryOptions  = useConfigOptions('item_category')
+  const unitOptions      = useConfigOptions('unit')
+  const feedSubOptions   = useConfigOptions('ingredient_category')
+  const medSubOptions    = useConfigOptions('medicine_subtype')
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['items_master'],
@@ -269,7 +234,7 @@ export const ItemsMasterPage: React.FC = () => {
                 value={form.category} onChange={e => { s('category', e.target.value); s('sub_type', '') }}
                 placeholder="— Select Category —"/>
               <Select label="Unit" required
-                options={UNIT_OPTIONS}
+                options={unitOptions}
                 value={form.unit} onChange={e => s('unit', e.target.value)}/>
             </FormRow>
             <FormRow>
@@ -283,7 +248,7 @@ export const ItemsMasterPage: React.FC = () => {
             {isFeed && (
               <>
                 <Select label="Sub Type"
-                  options={FEED_SUB} value={form.sub_type}
+                  options={feedSubOptions} value={form.sub_type}
                   onChange={e => s('sub_type', e.target.value)} placeholder="— Select —"/>
                 <FormRow>
                   <Input label="Protein %" type="number" value={form.protein_pct}
@@ -299,7 +264,7 @@ export const ItemsMasterPage: React.FC = () => {
               <>
                 <FormRow>
                   <Select label="Form / Type"
-                    options={MED_SUB} value={form.sub_type}
+                    options={medSubOptions} value={form.sub_type}
                     onChange={e => s('sub_type', e.target.value)} placeholder="— Select —"/>
                   <Input label="Manufacturer" value={form.manufacturer}
                     onChange={e => s('manufacturer', e.target.value)} placeholder="e.g. Zoetis"/>
