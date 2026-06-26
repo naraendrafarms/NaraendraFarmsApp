@@ -648,35 +648,57 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
 
   const totalPlacedF = flock.total_placed_f ?? ((flock.paid_female ?? 0) + (flock.free_female ?? 0))
   const totalPlacedM = flock.total_placed_m ?? ((flock.paid_male ?? 0) + (flock.free_male ?? 0))
-  const latestRow = daily[0]
+
+  // Group raw rows by date — a flock can span multiple sheds so multiple rows per date exist.
+  // Summing per date gives correct flock-level totals; then we aggregate across dates.
+  const byDate: Record<string, any> = {}
+  for (const r of (daily ?? [])) {
+    const d = r.record_date as string
+    if (!byDate[d]) byDate[d] = { record_date: d, closing_female: 0, closing_male: 0, mortality_female: 0, mortality_male: 0, total_eggs: 0, he_eggs: 0, he_grade_a: 0, he_grade_b: 0, he_grade_c: 0, wastage_eggs: 0, hd_pct_sum: 0, hd_pct_cnt: 0, he_pct_sum: 0, he_pct_cnt: 0 }
+    byDate[d].closing_female    += r.closing_female ?? 0
+    byDate[d].closing_male      += r.closing_male ?? 0
+    byDate[d].mortality_female  += r.mortality_female ?? 0
+    byDate[d].mortality_male    += r.mortality_male ?? 0
+    byDate[d].total_eggs        += r.total_eggs ?? 0
+    byDate[d].he_eggs           += r.he_eggs ?? 0
+    byDate[d].he_grade_a        += r.he_grade_a ?? 0
+    byDate[d].he_grade_b        += r.he_grade_b ?? 0
+    byDate[d].he_grade_c        += r.he_grade_c ?? 0
+    byDate[d].wastage_eggs      += r.wastage_eggs ?? 0
+    if (r.hd_pct != null) { byDate[d].hd_pct_sum += r.hd_pct; byDate[d].hd_pct_cnt++ }
+    if (r.he_pct != null) { byDate[d].he_pct_sum += r.he_pct; byDate[d].he_pct_cnt++ }
+  }
+  const dailyDates = Object.values(byDate).sort((a: any, b: any) => b.record_date.localeCompare(a.record_date))
+
+  const latestRow = dailyDates[0]
   const currentBirds = (latestRow?.closing_female ?? 0) + (latestRow?.closing_male ?? 0)
-  const totalMortF = daily.reduce((s: number, r: any) => s + (r.mortality_female ?? 0), 0)
-  const totalMortM = daily.reduce((s: number, r: any) => s + (r.mortality_male ?? 0), 0)
-  const totalEggs   = daily.reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0)
-  const totalHE     = daily.reduce((s: number, r: any) => s + (r.he_eggs ?? 0), 0)
-  const totalGradeA = daily.reduce((s: number, r: any) => s + (r.he_grade_a ?? 0), 0)
-  const totalGradeB = daily.reduce((s: number, r: any) => s + (r.he_grade_b ?? 0), 0)
-  const totalGradeC = daily.reduce((s: number, r: any) => s + (r.he_grade_c ?? 0), 0)
-  const totalWaste  = daily.reduce((s: number, r: any) => s + (r.wastage_eggs ?? 0), 0)
+  const totalMortF = dailyDates.reduce((s: number, r: any) => s + r.mortality_female, 0)
+  const totalMortM = dailyDates.reduce((s: number, r: any) => s + r.mortality_male, 0)
+  const totalEggs   = dailyDates.reduce((s: number, r: any) => s + r.total_eggs, 0)
+  const totalHE     = dailyDates.reduce((s: number, r: any) => s + r.he_eggs, 0)
+  const totalGradeA = dailyDates.reduce((s: number, r: any) => s + r.he_grade_a, 0)
+  const totalGradeB = dailyDates.reduce((s: number, r: any) => s + r.he_grade_b, 0)
+  const totalGradeC = dailyDates.reduce((s: number, r: any) => s + r.he_grade_c, 0)
+  const totalWaste  = dailyDates.reduce((s: number, r: any) => s + r.wastage_eggs, 0)
   const totalHEDisp = (heDispatch ?? []).reduce((s: number, r: any) => s + (r.total_dispatched ?? 0), 0)
 
-  const hdRows = daily.filter((r: any) => r.hd_pct != null && (r.total_eggs ?? 0) > 0)
-  const avgHD  = hdRows.length ? hdRows.reduce((s: number, r: any) => s + r.hd_pct, 0) / hdRows.length : null
-  const heRows = daily.filter((r: any) => r.he_pct != null && (r.total_eggs ?? 0) > 0)
-  const avgHE  = heRows.length ? heRows.reduce((s: number, r: any) => s + r.he_pct, 0) / heRows.length : null
+  const hdRows = dailyDates.filter((r: any) => r.hd_pct_cnt > 0 && r.total_eggs > 0)
+  const avgHD  = hdRows.length ? hdRows.reduce((s: number, r: any) => s + r.hd_pct_sum / r.hd_pct_cnt, 0) / hdRows.length : null
+  const heRows = dailyDates.filter((r: any) => r.he_pct_cnt > 0 && r.total_eggs > 0)
+  const avgHE  = heRows.length ? heRows.reduce((s: number, r: any) => s + r.he_pct_sum / r.he_pct_cnt, 0) / heRows.length : null
 
   const monthly: Record<string, { eggs: number; heEggs: number; gradeA: number; gradeB: number; gradeC: number; waste: number; mort: number; birdDays: number; days: number }> = {}
-  daily.forEach((r: any) => {
+  dailyDates.forEach((r: any) => {
     const month = (r.record_date as string)?.slice(0, 7) ?? ''
     if (!monthly[month]) monthly[month] = { eggs: 0, heEggs: 0, gradeA: 0, gradeB: 0, gradeC: 0, waste: 0, mort: 0, birdDays: 0, days: 0 }
-    monthly[month].eggs     += r.total_eggs ?? 0
-    monthly[month].heEggs   += r.he_eggs ?? 0
-    monthly[month].gradeA   += r.he_grade_a ?? 0
-    monthly[month].gradeB   += r.he_grade_b ?? 0
-    monthly[month].gradeC   += r.he_grade_c ?? 0
-    monthly[month].waste    += r.wastage_eggs ?? 0
-    monthly[month].mort     += (r.mortality_female ?? 0) + (r.mortality_male ?? 0)
-    monthly[month].birdDays += (r.closing_female ?? 0) + (r.closing_male ?? 0)
+    monthly[month].eggs     += r.total_eggs
+    monthly[month].heEggs   += r.he_eggs
+    monthly[month].gradeA   += r.he_grade_a
+    monthly[month].gradeB   += r.he_grade_b
+    monthly[month].gradeC   += r.he_grade_c
+    monthly[month].waste    += r.wastage_eggs
+    monthly[month].mort     += r.mortality_female + r.mortality_male
+    monthly[month].birdDays += r.closing_female + r.closing_male
     monthly[month].days     += 1
   })
 
