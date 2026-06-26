@@ -136,63 +136,89 @@ export const InventoryPage: React.FC = () => {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// SHARED: compute per-item stock as-on a date
+// SHARED: compute per-item stock as-on a date from stock_ledger
 // ════════════════════════════════════════════════════════════════════
+const OUT_TYPES = new Set(['production_out','medicine_out','adjustment_out','transfer_out'])
+
 function useStockRows(asOf: string) {
-  const grn = useGrn()
-  const prod = useProductionUsage()
-  const adj = useAdjustments()
   const meta = useItemMeta()
+  const adj = useAdjustments()
+
+  const { data: slData, isLoading: slLoading } = useQuery({
+    queryKey: ['sl_all', asOf],
+    queryFn: async () => {
+      let all: any[] = [], from = 0
+      while (true) {
+        let q = supabase.from('stock_ledger')
+          .select('item_id,item_name,txn_type,qty,unit,unit_price,txn_date')
+          .order('txn_date').range(from, from + 999)
+        if (asOf) q = q.lte('txn_date', asOf)
+        const { data } = await q
+        if (!data || !data.length) break
+        all = all.concat(data); if (data.length < 1000) break; from += 1000
+      }
+      return all
+    },
+  })
 
   const rows = useMemo(() => {
     const m: Record<string, any> = {}
-    const ensure = (name: string) => {
-      const k = norm(name)
-      if (!m[k]) m[k] = { key: k, item_name: name, opening: 0, received: 0, used: 0, adjusted: 0, rate: 0, lastDate: '', unit: '' }
-      return m[k]
+    const ensure = (id: string, name: string) => {
+      if (!m[id]) m[id] = { key: id, item_name: name, opening: 0, received: 0, used: 0, adjusted: 0, rate: 0, lastDate: '', unit: '' }
+      return m[id]
     }
-    const within = (d?: string | null) => !d || !asOf || d <= asOf
 
-    for (const g of grn.data ?? []) {
-      if (!g.item_name) continue
-      const r = ensure(g.item_name)
-      if (within(g.grn_date)) {
-        r.received += Number(g.qty ?? 0)
-        if (g.grn_date >= r.lastDate) { r.rate = Number(g.price_per_unit ?? 0); r.lastDate = g.grn_date; if (g.unit) r.unit = g.unit }
+    for (const r of slData ?? []) {
+      const key = r.item_id ?? norm(r.item_name)
+      const row = ensure(key, r.item_name)
+      const qty = Number(r.qty ?? 0)
+      if (OUT_TYPES.has(r.txn_type)) {
+        row.used += qty
+      } else if (r.txn_type === 'opening') {
+        row.opening += qty
+      } else if (r.txn_type === 'adjustment_in') {
+        row.adjusted += qty
+      } else {
+        // grn_in, transfer_in
+        row.received += qty
+        if ((r.txn_date ?? '') >= row.lastDate) {
+          row.rate = Number(r.unit_price ?? 0); row.lastDate = r.txn_date; if (r.unit) row.unit = r.unit
+        }
       }
+      if (r.unit && !row.unit) row.unit = r.unit
     }
-    for (const u of prod.data ?? []) {
-      if (!u.item_name) continue
-      const r = ensure(u.item_name)
-      if (within(u.date)) r.used += Number(u.qty ?? 0)
-    }
+
+    // Also fold in manual adjustments from feed_stock_adjustments (legacy)
+    const within = (d?: string | null) => !d || !asOf || d <= asOf
     for (const a of adj.data ?? []) {
       if (!a.ingredient_name) continue
-      const r = ensure(a.ingredient_name)
+      const k = norm(a.ingredient_name)
+      const row = ensure(k, a.ingredient_name)
       if (within(a.adjustment_date)) {
-        if (a.adjustment_type === 'Opening') r.opening += Number(a.adjustment_kg ?? 0)
-        else r.adjusted += Number(a.adjustment_kg ?? 0)
-        if (a.unit && !r.unit) r.unit = a.unit
+        if (a.adjustment_type === 'Opening') row.opening += Number(a.adjustment_kg ?? 0)
+        else row.adjusted += Number(a.adjustment_kg ?? 0)
+        if (a.unit && !row.unit) row.unit = a.unit
       }
     }
+
     const metaMap: Record<string, any> = {}
     for (const mm of meta.data ?? []) metaMap[mm.item_key] = mm
 
     return Object.values(m).map((r: any) => {
-      const meta = metaMap[r.key]
+      const mm = metaMap[r.key] ?? metaMap[norm(r.item_name)]
       const closing = r.opening + r.received + r.adjusted - r.used
       return {
         ...r,
-        category: meta?.category ?? '',
-        unit: meta?.unit || r.unit || 'kg',
-        reorder_level: Number(meta?.reorder_level ?? 0),
+        category: mm?.category ?? '',
+        unit: mm?.unit || r.unit || 'kg',
+        reorder_level: Number(mm?.reorder_level ?? 0),
         closing,
         value: closing * (r.rate || 0),
       }
     }).sort((a, b) => a.item_name.localeCompare(b.item_name))
-  }, [grn.data, prod.data, adj.data, meta.data, asOf])
+  }, [slData, adj.data, meta.data, asOf])
 
-  return { rows, isLoading: grn.isLoading || prod.isLoading || adj.isLoading || meta.isLoading }
+  return { rows, isLoading: slLoading || adj.isLoading || meta.isLoading }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -619,60 +645,111 @@ const CategoriesTab: React.FC = () => {
 // ════════════════════════════════════════════════════════════════════
 // TAB 5: STOCK LEDGER (per-item movement timeline)
 // ════════════════════════════════════════════════════════════════════
+const TXN_LABEL: Record<string, string> = {
+  grn_in:         'GRN Received',
+  production_out: 'Production Used',
+  medicine_out:   'Medicine Used',
+  adjustment_in:  'Adjustment In',
+  adjustment_out: 'Adjustment Out',
+  transfer_in:    'Transfer In',
+  transfer_out:   'Transfer Out',
+  opening:        'Opening Stock',
+}
+const TXN_IS_OUT = new Set(['production_out','medicine_out','adjustment_out','transfer_out'])
+
 const LedgerTab: React.FC = () => {
-  const grn = useGrn()
-  const prod = useProductionUsage()
-  const adj = useAdjustments()
-  const [item, setItem] = useState('')
+  const [search, setSearch] = useState('')
+  const [selectedItem, setSelectedItem] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate]     = useState('')
 
-  const items = useMemo(() => {
-    const set = new Map<string, string>()
-    for (const g of grn.data ?? []) if (g.item_name) set.set(norm(g.item_name), g.item_name)
-    for (const a of adj.data ?? []) if (a.ingredient_name) set.set(norm(a.ingredient_name), a.ingredient_name)
-    return Array.from(set.values()).sort()
-  }, [grn.data, adj.data])
+  const { data: allItems, isLoading: loadingItems } = useQuery({
+    queryKey: ['sl_items'],
+    queryFn: async () => {
+      const { data } = await supabase.from('stock_ledger').select('item_id,item_name').order('item_name')
+      const seen = new Set<string>()
+      const out: { id: string; name: string }[] = []
+      for (const r of data ?? []) {
+        const key = r.item_id ?? r.item_name
+        if (!seen.has(key)) { seen.add(key); out.push({ id: r.item_id ?? r.item_name, name: r.item_name }) }
+      }
+      return out.sort((a,b) => a.name.localeCompare(b.name))
+    },
+    staleTime: 2 * 60 * 1000,
+  })
 
-  const moves = useMemo(() => {
-    if (!item) return []
-    const k = norm(item)
-    const out: any[] = []
-    for (const g of grn.data ?? []) if (norm(g.item_name) === k) out.push({ date: g.grn_date, type: 'GRN Received', qty: Number(g.qty ?? 0), rate: g.price_per_unit })
-    for (const u of prod.data ?? []) if (norm(u.item_name) === k) out.push({ date: u.date, type: 'Production Used', qty: -Number(u.qty ?? 0) })
-    for (const a of adj.data ?? []) if (norm(a.ingredient_name) === k) out.push({ date: a.adjustment_date, type: a.adjustment_type, qty: Number(a.adjustment_kg ?? 0), rate: a.rate, remarks: a.remarks })
-    out.sort((x, y) => (x.date ?? '').localeCompare(y.date ?? ''))
-    let bal = 0
-    return out.map(m => { bal += m.qty; return { ...m, balance: bal } })
-  }, [item, grn.data, prod.data, adj.data])
+  const filtered = useMemo(() => {
+    if (!search) return allItems ?? []
+    const s = search.toLowerCase()
+    return (allItems ?? []).filter(i => i.name.toLowerCase().includes(s))
+  }, [allItems, search])
 
-  const loading = grn.isLoading || prod.isLoading || adj.isLoading
+  const { data: moves, isLoading: loadingMoves } = useQuery({
+    queryKey: ['sl_moves', selectedItem, fromDate, toDate],
+    enabled: !!selectedItem,
+    queryFn: async () => {
+      let q = supabase.from('stock_ledger')
+        .select('txn_date,txn_type,qty,unit,unit_price,total_value,reference_no,remarks,flock_id')
+        .or(`item_id.eq.${selectedItem},item_name.eq.${selectedItem}`)
+        .order('txn_date').order('created_at')
+      if (fromDate) q = q.gte('txn_date', fromDate)
+      if (toDate)   q = q.lte('txn_date', toDate)
+      const { data } = await q
+      let bal = 0
+      return (data ?? []).map(r => {
+        const signed = TXN_IS_OUT.has(r.txn_type) ? -Number(r.qty) : Number(r.qty)
+        bal += signed
+        return { ...r, signed, balance: bal }
+      })
+    },
+  })
 
   return (
     <div className="space-y-4">
       <Card>
-        <div className="max-w-md">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Select Item</label>
-          <select value={item} onChange={e => setItem(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500">
-            <option value="">— Select an item —</option>
-            {items.map(i => <option key={i} value={i}>{i}</option>)}
-          </select>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Search & Select Item</label>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Type to search…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-1 focus:ring-1 focus:ring-brand-500" />
+            <select size={4} value={selectedItem} onChange={e => setSelectedItem(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-1 focus:ring-brand-500">
+              {loadingItems ? <option>Loading…</option> : filtered.map(i => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">From</label>
+            <DateInput value={fromDate} onChange={setFromDate} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">To</label>
+            <DateInput value={toDate} onChange={setToDate} />
+          </div>
         </div>
       </Card>
 
-      {item && (
+      {selectedItem && (
         <Card padding={false}>
-          {loading ? <Spinner /> : moves.length === 0 ? <EmptyState title="No movements for this item" /> : (
+          {loadingMoves ? <Spinner /> : !moves?.length ? <EmptyState title="No movements found" /> : (
             <div className="overflow-x-auto">
               <Table>
-                <thead><tr><Th>Date</Th><Th>Movement</Th><Th right>In/Out</Th><Th right>Running Balance</Th><Th right>Rate</Th><Th>Remarks</Th></tr></thead>
+                <thead><tr>
+                  <Th>Date</Th><Th>Type</Th><Th>Ref</Th>
+                  <Th right>In</Th><Th right>Out</Th><Th right>Balance</Th>
+                  <Th right>Rate</Th><Th>Remarks</Th>
+                </tr></thead>
                 <tbody>
                   {moves.map((m, i) => (
                     <tr key={i} className="text-sm hover:bg-gray-50">
-                      <Td className="text-xs">{m.date ? fmtDate(m.date) : '—'}</Td>
-                      <Td><Badge color={m.type === 'Opening' ? 'blue' : m.qty >= 0 ? 'green' : m.type === 'Production Used' ? 'yellow' : 'red'}>{m.type}</Badge></Td>
-                      <Td right className={m.qty < 0 ? 'text-red-600' : 'text-green-700'}>{m.qty > 0 ? '+' : ''}{m.qty.toLocaleString('en-IN')}</Td>
-                      <Td right className="font-semibold">{Math.round(m.balance).toLocaleString('en-IN')}</Td>
-                      <Td right className="text-xs">{m.rate != null ? Number(m.rate).toFixed(2) : '—'}</Td>
+                      <Td className="text-xs">{m.txn_date ? fmtDate(m.txn_date) : '—'}</Td>
+                      <Td><Badge color={m.signed > 0 ? 'green' : 'red'}>{TXN_LABEL[m.txn_type] ?? m.txn_type}</Badge></Td>
+                      <Td className="text-xs text-gray-500">{m.reference_no ?? '—'}</Td>
+                      <Td right className="text-green-700">{m.signed > 0 ? m.signed.toLocaleString('en-IN') : ''}</Td>
+                      <Td right className="text-red-600">{m.signed < 0 ? (-m.signed).toLocaleString('en-IN') : ''}</Td>
+                      <Td right className="font-semibold">{m.balance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Td>
+                      <Td right className="text-xs">{m.unit_price != null ? Number(m.unit_price).toFixed(2) : '—'}</Td>
                       <Td className="text-xs text-gray-400 max-w-[180px] truncate">{m.remarks ?? '—'}</Td>
                     </tr>
                   ))}
