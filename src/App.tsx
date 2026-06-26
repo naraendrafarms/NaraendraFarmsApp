@@ -60,6 +60,7 @@ import { PaymentPlanningPage } from '@/pages/accounts/PaymentPlanning'
 import { CMSUploadPage } from '@/pages/accounts/CMSUpload'
 import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
 import { HelpGuidePage } from '@/pages/help/HelpGuide'
+import { ItemsMasterPage } from '@/pages/purchase/ItemsMaster'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -130,13 +131,18 @@ export const App: React.FC = () => {
             <Route path="flocks/vaccination" element={<VaccinationRecordsPage />} />
 
             {/* Feed Mill */}
-            <Route path="feed" element={<FeedDashboard />} />
-            <Route path="feed/grn" element={<GRNEntry />} />
+            <Route path="feed/mill" element={<FeedMillPage />} />
             <Route path="feed/production" element={<FeedProduction />} />
             <Route path="feed/transfer" element={<FeedTransfer />} />
-            <Route path="feed/stock" element={<StockPage />} />
+
+            {/* Purchase */}
+            <Route path="purchase/items" element={<ItemsMasterPage />} />
+            <Route path="purchase/orders" element={<PurchaseOrdersPage />} />
+            <Route path="purchase/grn" element={<GRNEntry />} />
+            <Route path="purchase/payments" element={<PendingPaymentsPage />} />
+
+            {/* Inventory */}
             <Route path="inventory" element={<InventoryPage />} />
-            <Route path="feed/mill" element={<FeedMillPage />} />
 
             {/* Electricity */}
             <Route path="electricity" element={<ElectricityEntry />} />

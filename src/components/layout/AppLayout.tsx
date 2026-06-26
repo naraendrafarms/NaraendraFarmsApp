@@ -78,15 +78,12 @@ const NAV: NavItem[] = [
     label: 'Masters', icon: <Settings size={18}/>,
     roles: ['admin', 'accounts'],
     children: [
-      { label: 'Farm / Sites',        to: '/masters/farms' },
-      { label: 'Sheds',               to: '/masters/sheds' },
-      { label: 'Item Master',          to: '/masters/ingredients' },
-      { label: 'Feed Types',          to: '/masters/feed-types' },
-      { label: 'Vaccination Schedule',to: '/masters/vaccination' },
-      { label: 'Parties',             to: '/masters/parties' },
-      { label: 'Hatcheries',          to: '/masters/hatcheries' },
-      { label: 'Medicines',           to: '/masters/medicines' },
-      { label: 'Electricity Meters',  to: '/masters/meters' },
+      { label: 'Farm / Sites',         to: '/masters/farms' },
+      { label: 'Sheds',                to: '/masters/sheds' },
+      { label: 'Feed Types',           to: '/masters/feed-types' },
+      { label: 'Vaccination Schedule', to: '/masters/vaccination' },
+      { label: 'Hatcheries',           to: '/masters/hatcheries' },
+      { label: 'Electricity Meters',   to: '/masters/meters' },
     ]
   },
   {
@@ -122,19 +119,22 @@ const NAV: NavItem[] = [
     ]
   },
   {
-    label: 'Procurement', icon: <ShoppingCart size={18}/>,
+    label: 'Purchase', icon: <ShoppingCart size={18}/>,
     children: [
-      { label: 'Purchase Orders',        to: '/purchase-orders?tab=po' },
-      { label: 'Bills / GRN',            to: '/purchase-orders?tab=grn' },
-      { label: 'Payments',               to: '/purchase-orders?tab=payments' },
-      { label: 'Medicine Receipts',      to: '/flocks/medicine-purchases' },
-      { label: 'Farm Expenses',          to: '/expenses' },
+      { label: 'Items Master',    to: '/purchase/items' },
+      { label: 'Suppliers',       to: '/masters/parties' },
+      { label: 'Purchase Orders', to: '/purchase/orders' },
+      { label: 'GRN',             to: '/purchase/grn' },
+      { label: 'Payments',        to: '/purchase/payments' },
+      { label: 'Farm Expenses',   to: '/expenses' },
     ]
   },
   {
     label: 'Inventory', icon: <Database size={18}/>,
     children: [
-      { label: 'Repair / Consumables Stock', to: '/inventory' },
+      { label: 'Stock Balance',   to: '/inventory' },
+      { label: 'Stock Ledger',    to: '/inventory/ledger' },
+      { label: 'Adjustments',     to: '/inventory/adjustments' },
     ]
   },
   {
