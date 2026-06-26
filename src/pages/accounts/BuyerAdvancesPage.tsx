@@ -16,6 +16,7 @@ const EMPTY = {
   payment_mode: 'cash',
   reference_no: '',
   remarks: '',
+  bank_account_id: '',
 }
 
 const MODES = [
@@ -71,17 +72,59 @@ export const BuyerAdvancesPage: React.FC = () => {
     }
   })
 
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bank_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name')
+      return data ?? []
+    }
+  })
+
   const addMut = useMutation({
-    mutationFn: async (row: typeof EMPTY) => {
-      const { error } = await supabase.from('party_advances').insert({
+    mutationFn: async (row: typeof EMPTY & { bank_account_id?: string }) => {
+      const amt = parseFloat(row.amount) || 0
+      const partyName = (parties as any[]).find((p: any) => p.id === row.party_id)?.name ?? ''
+      const narration = `Advance from ${partyName}${row.reference_no ? ` (${row.reference_no})` : ''}`
+
+      // 1. Save to party_advances
+      const { data: adv, error } = await supabase.from('party_advances').insert({
         advance_date: row.advance_date,
         party_id: row.party_id,
-        amount: parseFloat(row.amount) || 0,
+        amount: amt,
         payment_mode: row.payment_mode,
         reference_no: row.reference_no || null,
         remarks: row.remarks || null,
-      })
+      }).select('id').single()
       if (error) throw error
+
+      // 2. Record in Cash Book (cash) or Bank Transactions (bank/upi/etc)
+      const isCash = ['cash'].includes(row.payment_mode)
+      if (isCash) {
+        const { error: cbErr } = await supabase.from('cash_book').insert({
+          txn_date: row.advance_date,
+          txn_type: 'receipt',
+          category: 'sales_collection',
+          description: narration,
+          party_name: partyName,
+          amount_in: amt,
+          amount_out: 0,
+          payment_mode: 'cash',
+          reference_no: row.reference_no || null,
+        })
+        if (cbErr) throw new Error('Advance saved but Cash Book entry failed: ' + cbErr.message)
+      } else if (row.bank_account_id) {
+        const { error: bErr } = await supabase.from('bank_transactions').insert({
+          bank_account_id: row.bank_account_id,
+          txn_date: row.advance_date,
+          txn_type: 'Credit',
+          category: 'Sale Receipt',
+          reference_no: row.reference_no || null,
+          description: narration,
+          amount: amt,
+        })
+        if (bErr) throw new Error('Advance saved but Bank entry failed: ' + bErr.message)
+      }
+      return adv
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['party_advances'] })
@@ -229,6 +272,19 @@ export const BuyerAdvancesPage: React.FC = () => {
               options={MODES}
             />
           </div>
+          {form.payment_mode !== 'cash' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Bank Account <span className="text-gray-400 font-normal">(for bank ledger entry)</span></label>
+              <Select
+                value={form.bank_account_id}
+                onChange={e => set('bank_account_id', e.target.value)}
+                options={[
+                  { value: '', label: '— Select bank (optional) —' },
+                  ...(bankAccounts as any[]).map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — ' + b.account_name : ''}` }))
+                ]}
+              />
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Reference No</label>
             <Input value={form.reference_no} onChange={e => set('reference_no', e.target.value)} placeholder="UTR / Cheque No" />
