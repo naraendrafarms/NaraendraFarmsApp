@@ -1401,33 +1401,44 @@ export const NHESales: React.FC = () => {
         }
       }
 
-      // Reverse daily_records cull for bird sales being deleted
+      // Collect affected flock+date pairs for bird sales before deleting
+      const affectedPairs: { flock_id: string; sale_date: string }[] = []
       if (sales) {
         const birdSales = sales.filter(s => isBirdSale(s.sale_type) && (s.quantity ?? 0) > 0)
         for (const s of birdSales) {
-          const qty = parseFloat(s.quantity) || 0
-          const sex = s.bird_sex ?? 'female'
-          if (qty <= 0 || sex === 'mixed') continue
-          const { data: dr } = await supabase.from('daily_records')
-            .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
-            .eq('flock_id', s.flock_id).eq('record_date', s.sale_date).maybeSingle()
-          if (!dr) continue
-          const newCullF = sex === 'female' || sex === 'sex_error' ? Math.max(0, (dr.cull_female ?? 0) - qty) : (dr.cull_female ?? 0)
-          const newCullM = sex === 'male' ? Math.max(0, (dr.cull_male ?? 0) - qty) : (dr.cull_male ?? 0)
-          const trcullF = (dr.transfer_female ?? 0) + newCullF
-          const trcullM = (dr.transfer_male ?? 0) + newCullM
-          const closingF = Math.max(0, (dr.opening_female ?? 0) - trcullF - (dr.mortality_female ?? 0))
-          const closingM = Math.max(0, (dr.opening_male ?? 0) - trcullM - (dr.mortality_male ?? 0))
-          await supabase.from('daily_records').update({
-            cull_female: newCullF, cull_male: newCullM,
-            trcull_female: trcullF, trcull_male: trcullM,
-            ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
-          }).eq('id', dr.id)
+          if (!affectedPairs.some(p => p.flock_id === s.flock_id && p.sale_date === s.sale_date))
+            affectedPairs.push({ flock_id: s.flock_id, sale_date: s.sale_date })
         }
       }
 
       const { error } = await supabase.from('nhe_sales').delete().in('id', ids)
       if (error) throw error
+
+      // After deletion, recompute cull from remaining nhe_sales for each affected flock+date
+      for (const { flock_id, sale_date } of affectedPairs) {
+        const { data: remaining } = await supabase.from('nhe_sales')
+          .select('quantity,bird_sex')
+          .eq('flock_id', flock_id).eq('sale_date', sale_date)
+          .in('sale_type', ['bird_sale','bird_cull','bird_lame','bird_weak','bird_sex_error'])
+          .gt('quantity', 0)
+        const totalF = (remaining ?? []).reduce((s, x) =>
+          s + ((x.bird_sex === 'female' || x.bird_sex === 'sex_error' || !x.bird_sex) ? (parseFloat(x.quantity) || 0) : 0), 0)
+        const totalM = (remaining ?? []).reduce((s, x) =>
+          s + (x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
+        const { data: dr } = await supabase.from('daily_records')
+          .select('id,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
+          .eq('flock_id', flock_id).eq('record_date', sale_date).maybeSingle()
+        if (!dr) continue
+        const trcullF = (dr.transfer_female ?? 0) + totalF
+        const trcullM = (dr.transfer_male ?? 0) + totalM
+        const closingF = Math.max(0, (dr.opening_female ?? 0) - trcullF - (dr.mortality_female ?? 0))
+        const closingM = Math.max(0, (dr.opening_male ?? 0) - trcullM - (dr.mortality_male ?? 0))
+        await supabase.from('daily_records').update({
+          cull_female: totalF, cull_male: totalM,
+          trcull_female: trcullF, trcull_male: trcullM,
+          ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+        }).eq('id', dr.id)
+      }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['nhe_sales'] }); qc.invalidateQueries({ queryKey: ['daily_record'] }); qc.invalidateQueries({ queryKey: ['flock_daily'] }); setSel(new Set()); setBulkConfirm(false) },
     onError: (e: any) => toast.error(e.message),
@@ -1603,55 +1614,47 @@ export const NHESales: React.FC = () => {
         })
       }
 
-      // Auto-deduct bird sale qty from daily record cull counts
+      // Sync daily_records cull counts from total of ALL nhe_sales for this flock+date
       if (bird) {
-        const qty = parseFloat(form.quantity) || 0
-        const sex = form.bird_sex // female | male | sex_error | mixed
-        if (qty > 0 && sex !== 'mixed') {
-          const isEditReplace = !!editing
-          const prevQty = isEditReplace ? (parseFloat(editing.quantity) || 0) : 0
-          const prevSex = isEditReplace ? (editing.bird_sex ?? 'female') : 'female'
+        const saleDate = form.sale_date
+        const flockId = form.flock_id
 
-          const { data: dr } = await supabase.from('daily_records')
-            .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
-            .eq('flock_id', form.flock_id).eq('record_date', form.sale_date).maybeSingle()
+        // Fetch all bird sales for this flock+date AFTER the current save
+        // (the current sale is already saved at this point in the mutation flow)
+        const { data: allSales } = await supabase.from('nhe_sales')
+          .select('quantity,bird_sex')
+          .eq('flock_id', flockId).eq('sale_date', saleDate)
+          .in('sale_type', ['bird_sale','bird_cull','bird_lame','bird_weak','bird_sex_error'])
+          .gt('quantity', 0)
 
-          // Reverse previous edit deduction first
-          let prevCullF = dr?.cull_female ?? 0
-          let prevCullM = dr?.cull_male ?? 0
-          if (isEditReplace && prevQty > 0) {
-            if (prevSex === 'female' || prevSex === 'sex_error') prevCullF = Math.max(0, prevCullF - prevQty)
-            else if (prevSex === 'male') prevCullM = Math.max(0, prevCullM - prevQty)
-          }
+        const totalF = (allSales ?? []).reduce((s, x) =>
+          s + ((x.bird_sex === 'female' || x.bird_sex === 'sex_error' || !x.bird_sex) ? (parseFloat(x.quantity) || 0) : 0), 0)
+        const totalM = (allSales ?? []).reduce((s, x) =>
+          s + (x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
 
-          // Apply new deduction
-          let newCullF = prevCullF
-          let newCullM = prevCullM
-          if (sex === 'female' || sex === 'sex_error') newCullF = prevCullF + qty
-          else if (sex === 'male') newCullM = prevCullM + qty
+        const { data: dr } = await supabase.from('daily_records')
+          .select('id,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
+          .eq('flock_id', flockId).eq('record_date', saleDate).maybeSingle()
 
-          const trcullF = (dr?.transfer_female ?? 0) + newCullF
-          const trcullM = (dr?.transfer_male ?? 0) + newCullM
-          const closingF = Math.max(0, (dr?.opening_female ?? 0) - trcullF - (dr?.mortality_female ?? 0))
-          const closingM = Math.max(0, (dr?.opening_male ?? 0) - trcullM - (dr?.mortality_male ?? 0))
+        const trcullF = (dr?.transfer_female ?? 0) + totalF
+        const trcullM = (dr?.transfer_male ?? 0) + totalM
+        const closingF = Math.max(0, (dr?.opening_female ?? 0) - trcullF - (dr?.mortality_female ?? 0))
+        const closingM = Math.max(0, (dr?.opening_male ?? 0) - trcullM - (dr?.mortality_male ?? 0))
 
-          if (dr) {
-            await supabase.from('daily_records').update({
-              cull_female: newCullF, cull_male: newCullM,
-              trcull_female: trcullF, trcull_male: trcullM,
-              ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
-            }).eq('id', dr.id)
-          } else {
-            await supabase.from('daily_records').insert({
-              flock_id: form.flock_id, record_date: form.sale_date,
-              cull_female: sex === 'female' || sex === 'sex_error' ? qty : 0,
-              cull_male: sex === 'male' ? qty : 0,
-              trcull_female: sex === 'female' || sex === 'sex_error' ? qty : 0,
-              trcull_male: sex === 'male' ? qty : 0,
-              transfer_female: 0, transfer_male: 0,
-              mortality_female: 0, mortality_male: 0,
-            })
-          }
+        if (dr) {
+          await supabase.from('daily_records').update({
+            cull_female: totalF, cull_male: totalM,
+            trcull_female: trcullF, trcull_male: trcullM,
+            ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+          }).eq('id', dr.id)
+        } else {
+          await supabase.from('daily_records').insert({
+            flock_id: flockId, record_date: saleDate,
+            cull_female: totalF, cull_male: totalM,
+            trcull_female: totalF, trcull_male: totalM,
+            transfer_female: 0, transfer_male: 0,
+            mortality_female: 0, mortality_male: 0,
+          })
         }
       }
     },
