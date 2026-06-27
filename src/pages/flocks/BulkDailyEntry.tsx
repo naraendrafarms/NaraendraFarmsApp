@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput } from '@/components/ui'
-import { Save } from 'lucide-react'
+import { Save, Download, Upload, FileSpreadsheet } from 'lucide-react'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
+import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -508,6 +510,172 @@ export const BulkDailyEntry: React.FC = () => {
     ...(allFlocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}${f.breed ? ` · ${f.breed}` : ''}` }))
   ]
 
+  // Medicine name <-> id maps (for Excel import/export by name)
+  const medNameToId = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const x of (medicines ?? [])) m[String(x.name).toLowerCase().trim()] = x.id
+    return m
+  }, [medicines])
+  const medIdToName = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const x of (medicines ?? [])) m[x.id] = x.name
+    return m
+  }, [medicines])
+
+  const importRef = useRef<HTMLInputElement>(null)
+
+  // ── FLOCK MODE: template / export / import ───────────────────────────────────
+  const FLOCK_HEADERS = ['Flock No','Feed F kg','Feed Type F','Feed M kg','Feed Type M',
+    'Death F','Death M','HE','JE','TE','BE','LE','Grade A','Grade B','Grade C',
+    'Wastage HE','Wastage JE','Wastage TE','Wastage BE','Medicine','Med Qty']
+
+  const flockTemplate = () => downloadXlsxTemplate('bulk_all_flocks_template.xlsx', FLOCK_HEADERS,
+    ['101','120','BCM','30','MALE','2','1','500','40','20','10','5','300','150','50','','','','','',''])
+
+  const flockExport = () => {
+    const data = visibleFlocks.map((f: any) => {
+      const r = flockRows[f.id] ?? emptyFlockRow()
+      return {
+        'Flock No': f.flock_no, 'Feed F kg': r.feed_female_kg, 'Feed Type F': r.feed_type_f,
+        'Feed M kg': r.feed_male_kg, 'Feed Type M': r.feed_type_m,
+        'Death F': r.mortality_female, 'Death M': r.mortality_male,
+        HE: r.he_eggs, JE: r.je_eggs, TE: r.te_eggs, BE: r.be_eggs, LE: r.le_eggs,
+        'Grade A': r.he_grade_a, 'Grade B': r.he_grade_b, 'Grade C': r.he_grade_c,
+        'Wastage HE': r.wastage_he, 'Wastage JE': r.wastage_je, 'Wastage TE': r.wastage_te, 'Wastage BE': r.wastage_be,
+        Medicine: r.med_id ? (medIdToName[r.med_id] ?? '') : '', 'Med Qty': r.med_qty,
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(data, { header: FLOCK_HEADERS })
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'All Flocks')
+    XLSX.writeFile(wb, `BulkDaily_AllFlocks_${date}.xlsx`)
+    toast.success('Exported current grid')
+  }
+
+  const flockImport = async (file: File) => {
+    try {
+      const { headers, rows } = await parseFile(file)
+      const idx = (n: string) => headers.findIndex(h => h.toLowerCase().trim() === n.toLowerCase())
+      const ci = {
+        flock: idx('Flock No'), ff: idx('Feed F kg'), ftf: idx('Feed Type F'), fm: idx('Feed M kg'), ftm: idx('Feed Type M'),
+        df: idx('Death F'), dm: idx('Death M'), he: idx('HE'), je: idx('JE'), te: idx('TE'), be: idx('BE'), le: idx('LE'),
+        ga: idx('Grade A'), gb: idx('Grade B'), gc: idx('Grade C'),
+        whe: idx('Wastage HE'), wje: idx('Wastage JE'), wte: idx('Wastage TE'), wbe: idx('Wastage BE'),
+        med: idx('Medicine'), mq: idx('Med Qty'),
+      }
+      if (ci.flock < 0) { toast.error('File needs a "Flock No" column'); return }
+      const flockByNo: Record<string, any> = {}
+      for (const f of visibleFlocks) flockByNo[String(f.flock_no).trim()] = f
+      let matched = 0
+      setFlockRows(prev => {
+        const next = { ...prev }
+        for (const row of (rows as any[])) {
+          const fno = String(row[ci.flock] ?? '').trim()
+          const f = flockByNo[fno]
+          if (!f) continue
+          matched++
+          const g = (i: number) => i >= 0 ? String(row[i] ?? '').trim() : ''
+          const cur = next[f.id] ?? emptyFlockRow()
+          const medName = g(ci.med).toLowerCase()
+          next[f.id] = {
+            ...cur,
+            feed_female_kg: g(ci.ff) || cur.feed_female_kg, feed_type_f: g(ci.ftf) || cur.feed_type_f,
+            feed_male_kg: g(ci.fm) || cur.feed_male_kg, feed_type_m: g(ci.ftm) || cur.feed_type_m,
+            mortality_female: g(ci.df) || cur.mortality_female, mortality_male: g(ci.dm) || cur.mortality_male,
+            he_eggs: g(ci.he) || cur.he_eggs, je_eggs: g(ci.je) || cur.je_eggs, te_eggs: g(ci.te) || cur.te_eggs,
+            be_eggs: g(ci.be) || cur.be_eggs, le_eggs: g(ci.le) || cur.le_eggs,
+            he_grade_a: g(ci.ga) || cur.he_grade_a, he_grade_b: g(ci.gb) || cur.he_grade_b, he_grade_c: g(ci.gc) || cur.he_grade_c,
+            wastage_he: g(ci.whe) || cur.wastage_he, wastage_je: g(ci.wje) || cur.wastage_je,
+            wastage_te: g(ci.wte) || cur.wastage_te, wastage_be: g(ci.wbe) || cur.wastage_be,
+            med_id: medName && medNameToId[medName] ? medNameToId[medName] : cur.med_id,
+            med_qty: g(ci.mq) || cur.med_qty,
+          }
+        }
+        return next
+      })
+      toast.success(`Imported ${matched} flock(s) into grid — review and click Save All`)
+    } catch (e: any) { toast.error(e.message) }
+    finally { if (importRef.current) importRef.current.value = '' }
+  }
+
+  // ── SHED MODE: template / export / import ────────────────────────────────────
+  const SHED_HEADERS = ['Shed No','Open F','Open M','Feed F kg','Feed Type F','Feed M kg','Feed Type M',
+    'Transfer F','Transfer M','Cull F','Cull M','Death F','Death M','HE','JE','TE','BE','LE',
+    'Wastage HE','Wastage JE','Wastage TE','Wastage BE','Close F','Close M','Lighting Hrs','Medicine','Med Qty','Remarks']
+
+  const shedTemplate = () => downloadXlsxTemplate('bulk_flockwise_template.xlsx', SHED_HEADERS,
+    ['1','1000','100','120','BCM','30','MALE','0','0','0','0','2','1','500','40','20','10','5','','','','','998','99','16','','','OK'])
+
+  const shedExport = () => {
+    const data = flockSheds.map((shed: any) => {
+      const r = shedRows[shed.id] ?? emptyShedRow()
+      return {
+        'Shed No': shed.shed_no, 'Open F': r.opening_female, 'Open M': r.opening_male,
+        'Feed F kg': r.feed_female_kg, 'Feed Type F': r.feed_type_f, 'Feed M kg': r.feed_male_kg, 'Feed Type M': r.feed_type_m,
+        'Transfer F': r.transfer_female, 'Transfer M': r.transfer_male, 'Cull F': r.cull_female, 'Cull M': r.cull_male,
+        'Death F': r.mortality_female, 'Death M': r.mortality_male,
+        HE: r.he_eggs, JE: r.je_eggs, TE: r.te_eggs, BE: r.be_eggs, LE: r.le_eggs,
+        'Wastage HE': r.wastage_he, 'Wastage JE': r.wastage_je, 'Wastage TE': r.wastage_te, 'Wastage BE': r.wastage_be,
+        'Close F': r.closing_female, 'Close M': r.closing_male, 'Lighting Hrs': r.lighting_hrs,
+        Medicine: r.med_id ? (medIdToName[r.med_id] ?? '') : '', 'Med Qty': r.med_qty, Remarks: r.remarks,
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(data, { header: SHED_HEADERS })
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Sheds')
+    XLSX.writeFile(wb, `BulkDaily_Flock${flockObj?.flock_no}_${date}.xlsx`)
+    toast.success('Exported current grid')
+  }
+
+  const shedImport = async (file: File) => {
+    try {
+      const { headers, rows } = await parseFile(file)
+      const idx = (n: string) => headers.findIndex(h => h.toLowerCase().trim() === n.toLowerCase())
+      const ci = {
+        shed: idx('Shed No'), of: idx('Open F'), om: idx('Open M'), ff: idx('Feed F kg'), ftf: idx('Feed Type F'),
+        fm: idx('Feed M kg'), ftm: idx('Feed Type M'), trf: idx('Transfer F'), trm: idx('Transfer M'),
+        cf: idx('Cull F'), cm: idx('Cull M'), df: idx('Death F'), dm: idx('Death M'),
+        he: idx('HE'), je: idx('JE'), te: idx('TE'), be: idx('BE'), le: idx('LE'),
+        whe: idx('Wastage HE'), wje: idx('Wastage JE'), wte: idx('Wastage TE'), wbe: idx('Wastage BE'),
+        clf: idx('Close F'), clm: idx('Close M'), lt: idx('Lighting Hrs'), med: idx('Medicine'), mq: idx('Med Qty'), rem: idx('Remarks'),
+      }
+      if (ci.shed < 0) { toast.error('File needs a "Shed No" column'); return }
+      const shedByNo: Record<string, any> = {}
+      for (const s of flockSheds) shedByNo[String(s.shed_no).trim()] = s
+      let matched = 0
+      setShedRows(prev => {
+        const next = { ...prev }
+        for (const row of (rows as any[])) {
+          const sno = String(row[ci.shed] ?? '').trim()
+          const s = shedByNo[sno]
+          if (!s) continue
+          matched++
+          const g = (i: number) => i >= 0 ? String(row[i] ?? '').trim() : ''
+          const cur = next[s.id] ?? emptyShedRow()
+          const medName = g(ci.med).toLowerCase()
+          next[s.id] = {
+            ...cur,
+            opening_female: g(ci.of) || cur.opening_female, opening_male: g(ci.om) || cur.opening_male,
+            feed_female_kg: g(ci.ff) || cur.feed_female_kg, feed_type_f: g(ci.ftf) || cur.feed_type_f,
+            feed_male_kg: g(ci.fm) || cur.feed_male_kg, feed_type_m: g(ci.ftm) || cur.feed_type_m,
+            transfer_female: g(ci.trf) || cur.transfer_female, transfer_male: g(ci.trm) || cur.transfer_male,
+            cull_female: g(ci.cf) || cur.cull_female, cull_male: g(ci.cm) || cur.cull_male,
+            mortality_female: g(ci.df) || cur.mortality_female, mortality_male: g(ci.dm) || cur.mortality_male,
+            he_eggs: g(ci.he) || cur.he_eggs, je_eggs: g(ci.je) || cur.je_eggs, te_eggs: g(ci.te) || cur.te_eggs,
+            be_eggs: g(ci.be) || cur.be_eggs, le_eggs: g(ci.le) || cur.le_eggs,
+            wastage_he: g(ci.whe) || cur.wastage_he, wastage_je: g(ci.wje) || cur.wastage_je,
+            wastage_te: g(ci.wte) || cur.wastage_te, wastage_be: g(ci.wbe) || cur.wastage_be,
+            closing_female: g(ci.clf) || cur.closing_female, closing_male: g(ci.clm) || cur.closing_male,
+            lighting_hrs: g(ci.lt) || cur.lighting_hrs,
+            med_id: medName && medNameToId[medName] ? medNameToId[medName] : cur.med_id,
+            med_qty: g(ci.mq) || cur.med_qty, remarks: g(ci.rem) || cur.remarks,
+          }
+        }
+        return next
+      })
+      toast.success(`Imported ${matched} shed(s) into grid — review and click Save All`)
+    } catch (e: any) { toast.error(e.message) }
+    finally { if (importRef.current) importRef.current.value = '' }
+  }
+
   const isSheedMode = !!selectedFlock
   const isLoading = flocksLoading || (isSheedMode && shedsLoading)
 
@@ -568,6 +736,17 @@ export const BulkDailyEntry: React.FC = () => {
           </div>
         }
       />
+
+      {/* Import / Export / Template toolbar (mode-aware) */}
+      <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) (isSheedMode ? shedImport(f) : flockImport(f)) }} />
+      <div className="flex flex-wrap gap-2 items-center">
+        <span className="text-xs text-gray-400 mr-1">{isSheedMode ? `Flock-wise (sheds)` : 'All Flocks'}:</span>
+        <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>
+        <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={isSheedMode ? shedExport : flockExport}>Export</Button>
+        <Button size="sm" variant="ghost" icon={<FileSpreadsheet size={14}/>} onClick={isSheedMode ? shedTemplate : flockTemplate}>Template</Button>
+        <span className="text-xs text-gray-400">Import fills the grid — review, then click <strong>Save All</strong>.</span>
+      </div>
 
       {existingFetching && <div className="text-center py-2 text-xs text-gray-400">Loading records for {date}…</div>}
 
