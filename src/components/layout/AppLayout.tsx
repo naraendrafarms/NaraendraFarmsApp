@@ -116,6 +116,7 @@ const NAV: NavItem[] = [
       { label: 'Cash Book', to: '/accounts/cash-book' },
       { label: 'Bank Ledger', to: '/accounts/bank-ledger' },
       { label: 'Party Ledger', to: '/accounts/party-ledger' },
+      { label: 'Opening Balances', to: '/accounts/opening-balances' },
       { label: 'Buyer Advances', to: '/accounts/buyer-advances' },
       { label: 'Daily Payment Planning', to: '/accounts/payment-planning' },
       { label: 'Generate CMS File', to: '/accounts/cms-upload' },
