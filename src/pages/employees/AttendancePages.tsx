@@ -1,10 +1,16 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput } from '@/components/ui'
+import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput, Modal } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const escape = (v: string|number|null|undefined) => `"${String(v??'').replace(/"/g,'""')}"`
@@ -42,6 +48,8 @@ export const DailyAttendancePage: React.FC = () => {
   const [localStatus, setLocalStatus] = useState<Record<string, string>>({})
   const [localOT, setLocalOT] = useState<Record<string, number>>({})
   const [saving, setSaving] = useState(false)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -142,6 +150,30 @@ export const DailyAttendancePage: React.FC = () => {
     setSaving(false)
   }
 
+  const delMut = useMutation({
+    mutationFn: async (empIds: string[]) => {
+      // Delete attendance_daily records for the selected employees on this date
+      const { error } = await supabase.from('attendance_daily')
+        .delete()
+        .in('employee_id', empIds)
+        .eq('attendance_date', date)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Attendance deleted')
+      setSel(new Set()); setBulkConfirm(false)
+      qc.invalidateQueries({ queryKey: ['attendance_day'] })
+      qc.invalidateQueries({ queryKey: ['attendance_month'] })
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const visIds = visibleEmployees.map((e: any) => e.id)
+  const allSel = visIds.length > 0 && visIds.every((id: string) => sel.has(id))
+  const someSel = visIds.some((id: string) => sel.has(id)) && !allSel
+  const toggle = (id: string) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(visIds))
+
   const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))
   const counts = useMemo(() => {
     const c = { P: 0, A: 0, H: 0, WO: 0, OT: 0 }
@@ -195,10 +227,21 @@ export const DailyAttendancePage: React.FC = () => {
             ))}
           </div>
 
+          {sel.size > 0 && (
+            <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+              <span className="text-sm font-medium text-red-700">{sel.size} selected</span>
+              <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+              <div className="ml-auto">
+                <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setBulkConfirm(true)}>Delete Selected ({sel.size})</Button>
+              </div>
+            </div>
+          )}
+
           <Card padding={false}>
             <Table>
               <thead>
                 <tr>
+                  <Th><CB checked={allSel} indeterminate={someSel} onChange={toggleAll} /></Th>
                   <Th>Employee</Th>
                   <Th>Emp ID</Th>
                   <Th>Designation</Th>
@@ -211,7 +254,8 @@ export const DailyAttendancePage: React.FC = () => {
                   const cur = localStatus[e.id] ?? 'P'
                   const otVal = localOT[e.id] ?? 0
                   return (
-                    <tr key={e.id} className={`hover:bg-gray-50 ${cur === 'A' ? 'bg-red-50' : cur === 'H' ? 'bg-amber-50' : ''}`}>
+                    <tr key={e.id} className={`hover:bg-gray-50 ${sel.has(e.id) ? 'bg-blue-50' : cur === 'A' ? 'bg-red-50' : cur === 'H' ? 'bg-amber-50' : ''}`}>
+                      <Td><CB checked={sel.has(e.id)} onChange={() => toggle(e.id)} /></Td>
                       <Td className="font-medium">{e.name}</Td>
                       <Td className="text-gray-500 text-xs">{e.emp_id ?? '—'}</Td>
                       <Td className="text-gray-500 text-xs">{e.designation ?? '—'}</Td>
@@ -251,6 +295,14 @@ export const DailyAttendancePage: React.FC = () => {
       {!farmId && (
         <Card><div className="p-8 text-center text-gray-400">Select a site to begin entering attendance</div></Card>
       )}
+
+      <Modal open={bulkConfirm} onClose={() => setBulkConfirm(false)} title="Confirm Delete" size="sm"
+        footer={<><Button variant="secondary" onClick={() => setBulkConfirm(false)}>Cancel</Button>
+          <Button variant="danger" loading={delMut.isPending} onClick={() => delMut.mutate([...sel])}>
+            Delete {sel.size} record{sel.size > 1 ? 's' : ''}
+          </Button></>}>
+        <p className="text-sm text-gray-700">Delete attendance records for <strong>{sel.size} selected employee{sel.size > 1 ? 's' : ''}</strong> on <strong>{date}</strong>? This cannot be undone.</p>
+      </Modal>
     </div>
   )
 }
@@ -258,10 +310,13 @@ export const DailyAttendancePage: React.FC = () => {
 // ── MONTH ATTENDANCE VIEW ─────────────────────────────────────────────────────
 
 export const MonthAttendancePage: React.FC = () => {
+  const qc = useQueryClient()
   const today = new Date()
   const [year, setYear] = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth() + 1)
   const [farmId, setFarmId] = useState('')
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -323,6 +378,33 @@ export const MonthAttendancePage: React.FC = () => {
   const prevMonth = () => { if (month === 1) { setMonth(12); setYear(y => y - 1) } else setMonth(m => m - 1) }
   const nextMonth = () => { if (month === 12) { setMonth(1); setYear(y => y + 1) } else setMonth(m => m + 1) }
 
+  const delMut = useMutation({
+    mutationFn: async (selEmpIds: string[]) => {
+      // Delete attendance_daily records for selected employees across the displayed month
+      const start = `${monthStr}-01`
+      const end = `${monthStr}-${String(numDays).padStart(2, '0')}`
+      const { error } = await supabase.from('attendance_daily')
+        .delete()
+        .in('employee_id', selEmpIds)
+        .gte('attendance_date', start)
+        .lte('attendance_date', end)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Attendance deleted')
+      setSel(new Set()); setBulkConfirm(false)
+      qc.invalidateQueries({ queryKey: ['attendance_month'] })
+      qc.invalidateQueries({ queryKey: ['attendance_day'] })
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const empRowIds = (employees ?? []).map((e: any) => e.id)
+  const allSel = empRowIds.length > 0 && empRowIds.every((id: string) => sel.has(id))
+  const someSel = empRowIds.some((id: string) => sel.has(id)) && !allSel
+  const toggle = (id: string) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(empRowIds))
+
   const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))
 
@@ -362,13 +444,24 @@ export const MonthAttendancePage: React.FC = () => {
         ))}
       </div>
 
+      {farmId && sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-red-700">{sel.size} selected</span>
+          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+          <div className="ml-auto">
+            <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setBulkConfirm(true)}>Delete Selected ({sel.size})</Button>
+          </div>
+        </div>
+      )}
+
       {farmId && (isLoading ? <Spinner /> : (
         <div className="overflow-x-auto">
           <Card padding={false}>
             <table className="min-w-full text-xs">
               <thead>
                 <tr className="bg-gray-50 border-b">
-                  <th className="sticky left-0 bg-gray-50 px-3 py-2 text-left font-semibold text-gray-700 min-w-[140px]">Employee</th>
+                  <th className="sticky left-0 bg-gray-50 px-2 py-2 text-center"><CB checked={allSel} indeterminate={someSel} onChange={toggleAll} /></th>
+                  <th className="bg-gray-50 px-3 py-2 text-left font-semibold text-gray-700 min-w-[140px]">Employee</th>
                   {days.map(d => (
                     <th key={d} className="px-1 py-2 text-center font-medium text-gray-600 w-8 min-w-[28px]">{d}</th>
                   ))}
@@ -379,8 +472,9 @@ export const MonthAttendancePage: React.FC = () => {
                 {(employees ?? []).map((e: any) => {
                   const totalDays = calcDays(e.id)
                   return (
-                    <tr key={e.id} className="border-b hover:bg-gray-50">
-                      <td className="sticky left-0 bg-white px-3 py-1.5 font-medium text-gray-900 border-r">
+                    <tr key={e.id} className={`border-b hover:bg-gray-50 ${sel.has(e.id) ? 'bg-blue-50' : ''}`}>
+                      <td className="sticky left-0 bg-inherit px-2 py-1.5 text-center border-r"><CB checked={sel.has(e.id)} onChange={() => toggle(e.id)} /></td>
+                      <td className="bg-inherit px-3 py-1.5 font-medium text-gray-900 border-r">
                         <div>{e.name}</div>
                         <div className="text-gray-400 text-[10px]">{e.emp_id}</div>
                       </td>
@@ -411,6 +505,14 @@ export const MonthAttendancePage: React.FC = () => {
       {!farmId && (
         <Card><div className="p-8 text-center text-gray-400">Select a site to view attendance</div></Card>
       )}
+
+      <Modal open={bulkConfirm} onClose={() => setBulkConfirm(false)} title="Confirm Delete" size="sm"
+        footer={<><Button variant="secondary" onClick={() => setBulkConfirm(false)}>Cancel</Button>
+          <Button variant="danger" loading={delMut.isPending} onClick={() => delMut.mutate([...sel])}>
+            Delete {sel.size} employee{sel.size > 1 ? 's' : ''}
+          </Button></>}>
+        <p className="text-sm text-gray-700">Delete all attendance records for <strong>{sel.size} selected employee{sel.size > 1 ? 's' : ''}</strong> in <strong>{MONTH_NAMES[month - 1]} {year}</strong>? This cannot be undone.</p>
+      </Modal>
     </div>
   )
 }
@@ -437,6 +539,8 @@ export const EmployeeAdvancesPage: React.FC = () => {
   const [filterMonth, setFilterMonth] = useState(curMonth)
   const [form, setForm] = useState({ ...EMPTY_FORM, salary_month: curMonth })
   const [showForm, setShowForm] = useState(false)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkConfirm, setBulkConfirm] = useState(false)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const { data: farms } = useQuery({
@@ -505,13 +609,19 @@ export const EmployeeAdvancesPage: React.FC = () => {
   })
 
   const delMut = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('employee_advances').delete().eq('id', id)
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('employee_advances').delete().in('id', ids)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({ queryKey: ['employee_advances'] }) },
+    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({ queryKey: ['employee_advances'] }); setSel(new Set()); setBulkConfirm(false) },
     onError: (e: any) => toast.error(e.message)
   })
+
+  const advIds = (advances ?? []).map((r: any) => r.id)
+  const allSel = advIds.length > 0 && advIds.every((id: string) => sel.has(id))
+  const someSel = advIds.some((id: string) => sel.has(id)) && !allSel
+  const toggle = (id: string) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(advIds))
 
   const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))
   const empOptions = (employees ?? []).map((e: any) => ({ value: e.id, label: `${e.name}${e.emp_id ? ' ('+e.emp_id+')' : ''}` }))
@@ -598,11 +708,23 @@ export const EmployeeAdvancesPage: React.FC = () => {
         </div>
       )}
 
+      {/* Bulk bar */}
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-red-700">{sel.size} selected</span>
+          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+          <div className="ml-auto">
+            <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setBulkConfirm(true)}>Delete Selected ({sel.size})</Button>
+          </div>
+        </div>
+      )}
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead>
               <tr>
+                <Th><CB checked={allSel} indeterminate={someSel} onChange={toggleAll} /></Th>
                 <Th>Date</Th>
                 <Th>Employee</Th>
                 <Th>Site</Th>
@@ -615,7 +737,8 @@ export const EmployeeAdvancesPage: React.FC = () => {
             </thead>
             <tbody>
               {(advances ?? []).map((r: any) => (
-                <tr key={r.id} className="hover:bg-gray-50">
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-blue-50' : ''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></Td>
                   <Td className="text-sm">{r.advance_date}</Td>
                   <Td>
                     <div className="font-medium">{r.employees?.name}</div>
@@ -633,18 +756,26 @@ export const EmployeeAdvancesPage: React.FC = () => {
                   <Td className="font-semibold text-red-700">{inr(r.amount)}</Td>
                   <Td className="text-xs text-gray-500">{r.salary_month ?? '—'}</Td>
                   <Td>
-                    <button onClick={() => { if (confirm('Delete this advance?')) delMut.mutate(r.id) }}
+                    <button onClick={() => { setSel(new Set([r.id])); setBulkConfirm(true) }}
                       className="text-red-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
                   </Td>
                 </tr>
               ))}
               {(advances ?? []).length === 0 && (
-                <tr><td colSpan={8} className="text-center text-gray-400 py-8">No advances recorded for this period</td></tr>
+                <tr><td colSpan={9} className="text-center text-gray-400 py-8">No advances recorded for this period</td></tr>
               )}
             </tbody>
           </Table>
         </Card>
       )}
+
+      <Modal open={bulkConfirm} onClose={() => setBulkConfirm(false)} title="Confirm Delete" size="sm"
+        footer={<><Button variant="secondary" onClick={() => setBulkConfirm(false)}>Cancel</Button>
+          <Button variant="danger" loading={delMut.isPending} onClick={() => delMut.mutate([...sel])}>
+            Delete {sel.size} advance{sel.size > 1 ? 's' : ''}
+          </Button></>}>
+        <p className="text-sm text-gray-700">Delete <strong>{sel.size} selected advance{sel.size > 1 ? 's' : ''}</strong>? This cannot be undone.</p>
+      </Modal>
     </div>
   )
 }

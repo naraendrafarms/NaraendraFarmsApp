@@ -8,7 +8,7 @@ import {
   DateInput, SearchableSelect,
 } from '@/components/ui'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
-import { Plus, ShoppingCart, Download } from 'lucide-react'
+import { Plus, ShoppingCart, Download, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supplyType, splitTax, PURCHASE_NATURE_OPTIONS, GST_RATE_OPTIONS, OUR_STATE_CODE } from '@/lib/gst'
 
@@ -45,6 +45,7 @@ export const PurchaseEntry: React.FC = () => {
     remarks: '',
   })
   const [form, setForm] = useState(empty())
+  const [editId, setEditId] = useState<string | null>(null)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const { data: items } = useQuery({
@@ -101,12 +102,39 @@ export const PurchaseEntry: React.FC = () => {
 
   const saveMut = useMutation({
     mutationFn: async () => {
+      const item = (items ?? []).find((i: any) => i.id === form.item_id)
+      const itemName = item?.name ?? form.item_name
+
+      // EDIT mode — update the existing pending_payments row directly.
+      if (editId) {
+        const { error } = await supabase.from('pending_payments').update({
+          vendor_name: supplierName || undefined,
+          party_id: form.supplier_id || null,
+          grn_no: form.grn_no || null,
+          grn_date: form.purchase_date || null,
+          invoice_no: form.invoice_no || null,
+          invoice_date: form.invoice_date || form.purchase_date || null,
+          basic_amount: basic || null,
+          gst_pct: gst || 0,
+          gst_amount: gstAmt || null,
+          invoice_amount: total || null,
+          category: form.category,
+          tds_pct: tdsPct || null,
+          tds_amount: tdsAmt > 0 ? tdsAmt : null,
+          net_payable: tdsAmt > 0 ? netPayable : (total || null),
+          payment_status: form.payment_status,
+          paid_date: form.payment_status === 'Paid' ? form.purchase_date : null,
+          credit_limit: form.credit_limit ? Number(form.credit_limit) : null,
+          pay_before_date: payBefore,
+          account_type: form.account_type || null,
+        }).eq('id', editId)
+        if (error) throw error
+        return
+      }
+
       if (!form.item_id && !form.item_name) throw new Error('Pick an item')
       if (!form.qty || qty <= 0) throw new Error('Quantity required')
       if (!form.supplier_id) throw new Error('Supplier required')
-
-      const item = (items ?? []).find((i: any) => i.id === form.item_id)
-      const itemName = item?.name ?? form.item_name
 
       // 1. Route to the category-specific table
       if (form.category === 'Feed') {
@@ -221,8 +249,9 @@ export const PurchaseEntry: React.FC = () => {
       }
     },
     onSuccess: () => {
-      toast.success('Purchase saved & routed')
-      setForm(f => ({ ...empty(), category: f.category, supplier_id: f.supplier_id, farm_id: f.farm_id, purchase_date: f.purchase_date }))
+      toast.success(editId ? 'Purchase updated' : 'Purchase saved & routed')
+      if (editId) { setForm(empty()); setEditId(null) }
+      else setForm(f => ({ ...empty(), category: f.category, supplier_id: f.supplier_id, farm_id: f.farm_id, purchase_date: f.purchase_date }))
       qc.invalidateQueries({ queryKey: ['recent_purchases'] })
       qc.invalidateQueries({ queryKey: ['grn'] })
       qc.invalidateQueries({ queryKey: ['grns'] })
@@ -269,9 +298,37 @@ export const PurchaseEntry: React.FC = () => {
     setForm(f => ({ ...f, item_id: id, item_name: it?.name ?? '', unit: it?.unit ?? f.unit }))
   }
 
+  const openEdit = (r: any) => {
+    setEditId(r.id)
+    const qtyV = r.qty ?? (r.basic_amount && r.price_per_unit ? Number(r.basic_amount) / Number(r.price_per_unit) : '')
+    setForm({
+      ...empty(),
+      category: (CATEGORIES.includes(r.category) ? r.category : 'Other') as Cat,
+      item_id: '', item_name: r.item_name ?? '',
+      unit: r.unit ?? 'kg',
+      supplier_id: r.party_id ?? '',
+      farm_id: r.farm_id ?? '',
+      purchase_date: r.grn_date ?? r.invoice_date ?? today(),
+      invoice_no: r.invoice_no ?? '',
+      invoice_date: r.invoice_date ?? '',
+      grn_no: r.grn_no ?? '',
+      qty: qtyV != null ? String(qtyV) : '',
+      rate: r.price_per_unit != null ? String(r.price_per_unit) : '',
+      gst_pct: r.gst_pct != null ? String(r.gst_pct) : '0',
+      tds_pct: r.tds_pct != null ? String(r.tds_pct) : '0',
+      payment_status: r.payment_status ?? 'Pending',
+      credit_limit: r.credit_limit != null ? String(r.credit_limit) : '',
+      account_type: r.account_type ?? 'Online',
+      remarks: r.remarks ?? '',
+    })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const cancelEdit = () => { setEditId(null); setForm(empty()) }
+
   return (
     <div className="space-y-5">
-      <SectionHeader title="New Purchase"
+      <SectionHeader title={editId ? 'Edit Purchase' : 'New Purchase'}
         subtitle="One screen for every purchase — feed, medicine, equipment. The app files it where it belongs." />
 
       <Card>
@@ -368,7 +425,8 @@ export const PurchaseEntry: React.FC = () => {
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
 
           <div className="flex items-center gap-3">
-            <Button icon={<Plus size={16} />} loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save Purchase</Button>
+            <Button icon={<Plus size={16} />} loading={saveMut.isPending} onClick={() => saveMut.mutate()}>{editId ? 'Update Purchase' : 'Save Purchase'}</Button>
+            {editId && <Button variant="outline" onClick={cancelEdit}>Cancel Edit</Button>}
             <span className="text-xs text-gray-500">
               {form.category === 'Feed' && 'Files into Feed GRN + Pending Payments'}
               {form.category === 'Medicine' && 'Files into GRN (Medicine) — Pending Payment auto-created by DB trigger'}
@@ -386,7 +444,7 @@ export const PurchaseEntry: React.FC = () => {
         </div>
         {isLoading ? <Spinner /> : (recent ?? []).length === 0 ? <EmptyState title="No purchases yet" /> : (
           <Table>
-            <thead><tr>{['Date','Supplier','GRN','Invoice ₹','Status','Pay Before'].map(h => <Th key={h}>{h}</Th>)}</tr></thead>
+            <thead><tr>{['Date','Supplier','GRN','Invoice ₹','Status','Pay Before',''].map((h, i) => <Th key={h || `act-${i}`}>{h}</Th>)}</tr></thead>
             <tbody>
               {(recent ?? []).map((r: any) => (
                 <tr key={r.id} className="border-t border-gray-100">
@@ -396,6 +454,9 @@ export const PurchaseEntry: React.FC = () => {
                   <Td>{r.invoice_amount != null ? inr(r.invoice_amount) : '—'}</Td>
                   <Td><Badge color={r.payment_status === 'Paid' ? 'green' : r.payment_status === 'HOLD' ? 'red' : 'yellow'}>{{Paid:'Paid',HOLD:'On Hold',Pending:'Pending',Partial:'Partial'}[r.payment_status as string]??r.payment_status}</Badge></Td>
                   <Td>{r.pay_before_date ? fmtDate(r.pay_before_date) : '—'}</Td>
+                  <Td>
+                    <button onClick={() => openEdit(r)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={14} /></button>
+                  </Td>
                 </tr>
               ))}
             </tbody>

@@ -311,6 +311,19 @@ export const HatchBatches: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  // ── single delete ────────────────────────────────────────────────────────────
+  const delOneMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('hatch_batches').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Batch deleted')
+      qc.invalidateQueries({ queryKey: ['hatch_batches'] })
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
   // ── import ───────────────────────────────────────────────────────────────────
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return
@@ -535,9 +548,14 @@ export const HatchBatches: React.FC = () => {
                       <td className="px-3 py-2 text-xs text-right">{r.stdBySetting > 0 ? r.stdBySetting.toLocaleString('en-IN') : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right">{r.std > 0 ? r.stdMinusSale.toLocaleString('en-IN') : '—'}</td>
                       <td className="px-3 py-2">
-                        <button onClick={() => openForm(b)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600">
-                          <Edit2 size={13}/>
-                        </button>
+                        <div className="flex gap-1">
+                          <button onClick={() => openForm(b)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600">
+                            <Edit2 size={13}/>
+                          </button>
+                          <button onClick={() => { if (confirm('Delete this hatch batch? This cannot be undone.')) delOneMut.mutate(b.id) }} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600">
+                            <Trash2 size={13}/>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )

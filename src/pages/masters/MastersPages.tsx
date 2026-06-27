@@ -45,6 +45,7 @@ const MasterTable: React.FC<{
   columns: Array<{ label: string; key: string; right?: boolean; render?: (row: any) => React.ReactNode }>
   data: any[]
   onEdit: (row: any) => void
+  onDelete?: (row: any) => void
   onAdd: () => void
   loading: boolean
   headerAction?: React.ReactNode
@@ -53,7 +54,7 @@ const MasterTable: React.FC<{
   onToggleAll?: () => void
   allSel?: boolean
   someSel?: boolean
-}> = ({ title, subtitle, columns, data, onEdit, onAdd, loading, headerAction, sel, onToggle, onToggleAll, allSel, someSel }) => (
+}> = ({ title, subtitle, columns, data, onEdit, onDelete, onAdd, loading, headerAction, sel, onToggle, onToggleAll, allSel, someSel }) => (
   <div className="space-y-4">
     <SectionHeader title={title} subtitle={subtitle}
       action={
@@ -84,10 +85,18 @@ const MasterTable: React.FC<{
                 </Td>
               ))}
               <Td>
-                <button onClick={() => onEdit(row)}
-                  className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
-                  <Edit2 size={13}/>
-                </button>
+                <div className="flex gap-1">
+                  <button onClick={() => onEdit(row)}
+                    className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors">
+                    <Edit2 size={13}/>
+                  </button>
+                  {onDelete && (
+                    <button onClick={() => onDelete(row)}
+                      className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors">
+                      <Trash2 size={13}/>
+                    </button>
+                  )}
+                </div>
               </Td>
             </tr>
           ))}</tbody>
@@ -103,6 +112,7 @@ export const FarmsMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
+  const [deleteRow, setDeleteRow] = useState<any>(null)
   const [form, setForm] = useState({code:'',name:'',site_type:'laying',address:'',taluka:'',elec_usc_1:'',elec_usc_2:'',contact:''})
   const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
 
@@ -125,10 +135,21 @@ export const FarmsMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const delMut=useMutation({
+    mutationFn:async(id:string)=>{const{error}=await supabase.from('farms').delete().eq('id',id);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['farms']});setDeleteRow(null)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Cannot delete — farm has linked records (sheds / flocks)')
+      else toast.error(e.message)
+      setDeleteRow(null)
+    }
+  })
+
   return (
     <>
       <MasterTable title="Farms" subtitle="Farm sites and locations" loading={isLoading}
-        data={data??[]} onAdd={()=>open()} onEdit={open}
+        data={data??[]} onAdd={()=>open()} onEdit={open} onDelete={setDeleteRow}
         columns={[
           {label:'Code',key:'code',render:r=><span className="font-mono text-xs font-bold text-brand-700">{r.code}</span>},
           {label:'Name',key:'name',render:r=><span className="font-medium">{r.name}</span>},
@@ -139,6 +160,13 @@ export const FarmsMaster: React.FC = () => {
           {label:'Status',key:'is_active',render:r=><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge>},
         ]}
       />
+      {deleteRow&&(
+        <Modal open onClose={()=>setDeleteRow(null)} title="Delete Farm" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setDeleteRow(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={()=>delMut.mutate(deleteRow.id)}>Delete</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{deleteRow.name}</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Note: deletion will fail if this farm has linked sheds / flocks / records.</p>
+        </Modal>
+      )}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Farm':'Add Farm'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
@@ -170,6 +198,7 @@ export const IngredientsMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({code:'',name:'',short_name:'',category:'grain',unit:'kg',protein_pct:'',moisture_pct:'',hsn_code:'',gst_rate:'0'})
+  const [deleteRow, setDeleteRow] = useState<any>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -196,6 +225,17 @@ export const IngredientsMaster: React.FC = () => {
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['ingredients']});setShowForm(false)},
     onError:(e:any)=>toast.error(e.message)
+  })
+
+  const delMut=useMutation({
+    mutationFn:async(id:string)=>{const{error}=await supabase.from('feed_ingredients').delete().eq('id',id);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['ingredients']});setDeleteRow(null)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Cannot delete — ingredient has linked records (Formula / GRN)')
+      else toast.error(e.message)
+      setDeleteRow(null)
+    }
   })
 
   const bulkDelMut=useMutation({
@@ -308,7 +348,12 @@ export const IngredientsMaster: React.FC = () => {
                   <Td right>{r.protein_pct??'—'}</Td>
                   <Td right>{r.moisture_pct??'—'}</Td>
                   <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
-                  <Td><button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                      <button onClick={()=>setDeleteRow(r)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}</tbody>
             </Table>
@@ -316,6 +361,15 @@ export const IngredientsMaster: React.FC = () => {
           </Card>
         )}
       </div>
+
+      {/* Single delete confirm */}
+      {deleteRow&&(
+        <Modal open onClose={()=>setDeleteRow(null)} title="Delete Ingredient" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setDeleteRow(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={()=>delMut.mutate(deleteRow.id)}>Delete</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{deleteRow.name}</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Note: ingredients used in Feed Formulas or GRN cannot be deleted.</p>
+        </Modal>
+      )}
 
       {/* Bulk delete confirm */}
       {bulkConfirm&&(
@@ -661,6 +715,7 @@ export const MedicinesMaster: React.FC = () => {
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({name:'',type:'medicine',unit:'ml',manufacturer:'',rate:'',batch_no:'',expiry_date:''})
   const medTypes = useConfigValues('medicine_type', ['medicine','vaccine','supplement','sanitizer','injectable','disinfectant','pesticide','other'])
+  const [deleteRow, setDeleteRow] = useState<any>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -685,6 +740,17 @@ export const MedicinesMaster: React.FC = () => {
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['medicines']});setShowForm(false)},
     onError:(e:any)=>toast.error(e.message)
+  })
+
+  const delMut=useMutation({
+    mutationFn:async(id:string)=>{const{error}=await supabase.from('medicines_master').delete().eq('id',id);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['medicines']});setDeleteRow(null)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Cannot delete — medicine has linked usage records')
+      else toast.error(e.message)
+      setDeleteRow(null)
+    }
   })
 
   const bulkDelMut=useMutation({
@@ -791,7 +857,12 @@ export const MedicinesMaster: React.FC = () => {
                   <Td>{r.expiry_date?fmtDate(r.expiry_date):'—'}</Td>
                   <Td right>{r.rate?`₹${Number(r.rate).toLocaleString('en-IN')}`:'—'}</Td>
                   <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
-                  <Td><button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                      <button onClick={()=>setDeleteRow(r)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}</tbody>
             </Table>
@@ -799,6 +870,14 @@ export const MedicinesMaster: React.FC = () => {
           </Card>
         )}
       </div>
+
+      {deleteRow&&(
+        <Modal open onClose={()=>setDeleteRow(null)} title="Delete Medicine" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setDeleteRow(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={()=>delMut.mutate(deleteRow.id)}>Delete</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{deleteRow.name}</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Note: medicines with linked usage records cannot be deleted.</p>
+        </Modal>
+      )}
 
       {bulkConfirm&&(
         <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Medicines" size="sm"
@@ -864,6 +943,7 @@ export const ShedsMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
+  const [deleteRow, setDeleteRow] = useState<any>(null)
   const [farmFilter, setFarmFilter] = useState('')
   const [form, setForm] = useState({
     farm_id:'', shed_no:'', shed_name:'', shed_type:'laying', sex:'combined',
@@ -899,6 +979,17 @@ export const ShedsMaster: React.FC = () => {
     onError:(e:any)=>toast.error(e.message)
   })
 
+  const delMut=useMutation({
+    mutationFn:async(id:string)=>{const{error}=await supabase.from('sheds').delete().eq('id',id);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['sheds']});setDeleteRow(null)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Cannot delete — shed has linked flocks / records')
+      else toast.error(e.message)
+      setDeleteRow(null)
+    }
+  })
+
   const farmOptions=farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
 
   return (
@@ -930,7 +1021,12 @@ export const ShedsMaster: React.FC = () => {
                   <Td right>{r.a_side_boxes??'—'}</Td>
                   <Td right>{r.b_side_boxes??'—'}</Td>
                   <Td right>{r.birds_per_box??'—'}</Td>
-                  <Td><button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                      <button onClick={()=>setDeleteRow(r)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}</tbody>
             </Table>
@@ -938,6 +1034,13 @@ export const ShedsMaster: React.FC = () => {
           </Card>
         )}
       </div>
+      {deleteRow&&(
+        <Modal open onClose={()=>setDeleteRow(null)} title="Delete Shed" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setDeleteRow(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={()=>delMut.mutate(deleteRow.id)}>Delete</Button></>}>
+          <p className="text-sm text-gray-700">Delete shed <strong>{deleteRow.shed_no}{deleteRow.shed_name?` — ${deleteRow.shed_name}`:''}</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Note: deletion will fail if this shed has linked flocks / records.</p>
+        </Modal>
+      )}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Shed':'Add Shed'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
@@ -976,6 +1079,7 @@ export const HatcheriesMaster: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({name:'',type:'Hitech',location:'',city:'',contact:''})
+  const [deleteRow, setDeleteRow] = useState<any>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -1000,6 +1104,17 @@ export const HatcheriesMaster: React.FC = () => {
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['hatcheries']});setShowForm(false)},
     onError:(e:any)=>toast.error(e.message)
+  })
+
+  const delMut=useMutation({
+    mutationFn:async(id:string)=>{const{error}=await supabase.from('hatcheries').delete().eq('id',id);if(error)throw error},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['hatcheries']});setDeleteRow(null)},
+    onError:(e:any)=>{
+      if(e.message?.includes('foreign key')||e.code==='23503')
+        toast.error('Cannot delete — hatchery has linked HE dispatch records')
+      else toast.error(e.message)
+      setDeleteRow(null)
+    }
   })
 
   const bulkDelMut=useMutation({
@@ -1085,7 +1200,12 @@ export const HatcheriesMaster: React.FC = () => {
                   <Td>{r.city??'—'}</Td>
                   <Td>{r.contact??'—'}</Td>
                   <Td><Badge color={r.is_active?'green':'gray'}>{r.is_active?'Active':'Inactive'}</Badge></Td>
-                  <Td><button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button></Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={()=>open(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                      <button onClick={()=>setDeleteRow(r)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}</tbody>
             </Table>
@@ -1093,6 +1213,14 @@ export const HatcheriesMaster: React.FC = () => {
           </Card>
         )}
       </div>
+
+      {deleteRow&&(
+        <Modal open onClose={()=>setDeleteRow(null)} title="Delete Hatchery" size="sm"
+          footer={<><Button variant="secondary" onClick={()=>setDeleteRow(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={()=>delMut.mutate(deleteRow.id)}>Delete</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{deleteRow.name}</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Note: hatcheries with linked HE dispatch records cannot be deleted.</p>
+        </Modal>
+      )}
 
       {bulkConfirm&&(
         <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Hatcheries" size="sm"

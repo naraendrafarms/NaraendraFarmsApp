@@ -1,11 +1,25 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
 import { Card, CardHeader, Input, Select, FormRow, Modal, EmptyState, Spinner, Td, Th, DateInput, Badge } from '@/components/ui'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import toast from 'react-hot-toast'
-import { Plus, Trash2, Edit2, Download, X } from 'lucide-react'
+import { Plus, Trash2, Edit2, Download, Upload, X } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+
+// Raw GRN input columns for the import template — only fields the user types.
+// Amounts (basic / gst / total) are computed in code on import, never imported.
+const GRN_TEMPLATE_HEADERS = [
+  'grn_no', 'grn_date', 'farm', 'supplier', 'category', 'item',
+  'qty', 'unit', 'bags', 'price_per_unit', 'gst_pct',
+  'invoice_no', 'invoice_date', 'batch_no', 'expiry_date', 'vehicle_no', 'remarks',
+]
+const GRN_TEMPLATE_EXAMPLE = [
+  'GRN-20250601-001', '2025-06-01', 'Farm A', 'Vendor ABC', 'Feed Ingredient', 'Maize',
+  '1000', 'kg', '20', '25', '0',
+  'INV-001', '2025-06-01', '', '', 'AP01AB1234', '',
+]
 
 // BATCH_CATS: medicine-type categories that need batch/expiry tracking
 const BATCH_CATS = new Set(['Medicine', 'Vaccine', 'Supplement', 'Injectable'])
@@ -47,6 +61,7 @@ export const GRNPage: React.FC = () => {
   const [delId, setDelId] = useState<string | null>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkDelConfirm, setBulkDelConfirm] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState(emptyForm())
   const [itemSearch, setItemSearch] = useState('')
@@ -243,6 +258,77 @@ export const GRNPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  const downloadTemplate = () =>
+    downloadXlsxTemplate('grn_import_template.xlsx', GRN_TEMPLATE_HEADERS, GRN_TEMPLATE_EXAMPLE)
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const { headers, rows } = await parseFile(file)
+      const col = (name: string) => headers.indexOf(name)
+      const dataRows = rows.filter(r => r.some(c => (c ?? '').toString().trim() !== ''))
+      if (!dataRows.length) { toast.error('No data rows found'); return }
+
+      const farmByName = new Map((farms ?? []).map((f: any) => [f.name.toLowerCase().trim(), f.id]))
+      const partyByName = new Map((parties ?? []).map((p: any) => [p.name.toLowerCase().trim(), p.id]))
+      const itemByName = new Map((items ?? []).map((i: any) => [i.name.toLowerCase().trim(), i]))
+
+      const get = (r: string[], name: string) => { const c = col(name); return c >= 0 ? (r[c] ?? '').toString().trim() : '' }
+
+      const inserts = dataRows.map(r => {
+        const qty = parseFloat(get(r, 'qty')) || 0
+        const rate = parseFloat(get(r, 'price_per_unit')) || 0
+        const gstPct = parseFloat(get(r, 'gst_pct')) || 0
+        // Amounts computed here — never taken from the template
+        const basic = +(qty * rate).toFixed(2)
+        const gstAmt = +(basic * gstPct / 100).toFixed(2)
+        const total = +(basic + gstAmt).toFixed(2)
+
+        const category = get(r, 'category') || 'Feed Ingredient'
+        const itemName = get(r, 'item')
+        const matchedItem = itemByName.get(itemName.toLowerCase())
+        const farmName = get(r, 'farm')
+        const partyName = get(r, 'supplier')
+
+        return {
+          grn_no: get(r, 'grn_no') || null,
+          grn_date: get(r, 'grn_date') || today(),
+          farm_id: farmByName.get(farmName.toLowerCase()) ?? null,
+          party_id: partyByName.get(partyName.toLowerCase()) ?? null,
+          invoice_no: get(r, 'invoice_no') || null,
+          invoice_date: get(r, 'invoice_date') || null,
+          category,
+          item_id: matchedItem?.id ?? null,
+          ingredient_id: category === 'Feed Ingredient' ? (matchedItem?.id ?? null) : null,
+          item_name: itemName || null,
+          qty: qty || null,
+          unit: get(r, 'unit') || matchedItem?.unit || null,
+          bags: parseInt(get(r, 'bags')) || null,
+          price_per_unit: rate || null,
+          basic_amount: basic || null,
+          gst_pct: gstPct || 0,
+          gst_amount: gstAmt || null,
+          total_amount: total || null,
+          batch_no: get(r, 'batch_no') || null,
+          expiry_date: get(r, 'expiry_date') || null,
+          vehicle_no: get(r, 'vehicle_no') || null,
+          remarks: get(r, 'remarks') || null,
+        }
+      }).filter(g => g.grn_no && g.grn_date)
+
+      if (!inserts.length) { toast.error('Rows must have grn_no and grn_date'); return }
+      const { error } = await supabase.from('grn').insert(inserts)
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['grns'] })
+      toast.success(`Imported ${inserts.length} GRN(s)`)
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      e.target.value = ''
+    }
+  }
+
   const toggleSel = (id: string) => setSel(prev => {
     const next = new Set(prev)
     if (next.has(id)) next.delete(id); else next.add(id)
@@ -284,6 +370,19 @@ export const GRNPage: React.FC = () => {
                 <Trash2 size={14} /> Delete ({sel.size})
               </button>
             )}
+            <button
+              onClick={downloadTemplate}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded hover:bg-gray-50"
+            >
+              <Download size={14} /> Template
+            </button>
+            <button
+              onClick={() => importRef.current?.click()}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded hover:bg-gray-50"
+            >
+              <Upload size={14} /> Import
+            </button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
             <button
               onClick={handleExport}
               className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded hover:bg-gray-50"

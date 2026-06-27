@@ -75,6 +75,7 @@ export const FlockDetail: React.FC = () => {
   })
   const [transferForm, setTransferForm] = useState(blankTransfer())
   const [showTransferForm, setShowTransferForm] = useState(false)
+  const [editTransferId, setEditTransferId] = useState<string|null>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
@@ -289,6 +290,37 @@ export const FlockDetail: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['flock_daily', id] })
       qc.invalidateQueries({ queryKey: ['flock', id] })
       setShowTransferForm(false)
+      setTransferForm(blankTransfer())
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const updateTransferMut = useMutation({
+    mutationFn: async () => {
+      if (!editTransferId) throw new Error('No transfer selected')
+      if (!transferForm.to_farm_id) throw new Error('To Farm is required')
+      const payload = {
+        transfer_date: transferForm.transfer_date,
+        from_farm_id: transferForm.from_farm_id || null,
+        to_farm_id: transferForm.to_farm_id,
+        from_shed_id: transferForm.from_shed_id || null,
+        to_shed_id: transferForm.to_shed_id || null,
+        female_count: parseInt(transferForm.female_count) || 0,
+        male_count: parseInt(transferForm.male_count) || 0,
+        sex_error_female: parseInt(transferForm.sex_error_female) || 0,
+        sex_error_male: parseInt(transferForm.sex_error_male) || 0,
+        sold_female: parseInt(transferForm.sold_female) || 0,
+        sold_male: parseInt(transferForm.sold_male) || 0,
+        is_final_transfer: transferForm.is_final_transfer,
+        notes: transferForm.notes || null,
+      }
+      const { error } = await supabase.from('flock_transfers').update(payload).eq('id', editTransferId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Transfer updated')
+      qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
+      setShowTransferForm(false); setEditTransferId(null)
       setTransferForm(blankTransfer())
     },
     onError: (e: any) => toast.error(e.message)
@@ -1030,7 +1062,10 @@ export const FlockDetail: React.FC = () => {
               }}>Template</Button>
               <Button variant="outline" size="sm" onClick={() => transferImportRef.current?.click()}>Import CSV</Button>
               <input ref={transferImportRef} type="file" accept=".csv" className="hidden" onChange={handleTransferImport}/>
-              <Button size="sm" onClick={() => setShowTransferForm(v => !v)}>
+              <Button size="sm" onClick={() => {
+                if (showTransferForm) { setShowTransferForm(false); setEditTransferId(null); setTransferForm(blankTransfer()) }
+                else { setEditTransferId(null); setTransferForm(blankTransfer()); setShowTransferForm(true) }
+              }}>
                 {showTransferForm ? 'Cancel' : '+ Add Transfer'}
               </Button>
             </div>
@@ -1038,7 +1073,7 @@ export const FlockDetail: React.FC = () => {
 
           {showTransferForm && (
             <Card>
-              <CardHeader title="New Transfer Entry" />
+              <CardHeader title={editTransferId ? 'Edit Transfer Entry' : 'New Transfer Entry'} />
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div>
@@ -1156,11 +1191,20 @@ export const FlockDetail: React.FC = () => {
                   </div>
                 </label>
 
+                {editTransferId && (
+                  <p className="text-xs text-gray-400">Note: editing updates the transfer record only — it does not re-adjust daily bird counts or flock status.</p>
+                )}
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setShowTransferForm(false)}>Cancel</Button>
-                  <Button size="sm" loading={addTransferMut.isPending} onClick={() => addTransferMut.mutate()}>
-                    {transferForm.is_final_transfer ? 'Save & Mark as Laying' : 'Save Transfer'}
-                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => { setShowTransferForm(false); setEditTransferId(null); setTransferForm(blankTransfer()) }}>Cancel</Button>
+                  {editTransferId ? (
+                    <Button size="sm" loading={updateTransferMut.isPending} onClick={() => updateTransferMut.mutate()}>
+                      Update Transfer
+                    </Button>
+                  ) : (
+                    <Button size="sm" loading={addTransferMut.isPending} onClick={() => addTransferMut.mutate()}>
+                      {transferForm.is_final_transfer ? 'Save & Mark as Laying' : 'Save Transfer'}
+                    </Button>
+                  )}
                 </div>
               </div>
             </Card>
@@ -1179,11 +1223,12 @@ export const FlockDetail: React.FC = () => {
                     <th className="px-3 py-2 text-right font-semibold text-gray-600 text-xs">Sold</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-600 text-xs">Notes</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-600 text-xs">Status</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-600 text-xs"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {(transfers ?? []).length === 0 ? (
-                    <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400 text-sm">No transfers recorded yet</td></tr>
+                    <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400 text-sm">No transfers recorded yet</td></tr>
                   ) : (transfers ?? []).map((t: any) => (
                     <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap text-xs">{fmtDate(t.transfer_date)}</td>
@@ -1209,6 +1254,27 @@ export const FlockDetail: React.FC = () => {
                           ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">Final ✓</span>
                           : <span className="text-xs text-gray-400">Partial</span>}
                       </td>
+                      <td className="px-3 py-2 text-right">
+                        <button className="text-xs text-blue-600 hover:underline" onClick={() => {
+                          setEditTransferId(t.id)
+                          setTransferForm({
+                            transfer_date: t.transfer_date,
+                            from_farm_id: t.from_farm_id ?? '',
+                            to_farm_id: t.to_farm_id ?? '',
+                            from_shed_id: t.from_shed_id ?? '',
+                            to_shed_id: t.to_shed_id ?? '',
+                            female_count: (t.female_count ?? 0).toString(),
+                            male_count: (t.male_count ?? 0).toString(),
+                            sex_error_female: (t.sex_error_female ?? 0).toString(),
+                            sex_error_male: (t.sex_error_male ?? 0).toString(),
+                            sold_female: (t.sold_female ?? 0).toString(),
+                            sold_male: (t.sold_male ?? 0).toString(),
+                            is_final_transfer: !!t.is_final_transfer,
+                            notes: t.notes ?? '',
+                          })
+                          setShowTransferForm(true)
+                        }}>Edit</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1226,7 +1292,7 @@ export const FlockDetail: React.FC = () => {
                       <td className="px-3 py-2 text-right">{totM.toLocaleString('en-IN')} ♂</td>
                       <td className="px-3 py-2 text-right text-amber-600">{totSEF}♀ {totSEM}♂</td>
                       <td className="px-3 py-2 text-right text-orange-600">{totSF}♀ {totSM}♂</td>
-                      <td colSpan={2}/>
+                      <td colSpan={3}/>
                     </tr></tfoot>
                   )
                 })()}

@@ -1,19 +1,29 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import { fmtDate } from '@/lib/utils'
 import { today } from '@/lib/utils'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Upload, FileDown, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+}
 
 export const EggOpeningStockPage: React.FC = () => {
   const qc = useQueryClient()
   const [editing, setEditing] = useState<any | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState({
     flock_id: '', as_of_date: today(),
@@ -92,6 +102,80 @@ export const EggOpeningStockPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => { const { error } = await supabase.from('egg_opening_stock').delete().in('id', ids); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['egg_opening_stock'] }); toast.success('Deleted'); setSel(new Set()) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const parseDMY = (v: string) => {
+    if (!v) return null
+    const str = String(v).trim()
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10)
+    const [d, m, y] = str.split('/')
+    if (d && m && y) return `${y.padStart(4, '20')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+    return null
+  }
+
+  const downloadTemplate = () => {
+    downloadXlsxTemplate(
+      'EggOpeningStock_Template.xlsx',
+      ['flock_no', 'as_of_date', 'he_grade_a', 'he_grade_b', 'he_grade_c', 'je_eggs', 'te_eggs', 'be_eggs', 'le_eggs'],
+      ['1', today().split('-').reverse().join('/'), '0', '0', '0', '0', '0', '0', '0']
+    )
+  }
+
+  const exportRows = () => {
+    const data = (stocks ?? []).map((r: any) => ({
+      flock_no: r.flocks?.flock_no ?? '',
+      as_of_date: fmtDate(r.as_of_date),
+      he_grade_a: r.he_grade_a ?? 0, he_grade_b: r.he_grade_b ?? 0, he_grade_c: r.he_grade_c ?? 0,
+      je_eggs: r.je_eggs ?? 0, te_eggs: r.te_eggs ?? 0, be_eggs: r.be_eggs ?? 0, le_eggs: r.le_eggs ?? 0,
+    }))
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Opening Stock')
+    XLSX.writeFile(wb, `EggOpeningStock_${today()}.xlsx`)
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    e.target.value = ''
+    try {
+      const { headers, rows } = await parseFile(file)
+      if (!rows.length) { toast.error('No data found in file'); return }
+      const col = (n: string) => headers.indexOf(n)
+      const flockMap = Object.fromEntries((flocks ?? []).map((f: any) => [String(f.flock_no), f.id]))
+      const parsed = rows.map((r: string[]) => {
+        const flockNo = String(r[col('flock_no')] ?? '').replace(/^F-/i, '').trim()
+        return {
+          flock_id: flockMap[flockNo] ?? null,
+          as_of_date: parseDMY(r[col('as_of_date')]) ?? today(),
+          he_grade_a: parseInt(r[col('he_grade_a')]) || 0,
+          he_grade_b: parseInt(r[col('he_grade_b')]) || 0,
+          he_grade_c: parseInt(r[col('he_grade_c')]) || 0,
+          je_eggs: parseInt(r[col('je_eggs')]) || 0,
+          te_eggs: parseInt(r[col('te_eggs')]) || 0,
+          be_eggs: parseInt(r[col('be_eggs')]) || 0,
+          le_eggs: parseInt(r[col('le_eggs')]) || 0,
+        }
+      }).filter((r: any) => r.flock_id)
+      if (!parsed.length) { toast.error('No rows matched a known flock'); return }
+      const { error } = await supabase.from('egg_opening_stock').upsert(parsed, { onConflict: 'flock_id' })
+      if (error) throw error
+      toast.success(`Imported ${parsed.length} entries`)
+      qc.invalidateQueries({ queryKey: ['egg_opening_stock'] })
+    } catch (err: any) {
+      toast.error('Import failed: ' + err.message)
+    }
+  }
+
+  const rows_ = stocks ?? []
+  const allSel = rows_.length > 0 && sel.size === rows_.length
+  const someSel = sel.size > 0 && sel.size < rows_.length
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(rows_.map((r: any) => r.id)))
+
   const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no} (${f.status})` }))
   const N = (v: any) => v > 0 ? v.toLocaleString('en-IN') : '—'
 
@@ -99,7 +183,17 @@ export const EggOpeningStockPage: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Egg Opening Stock"
         subtitle="One-time opening balance per flock — enter stock on hand from Week 19 Day 1 before daily entries begin"
-        action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Opening Stock</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button variant="secondary" icon={<FileDown size={15}/>} onClick={downloadTemplate}>Template</Button>
+            <Button variant="secondary" icon={<Upload size={15}/>} onClick={() => fileRef.current?.click()}>Import</Button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
+            {rows_.length > 0 && (
+              <Button variant="secondary" icon={<Download size={15}/>} onClick={exportRows}>Export</Button>
+            )}
+            <Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Opening Stock</Button>
+          </div>
+        }
       />
 
       <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
@@ -136,10 +230,24 @@ export const EggOpeningStockPage: React.FC = () => {
         </Card>
       )}
 
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-red-700">{sel.size} selected</span>
+          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+          <div className="ml-auto">
+            <Button size="sm" variant="danger" loading={bulkDelMut.isPending}
+              onClick={() => { if (confirm(`Delete ${sel.size} opening stock entries? This cannot be undone.`)) bulkDelMut.mutate([...sel]) }}>
+              Delete Selected
+            </Button>
+          </div>
+        </div>
+      )}
+
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
             <thead><tr>
+              <Th><CB checked={allSel} indeterminate={someSel} onChange={toggleAll} /></Th>
               <Th>Flock</Th><Th>As of Date</Th>
               <Th right>HE Gr A</Th><Th right>HE Gr B</Th><Th right>HE Gr C</Th>
               <Th right>JE</Th><Th right>TE</Th><Th right>BE</Th><Th right>LE</Th>
@@ -147,7 +255,8 @@ export const EggOpeningStockPage: React.FC = () => {
             </tr></thead>
             <tbody>
               {(stocks ?? []).map((r: any) => (
-                <tr key={r.id} className="hover:bg-gray-50">
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-blue-50' : ''}`}>
+                  <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></Td>
                   <Td><Badge color="green">F-{r.flocks?.flock_no}</Badge></Td>
                   <Td className="text-xs">{fmtDate(r.as_of_date)}</Td>
                   <Td right className="text-xs text-emerald-600">{N(r.he_grade_a)}</Td>

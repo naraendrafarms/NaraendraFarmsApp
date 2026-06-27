@@ -676,6 +676,7 @@ export const GRNEntry: React.FC = () => {
 export const FeedProduction: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
 
   const { data: feedTypes } = useQuery({ queryKey: ['feed_types'], queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] } })
 
@@ -691,17 +692,40 @@ export const FeedProduction: React.FC = () => {
   const [form, setForm] = useState({ production_date: today(), feed_type_id: '', batch_no: '', quantity_kg: '', remarks: '' })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  const openAdd = () => {
+    setEditing(null)
+    setForm({ production_date: today(), feed_type_id: '', batch_no: '', quantity_kg: '', remarks: '' })
+    setShowForm(true)
+  }
+  const openEdit = (p: any) => {
+    setEditing(p)
+    setForm({
+      production_date: p.production_date ?? today(),
+      feed_type_id: p.feed_type_id ?? '',
+      batch_no: p.batch_no ?? '',
+      quantity_kg: p.quantity_kg?.toString() ?? '',
+      remarks: p.remarks ?? '',
+    })
+    setShowForm(true)
+  }
+
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.feed_type_id || !form.quantity_kg) throw new Error('Feed type and quantity required')
-      const { error } = await supabase.from('feed_production').insert({
+      const payload = {
         production_date: form.production_date, feed_type_id: form.feed_type_id,
         batch_no: form.batch_no || null, quantity_kg: parseFloat(form.quantity_kg),
         remarks: form.remarks || null
-      })
-      if (error) throw error
+      }
+      if (editing) {
+        const { error } = await supabase.from('feed_production').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('feed_production').insert(payload)
+        if (error) throw error
+      }
     },
-    onSuccess: () => { toast.success('Batch recorded!'); qc.invalidateQueries({ queryKey: ['feed_production'] }); setShowForm(false) },
+    onSuccess: () => { toast.success(editing ? 'Batch updated!' : 'Batch recorded!'); qc.invalidateQueries({ queryKey: ['feed_production'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -718,7 +742,7 @@ export const FeedProduction: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Feed Production"
         subtitle="Daily feed mill production batches"
-        action={<Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add Batch</Button>}
+        action={<Button icon={<Plus size={16}/>} onClick={openAdd}>Add Batch</Button>}
       />
       {Object.keys(byType).length > 0 && (
         <div className="grid grid-cols-4 gap-3">
@@ -736,7 +760,7 @@ export const FeedProduction: React.FC = () => {
           <Table>
             <thead><tr>
               <Th>Date</Th><Th>Feed Type</Th><Th>Batch No</Th>
-              <Th right>Quantity (kg)</Th><Th right>MT</Th><Th>Remarks</Th>
+              <Th right>Quantity (kg)</Th><Th right>MT</Th><Th>Remarks</Th><Th></Th>
             </tr></thead>
             <tbody>
               {productions?.map((p: any) => (
@@ -747,16 +771,19 @@ export const FeedProduction: React.FC = () => {
                   <Td right className="font-semibold">{p.quantity_kg?.toLocaleString('en-IN')}</Td>
                   <Td right className="text-xs text-gray-400">{(p.quantity_kg/1000).toFixed(2)}</Td>
                   <Td className="text-xs text-gray-400">{p.remarks ?? ''}</Td>
+                  <Td>
+                    <button onClick={() => openEdit(p)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors" title="Edit"><Edit2 size={13}/></button>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
-          {productions?.length === 0 && <EmptyState icon={<Factory size={32}/>} title="No production records" action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add Batch</Button>} />}
+          {productions?.length === 0 && <EmptyState icon={<Factory size={32}/>} title="No production records" action={<Button onClick={openAdd} icon={<Plus size={16}/>}>Add Batch</Button>} />}
         </Card>
       )}
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="Record Production Batch" size="md"
+      <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Production Batch' : 'Record Production Batch'} size="md"
         footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
-          <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button></>}>
+          <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>}>
         <div className="space-y-4">
           <FormRow>
             <DateInput label="Production Date" required value={form.production_date} onChange={e => s('production_date', e.target.value)} />
@@ -778,6 +805,7 @@ export const FeedProduction: React.FC = () => {
 export const FeedTransfer: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
 
   const { data: farms } = useQuery({ queryKey: ['farms'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
   const { data: feedTypes } = useQuery({ queryKey: ['feed_types'], queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] } })
@@ -799,18 +827,44 @@ export const FeedTransfer: React.FC = () => {
   })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  const openAdd = () => {
+    setEditing(null)
+    setForm({ transfer_date: today(), from_farm_id: '', to_farm_id: '', feed_type_id: '', flock_id: '', quantity_kg: '', vehicle_no: '', remarks: '' })
+    setShowForm(true)
+  }
+  const openEdit = (t: any) => {
+    setEditing(t)
+    setForm({
+      transfer_date: t.transfer_date ?? today(),
+      from_farm_id: t.from_farm_id ?? '',
+      to_farm_id: t.to_farm_id ?? '',
+      feed_type_id: t.feed_type_id ?? '',
+      flock_id: t.flock_id ?? '',
+      quantity_kg: t.quantity_kg?.toString() ?? '',
+      vehicle_no: t.vehicle_no ?? '',
+      remarks: t.remarks ?? '',
+    })
+    setShowForm(true)
+  }
+
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.from_farm_id || !form.to_farm_id || !form.quantity_kg) throw new Error('From, to farms and quantity required')
-      const { error } = await supabase.from('feed_transfers').insert({
+      const payload = {
         transfer_date: form.transfer_date, from_farm_id: form.from_farm_id,
         to_farm_id: form.to_farm_id, feed_type_id: form.feed_type_id || null,
         flock_id: form.flock_id || null, quantity_kg: parseFloat(form.quantity_kg),
         vehicle_no: form.vehicle_no || null, remarks: form.remarks || null
-      })
-      if (error) throw error
+      }
+      if (editing) {
+        const { error } = await supabase.from('feed_transfers').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('feed_transfers').insert(payload)
+        if (error) throw error
+      }
     },
-    onSuccess: () => { toast.success('Transfer recorded!'); qc.invalidateQueries({ queryKey: ['feed_transfers'] }); setShowForm(false) },
+    onSuccess: () => { toast.success(editing ? 'Transfer updated!' : 'Transfer recorded!'); qc.invalidateQueries({ queryKey: ['feed_transfers'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -822,7 +876,7 @@ export const FeedTransfer: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Feed Transfers"
         subtitle="Feed mill → farm dispatches"
-        action={<Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add Transfer</Button>}
+        action={<Button icon={<Plus size={16}/>} onClick={openAdd}>Add Transfer</Button>}
       />
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
@@ -830,7 +884,7 @@ export const FeedTransfer: React.FC = () => {
             <thead><tr>
               <Th>Date</Th><Th>From</Th><Th></Th><Th>To</Th>
               <Th>Feed Type</Th><Th>Flock</Th>
-              <Th right>Quantity (kg)</Th><Th>Vehicle</Th>
+              <Th right>Quantity (kg)</Th><Th>Vehicle</Th><Th></Th>
             </tr></thead>
             <tbody>
               {transfers?.map((t: any) => (
@@ -843,16 +897,19 @@ export const FeedTransfer: React.FC = () => {
                   <Td className="text-xs">{t.flocks?.flock_no ? `F-${t.flocks.flock_no}` : '—'}</Td>
                   <Td right className="font-semibold">{t.quantity_kg?.toLocaleString('en-IN')}</Td>
                   <Td className="text-xs text-gray-400">{t.vehicle_no ?? '—'}</Td>
+                  <Td>
+                    <button onClick={() => openEdit(t)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors" title="Edit"><Edit2 size={13}/></button>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
-          {transfers?.length === 0 && <EmptyState icon={<ArrowRight size={32}/>} title="No transfer records" action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add Transfer</Button>} />}
+          {transfers?.length === 0 && <EmptyState icon={<ArrowRight size={32}/>} title="No transfer records" action={<Button onClick={openAdd} icon={<Plus size={16}/>}>Add Transfer</Button>} />}
         </Card>
       )}
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="Record Feed Transfer" size="md"
+      <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Feed Transfer' : 'Record Feed Transfer'} size="md"
         footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
-          <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button></>}>
+          <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>}>
         <div className="space-y-4">
           <DateInput label="Transfer Date" required value={form.transfer_date} onChange={e => s('transfer_date', e.target.value)} />
           <FormRow>

@@ -1,12 +1,13 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, today } from '@/lib/utils'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download } from 'lucide-react'
+import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download, Upload, FileDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 
@@ -55,6 +56,7 @@ export const VaccinationRecordsPage: React.FC = () => {
   const [filterFlock, setFilterFlock] = useState('')
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
@@ -180,6 +182,57 @@ export const VaccinationRecordsPage: React.FC = () => {
     a.download = `vaccinations_${new Date().toISOString().slice(0,10)}.csv`; a.click()
   }
 
+  const parseDMY = (v: string) => {
+    if (!v) return null
+    const str = String(v).trim()
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10)
+    const [d, m, y] = str.split('/')
+    if (d && m && y) return `${y.padStart(4, '20')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+    return null
+  }
+
+  const downloadTemplate = () => {
+    downloadXlsxTemplate(
+      'Vaccinations_Template.xlsx',
+      ['flock_no', 'vaccine_date', 'vaccine_name', 'dose_no', 'route', 'quantity', 'unit', 'cost', 'next_due_date', 'administered_by', 'remarks'],
+      ['1', today().split('-').reverse().join('/'), "ND LaSota", '1', 'drinking_water', '1000', 'doses', '500', '', 'Vet', '']
+    )
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    e.target.value = ''
+    try {
+      const { headers, rows } = await parseFile(file)
+      if (!rows.length) { toast.error('No data found in file'); return }
+      const col = (n: string) => headers.indexOf(n)
+      const flockMap = Object.fromEntries((flocks ?? []).map((f: any) => [String(f.flock_no), f.id]))
+      const parsed = rows.map((r: string[]) => {
+        const flockNo = String(r[col('flock_no')] ?? '').replace(/^F-/i, '').trim()
+        return {
+          flock_id: flockMap[flockNo] ?? null,
+          vaccine_date: parseDMY(r[col('vaccine_date')]) ?? today(),
+          vaccine_name: (r[col('vaccine_name')] ?? '').trim(),
+          dose_no: parseInt(r[col('dose_no')]) || 1,
+          route: r[col('route')] || null,
+          quantity: parseFloat(r[col('quantity')]) || null,
+          unit: r[col('unit')] || null,
+          cost: parseFloat(r[col('cost')]) || null,
+          next_due_date: parseDMY(r[col('next_due_date')]),
+          administered_by: r[col('administered_by')] || null,
+          remarks: r[col('remarks')] || null,
+        }
+      }).filter((r: any) => r.flock_id && r.vaccine_name)
+      if (!parsed.length) { toast.error('No rows matched a known flock with a vaccine name'); return }
+      const { error } = await supabase.from('vaccination_records').insert(parsed)
+      if (error) throw error
+      toast.success(`Imported ${parsed.length} records`)
+      qc.invalidateQueries({ queryKey: ['vaccination_records'] })
+    } catch (err: any) {
+      toast.error('Import failed: ' + err.message)
+    }
+  }
+
   const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no} (${f.status})` }))
   const shedOptions = (sheds ?? []).filter((sh: any) => !form.farm_id || sh.farm_id === form.farm_id)
     .map((sh: any) => ({ value: sh.id, label: `Shed ${sh.shed_no}${sh.shed_name ? ' – ' + sh.shed_name : ''}` }))
@@ -190,6 +243,9 @@ export const VaccinationRecordsPage: React.FC = () => {
       <SectionHeader title="Vaccination Records"
         subtitle="Track vaccines administered to each flock with due date alerts"
         action={<div className="flex gap-2">
+          <Button variant="outline" size="sm" icon={<FileDown size={14}/>} onClick={downloadTemplate}>Template</Button>
+          <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={() => fileRef.current?.click()}>Import</Button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportRows}>Export</Button>
           <Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Record</Button>
         </div>}

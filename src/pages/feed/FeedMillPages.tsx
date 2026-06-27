@@ -581,6 +581,7 @@ const ProductionTab: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
   const [fFarm, setFFarm] = useState('')
@@ -649,6 +650,20 @@ const ProductionTab: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await supabase.from('feed_production_ingredients').delete().in('production_id', ids)
+      const { error } = await supabase.from('feed_production_log').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); setSelected(new Set()); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const allChecked = logs.length > 0 && logs.every((l: any) => selected.has(l.id))
+  const toggleAll = () => { if (allChecked) setSelected(new Set()); else setSelected(new Set(logs.map((l: any) => l.id))) }
+  const toggleOne = (id: string) => setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+
   function handleExport() {
     const rows: (string|number|null|undefined)[][] = []
     logs.forEach((l: any) => {
@@ -669,6 +684,7 @@ const ProductionTab: React.FC = () => {
       <SectionHeader title="Production Log" action={
         <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export</Button>
+          {selected.size > 0 && <Button size="sm" variant="outline" loading={bulkDelMut.isPending} onClick={() => { if(confirm(`Delete ${selected.size} entry(s)?`)) bulkDelMut.mutate(Array.from(selected)) }} className="text-red-600 border-red-300"><Trash2 size={14}/> Delete ({selected.size})</Button>}
           <Button size="sm" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={14}/> Add Daily Entry</Button>
         </div>
       } />
@@ -698,11 +714,13 @@ const ProductionTab: React.FC = () => {
       {isLoading ? <Spinner /> : logs.length === 0 ? <EmptyState title="No production records" /> : (
         <Table>
           <thead><tr>
+            <Th><input type="checkbox" checked={allChecked} onChange={toggleAll} className="w-4 h-4 rounded accent-green-600 cursor-pointer" /></Th>
             <Th>Date</Th><Th>Formula</Th><Th>Farm</Th><Th>Qty (Kg)</Th><Th>Ingredients</Th><Th>Remarks</Th><Th>Actions</Th>
           </tr></thead>
           <tbody>
             {logs.map((l: any) => (
               <tr key={l.id} className="hover:bg-gray-50">
+                <Td><input type="checkbox" checked={selected.has(l.id)} onChange={() => toggleOne(l.id)} className="w-4 h-4 rounded accent-green-600 cursor-pointer" /></Td>
                 <Td>{fmtDate(l.production_date)}</Td>
                 <Td>
                   <span className="font-medium">{l.feed_formulas?.formula_code}</span>
@@ -852,6 +870,7 @@ const StockTab: React.FC = () => {
   const [section, setSection] = useState<'summary'|'adjustments'>('summary')
   const [showAdjForm, setShowAdjForm] = useState(false)
   const [editingAdj, setEditingAdj] = useState<any>(null)
+  const [selectedAdj, setSelectedAdj] = useState<Set<string>>(new Set())
   const [showMerge, setShowMerge] = useState(false)
   const [mergeFrom, setMergeFrom] = useState('')
   const [mergeTo,   setMergeTo]   = useState('')
@@ -907,6 +926,16 @@ const StockTab: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({queryKey:['stock_adj']}); toast.success('Deleted') },
     onError: (e:any) => toast.error(e.message)
   })
+
+  const bulkDelAdjMut = useMutation({
+    mutationFn: async (ids: string[]) => { const {error} = await supabase.from('feed_stock_adjustments').delete().in('id', ids); if(error) throw error },
+    onSuccess: () => { qc.invalidateQueries({queryKey:['stock_adj']}); setSelectedAdj(new Set()); toast.success('Deleted') },
+    onError: (e:any) => toast.error(e.message)
+  })
+
+  const allAdjChecked = adjData.length > 0 && (adjData as any[]).every((a: any) => selectedAdj.has(a.id))
+  const toggleAllAdj = () => { if (allAdjChecked) setSelectedAdj(new Set()); else setSelectedAdj(new Set((adjData as any[]).map((a: any) => a.id))) }
+  const toggleOneAdj = (id: string) => setSelectedAdj(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
 
   // Build stock map: GRN received + adjustments - production consumed
   const stockMap: Record<string, { code?:string; received: number; adjusted: number; consumed: number }> = {}
@@ -1029,6 +1058,7 @@ const StockTab: React.FC = () => {
           <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}><Upload size={14}/> Import</Button>
           <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export</Button>
           <Button size="sm" variant="outline" onClick={() => setShowMerge(true)}>Merge Names</Button>
+          {section === 'adjustments' && selectedAdj.size > 0 && <Button size="sm" variant="outline" loading={bulkDelAdjMut.isPending} onClick={() => { if(confirm(`Delete ${selectedAdj.size} adjustment(s)?`)) bulkDelAdjMut.mutate(Array.from(selectedAdj)) }} className="text-red-600 border-red-300"><Trash2 size={14}/> Delete ({selectedAdj.size})</Button>}
           <Button size="sm" onClick={() => { setEditingAdj(null); setShowAdjForm(true) }}><Plus size={14}/> Add Adjustment</Button>
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
         </div>
@@ -1093,12 +1123,14 @@ const StockTab: React.FC = () => {
           {adjLoading ? <Spinner /> : adjData.length === 0 ? <EmptyState title="No adjustments yet" action={<Button onClick={() => setShowAdjForm(true)} icon={<Plus size={14}/>}>Add Adjustment</Button>} /> : (
             <Table>
               <thead><tr>
+                <Th><input type="checkbox" checked={allAdjChecked} onChange={toggleAllAdj} className="w-4 h-4 rounded accent-green-600 cursor-pointer" /></Th>
                 <Th>Date</Th><Th>Ingredient</Th><Th>Type</Th><Th>Farm</Th>
                 <Th className="text-right">Kg</Th><Th>Remarks</Th><Th></Th>
               </tr></thead>
               <tbody>
                 {(adjData as any[]).map((a: any) => (
                   <tr key={a.id} className="hover:bg-gray-50">
+                    <Td><input type="checkbox" checked={selectedAdj.has(a.id)} onChange={() => toggleOneAdj(a.id)} className="w-4 h-4 rounded accent-green-600 cursor-pointer" /></Td>
                     <Td>{fmtDate(a.adjustment_date)}</Td>
                     <Td className="font-medium">{a.ingredient_name}<br/><span className="text-xs text-gray-400">{a.ingredient_code}</span></Td>
                     <Td><Badge color={a.adjustment_kg >= 0 ? 'green' : 'red'}>{a.adjustment_type}</Badge></Td>
@@ -1207,6 +1239,7 @@ const ExpensesTab: React.FC = () => {
   const EXPENSE_CATEGORIES = useConfigValues('feedmill_expense', EXPENSE_CATEGORIES_FB)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [fCat,  setFCat]  = useState('')
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
@@ -1241,6 +1274,16 @@ const ExpensesTab: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({queryKey:['feedmill_expenses']}); toast.success('Deleted') },
     onError: (e: any) => toast.error(e.message),
   })
+
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => { const {error} = await supabase.from('feedmill_expenses').delete().in('id', ids); if(error) throw error },
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feedmill_expenses']}); setSelected(new Set()); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const allChecked = expenses.length > 0 && expenses.every((e: any) => selected.has(e.id))
+  const toggleAll = () => { if (allChecked) setSelected(new Set()); else setSelected(new Set(expenses.map((e: any) => e.id))) }
+  const toggleOne = (id: string) => setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
 
   function handleExport() {
     exportXlsx('feedmill_expenses.xlsx',
@@ -1292,6 +1335,7 @@ const ExpensesTab: React.FC = () => {
           <Button size="sm" variant="outline" onClick={handleTemplate}><Download size={14}/> Template</Button>
           <Button size="sm" variant="outline" onClick={() => importRef.current?.click()}><Upload size={14}/> Import</Button>
           <Button size="sm" variant="outline" onClick={handleExport}><Download size={14}/> Export</Button>
+          {selected.size > 0 && <Button size="sm" variant="outline" loading={bulkDelMut.isPending} onClick={() => { if(confirm(`Delete ${selected.size} expense(s)?`)) bulkDelMut.mutate(Array.from(selected)) }} className="text-red-600 border-red-300"><Trash2 size={14}/> Delete ({selected.size})</Button>}
           <Button size="sm" onClick={() => { setEditing(null); setShowForm(true) }}><Plus size={14}/> Add Expense</Button>
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
         </div>
@@ -1329,10 +1373,11 @@ const ExpensesTab: React.FC = () => {
 
       {isLoading ? <Spinner /> : expenses.length === 0 ? <EmptyState title="No expenses" /> : (
         <Table>
-          <thead><tr><Th>Date</Th><Th>Category</Th><Th>Farm</Th><Th>Description</Th><Th>Vendor</Th><Th>Invoice</Th><Th className="text-right">Amount</Th><Th>Actions</Th></tr></thead>
+          <thead><tr><Th><input type="checkbox" checked={allChecked} onChange={toggleAll} className="w-4 h-4 rounded accent-green-600 cursor-pointer" /></Th><Th>Date</Th><Th>Category</Th><Th>Farm</Th><Th>Description</Th><Th>Vendor</Th><Th>Invoice</Th><Th className="text-right">Amount</Th><Th>Actions</Th></tr></thead>
           <tbody>
             {expenses.map((e: any) => (
               <tr key={e.id} className="hover:bg-gray-50">
+                <Td><input type="checkbox" checked={selected.has(e.id)} onChange={() => toggleOne(e.id)} className="w-4 h-4 rounded accent-green-600 cursor-pointer" /></Td>
                 <Td>{fmtDate(e.expense_date)}</Td>
                 <Td><Badge color="gray">{e.category}</Badge></Td>
                 <Td>{(e.farms as any)?.code ?? '—'}</Td>

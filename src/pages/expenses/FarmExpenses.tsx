@@ -222,9 +222,30 @@ export const FarmExpensesPage: React.FC = () => {
       }))
 
       if (!toInsert.length) { toast.error('No valid rows found'); return }
-      const { error } = await supabase.from('farm_expenses').insert(toInsert)
+
+      // Dedup against existing rows: natural key = date + category + amount + farm + description.
+      // Fetch existing expenses in the date range of the import and skip any incoming row
+      // that matches an existing one on that key (prevents duplicate inserts on re-run).
+      const keyOf = (r: any) =>
+        [r.expense_date, r.category, r.amount, r.farm_id ?? '', (r.description ?? '').trim().toLowerCase()].join('|')
+      const dates = toInsert.map(r => r.expense_date).filter(Boolean)
+      const minDate = dates.reduce((a, b) => (a < b ? a : b))
+      const maxDate = dates.reduce((a, b) => (a > b ? a : b))
+      const { data: existingRows } = await supabase.from('farm_expenses')
+        .select('expense_date,category,amount,farm_id,description')
+        .gte('expense_date', minDate).lte('expense_date', maxDate)
+      const existingKeys = new Set((existingRows ?? []).map(keyOf))
+      const seen = new Set<string>()
+      const deduped = toInsert.filter(r => {
+        const k = keyOf(r)
+        if (existingKeys.has(k) || seen.has(k)) return false
+        seen.add(k); return true
+      })
+      const skipped = toInsert.length - deduped.length
+      if (!deduped.length) { toast.error(`All ${toInsert.length} rows already exist — nothing imported`); return }
+      const { error } = await supabase.from('farm_expenses').insert(deduped)
       if (error) throw error
-      toast.success(`Imported ${toInsert.length} expenses`)
+      toast.success(`Imported ${deduped.length} expenses${skipped ? ` (skipped ${skipped} duplicate${skipped > 1 ? 's' : ''})` : ''}`)
       qc.invalidateQueries({ queryKey: ['farm_expenses'] })
     } catch (e: any) {
       toast.error('Import failed: ' + e.message)

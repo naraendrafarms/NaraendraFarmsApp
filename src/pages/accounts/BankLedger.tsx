@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, today } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState } from '@/components/ui'
-import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2 } from 'lucide-react'
+import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const EMPTY_FORM = {
@@ -130,7 +130,9 @@ export const BankLedgerPage: React.FC = () => {
   const [toDate, setToDate] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_FORM })
+  const [editId, setEditId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   // Import state
   const fileRef = useRef<HTMLInputElement>(null)
@@ -223,6 +225,54 @@ export const BankLedgerPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('bank_transactions').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bank_transactions', selectedAccount] })
+      setSelectedIds(new Set())
+      toast.success('Selected transactions deleted')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredRows.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredRows.map((t: any) => t.id)))
+    }
+  }
+
+  const openAdd = () => {
+    setEditId(null)
+    setForm({ ...EMPTY_FORM })
+    setShowModal(true)
+  }
+
+  const openEdit = (t: any) => {
+    setEditId(t.id)
+    setForm({
+      txn_date: t.txn_date ?? today(),
+      txn_type: t.txn_type ?? 'Credit',
+      category: t.category ?? '',
+      reference_no: t.reference_no ?? '',
+      description: t.description ?? '',
+      amount: t.amount != null ? String(t.amount) : '',
+    })
+    setShowModal(true)
+  }
+
   const handleSubmit = async () => {
     if (!selectedAccount) return
     if (!form.txn_date || !form.amount) {
@@ -230,7 +280,7 @@ export const BankLedgerPage: React.FC = () => {
       return
     }
     setSaving(true)
-    const { error } = await supabase.from('bank_transactions').insert({
+    const payload = {
       bank_account_id: selectedAccount,
       txn_date: form.txn_date,
       txn_type: form.txn_type,
@@ -238,14 +288,18 @@ export const BankLedgerPage: React.FC = () => {
       reference_no: form.reference_no || null,
       description: form.description || null,
       amount: parseFloat(form.amount) || 0,
-    })
+    }
+    const { error } = editId
+      ? await supabase.from('bank_transactions').update(payload).eq('id', editId)
+      : await supabase.from('bank_transactions').insert(payload)
     setSaving(false)
     if (error) {
       toast.error(error.message)
     } else {
-      toast.success('Transaction saved')
+      toast.success(editId ? 'Transaction updated' : 'Transaction saved')
       setShowModal(false)
       setForm({ ...EMPTY_FORM })
+      setEditId(null)
       qc.invalidateQueries({ queryKey: ['bank_transactions', selectedAccount] })
     }
   }
@@ -393,7 +447,7 @@ export const BankLedgerPage: React.FC = () => {
           <div className="flex items-center gap-3">
             {tab === 'ledger' && (
               <>
-                <Button icon={<Plus size={16} />} onClick={() => setShowModal(true)} disabled={!selectedAccount}>
+                <Button icon={<Plus size={16} />} onClick={openAdd} disabled={!selectedAccount}>
                   Add Transaction
                 </Button>
                 <Button icon={<Download size={16} />} variant="outline" onClick={handleExportCSV} disabled={!filteredRows.length}>
@@ -479,10 +533,35 @@ export const BankLedgerPage: React.FC = () => {
             <EmptyState title="No transactions found" subtitle="Add a transaction to get started" />
           ) : (
             <Card padding={false}>
+              {selectedIds.size > 0 && (
+                <div className="flex items-center justify-between px-4 py-2 bg-red-50 border-b border-red-200 text-sm">
+                  <span className="text-red-700 font-medium">{selectedIds.size} selected</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={<Trash2 size={14} />}
+                    loading={bulkDeleteMutation.isPending}
+                    onClick={() => {
+                      if (confirm(`Delete ${selectedIds.size} selected transaction(s)?`)) {
+                        bulkDeleteMutation.mutate([...selectedIds])
+                      }
+                    }}
+                  >
+                    Delete Selected
+                  </Button>
+                </div>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-xs text-gray-500 uppercase border-b border-gray-100">
+                      <th className="px-3 py-2 w-8">
+                        <input
+                          type="checkbox"
+                          checked={filteredRows.length > 0 && selectedIds.size === filteredRows.length}
+                          onChange={toggleSelectAll}
+                        />
+                      </th>
                       <th className="px-3 py-2 text-left">Date</th>
                       <th className="px-3 py-2 text-left">Type</th>
                       <th className="px-3 py-2 text-left">Category</th>
@@ -491,12 +570,19 @@ export const BankLedgerPage: React.FC = () => {
                       <th className="px-3 py-2 text-right">Debit</th>
                       <th className="px-3 py-2 text-right">Credit</th>
                       <th className="px-3 py-2 text-right">Balance</th>
-                      <th className="px-3 py-2 w-10" />
+                      <th className="px-3 py-2 w-16" />
                     </tr>
                   </thead>
                   <tbody>
                     {filteredRows.map((t: any, idx: number) => (
                       <tr key={t.id} className={`group ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-brand-50/30`}>
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(t.id)}
+                            onChange={() => toggleSelect(t.id)}
+                          />
+                        </td>
                         <td className="px-3 py-2 text-gray-600">{t.txn_date}</td>
                         <td className="px-3 py-2">
                           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${t.txn_type === 'Credit' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -515,7 +601,13 @@ export const BankLedgerPage: React.FC = () => {
                         <td className={`px-3 py-2 text-right font-semibold ${t.balance >= 0 ? 'text-gray-800' : 'text-red-600'}`}>
                           {inr(t.balance)}
                         </td>
-                        <td className="px-3 py-2 text-right">
+                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => openEdit(t)}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-500 transition-opacity"
+                          >
+                            <Pencil size={14} />
+                          </button>
                           <button
                             onClick={() => {
                               if (confirm('Delete this transaction?')) {
@@ -642,7 +734,7 @@ export const BankLedgerPage: React.FC = () => {
       )}
 
       {/* Add Transaction Modal */}
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Bank Transaction">
+      <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Bank Transaction' : 'Add Bank Transaction'}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>

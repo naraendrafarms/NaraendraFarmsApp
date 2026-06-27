@@ -157,6 +157,7 @@ const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows,
     hatchery:'', setting_no:'', dc_no:'', age_weeks:'', eggs_set:'', broken:'0', infertile:'0',
     blasters:'0', chicks_hatched:'', hatch_pct:'', eggs_weight:'', unhatch:'', rejects:'' }
   const [form, setForm] = useState<any>(EMPTY)
+  const [confirmDel, setConfirmDel] = useState<string | null>(null)
   const s = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }))
 
   const openAdd = () => { setEditing(null); setForm(EMPTY); setShowForm(true) }
@@ -218,7 +219,7 @@ const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows,
       const { error } = await supabase.from('hatchability').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('Record deleted'); qc.invalidateQueries({ queryKey: ['hatchability'] }) },
+    onSuccess: () => { toast.success('Record deleted'); setConfirmDel(null); qc.invalidateQueries({ queryKey: ['hatchability'] }) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -249,7 +250,7 @@ const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows,
                 <Td>
                   <div className="flex gap-1">
                     <button onClick={() => openEdit(r)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600 transition-colors" title="Edit"><Edit2 size={13}/></button>
-                    <button onClick={() => { if(confirm('Delete this hatchability record?')) deleteMut.mutate(r.id) }} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={13}/></button>
+                    <button onClick={() => setConfirmDel(r.id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors" title="Delete"><Trash2 size={13}/></button>
                   </div>
                 </Td>
               </tr>
@@ -292,6 +293,12 @@ const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows,
             <DateInput label="Production Date" value={form.production_date} onChange={e => s('production_date', e.target.value)} />
           </FormRow>
         </div>
+      </Modal>
+
+      <Modal open={!!confirmDel} onClose={() => setConfirmDel(null)} title="Confirm Delete" size="sm"
+        footer={<><Button variant="secondary" onClick={() => setConfirmDel(null)}>Cancel</Button>
+          <Button variant="danger" loading={deleteMut.isPending} onClick={() => confirmDel && deleteMut.mutate(confirmDel)}>Delete</Button></>}>
+        <p className="text-sm text-gray-700">Delete this hatchability record? This cannot be undone.</p>
       </Modal>
     </div>
   )

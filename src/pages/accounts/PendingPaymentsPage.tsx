@@ -5,7 +5,7 @@ import { today } from '@/lib/utils'
 import {
   Card, SectionHeader, Spinner, Badge, Select
 } from '@/components/ui'
-import { AlertCircle, Search, Link2, X, CheckCircle2 } from 'lucide-react'
+import { AlertCircle, Search, Link2, X, CheckCircle2, Trash2, Pencil } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { Download } from 'lucide-react'
 
@@ -242,6 +242,12 @@ export const PendingPaymentsPage: React.FC = () => {
   const [modal, setModal] = useState<PayModal | null>(null)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
+  const [editModal, setEditModal] = useState<PayRecord | null>(null)
+  const [editForm, setEditForm] = useState({ vendor_name: '', invoice_no: '', grn_no: '', invoice_amount: '', tds_amount: '', discount_amount: '', pay_before_date: '', category: '', remarks: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editErr, setEditErr] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const { data: records, isLoading } = useQuery({
     queryKey: ['pending_payments_page'],
@@ -344,6 +350,81 @@ export const PendingPaymentsPage: React.FC = () => {
     }
   }
 
+  const openEdit = (r: PayRecord) => {
+    setEditModal(r)
+    setEditForm({
+      vendor_name: r.vendor_name ?? '',
+      invoice_no: r.invoice_no ?? '',
+      grn_no: r.grn_no ?? '',
+      invoice_amount: r.invoice_amount != null ? String(r.invoice_amount) : '',
+      tds_amount: r.tds_amount != null ? String(r.tds_amount) : '',
+      discount_amount: r.discount_amount != null ? String(r.discount_amount) : '',
+      pay_before_date: r.pay_before_date ?? '',
+      category: r.category ?? '',
+      remarks: r.remarks ?? '',
+    })
+    setEditErr('')
+  }
+
+  const handleEditSave = async () => {
+    if (!editModal) return
+    if (!editForm.vendor_name.trim()) { setEditErr('Vendor name is required'); return }
+    setEditSaving(true); setEditErr('')
+    try {
+      const invAmt = parseFloat(editForm.invoice_amount) || 0
+      const tds = editForm.tds_amount === '' ? null : parseFloat(editForm.tds_amount) || 0
+      const { error } = await supabase.from('pending_payments').update({
+        vendor_name: editForm.vendor_name.trim(),
+        invoice_no: editForm.invoice_no || null,
+        grn_no: editForm.grn_no || null,
+        invoice_amount: invAmt,
+        tds_amount: tds,
+        net_payable: invAmt - (tds ?? 0),
+        discount_amount: editForm.discount_amount === '' ? null : parseFloat(editForm.discount_amount) || 0,
+        pay_before_date: editForm.pay_before_date || null,
+        category: editForm.category || null,
+        remarks: editForm.remarks || null,
+      }).eq('id', editModal.id)
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      setEditModal(null)
+    } catch (e: any) {
+      setEditErr(e.message)
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set(filtered.map(r => r.id)))
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Delete ${selectedIds.size} selected bill(s)?`)) return
+    setBulkDeleting(true)
+    try {
+      const { error } = await supabase.from('pending_payments').delete().in('id', [...selectedIds])
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      setSelectedIds(new Set())
+      toast.success('Selected bills deleted')
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   const handleExport = () => {
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.aoa_to_sheet([
@@ -442,12 +523,33 @@ export const PendingPaymentsPage: React.FC = () => {
         )}
       </div>
 
+      {/* Bulk delete bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-sm">
+          <span className="text-red-700 font-medium">{selectedIds.size} selected</span>
+          <button
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+          >
+            <Trash2 size={14} /> {bulkDeleting ? 'Deleting…' : 'Delete Selected'}
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <Card padding={false}>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left">
+                <th className="px-3 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th className="px-3 py-2">Vendor</th>
                 <th className="px-2 py-2">Category</th>
                 <th className="px-2 py-2">Invoice / GRN</th>
@@ -468,6 +570,13 @@ export const PendingPaymentsPage: React.FC = () => {
                 const isOverdue = r.payment_status !== 'Paid' && r.pay_before_date && r.pay_before_date < todayStr
                 return (
                   <tr key={r.id} className={`border-b border-gray-100 hover:bg-gray-50 ${isOverdue ? 'bg-red-50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(r.id)}
+                        onChange={() => toggleSelect(r.id)}
+                      />
+                    </td>
                     <td className="px-3 py-2 font-medium text-gray-800 max-w-[160px] truncate">{r.vendor_name}</td>
                     <td className="px-2 py-2 text-gray-500">{r.category ?? '—'}</td>
                     <td className="px-2 py-2">
@@ -485,30 +594,36 @@ export const PendingPaymentsPage: React.FC = () => {
                     <td className="px-2 py-2 text-gray-600">{r.pay_before_date ? fmtDate(r.pay_before_date) : '—'}</td>
                     <td className="px-2 py-2">{getDueBadge(r)}</td>
                     <td className="px-2 py-2">
-                      {r.payment_status !== 'Paid' && bal > 0 && (
-                        <button onClick={() => openPayModal(r)}
-                          className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap">
-                          Pay
+                      <div className="flex items-center gap-1.5">
+                        {r.payment_status !== 'Paid' && bal > 0 && (
+                          <button onClick={() => openPayModal(r)}
+                            className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap">
+                            Pay
+                          </button>
+                        )}
+                        <button onClick={() => openEdit(r)} title="Edit"
+                          className="p-1 text-gray-400 hover:text-blue-600">
+                          <Pencil size={13} />
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 )
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={12} className="text-center py-10 text-gray-400">No records found</td></tr>
+                <tr><td colSpan={13} className="text-center py-10 text-gray-400">No records found</td></tr>
               )}
             </tbody>
             {filtered.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold text-xs">
-                  <td colSpan={4} className="px-3 py-2">{filtered.length} bills</td>
+                  <td colSpan={5} className="px-3 py-2">{filtered.length} bills</td>
                   <td className="px-2 py-2 text-right">{fmt(filtered.reduce((s, r) => s + (r.invoice_amount ?? 0), 0))}</td>
                   <td className="px-2 py-2 text-right text-orange-600">{fmt(filtered.reduce((s, r) => s + (r.tds_amount ?? 0), 0))}</td>
                   <td className="px-2 py-2 text-right">{fmt(filtered.reduce((s, r) => s + (r.net_payable ?? r.invoice_amount ?? 0), 0))}</td>
                   <td className="px-2 py-2 text-right text-green-700">{fmt(filtered.reduce((s, r) => s + (r.paid_amount ?? 0), 0))}</td>
                   <td className="px-2 py-2 text-right text-red-700">{fmt(filtered.reduce((s, r) => s + getBalance(r), 0))}</td>
-                  <td colSpan={3}></td>
+                  <td colSpan={4}></td>
                 </tr>
               </tfoot>
             )}
@@ -563,6 +678,76 @@ export const PendingPaymentsPage: React.FC = () => {
               <button onClick={() => setModal(null)} className="flex-1 py-2 border border-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
               <button onClick={handlePay} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
                 {saving ? 'Saving…' : 'Confirm Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Edit modal */}
+      {editModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="font-bold text-gray-900 text-lg">Edit Bill</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Vendor</label>
+                <input value={editForm.vendor_name} onChange={e => setEditForm(f => ({ ...f, vendor_name: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Invoice No</label>
+                  <input value={editForm.invoice_no} onChange={e => setEditForm(f => ({ ...f, invoice_no: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">GRN No</label>
+                  <input value={editForm.grn_no} onChange={e => setEditForm(f => ({ ...f, grn_no: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Invoice Amount</label>
+                  <input type="number" value={editForm.invoice_amount} onChange={e => setEditForm(f => ({ ...f, invoice_amount: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">TDS</label>
+                  <input type="number" value={editForm.tds_amount} onChange={e => setEditForm(f => ({ ...f, tds_amount: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Discount</label>
+                  <input type="number" value={editForm.discount_amount} onChange={e => setEditForm(f => ({ ...f, discount_amount: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Pay Before Date</label>
+                  <input type="date" value={editForm.pay_before_date} onChange={e => setEditForm(f => ({ ...f, pay_before_date: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Category</label>
+                <input value={editForm.category} onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Remarks</label>
+                <input value={editForm.remarks} onChange={e => setEditForm(f => ({ ...f, remarks: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+
+            {editErr && <div className="text-sm text-red-600 bg-red-50 rounded p-2">{editErr}</div>}
+
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setEditModal(null)} className="flex-1 py-2 border border-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+              <button onClick={handleEditSave} disabled={editSaving} className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                {editSaving ? 'Saving…' : 'Save Changes'}
               </button>
             </div>
           </div>

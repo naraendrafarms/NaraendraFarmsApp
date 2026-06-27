@@ -6,7 +6,7 @@ import {
   Card, Button, Input, Select, SearchableSelect, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, DateInput
 } from '@/components/ui'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const EMPTY = {
@@ -32,8 +32,10 @@ export const BuyerAdvancesPage: React.FC = () => {
   const qc = useQueryClient()
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState({ ...EMPTY })
+  const [editId, setEditId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [filterParty, setFilterParty] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
@@ -135,6 +137,29 @@ export const BuyerAdvancesPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const editMut = useMutation({
+    mutationFn: async (row: typeof EMPTY & { id: string }) => {
+      const amt = parseFloat(row.amount) || 0
+      const { error } = await supabase.from('party_advances').update({
+        advance_date: row.advance_date,
+        party_id: row.party_id,
+        amount: amt,
+        payment_mode: row.payment_mode,
+        reference_no: row.reference_no || null,
+        remarks: row.remarks || null,
+      }).eq('id', row.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['party_advances'] })
+      toast.success('Advance updated')
+      setShowModal(false)
+      setForm({ ...EMPTY })
+      setEditId(null)
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   const delMut = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('party_advances').delete().eq('id', id)
@@ -147,6 +172,52 @@ export const BuyerAdvancesPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const bulkDelMut = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase.from('party_advances').delete().in('id', ids)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['party_advances'] })
+      setSelectedIds(new Set())
+      toast.success('Selected advances deleted')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === advances.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set((advances as any[]).map((a: any) => a.id)))
+  }
+
+  const openAdd = () => {
+    setEditId(null)
+    setForm({ ...EMPTY })
+    setShowModal(true)
+  }
+
+  const openEdit = (a: any) => {
+    setEditId(a.id)
+    setForm({
+      advance_date: a.advance_date ?? today(),
+      party_id: a.party_id ?? '',
+      amount: a.amount != null ? String(a.amount) : '',
+      payment_mode: a.payment_mode ?? 'cash',
+      reference_no: a.reference_no ?? '',
+      remarks: a.remarks ?? '',
+      bank_account_id: '',
+    })
+    setShowModal(true)
+  }
+
   const totalReceived = advances.reduce((s, a: any) => s + (a.amount ?? 0), 0)
   const totalUsed = advances.reduce((s, a: any) => s + (a.amount_used ?? 0), 0)
   const totalBalance = totalReceived - totalUsed
@@ -157,7 +228,7 @@ export const BuyerAdvancesPage: React.FC = () => {
         title="Buyer Advances"
         subtitle="Record advances received from buyers — deducted when sale payment is received"
         action={
-          <Button onClick={() => setShowModal(true)}>
+          <Button onClick={openAdd}>
             <Plus size={16} className="mr-1" /> Add Advance
           </Button>
         }
@@ -189,6 +260,24 @@ export const BuyerAdvancesPage: React.FC = () => {
         />
       </Card>
 
+      {/* Bulk delete bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-sm">
+          <span className="text-red-700 font-medium">{selectedIds.size} selected</span>
+          <Button
+            variant="secondary"
+            disabled={bulkDelMut.isPending}
+            onClick={() => {
+              if (confirm(`Delete ${selectedIds.size} selected advance(s)?`)) {
+                bulkDelMut.mutate([...selectedIds])
+              }
+            }}
+          >
+            <Trash2 size={14} className="mr-1" /> Delete Selected
+          </Button>
+        </div>
+      )}
+
       {/* Table */}
       <Card>
         {isLoading ? <Spinner /> : advances.length === 0 ? (
@@ -197,6 +286,13 @@ export const BuyerAdvancesPage: React.FC = () => {
           <Table>
             <thead>
               <tr>
+                <Th>
+                  <input
+                    type="checkbox"
+                    checked={advances.length > 0 && selectedIds.size === advances.length}
+                    onChange={toggleSelectAll}
+                  />
+                </Th>
                 <Th>Date</Th>
                 <Th>Party</Th>
                 <Th>Mode</Th>
@@ -213,6 +309,13 @@ export const BuyerAdvancesPage: React.FC = () => {
                 const bal = (a.amount ?? 0) - (a.amount_used ?? 0)
                 return (
                   <tr key={a.id} className="hover:bg-gray-50">
+                    <Td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(a.id)}
+                        onChange={() => toggleSelect(a.id)}
+                      />
+                    </Td>
                     <Td>{fmtDate(a.advance_date)}</Td>
                     <Td className="font-medium">{(a as any).parties?.name ?? '—'}</Td>
                     <Td><Badge color="blue">{a.payment_mode}</Badge></Td>
@@ -222,14 +325,22 @@ export const BuyerAdvancesPage: React.FC = () => {
                     <Td className="text-right text-red-600">{inr(a.amount_used)}</Td>
                     <Td className="text-right font-bold text-blue-700">{inr(bal)}</Td>
                     <Td>
-                      {bal === (a.amount ?? 0) && (
+                      <div className="flex items-center gap-2">
                         <button
-                          onClick={() => { if (confirm('Delete this advance?')) delMut.mutate(a.id) }}
-                          className="text-red-500 hover:text-red-700"
+                          onClick={() => openEdit(a)}
+                          className="text-gray-400 hover:text-blue-600"
                         >
-                          <Trash2 size={14} />
+                          <Pencil size={14} />
                         </button>
-                      )}
+                        {bal === (a.amount ?? 0) && (
+                          <button
+                            onClick={() => { if (confirm('Delete this advance?')) delMut.mutate(a.id) }}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
                     </Td>
                   </tr>
                 )
@@ -240,7 +351,7 @@ export const BuyerAdvancesPage: React.FC = () => {
       </Card>
 
       {/* Add Modal */}
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Buyer Advance">
+      <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Buyer Advance' : 'Add Buyer Advance'}>
         <div className="space-y-4 p-1">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
@@ -300,12 +411,13 @@ export const BuyerAdvancesPage: React.FC = () => {
                 if (!form.party_id) return toast.error('Select a party')
                 if (!form.amount || parseFloat(form.amount) <= 0) return toast.error('Enter amount')
                 setSaving(true)
-                await addMut.mutateAsync(form)
+                if (editId) await editMut.mutateAsync({ ...form, id: editId })
+                else await addMut.mutateAsync(form)
                 setSaving(false)
               }}
               disabled={saving}
             >
-              {saving ? 'Saving…' : 'Save Advance'}
+              {saving ? 'Saving…' : editId ? 'Update Advance' : 'Save Advance'}
             </Button>
           </div>
         </div>

@@ -1,13 +1,15 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, today } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, ArrowRight } from 'lucide-react'
+import { Plus, ArrowRight, Pencil, Trash2, Upload, FileDown, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 
@@ -26,7 +28,9 @@ export const EggConversions: React.FC = () => {
   const { applyFlockFarmFilter, farmId } = useFarmScope()
   const EGG_TYPES = useConfigOptions('egg_type', EGG_TYPES_FB)
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<any | null>(null)
   const [flockFilter, setFlockFilter] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
@@ -57,13 +61,32 @@ export const EggConversions: React.FC = () => {
   })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  const openForm = (row?: any) => {
+    if (row) {
+      setEditing(row)
+      setForm({
+        flock_id: row.flock_id ?? '',
+        conversion_date: row.conversion_date ?? today(),
+        from_type: row.from_type ?? 'he_grade_c',
+        from_qty: row.from_qty?.toString() ?? '',
+        to_type: row.to_type ?? 'te_eggs',
+        to_qty: row.to_qty?.toString() ?? '',
+        reason: row.reason ?? ''
+      })
+    } else {
+      setEditing(null)
+      setForm({ flock_id: flockFilter, conversion_date: today(), from_type: 'he_grade_c', from_qty: '', to_type: 'te_eggs', to_qty: '', reason: '' })
+    }
+    setShowForm(true)
+  }
+
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.flock_id || !form.from_qty || !form.to_qty)
         throw new Error('Flock, from qty and to qty required')
       if (form.from_type === form.to_type)
         throw new Error('From and To types cannot be the same')
-      const { error } = await supabase.from('egg_conversions').insert({
+      const payload = {
         flock_id: form.flock_id,
         conversion_date: form.conversion_date,
         from_type: form.from_type,
@@ -71,17 +94,95 @@ export const EggConversions: React.FC = () => {
         to_type: form.to_type,
         to_qty: parseInt(form.to_qty),
         reason: form.reason || null
-      })
-      if (error) throw error
+      }
+      if (editing) {
+        const { error } = await supabase.from('egg_conversions').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('egg_conversions').insert(payload)
+        if (error) throw error
+      }
     },
     onSuccess: () => {
-      toast.success('Conversion recorded')
+      toast.success(editing ? 'Conversion updated' : 'Conversion recorded')
       qc.invalidateQueries({ queryKey: ['egg_conversions'] })
-      setShowForm(false)
+      setShowForm(false); setEditing(null)
       setForm({ flock_id: flockFilter, conversion_date: today(), from_type: 'he_grade_c', from_qty: '', to_type: 'te_eggs', to_qty: '', reason: '' })
     },
     onError: (e: any) => toast.error(e.message)
   })
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('egg_conversions').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['egg_conversions'] }); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const parseDMY = (v: string) => {
+    if (!v) return null
+    const str = String(v).trim()
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10)
+    const [d, m, y] = str.split('/')
+    if (d && m && y) return `${y.padStart(4, '20')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+    return null
+  }
+
+  const downloadTemplate = () => {
+    downloadXlsxTemplate(
+      'EggConversions_Template.xlsx',
+      ['flock_no', 'conversion_date', 'from_type', 'from_qty', 'to_type', 'to_qty', 'reason'],
+      ['1', today().split('-').reverse().join('/'), 'he_grade_c', '500', 'te_eggs', '500', 'Old stock']
+    )
+  }
+
+  const exportRows = () => {
+    const data = (conversions ?? []).map((c: any) => ({
+      flock_no: c.flocks?.flock_no ?? '',
+      conversion_date: fmtDate(c.conversion_date),
+      from_type: typeLabel(c.from_type),
+      from_qty: c.from_qty ?? 0,
+      to_type: typeLabel(c.to_type),
+      to_qty: c.to_qty ?? 0,
+      reason: c.reason ?? '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Conversions')
+    XLSX.writeFile(wb, `EggConversions_${today()}.xlsx`)
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    e.target.value = ''
+    try {
+      const { headers, rows } = await parseFile(file)
+      if (!rows.length) { toast.error('No data found in file'); return }
+      const col = (n: string) => headers.indexOf(n)
+      const flockMap = Object.fromEntries((flocks ?? []).map((f: any) => [String(f.flock_no), f.id]))
+      const parsed = rows.map((r: string[]) => {
+        const flockNo = String(r[col('flock_no')] ?? '').replace(/^F-/i, '').trim()
+        return {
+          flock_id: flockMap[flockNo] ?? null,
+          conversion_date: parseDMY(r[col('conversion_date')]) ?? today(),
+          from_type: r[col('from_type')] || 'he_grade_c',
+          from_qty: parseInt(r[col('from_qty')]) || 0,
+          to_type: r[col('to_type')] || 'te_eggs',
+          to_qty: parseInt(r[col('to_qty')]) || 0,
+          reason: r[col('reason')] || null,
+        }
+      }).filter((r: any) => r.flock_id)
+      if (!parsed.length) { toast.error('No rows matched a known flock'); return }
+      const { error } = await supabase.from('egg_conversions').insert(parsed)
+      if (error) throw error
+      toast.success(`Imported ${parsed.length} conversions`)
+      qc.invalidateQueries({ queryKey: ['egg_conversions'] })
+    } catch (err: any) {
+      toast.error('Import failed: ' + err.message)
+    }
+  }
 
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const typeLabel = (v: string) => EGG_TYPES.find(t => t.value === v)?.label ?? v
@@ -90,7 +191,17 @@ export const EggConversions: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Egg Conversions"
         subtitle="Record HE↔NHE type conversions (e.g. Grade C → Table Eggs)"
-        action={<Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add Conversion</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button variant="secondary" icon={<FileDown size={15}/>} onClick={downloadTemplate}>Template</Button>
+            <Button variant="secondary" icon={<Upload size={15}/>} onClick={() => fileRef.current?.click()}>Import</Button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
+            {(conversions?.length ?? 0) > 0 && (
+              <Button variant="secondary" icon={<Download size={15}/>} onClick={exportRows}>Export</Button>
+            )}
+            <Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Conversion</Button>
+          </div>
+        }
       />
 
       <div className="flex gap-3 items-end">
@@ -107,7 +218,7 @@ export const EggConversions: React.FC = () => {
               <Th>From</Th><Th right>From Qty</Th>
               <Th></Th>
               <Th>To</Th><Th right>To Qty</Th>
-              <Th>Reason</Th>
+              <Th>Reason</Th><Th></Th>
             </tr></thead>
             <tbody>
               {(conversions ?? []).map((c: any) => (
@@ -120,21 +231,27 @@ export const EggConversions: React.FC = () => {
                   <Td><span className="px-2 py-0.5 bg-green-50 text-green-700 rounded text-xs font-medium">{typeLabel(c.to_type)}</span></Td>
                   <Td right className="font-medium text-green-600">{c.to_qty?.toLocaleString('en-IN')}</Td>
                   <Td className="text-xs text-gray-400">{c.reason ?? '—'}</Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={() => openForm(c)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                      <button onClick={() => { if (confirm('Delete this conversion?')) delMut.mutate(c.id) }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
           {(conversions ?? []).length === 0 && (
             <EmptyState icon={<ArrowRight size={32}/>} title="No conversions yet"
-              action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add Conversion</Button>}
+              action={<Button onClick={() => openForm()} icon={<Plus size={16}/>}>Add Conversion</Button>}
             />
           )}
         </Card>
       )}
 
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="Record Egg Conversion" size="md"
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }} title={editing ? 'Edit Egg Conversion' : 'Record Egg Conversion'} size="md"
         footer={
-          <><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+          <><Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save</Button></>
         }>
         <div className="space-y-4">

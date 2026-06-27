@@ -104,10 +104,22 @@ const ManagePartners: React.FC = () => {
         default_tds_pct: ci.tds >= 0 ? (parseFloat(r[ci.tds]) || 0) : 10,
       }))
       if (!payload.length) { toast.error('No valid rows'); return }
-      const { error } = await supabase.from('partners').insert(payload)
+
+      // Skip partners whose name already exists (case-insensitive) — natural key = lower(name).
+      // Dedup both against the DB and within the file itself.
+      const existingNames = new Set((rows as any[]).map((r: any) => (r.name ?? '').trim().toLowerCase()))
+      const seen = new Set<string>()
+      const deduped = payload.filter(r => {
+        const k = r.name.trim().toLowerCase()
+        if (existingNames.has(k) || seen.has(k)) return false
+        seen.add(k); return true
+      })
+      const skipped = payload.length - deduped.length
+      if (!deduped.length) { toast.error(`All ${payload.length} partners already exist — nothing imported`); return }
+      const { error } = await supabase.from('partners').insert(deduped)
       if (error) throw error
       inv()
-      toast.success(`Imported ${payload.length} partners`)
+      toast.success(`Imported ${deduped.length} partners${skipped ? ` (skipped ${skipped} existing)` : ''}`)
     } catch (e: any) { toast.error(e.message) }
     finally { if (importRef.current) importRef.current.value = '' }
   }
