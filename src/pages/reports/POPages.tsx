@@ -902,7 +902,12 @@ const PaymentsTab: React.FC = () => {
         invoice_amount: r[col('invoice_amount')] ? Number(r[col('invoice_amount')]) : null,
         tds_pct: r[col('tds_pct')] ? Number(r[col('tds_pct')]) : 0,
         tds_amount: r[col('tds_amount')] ? Number(r[col('tds_amount')]) : 0,
-        net_payable: r[col('net_payable')] ? Number(r[col('net_payable')]) : null,
+        net_payable: (() => {
+          const inv = r[col('invoice_amount')] ? Number(r[col('invoice_amount')]) : 0
+          const tds = r[col('tds_amount')] ? Number(r[col('tds_amount')]) : 0
+          const disc = col('discount_amount') >= 0 && r[col('discount_amount')] ? Number(r[col('discount_amount')]) : 0
+          return inv ? +(inv - tds - disc).toFixed(2) : null
+        })(),
         payment_type: r[col('payment_type')] || null,
         payment_status: r[col('payment_status')] || 'Pending',
         pay_before_date: r[col('pay_before_date')] || null,
@@ -925,8 +930,8 @@ const PaymentsTab: React.FC = () => {
   }
 
   const downloadPayTemplate = () => {
-    const headers = ['vendor_name','invoice_no','invoice_date','invoice_amount','tds_pct','tds_amount','net_payable','payment_type','payment_status','pay_before_date','account_type','utr_no','cheque_no','remarks','po_no','grn_no']
-    const example = ['Vendor ABC','INV-001','2025-06-01','100000','2','2000','98000','Feed Raw Material','Pending','2025-06-30','Online','','','','PO-001','GRN-001']
+    const headers = ['vendor_name','invoice_no','invoice_date','invoice_amount','tds_pct','tds_amount','payment_type','payment_status','pay_before_date','account_type','utr_no','cheque_no','remarks','po_no','grn_no']
+    const example = ['Vendor ABC','INV-001','2025-06-01','100000','2','2000','Feed Raw Material','Pending','2025-06-30','Online','','','','PO-001','GRN-001']
     const ws = XLSX.utils.aoa_to_sheet([headers, example])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Payments')
@@ -2469,7 +2474,8 @@ const RateAnalysisTab: React.FC = () => {
       const rate = parseFloat(String(getVal(row, 'rate'))) || null
       const qty  = parseFloat(String(getVal(row, 'quantity'))) || null
       const gst  = parseFloat(String(getVal(row, 'gst_pct'))) || null
-      const total= parseFloat(String(getVal(row, 'total_amount'))) || (rate && qty ? rate * qty : null)
+      const basic = rate && qty ? rate * qty : null
+      const total = basic != null ? +(basic + basic * (gst ?? 0) / 100).toFixed(2) : null
       return {
         po_no:           poNo,
         po_date:         dateStr,
@@ -2587,8 +2593,8 @@ const RateAnalysisTab: React.FC = () => {
   }, [pos])
 
   const handleDownloadTemplate = () => {
-    const headers = ['po_no','po_date','fiscal_year','vendor_name','item_name','material_type','quantity','unit','rate','gst_pct','total_amount','grn_no','grn_date','material_status']
-    const sample  = ['PO-2022-001','01-04-2022','2022-23','ABC Company','Maize','Feed Raw Material','100','Tons','18500','5','1942500','GRN001','05-04-2022','Received']
+    const headers = ['po_no','po_date','fiscal_year','vendor_name','item_name','material_type','quantity','unit','rate','gst_pct','grn_no','grn_date','material_status']
+    const sample  = ['PO-2022-001','01-04-2022','2022-23','ABC Company','Maize','Feed Raw Material','100','Tons','18500','5','GRN001','05-04-2022','Received']
     exportFlatCSV('po_import_template.csv', headers, [sample])
   }
 

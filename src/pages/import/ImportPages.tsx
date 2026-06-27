@@ -617,11 +617,12 @@ export const ImportHE: React.FC = () => {
         if (!row || row.length < 6) continue
         const d = parseDate(row[0])
         if (!d) continue
-        const gradeA = num(row[3]); const gradeB = num(row[4]); const total = num(row[5]) || (gradeA + gradeB)
+        const gradeA = num(row[3]); const gradeB = num(row[4])
+        const total = gradeA + gradeB
         if (!total) continue
-        const free = num(row[6])
-        const rate = num(row[7])
-        const amount = num(row[8]) || ((total - free) * rate)
+        const free = num(row[5])
+        const rate = num(row[6])
+        const amount = (total - free) * rate
         rows.push({
           dispatch_date: d,
           dc_no: row[1] ? String(row[1]).trim() : null,
@@ -629,10 +630,10 @@ export const ImportHE: React.FC = () => {
           grade_a: gradeA, grade_b: gradeB,
           total_dispatched: total,
           free_eggs: free, rate, amount,
-          setting_date: parseDate(row[9]),
-          hatch_date: parseDate(row[10]),
-          chicks_sold: num(row[11]) || null,
-          remarks: row[12] ? String(row[12]).trim() : null,
+          setting_date: parseDate(row[7]),
+          hatch_date: parseDate(row[8]),
+          chicks_sold: num(row[9]) || null,
+          remarks: row[10] ? String(row[10]).trim() : null,
         })
       }
     }
@@ -642,8 +643,8 @@ export const ImportHE: React.FC = () => {
   }
 
   const downloadTemplate = () => {
-    const headers = ['date','dc_no','hatchery_name','grade_a','grade_b','total','free_eggs','rate','amount','setting_date','hatch_date','chicks_sold','remarks']
-    const sample = ['2026-04-15','DC-101','Sri Hatchery','5000','300','5300','50','3.5','18375','','','','']
+    const headers = ['date','dc_no','hatchery_name','grade_a','grade_b','free_eggs','rate','setting_date','hatch_date','chicks_sold','remarks']
+    const sample = ['2026-04-15','DC-101','Sri Hatchery','5000','300','50','3.5','','','','']
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([headers.join(',')+'\n'+sample.join(',')], { type:'text/csv' }))
     a.download = 'he_dispatch_template.csv'; a.click()
@@ -680,12 +681,12 @@ export const ImportHE: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Import HE Dispatch" subtitle="Upload HE dispatch Excel files (date, dc_no, hatchery, grade_a, grade_b, total, free, rate, amount)"/>
+      <SectionHeader title="Import HE Dispatch" subtitle="Upload HE dispatch Excel files (date, dc_no, hatchery, grade_a, grade_b, free, rate). Total & amount are auto-calculated."/>
       <Card>
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
             <p className="font-medium mb-1">Expected columns (row by row):</p>
-            <p>Date | DC No | Hatchery Name | Grade A | Grade B | Total | Free Eggs | Rate | Amount | Setting Date | Hatch Date | Chicks Sold | Remarks</p>
+            <p>Date | DC No | Hatchery Name | Grade A | Grade B | Free Eggs | Rate | Setting Date | Hatch Date | Chicks Sold | Remarks</p>
             <button onClick={downloadTemplate} className="mt-2 text-brand-600 hover:underline font-medium">↓ Download template (CSV)</button>
           </div>
           <Select label="Flock" required placeholder="— Select flock —" options={flockOptions} value={selectedFlock} onChange={e=>setSelectedFlock(e.target.value)}/>

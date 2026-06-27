@@ -64,11 +64,9 @@ const IMPORT_TYPES: ImportTypeDef[] = [
     table: 'daily_records',
     conflictKey: 'flock_id,record_date,shed_id',
     needsLookup: 'flock',
-    previewCols: ['record_date','total_eggs','he_eggs','mortality_female','mortality_male','feed_female_kg'],
+    previewCols: ['record_date','he_grade_a','je_eggs','te_eggs','mortality_female','feed_female_kg'],
     fields: [
       { key:'record_date',       label:'Date',                type:'date',  required:true },
-      { key:'total_eggs',        label:'Total Eggs',          type:'int' },
-      { key:'he_eggs',           label:'HE Eggs',             type:'int' },
       { key:'he_grade_a',        label:'HE Grade A',          type:'int' },
       { key:'he_grade_b',        label:'HE Grade B',          type:'int' },
       { key:'he_grade_c',        label:'HE Grade C',          type:'int' },
@@ -93,7 +91,7 @@ const IMPORT_TYPES: ImportTypeDef[] = [
       { key:'age_weeks',         label:'Age (weeks)',         type:'float' },
       { key:'remarks',           label:'Remarks',             type:'text' },
     ],
-    templateRow: { record_date:'01-06-2025', total_eggs:'9500', he_eggs:'8200', he_grade_a:'7000', he_grade_b:'900', he_grade_c:'300', je_eggs:'500', te_eggs:'400', be_eggs:'50', mortality_female:'2', mortality_male:'0', opening_female:'10000', opening_male:'1100', feed_female_kg:'1800', feed_male_kg:'220', remarks:'' }
+    templateRow: { record_date:'01-06-2025', he_grade_a:'7000', he_grade_b:'900', he_grade_c:'300', je_eggs:'500', te_eggs:'400', be_eggs:'50', mortality_female:'2', mortality_male:'0', opening_female:'10000', opening_male:'1100', feed_female_kg:'1800', feed_male_kg:'220', remarks:'' }
   },
   {
     id: 'salary',
@@ -102,7 +100,7 @@ const IMPORT_TYPES: ImportTypeDef[] = [
     table: 'salary_monthly',
     conflictKey: 'employee_id,month',
     needsLookup: 'employee',
-    previewCols: ['emp_id','month','basic_salary','gross_salary','advance','net_salary'],
+    previewCols: ['emp_id','month','basic_salary','hra','advance','esi_employee'],
     fields: [
       { key:'emp_id',          label:'Emp ID',           type:'text',  required:true, hint:'Must match employee emp_id in app' },
       { key:'month',           label:'Month (YYYY-MM)',  type:'month', required:true },
@@ -111,7 +109,6 @@ const IMPORT_TYPES: ImportTypeDef[] = [
       { key:'hra',             label:'HRA',              type:'float' },
       { key:'arrears',         label:'Arrears',          type:'float' },
       { key:'ot_bonus',        label:'OT / Bonus',       type:'float' },
-      { key:'gross_salary',    label:'Gross Salary',     type:'float' },
       { key:'esi_employee',    label:'ESI Employee',     type:'float' },
       { key:'esi_employer',    label:'ESI Employer',     type:'float' },
       { key:'pf_employee',     label:'PF Employee',      type:'float' },
@@ -120,11 +117,10 @@ const IMPORT_TYPES: ImportTypeDef[] = [
       { key:'advance',         label:'Advance',          type:'float' },
       { key:'tds',             label:'TDS',              type:'float' },
       { key:'hold',            label:'Hold',             type:'float' },
-      { key:'net_salary',      label:'Net Salary',       type:'float' },
       { key:'payment_mode',    label:'Payment Mode',     type:'text' },
       { key:'remarks',         label:'Remarks',          type:'text' },
     ],
-    templateRow: { emp_id:'BPS4001', month:'2025-06', days_worked:'26', basic_salary:'8000', hra:'2000', gross_salary:'10000', esi_employee:'75', pf_employee:'960', pt:'200', advance:'500', net_salary:'8265', payment_mode:'Cash', remarks:'' }
+    templateRow: { emp_id:'BPS4001', month:'2025-06', days_worked:'26', basic_salary:'8000', hra:'2000', esi_employee:'75', pf_employee:'960', pt:'200', advance:'500', payment_mode:'Cash', remarks:'' }
   },
   {
     id: 'electricity',
@@ -169,19 +165,18 @@ const IMPORT_TYPES: ImportTypeDef[] = [
     description: 'Goods Received Notes for feed ingredients',
     table: 'grn',
     conflictKey: 'grn_no',
-    previewCols: ['grn_date','ingredient_name','quantity_kg','rate_per_kg','total_amount'],
+    previewCols: ['grn_date','ingredient_name','quantity_kg','rate_per_kg','vehicle_no'],
     fields: [
       { key:'grn_date',         label:'GRN Date',         type:'date',  required:true },
       { key:'grn_no',           label:'GRN / Invoice No', type:'text',  required:true },
       { key:'ingredient_name',  label:'Ingredient Name',  type:'text',  required:true },
       { key:'quantity_kg',      label:'Quantity (kg)',     type:'float', required:true },
       { key:'rate_per_kg',      label:'Rate per kg',      type:'float' },
-      { key:'total_amount',     label:'Total Amount',     type:'float' },
       { key:'vehicle_no',       label:'Vehicle No',       type:'text' },
       { key:'party_name',       label:'Party/Supplier',   type:'text' },
       { key:'remarks',          label:'Remarks',          type:'text' },
     ],
-    templateRow: { grn_date:'01-06-2025', grn_no:'GRN001', ingredient_name:'Maize', quantity_kg:'10000', rate_per_kg:'21.5', total_amount:'215000', vehicle_no:'AP28XX1234', party_name:'Sai Traders', remarks:'' }
+    templateRow: { grn_date:'01-06-2025', grn_no:'GRN001', ingredient_name:'Maize', quantity_kg:'10000', rate_per_kg:'21.5', vehicle_no:'AP28XX1234', party_name:'Sai Traders', remarks:'' }
   },
   {
     id: 'flock_transfers',
@@ -347,9 +342,12 @@ export const ExcelMapperPage: React.FC = () => {
       if (importType.id === 'daily_records') {
         const flock = flocks?.find((f:any) => f.id === lookupId)
         if (!flock) { toast.error('Select a flock first'); setImporting(false); return }
-        const toInsert = validRows.map(r => ({
+        const toInsert = validRows.map(r => {
+          const heEggs = (r.row.he_grade_a||0) + (r.row.he_grade_b||0) + (r.row.he_grade_c||0)
+          const totalEggs = heEggs + (r.row.je_eggs||0) + (r.row.te_eggs||0) + (r.row.be_eggs||0) + (r.row.le_eggs||0) + (r.row.wastage_eggs||0)
+          return ({
           flock_id: lookupId, record_date: r.row.record_date,
-          total_eggs: r.row.total_eggs||0, he_eggs: r.row.he_eggs||0,
+          total_eggs: totalEggs, he_eggs: heEggs,
           he_grade_a: r.row.he_grade_a, he_grade_b: r.row.he_grade_b, he_grade_c: r.row.he_grade_c,
           je_eggs: r.row.je_eggs||0, te_eggs: r.row.te_eggs||0, be_eggs: r.row.be_eggs||0,
           le_eggs: r.row.le_eggs||0, wastage_eggs: r.row.wastage_eggs||0,
@@ -362,7 +360,7 @@ export const ExcelMapperPage: React.FC = () => {
           closing_female: r.row.closing_female, closing_male: r.row.closing_male,
           feed_female_kg: r.row.feed_female_kg||0, feed_male_kg: r.row.feed_male_kg||0,
           lighting_hrs: r.row.lighting_hrs, age_weeks: r.row.age_weeks, remarks: r.row.remarks,
-        }))
+        })})
         for (let i=0;i<toInsert.length;i+=50) {
           const { error } = await supabase.from('daily_records').upsert(toInsert.slice(i,i+50),{onConflict:'flock_id,record_date'})
           if (error) { errors += Math.min(50,toInsert.length-i); messages.push(error.message) }
@@ -374,15 +372,17 @@ export const ExcelMapperPage: React.FC = () => {
         const toInsert = validRows.map(r => {
           const empId = empMap[String(r.row.emp_id||'').toLowerCase()]
           if (!empId) { errors++; messages.push(`Emp ID "${r.row.emp_id}" not found`); return null }
+          const grossSalary = (r.row.basic_salary||0) + (r.row.hra||0) + (r.row.arrears||0) + (r.row.ot_bonus||0)
+          const netSalary = grossSalary - (r.row.esi_employee||0) - (r.row.pf_employee||0) - (r.row.pt||0) - (r.row.advance||0) - (r.row.tds||0) - (r.row.hold||0)
           return {
             employee_id: empId, month: r.row.month+'-01',
             days_worked: r.row.days_worked, basic_salary: r.row.basic_salary,
             hra: r.row.hra||0, arrears: r.row.arrears||0, ot_bonus: r.row.ot_bonus||0,
-            gross_salary: r.row.gross_salary, esi_employee: r.row.esi_employee||0,
+            gross_salary: grossSalary, esi_employee: r.row.esi_employee||0,
             esi_employer: r.row.esi_employer||0, pf_employee: r.row.pf_employee||0,
             pf_employer: r.row.pf_employer||0, pt: r.row.pt||0, advance: r.row.advance||0,
-            tds: r.row.tds||0, hold: r.row.hold||0, net_salary: r.row.net_salary,
-            earned_salary: r.row.gross_salary, payment_mode: r.row.payment_mode||'Cash',
+            tds: r.row.tds||0, hold: r.row.hold||0, net_salary: netSalary,
+            earned_salary: grossSalary, payment_mode: r.row.payment_mode||'Cash',
             remarks: r.row.remarks,
           }
         }).filter(Boolean) as any[]
@@ -420,7 +420,8 @@ export const ExcelMapperPage: React.FC = () => {
         const toInsert = validRows.map(r => {
           const ingName = String(r.row.ingredient_name||'').toLowerCase()
           const ingId = ingMap[ingName] || Object.entries(ingMap).find(([k])=>ingName.includes(k)||k.includes(ingName))?.[1]
-          return { grn_date: r.row.grn_date, grn_no: r.row.grn_no, ingredient_id: ingId||null, item_name: r.row.ingredient_name||null, qty: r.row.quantity_kg||null, price_per_unit: r.row.rate_per_kg||null, total_amount: r.row.total_amount||null, vehicle_no: r.row.vehicle_no||null, remarks: r.row.remarks||null }
+          const totalAmount = (r.row.quantity_kg||0) && (r.row.rate_per_kg||0) ? (r.row.quantity_kg||0) * (r.row.rate_per_kg||0) : null
+          return { grn_date: r.row.grn_date, grn_no: r.row.grn_no, ingredient_id: ingId||null, item_name: r.row.ingredient_name||null, qty: r.row.quantity_kg||null, price_per_unit: r.row.rate_per_kg||null, total_amount: totalAmount, vehicle_no: r.row.vehicle_no||null, remarks: r.row.remarks||null }
         })
         for (let i=0;i<toInsert.length;i+=50) {
           const { error } = await supabase.from('grn').upsert(toInsert.slice(i,i+50),{onConflict:'grn_no',ignoreDuplicates:true})
