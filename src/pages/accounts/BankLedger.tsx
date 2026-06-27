@@ -208,7 +208,8 @@ export const BankLedgerPage: React.FC = () => {
     const closing = filtered.length > 0 ? filtered[filtered.length - 1].balance : openingBalance
 
     return {
-      filteredRows: filtered,
+      // Balance computed oldest→newest; display newest first (latest date on top)
+      filteredRows: filtered.slice().reverse(),
       summary: { credits, debits, closing },
     }
   }, [transactions, fromDate, toDate, openingBalance])
