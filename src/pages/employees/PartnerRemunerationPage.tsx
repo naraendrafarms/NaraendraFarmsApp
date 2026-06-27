@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, CardHeader, Button, Input, Table, Th, Td, Spinner, EmptyState, Badge } from '@/components/ui'
-import { Plus, Edit2, Trash2, Users, Save, Download, Upload, FileSpreadsheet } from 'lucide-react'
+import { Plus, Edit2, Trash2, Users, Save, Download, Upload, FileSpreadsheet, IndianRupee } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
@@ -370,20 +370,131 @@ const EnterRemuneration: React.FC = () => {
   )
 }
 
+// ── Paid Status / History tab ────────────────────────────────────────────────
+const PaidStatus: React.FC = () => {
+  const qc = useQueryClient()
+  const [statusFilter, setStatusFilter] = useState<'all'|'pending'|'paid'>('all')
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['partner_remun_history'],
+    queryFn: async () => {
+      const { data } = await supabase.from('pending_payments')
+        .select('id,vendor_name,invoice_amount,tds_amount,net_payable,payment_status,paid_date,grn_date')
+        .eq('is_partner_remuneration', true)
+        .order('grn_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  const markPaid = useMutation({
+    mutationFn: async (r: any) => {
+      const { error } = await supabase.from('pending_payments').update({
+        payment_status: 'Paid', paid_amount: r.net_payable ?? r.invoice_amount ?? 0, paid_date: new Date().toISOString().slice(0,10),
+      }).eq('id', r.id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Marked paid'); qc.invalidateQueries({ queryKey: ['partner_remun_history'] }); qc.invalidateQueries({ queryKey: ['partner_remun'] }) },
+    onError: (e: any) => toast.error(e.message)
+  })
+  const markPending = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('pending_payments').update({
+        payment_status: 'Pending', paid_amount: 0, paid_date: null,
+      }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Marked pending'); qc.invalidateQueries({ queryKey: ['partner_remun_history'] }); qc.invalidateQueries({ queryKey: ['partner_remun'] }) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const isPaid = (r: any) => r.payment_status === 'Paid'
+  const filtered = (rows as any[]).filter(r =>
+    statusFilter === 'all' ? true : statusFilter === 'paid' ? isPaid(r) : !isPaid(r))
+
+  // Group by month (grn_date YYYY-MM)
+  const byMonth: Record<string, any[]> = {}
+  for (const r of filtered) {
+    const m = (r.grn_date ?? '').slice(0,7)
+    ;(byMonth[m] ??= []).push(r)
+  }
+  const months = Object.keys(byMonth).sort().reverse()
+
+  const grand = filtered.reduce((a: any, r: any) => ({
+    amt: a.amt + (r.invoice_amount ?? 0), tds: a.tds + (r.tds_amount ?? 0),
+    net: a.net + (r.net_payable ?? 0), paid: a.paid + (isPaid(r) ? (r.net_payable ?? 0) : 0),
+  }), { amt: 0, tds: 0, net: 0, paid: 0 })
+
+  if (isLoading) return <Spinner />
+  if (!filtered.length) return <EmptyState icon={<IndianRupee size={32}/>} title="No partner remuneration saved yet" subtitle="Enter remuneration in the first tab" />
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {([['all','All'],['pending','Pending'],['paid','Paid']] as [any,string][]).map(([k,l]) => (
+            <button key={k} onClick={() => setStatusFilter(k)}
+              className={`px-3 py-1 text-xs rounded-md ${statusFilter===k?'bg-white shadow font-semibold text-brand-700':'text-gray-500'}`}>{l}</button>
+          ))}
+        </div>
+        <div className="text-xs text-gray-500 ml-auto">
+          Total Net: <strong>{inr(grand.net)}</strong> · Paid: <strong className="text-green-700">{inr(grand.paid)}</strong> · Outstanding: <strong className="text-orange-600">{inr(grand.net - grand.paid)}</strong>
+        </div>
+      </div>
+
+      {months.map(m => {
+        const mr = byMonth[m]
+        const mNet = mr.reduce((s: number, r: any) => s + (r.net_payable ?? 0), 0)
+        const mPaid = mr.filter(isPaid).length
+        return (
+          <Card key={m} padding={false}>
+            <div className="px-4 py-2 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
+              <h3 className="font-semibold text-brand-800 text-sm">{monthLabel(m)} — {mr.length} partner(s), {mPaid} paid</h3>
+              <span className="text-xs text-gray-600">Net {inr(mNet)}</span>
+            </div>
+            <Table>
+              <thead><tr>
+                <Th>Partner</Th><Th right>Remuneration</Th><Th right>TDS</Th><Th right>Net Payable</Th>
+                <Th>Status</Th><Th>Paid Date</Th><Th></Th>
+              </tr></thead>
+              <tbody>
+                {mr.map((r: any) => (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <Td className="font-medium">{r.vendor_name}</Td>
+                    <Td right>{inr(r.invoice_amount ?? 0)}</Td>
+                    <Td right className="text-red-600">{inr(r.tds_amount ?? 0)}</Td>
+                    <Td right className="font-semibold text-green-700">{inr(r.net_payable ?? 0)}</Td>
+                    <Td><Badge color={isPaid(r) ? 'green' : 'orange'}>{isPaid(r) ? 'Paid' : 'Pending'}</Badge></Td>
+                    <Td className="text-xs text-gray-500">{r.paid_date ?? '—'}</Td>
+                    <Td>
+                      {isPaid(r)
+                        ? <Button size="sm" variant="ghost" onClick={() => markPending.mutate(r.id)}>Undo</Button>
+                        : <Button size="sm" variant="outline" onClick={() => markPaid.mutate(r)}>Mark Paid</Button>}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </Card>
+        )
+      })}
+    </div>
+  )
+}
+
 export const PartnerRemunerationPage: React.FC = () => {
-  const [tab, setTab] = useState<'enter'|'partners'>('enter')
+  const [tab, setTab] = useState<'enter'|'status'|'partners'>('enter')
   return (
     <div className="p-4 space-y-4">
       <CardHeader title="Partner Remuneration" subtitle="Pay partners monthly with TDS — flows into TDS Payable + CMS Upload" />
       <div className="flex gap-1 border-b border-gray-200">
-        {([['enter','Enter Remuneration'],['partners','Manage Partners']] as [string,string][]).map(([k,l]) => (
+        {([['enter','Enter Remuneration'],['status','Paid Status'],['partners','Manage Partners']] as [string,string][]).map(([k,l]) => (
           <button key={k} onClick={() => setTab(k as any)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab===k?'border-brand-600 text-brand-700':'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {l}
           </button>
         ))}
       </div>
-      {tab === 'enter' ? <EnterRemuneration /> : <ManagePartners />}
+      {tab === 'enter' ? <EnterRemuneration /> : tab === 'status' ? <PaidStatus /> : <ManagePartners />}
     </div>
   )
 }
