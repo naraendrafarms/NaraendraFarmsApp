@@ -45,7 +45,7 @@ const Sel: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { placeholde
   </select>
 )
 
-type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock Dispatch' | 'Formulas' | 'Raw Material Adj.' | 'Expenses' | 'Flock Allocation'
+type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock Dispatch' | 'Formulas' | 'Flock Allocation'
 
 // ══════════════════════════════════════════════════════════════════
 // FINISHED FEED STOCK TAB
@@ -128,7 +128,7 @@ export const FeedMillPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>(initialTab)
 
   const mainTabs: Tab[] = ['Raw Materials Stock', 'Production', 'Finished Feed Stock', 'Stock Dispatch']
-  const moreTabs: Tab[] = ['Formulas', 'Raw Material Adj.', 'Expenses', 'Flock Allocation']
+  const moreTabs: Tab[] = ['Formulas', 'Flock Allocation']
 
   return (
     <div className="space-y-4">
@@ -153,8 +153,6 @@ export const FeedMillPage: React.FC = () => {
       {tab === 'Finished Feed Stock' && <FinishedFeedStockTab />}
       {tab === 'Stock Dispatch'      && <FeedTransfer />}
       {tab === 'Formulas'            && <FormulasTab />}
-      {tab === 'Raw Material Adj.'   && <StockTab />}
-      {tab === 'Expenses'            && <ExpensesTab />}
       {tab === 'Flock Allocation'    && <FlockAllocationTab />}
     </div>
   )
