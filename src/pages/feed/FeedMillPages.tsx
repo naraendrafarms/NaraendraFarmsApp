@@ -493,6 +493,17 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
   const addRow = () => setIngs(prev => [...prev, { ...BLANK_ING }])
   const removeRow = (idx: number) => setIngs(prev => prev.filter((_, i) => i !== idx))
 
+  // Raw materials master — formula ingredients are picked from here (auto-fills code)
+  const { data: rawMaterials = [] } = useQuery({
+    queryKey: ['raw_materials_list'],
+    queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('name,code').order('name'); return data ?? [] }
+  })
+  const pickIngredient = (idx: number) => (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const name = e.target.value
+    const rm = (rawMaterials as any[]).find((r: any) => r.name === name)
+    setIngs(prev => prev.map((r, i) => i === idx ? { ...r, ingredient_name: name, ingredient_code: rm?.code ?? r.ingredient_code } : r))
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault()
     onSave({
@@ -547,8 +558,16 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
               {ings.map((ing, idx) => (
                 <tr key={idx} className="border-t border-gray-100">
                   <td className="px-2 py-1 text-gray-400">{idx+1}</td>
-                  <td className="px-2 py-1"><input className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs" value={ing.ingredient_code} onChange={si(idx,'ingredient_code')} placeholder="Code" /></td>
-                  <td className="px-2 py-1"><input className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs" value={ing.ingredient_name} onChange={si(idx,'ingredient_name')} placeholder="e.g. MAIZE" required={idx===0} /></td>
+                  <td className="px-2 py-1"><input className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs bg-gray-50 text-gray-500" value={ing.ingredient_code} readOnly placeholder="auto" title="Auto-filled from raw material" /></td>
+                  <td className="px-2 py-1">
+                    <select className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs bg-white" value={ing.ingredient_name} onChange={pickIngredient(idx)} required={idx===0}>
+                      <option value="">— Select raw material —</option>
+                      {ing.ingredient_name && !(rawMaterials as any[]).some((r: any) => r.name === ing.ingredient_name) && (
+                        <option value={ing.ingredient_name}>{ing.ingredient_name} (not in master)</option>
+                      )}
+                      {(rawMaterials as any[]).map((r: any) => <option key={r.name} value={r.name}>{r.name}</option>)}
+                    </select>
+                  </td>
                   <td className="px-2 py-1"><input type="number" step="0.0001" className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs text-right" value={ing.percentage} onChange={si(idx,'percentage')} placeholder="0" /></td>
                   <td className="px-2 py-1"><input type="number" step="0.001" className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs text-right" value={ing.kg_per_1000} onChange={si(idx,'kg_per_1000')} placeholder="auto" /></td>
                   <td className="px-2 py-1 text-center"><button type="button" onClick={() => removeRow(idx)} className="text-red-400 hover:text-red-600"><Trash2 size={11}/></button></td>
