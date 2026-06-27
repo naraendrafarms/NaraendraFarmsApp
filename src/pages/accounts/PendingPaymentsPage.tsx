@@ -55,7 +55,8 @@ type WaitingTxn = {
 const WaitingToLink: React.FC = () => {
   const qc = useQueryClient()
   const [linkModal, setLinkModal] = useState<WaitingTxn | null>(null)
-  const [selectedPaymentId, setSelectedPaymentId] = useState('')
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set())
+  const [billSearch, setBillSearch] = useState('')
   const [linking, setLinking] = useState(false)
 
   const { data: waitingTxns, isLoading } = useQuery({
@@ -99,34 +100,44 @@ const WaitingToLink: React.FC = () => {
     toast.success('Marked as ignored')
   }
 
+  const toggleBill = (id: string) => setSelectedPaymentIds(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const selectedBills = (openPayments ?? []).filter((p: any) => selectedPaymentIds.has(p.id))
+  const selectedTotal = selectedBills.reduce((s: number, p: any) => s + getBalance(p), 0)
+
   const handleLink = async () => {
-    if (!linkModal || !selectedPaymentId) return
+    if (!linkModal || selectedPaymentIds.size === 0) return
     setLinking(true)
     try {
-      const payment = (openPayments ?? []).find((p: any) => p.id === selectedPaymentId)
-      const balance = payment ? getBalance(payment) : 0
-
-      await supabase.from('bank_transactions').update({
-        match_status: 'manually_matched',
-        linked_payment_id: selectedPaymentId,
-      }).eq('id', linkModal.id)
-
-      if (payment) {
+      const ids = Array.from(selectedPaymentIds)
+      // Tag every paid-off bill with this bank transaction so a multi-bill link can be undone together
+      const tag = `BANKTXN:${linkModal.id}`
+      for (const id of ids) {
+        const payment = (openPayments ?? []).find((p: any) => p.id === id)
+        if (!payment) continue
+        const balance = getBalance(payment)
         await supabase.from('pending_payments').update({
           paid_amount: (payment.paid_amount ?? 0) + balance,
           paid_date: linkModal.txn_date,
           payment_status: 'Paid',
-          transaction_ref: linkModal.reference_no || null,
-        }).eq('id', selectedPaymentId)
+          transaction_ref: tag,
+        }).eq('id', id)
       }
+      // Link the bank transaction (linked_payment_id = first bill; tag holds the full set)
+      await supabase.from('bank_transactions').update({
+        match_status: 'manually_matched',
+        linked_payment_id: ids[0],
+      }).eq('id', linkModal.id)
 
       qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
       setLinkModal(null)
-      setSelectedPaymentId('')
-      toast.success('Linked and marked as paid')
+      setSelectedPaymentIds(new Set())
+      setBillSearch('')
+      toast.success(`Linked ${ids.length} bill(s) — marked paid`)
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -150,7 +161,11 @@ const WaitingToLink: React.FC = () => {
 
   const handleUnlink = async (t: any) => {
     try {
-      // Revert the linked vendor bill back to unpaid
+      // Revert ALL bills tagged to this bank transaction (covers multi-bill links)…
+      await supabase.from('pending_payments').update({
+        payment_status: 'Pending', paid_amount: 0, paid_date: null, transaction_ref: null,
+      }).eq('transaction_ref', `BANKTXN:${t.id}`)
+      // …and the single linked bill (covers auto-matched / legacy single links)
       if (t.linked_payment_id) {
         await supabase.from('pending_payments').update({
           payment_status: 'Pending', paid_amount: 0, paid_date: null, transaction_ref: null,
@@ -209,7 +224,7 @@ const WaitingToLink: React.FC = () => {
                     <td className="px-3 py-2 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <button
-                          onClick={() => { setLinkModal(t); setSelectedPaymentId('') }}
+                          onClick={() => { setLinkModal(t); setSelectedPaymentIds(new Set()); setBillSearch('') }}
                           className="flex items-center gap-1 px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
                         >
                           <Link2 size={11} /> Link
@@ -277,35 +292,53 @@ const WaitingToLink: React.FC = () => {
         </div>
       )}
 
-      {/* Link modal */}
-      {linkModal && (
+      {/* Link modal — multi-select: one bank payment can cover many bills */}
+      {linkModal && (() => {
+        const search = billSearch.trim().toLowerCase()
+        const visibleBills = (openPayments ?? []).filter((p: any) =>
+          !search || `${p.vendor_name} ${p.invoice_no ?? ''} ${p.grn_no ?? ''}`.toLowerCase().includes(search))
+        const diff = Math.round((selectedTotal - linkModal.amount) * 100) / 100
+        return (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <h3 className="font-bold text-gray-900 text-lg">Link to Vendor Payment</h3>
-            <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-3 max-h-[90vh] flex flex-col">
+            <h3 className="font-bold text-gray-900 text-lg">Link to Vendor Bills</h3>
+            <div className="bg-gray-50 rounded-lg p-3 text-sm flex items-center justify-between">
               <div className="text-gray-500">{linkModal.txn_date} · {linkModal.reference_no || linkModal.description}</div>
-              <div className="font-semibold text-red-600">₹{fmt(linkModal.amount)}</div>
+              <div className="font-semibold text-red-600">Bank ₹{fmt(linkModal.amount)}</div>
             </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">Select Vendor Bill</label>
-              <select
-                value={selectedPaymentId}
-                onChange={e => setSelectedPaymentId(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">— Select —</option>
-                {paymentOptions.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+            <p className="text-xs text-gray-500">Tick every bill this one payment covers (e.g. 10 bills paid together). All ticked bills are marked Paid.</p>
+            <input value={billSearch} onChange={e => setBillSearch(e.target.value)} placeholder="Search vendor / invoice / GRN…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            <div className="border border-gray-200 rounded-lg overflow-y-auto flex-1 min-h-[120px]">
+              {visibleBills.length === 0 ? (
+                <div className="text-center text-gray-400 text-sm py-6">No open bills</div>
+              ) : visibleBills.map((p: any) => (
+                <label key={p.id} className={`flex items-center gap-2 px-3 py-2 text-sm border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${selectedPaymentIds.has(p.id) ? 'bg-blue-50' : ''}`}>
+                  <input type="checkbox" checked={selectedPaymentIds.has(p.id)} onChange={() => toggleBill(p.id)} className="rounded border-gray-300 text-blue-600" />
+                  <span className="flex-1">{p.vendor_name} <span className="text-gray-400 text-xs">{p.invoice_no ?? p.grn_no ?? ''}</span></span>
+                  <span className="font-medium">₹{fmt(getBalance(p))}</span>
+                </label>
+              ))}
             </div>
-            <div className="flex gap-3 pt-2">
+            <div className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
+              <span className="text-gray-600">{selectedPaymentIds.size} bill(s) selected</span>
+              <span className="font-semibold">Selected ₹{fmt(selectedTotal)}</span>
+            </div>
+            {selectedPaymentIds.size > 0 && diff !== 0 && (
+              <div className={`text-xs px-3 py-1.5 rounded-lg ${Math.abs(diff) < 1 ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                {diff > 0 ? `Selected is ₹${fmt(Math.abs(diff))} more than the bank payment` : `Selected is ₹${fmt(Math.abs(diff))} less than the bank payment`} — you can still link (partial / over).
+              </div>
+            )}
+            <div className="flex gap-3 pt-1">
               <button onClick={() => setLinkModal(null)} className="flex-1 py-2 border border-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
-              <button onClick={handleLink} disabled={!selectedPaymentId || linking} className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-                {linking ? 'Linking…' : 'Confirm Link'}
+              <button onClick={handleLink} disabled={selectedPaymentIds.size === 0 || linking} className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                {linking ? 'Linking…' : `Link ${selectedPaymentIds.size || ''} Bill(s)`}
               </button>
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
