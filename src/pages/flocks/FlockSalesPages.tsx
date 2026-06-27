@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
@@ -371,6 +371,16 @@ export const HEDispatch: React.FC = () => {
   const [genningInv, setGenningInv] = useState(false)
   const [peekInv, setPeekInv] = useState<string | null>(null)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const HE_DRAFT_KEY = 'he_dispatch_draft'
+  // Auto-save a draft of NEW (unsaved) dispatches so nothing is lost if the form is closed
+  useEffect(() => {
+    if (!showForm || editing) return
+    const t = setTimeout(() => {
+      try { localStorage.setItem(HE_DRAFT_KEY, JSON.stringify({ form, lines })) } catch {}
+    }, 400)
+    return () => clearTimeout(t)
+  }, [form, lines, showForm, editing])
+  const clearDraft = () => { try { localStorage.removeItem(HE_DRAFT_KEY) } catch {} }
   // Preview next invoice number without consuming it (counter not changed)
   const genInvoice = async () => {
     setGenningInv(true)
@@ -435,10 +445,23 @@ export const HEDispatch: React.FC = () => {
     } else {
       setEditing(null)
       setPeekInv(null)
-      setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
-        party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
-        boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', vehicle_type: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
-      setLines([emptyLine()])
+      // Restore an unsaved draft if one exists
+      let draft: any = null
+      try { const raw = localStorage.getItem(HE_DRAFT_KEY); if (raw) draft = JSON.parse(raw) } catch {}
+      const hasDraft = draft?.form && (
+        draft.form.party_id || draft.form.dc_no || draft.form.invoice_no ||
+        (draft.lines ?? []).some((l: any) => l && (l.grade_a || l.grade_b || l.grade_c))
+      )
+      if (hasDraft) {
+        setForm(draft.form)
+        setLines(draft.lines?.length ? draft.lines : [emptyLine()])
+        toast('Restored your unsaved draft', { icon: '📝' })
+      } else {
+        setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
+          party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
+          boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', vehicle_type: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
+        setLines([emptyLine()])
+      }
     }
     setShowForm(true)
   }
@@ -546,7 +569,7 @@ export const HEDispatch: React.FC = () => {
         if (error) throw error
       }
     },
-    onSuccess: () => { toast.success('Saved!'); qc.invalidateQueries({ queryKey: ['he_dispatch'] }); setShowForm(false) },
+    onSuccess: () => { toast.success('Saved!'); clearDraft(); qc.invalidateQueries({ queryKey: ['he_dispatch'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -1114,7 +1137,16 @@ export const HEDispatch: React.FC = () => {
       <Modal open={showForm} onClose={() => setShowForm(false)}
         title={editing ? 'Edit HE Dispatch' : 'New HE Dispatch'} size="xl"
         footer={
-          <><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+          <>
+          {!editing && <Button variant="secondary" onClick={() => {
+            clearDraft()
+            setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
+              party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
+              boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', vehicle_type: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
+            setLines([emptyLine()]); setPeekInv(null)
+            toast('Started fresh — draft cleared')
+          }}>Start Fresh</Button>}
+          <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>
         }>
         <div className="space-y-4">
