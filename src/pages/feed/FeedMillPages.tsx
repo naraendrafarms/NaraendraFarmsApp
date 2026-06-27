@@ -235,7 +235,8 @@ const FormulasTab: React.FC = () => {
 
   const saveMut = useMutation({
     mutationFn: async (d: any) => {
-      const { ingredients: ings, ...fData } = d
+      // strip joined/relational fields that aren't real columns on feed_formulas
+      const { ingredients: ings, feed_types, ...fData } = d
       let fId = fData.id
       if (fId) {
         const { error } = await supabase.from('feed_formulas').update(fData).eq('id', fId)
