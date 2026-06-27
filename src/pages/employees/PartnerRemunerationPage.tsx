@@ -1,9 +1,11 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, CardHeader, Button, Input, Table, Th, Td, Spinner, EmptyState, Badge } from '@/components/ui'
-import { Plus, Edit2, Trash2, Users, IndianRupee, Save } from 'lucide-react'
+import { Plus, Edit2, Trash2, Users, Save, Download, Upload, FileSpreadsheet } from 'lucide-react'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
+import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -22,13 +24,16 @@ const ManagePartners: React.FC = () => {
   const [form, setForm] = useState<any>(blank)
   const [editId, setEditId] = useState<string|null>(null)
   const [confirmDel, setConfirmDel] = useState<string|null>(null)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [bulkDel, setBulkDel] = useState<false|'selected'|'all'>(false)
+  const importRef = useRef<HTMLInputElement>(null)
   const s = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }))
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['partners'],
     queryFn: async () => { const { data } = await supabase.from('partners').select('*').order('name'); return data ?? [] }
   })
-  const inv = () => qc.invalidateQueries({ queryKey: ['partners'] })
+  const inv = () => { qc.invalidateQueries({ queryKey: ['partners'] }); qc.invalidateQueries({ queryKey: ['parties_bank_map'] }) }
 
   const save = useMutation({
     mutationFn: async () => {
@@ -46,8 +51,8 @@ const ManagePartners: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
   const del = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('partners').delete().eq('id', id); if (error) throw error },
-    onSuccess: () => { toast.success('Deleted'); inv(); setConfirmDel(null) },
+    mutationFn: async (ids: string[]) => { const { error } = await supabase.from('partners').delete().in('id', ids); if (error) throw error },
+    onSuccess: () => { toast.success('Deleted'); inv(); setConfirmDel(null); setBulkDel(false); setSel(new Set()) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -55,6 +60,56 @@ const ManagePartners: React.FC = () => {
     setEditId(r.id)
     setForm({ name: r.name ?? '', pan: r.pan ?? '', bank_name: r.bank_name ?? '', branch: r.branch ?? '',
       ifsc: r.ifsc ?? '', account_no: r.account_no ?? '', default_tds_pct: String(r.default_tds_pct ?? 10) })
+  }
+
+  const toggle = (id: string) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const allSel = (rows as any[]).length > 0 && (rows as any[]).every((r: any) => sel.has(r.id))
+  const toggleAll = () => setSel(allSel ? new Set() : new Set((rows as any[]).map((r: any) => r.id)))
+
+  const downloadTemplate = () => downloadXlsxTemplate('partners_template.xlsx',
+    ['name','pan','bank_name','branch','ifsc','account_no','default_tds_pct'],
+    ['ABC Partner','ABCDE1234F','HDFC Bank','Hyderabad','HDFC0001234','50100123456789',10])
+
+  const exportXlsx = () => {
+    if (!(rows as any[]).length) { toast.error('No partners to export'); return }
+    const data = (rows as any[]).map((r: any) => ({
+      name: r.name, pan: r.pan ?? '', bank_name: r.bank_name ?? '', branch: r.branch ?? '',
+      ifsc: r.ifsc ?? '', account_no: r.account_no ?? '', default_tds_pct: r.default_tds_pct ?? 0,
+    }))
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Partners')
+    XLSX.writeFile(wb, 'Partners.xlsx')
+    toast.success('Exported')
+  }
+
+  const handleImport = async (file: File) => {
+    try {
+      const { headers, rows: fileRows } = await parseFile(file)
+      const idx = (names: string[]) => headers.findIndex(h => names.includes(h.toLowerCase().trim()))
+      const ci = {
+        name: idx(['name','partner name','partner']), pan: idx(['pan']),
+        bank: idx(['bank_name','bank']), branch: idx(['branch']),
+        ifsc: idx(['ifsc']), acct: idx(['account_no','account','acc no','account number']),
+        tds: idx(['default_tds_pct','tds','tds%','tds pct']),
+      }
+      if (ci.name < 0) { toast.error('File needs a "name" column'); return }
+      const payload = (fileRows as any[]).filter(r => r[ci.name]?.trim()).map((r: any) => ({
+        name: r[ci.name].trim(),
+        pan: ci.pan >= 0 ? (r[ci.pan]?.trim() || null) : null,
+        bank_name: ci.bank >= 0 ? (r[ci.bank]?.trim() || null) : null,
+        branch: ci.branch >= 0 ? (r[ci.branch]?.trim() || null) : null,
+        ifsc: ci.ifsc >= 0 ? (r[ci.ifsc]?.trim() || null) : null,
+        account_no: ci.acct >= 0 ? (r[ci.acct]?.trim() || null) : null,
+        default_tds_pct: ci.tds >= 0 ? (parseFloat(r[ci.tds]) || 0) : 10,
+      }))
+      if (!payload.length) { toast.error('No valid rows'); return }
+      const { error } = await supabase.from('partners').insert(payload)
+      if (error) throw error
+      inv()
+      toast.success(`Imported ${payload.length} partners`)
+    } catch (e: any) { toast.error(e.message) }
+    finally { if (importRef.current) importRef.current.value = '' }
   }
 
   return (
@@ -76,15 +131,38 @@ const ManagePartners: React.FC = () => {
         </div>
       </Card>
 
+      {/* Toolbar: import / export / template / bulk delete */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+          onChange={e => e.target.files?.[0] && handleImport(e.target.files[0])} />
+        <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>
+        <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={exportXlsx}>Export Excel</Button>
+        <Button size="sm" variant="ghost" icon={<FileSpreadsheet size={14}/>} onClick={downloadTemplate}>Template</Button>
+        <div className="flex-1" />
+        {sel.size > 0 && <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setBulkDel('selected')}>Delete Selected ({sel.size})</Button>}
+        {(rows as any[]).length > 0 && <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setBulkDel('all')}>Delete All</Button>}
+      </div>
+
+      {bulkDel && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 flex items-center gap-3">
+          <span>Delete {bulkDel === 'all' ? `ALL ${(rows as any[]).length} partners` : `${sel.size} selected partner(s)`}? This cannot be undone.</span>
+          <Button size="sm" variant="danger" loading={del.isPending}
+            onClick={() => del.mutate(bulkDel === 'all' ? (rows as any[]).map((r: any) => r.id) : Array.from(sel))}>Yes, delete</Button>
+          <Button size="sm" variant="secondary" onClick={() => setBulkDel(false)}>Cancel</Button>
+        </div>
+      )}
+
       <Card padding={false}>
-        {isLoading ? <Spinner /> : !rows.length ? <EmptyState icon={<Users size={32}/>} title="No partners yet" subtitle="Add partners above" /> : (
+        {isLoading ? <Spinner /> : !rows.length ? <EmptyState icon={<Users size={32}/>} title="No partners yet" subtitle="Add partners above or Import from Excel" /> : (
           <Table>
             <thead><tr>
+              <Th><input type="checkbox" checked={allSel} onChange={toggleAll} className="rounded border-gray-300 text-brand-600" /></Th>
               <Th>Name</Th><Th>PAN</Th><Th>Bank</Th><Th>IFSC</Th><Th>Account</Th><Th right>Default TDS%</Th><Th></Th>
             </tr></thead>
             <tbody>
               {(rows as any[]).map((r: any) => (
-                <tr key={r.id} className="hover:bg-gray-50">
+                <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-brand-50' : ''}`}>
+                  <Td><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggle(r.id)} className="rounded border-gray-300 text-brand-600" /></Td>
                   <Td className="font-medium">{r.name}</Td>
                   <Td className="text-xs">{r.pan ?? '—'}</Td>
                   <Td className="text-xs">{r.bank_name ?? <span className="text-red-400">No bank</span>}</Td>
@@ -94,7 +172,7 @@ const ManagePartners: React.FC = () => {
                   <Td>
                     {confirmDel === r.id ? (
                       <div className="flex gap-1 justify-end">
-                        <Button size="sm" variant="danger" onClick={() => del.mutate(r.id)} loading={del.isPending}>Yes</Button>
+                        <Button size="sm" variant="danger" onClick={() => del.mutate([r.id])} loading={del.isPending}>Yes</Button>
                         <Button size="sm" variant="secondary" onClick={() => setConfirmDel(null)}>No</Button>
                       </div>
                     ) : (
@@ -163,6 +241,19 @@ const EnterRemuneration: React.FC = () => {
     return { amt: acc.amt + amt, tds: acc.tds + tds, net: acc.net + net }
   }, { amt: 0, tds: 0, net: 0 })
 
+  const exportXlsx = () => {
+    const data = (partners as any[]).map((p: any) => {
+      const { amt, pct, tds, net } = calcRow(p.id)
+      return { Partner: p.name, Remuneration: amt, 'TDS %': pct, 'TDS Amount': tds, 'Net Payable': net }
+    }).filter(r => r.Remuneration > 0)
+    if (!data.length) { toast.error('Enter amounts first'); return }
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Remuneration')
+    XLSX.writeFile(wb, `PartnerRemuneration_${month}.xlsx`)
+    toast.success('Exported')
+  }
+
   const save = async () => {
     setSaving(true)
     try {
@@ -218,6 +309,7 @@ const EnterRemuneration: React.FC = () => {
           </select>
         </div>
         <Button icon={<Save size={14}/>} onClick={save} loading={saving} disabled={!(partners as any[]).length}>Save Remuneration</Button>
+        <Button variant="outline" icon={<Download size={14}/>} onClick={exportXlsx} disabled={!(partners as any[]).length}>Export Excel</Button>
       </Card>
 
       <Card padding={false}>
