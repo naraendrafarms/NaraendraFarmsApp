@@ -28,14 +28,18 @@ export const CMSUploadPage: React.FC = () => {
     }
   })
 
-  // Vendor bank details fallback map (by vendor_name)
+  // Vendor + partner bank details fallback map (by name)
   const { data: partiesMap } = useQuery({
     queryKey: ['parties_bank_map'],
     queryFn: async () => {
-      const { data } = await supabase.from('parties')
-        .select('name,bank_name,branch,ifsc,account_no')
       const map: Record<string, any> = {}
-      for (const p of (data ?? [])) map[p.name] = p
+      const { data: parties } = await supabase.from('parties')
+        .select('name,bank_name,branch,ifsc,account_no')
+      for (const p of (parties ?? [])) map[p.name] = p
+      // Partners (remuneration) — merge so partner CMS rows resolve bank details
+      const { data: partners } = await supabase.from('partners')
+        .select('name,bank_name,branch,ifsc,account_no')
+      for (const p of (partners ?? [])) map[p.name] = p
       return map
     }
   })

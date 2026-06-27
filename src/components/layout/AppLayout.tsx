@@ -65,6 +65,7 @@ const NAV: NavItem[] = [
       { label: 'Bulk Salary',      to: '/employees/bulk-salary' },
       { label: 'Salary Register',  to: '/employees/salary-register' },
       { label: 'Salary History',   to: '/employees/salary-history' },
+      { label: 'Partner Remuneration', to: '/employees/partner-remuneration' },
       { label: 'Salary Entry',    to: '/employees/salary' },
       { label: 'Salary Abstract', to: '/employees/abstract' },
       { label: 'Bonus',           to: '/employees/bonus' },
