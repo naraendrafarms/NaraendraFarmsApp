@@ -14,6 +14,7 @@ import {
 import { Plus, Edit2, Trash2, Download, Upload, ChevronDown, ChevronUp } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigValues } from '@/hooks/useConfigOptions'
+import { useFeedRates } from '@/hooks/useFeedRates'
 
 // ── helpers ───────────────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -45,7 +46,7 @@ const Sel: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { placeholde
   </select>
 )
 
-type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock Dispatch' | 'Formulas' | 'Flock Allocation'
+type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock Dispatch' | 'Formulas' | 'Flock Allocation' | 'Reconciliation'
 
 // ══════════════════════════════════════════════════════════════════
 // FINISHED FEED STOCK TAB
@@ -55,24 +56,36 @@ const FinishedFeedStockTab: React.FC = () => {
     queryKey: ['feed_types'],
     queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] }
   })
+  const { byTypeId } = useFeedRates()
   const { data: productions = [] } = useQuery({
-    queryKey: ['feed_production'],
-    queryFn: async () => { const { data } = await supabase.from('feed_production').select('feed_type_id,quantity_kg'); return data ?? [] }
+    queryKey: ['feed_production_log_finished'],
+    queryFn: async () => { const { data } = await supabase.from('feed_production_log').select('quantity_kg, feed_formulas(feed_type_id)'); return data ?? [] }
   })
   const { data: dispatches = [] } = useQuery({
     queryKey: ['feed_transfers'],
     queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('feed_type_id,quantity_kg'); return data ?? [] }
   })
 
+  // Group produced kg by the formula's feed_type_id
+  const producedByType: Record<string, number> = {}
+  for (const p of (productions as any[])) {
+    const ftId = (p.feed_formulas as any)?.feed_type_id
+    if (!ftId) continue
+    producedByType[ftId] = (producedByType[ftId] ?? 0) + Number(p.quantity_kg ?? 0)
+  }
+
   const rows = (feedTypes as any[]).map((ft: any) => {
-    const produced   = (productions as any[]).filter((p: any) => p.feed_type_id === ft.id).reduce((s: number, p: any) => s + (p.quantity_kg ?? 0), 0)
+    const produced   = producedByType[ft.id] ?? 0
     const dispatched = (dispatches  as any[]).filter((d: any) => d.feed_type_id === ft.id).reduce((s: number, d: any) => s + (d.quantity_kg ?? 0), 0)
-    return { ...ft, produced, dispatched, balance: produced - dispatched }
+    const balance    = produced - dispatched
+    const costPerKg  = byTypeId[ft.id] ?? 0
+    return { ...ft, produced, dispatched, balance, costPerKg, stockValue: balance * costPerKg }
   }).filter((r: any) => r.produced > 0 || r.dispatched > 0)
 
   const totalProd = rows.reduce((s, r) => s + r.produced, 0)
   const totalDisp = rows.reduce((s, r) => s + r.dispatched, 0)
   const totalBal  = rows.reduce((s, r) => s + r.balance, 0)
+  const totalValue = rows.reduce((s, r) => s + r.stockValue, 0)
 
   return (
     <div className="space-y-4">
@@ -81,6 +94,7 @@ const FinishedFeedStockTab: React.FC = () => {
         <Card className="!p-4"><p className="text-xs text-gray-500">Total Dispatched</p><p className="text-xl font-bold text-blue-700 mt-1">{(totalDisp/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalDisp.toLocaleString('en-IN')} kg</p></Card>
         <Card className="!p-4"><p className="text-xs text-gray-500">Balance in Stock</p><p className={`text-xl font-bold mt-1 ${totalBal < 0 ? 'text-red-600' : 'text-green-700'}`}>{(totalBal/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalBal.toLocaleString('en-IN')} kg</p></Card>
       </div>
+      <Card className="!p-4"><p className="text-xs text-gray-500">Total Stock Value</p><p className="text-xl font-bold text-purple-700 mt-1">{inr(totalValue)}</p></Card>
       <Card padding={false}>
         <Table>
           <thead><tr>
@@ -88,6 +102,8 @@ const FinishedFeedStockTab: React.FC = () => {
             <Th right>Produced (kg)</Th>
             <Th right>Dispatched to Farms (kg)</Th>
             <Th right>Balance (kg)</Th>
+            <Th right>Cost/kg</Th>
+            <Th right>Stock Value</Th>
           </tr></thead>
           <tbody>
             {rows.map((r: any) => (
@@ -96,6 +112,8 @@ const FinishedFeedStockTab: React.FC = () => {
                 <Td right>{r.produced.toLocaleString('en-IN')}</Td>
                 <Td right className="text-blue-600">{r.dispatched.toLocaleString('en-IN')}</Td>
                 <Td right className={r.balance < 0 ? 'text-red-600 font-semibold' : 'text-green-700 font-semibold'}>{r.balance.toLocaleString('en-IN')}</Td>
+                <Td right>{r.costPerKg > 0 ? inr(r.costPerKg) : '—'}</Td>
+                <Td right className="text-purple-700 font-semibold">{r.stockValue ? inr(r.stockValue) : '—'}</Td>
               </tr>
             ))}
           </tbody>
@@ -105,6 +123,8 @@ const FinishedFeedStockTab: React.FC = () => {
               <Td right>{totalProd.toLocaleString('en-IN')}</Td>
               <Td right className="text-blue-600">{totalDisp.toLocaleString('en-IN')}</Td>
               <Td right className={totalBal < 0 ? 'text-red-600' : 'text-green-700'}>{totalBal.toLocaleString('en-IN')}</Td>
+              <Td right></Td>
+              <Td right className="text-purple-700">{inr(totalValue)}</Td>
             </tr></tfoot>
           )}
         </Table>
@@ -128,7 +148,7 @@ export const FeedMillPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>(initialTab)
 
   const mainTabs: Tab[] = ['Raw Materials Stock', 'Production', 'Finished Feed Stock', 'Stock Dispatch']
-  const moreTabs: Tab[] = ['Formulas', 'Flock Allocation']
+  const moreTabs: Tab[] = ['Formulas', 'Flock Allocation', 'Reconciliation']
 
   return (
     <div className="space-y-4">
@@ -154,6 +174,7 @@ export const FeedMillPage: React.FC = () => {
       {tab === 'Stock Dispatch'      && <FeedTransfer />}
       {tab === 'Formulas'            && <FormulasTab />}
       {tab === 'Flock Allocation'    && <FlockAllocationTab />}
+      {tab === 'Reconciliation'      && <ReconciliationTab />}
     </div>
   )
 }
@@ -1457,6 +1478,7 @@ const FlockAllocationTab: React.FC = () => {
   const [totalKg, setTotalKg]   = React.useState('')
   const [rows, setRows] = React.useState<{flockId:string;flockNo:string|number;avgBirds:number;femaleKg:string;maleKg:string}[]>([])
   const [saving, setSaving] = React.useState(false)
+  const { rate } = useFeedRates()
 
   const { data: farms = [] } = useQuery({ queryKey:['farms'], queryFn: async () => { const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[] } })
 
@@ -1519,11 +1541,16 @@ const FlockAllocationTab: React.FC = () => {
     setSaving(true)
     try {
       const feedDate = month + '-01'
+      const ratePerKg = rate(feedType)
       for (const r of validRows) {
+        const femaleKg = parseFloat(r.femaleKg) || 0
+        const maleKg   = parseFloat(r.maleKg)   || 0
         const { error } = await supabase.from('daily_feed').upsert({
           flock_id: r.flockId, feed_date: feedDate, feed_type: feedType,
-          female_kg: parseFloat(r.femaleKg) || 0,
-          male_kg:   parseFloat(r.maleKg)   || 0,
+          female_kg: femaleKg,
+          male_kg:   maleKg,
+          female_cost: femaleKg * ratePerKg,
+          male_cost:   maleKg * ratePerKg,
         }, { onConflict: 'flock_id,feed_date,feed_type' })
         if (error) throw error
       }
@@ -1645,6 +1672,121 @@ const FlockAllocationTab: React.FC = () => {
           </>
         )
       )}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RECONCILIATION TAB — Dispatched vs Consumed per farm + feed type
+// ══════════════════════════════════════════════════════════════════
+const ReconciliationTab: React.FC = () => {
+  const [farm, setFarm] = useState('')
+
+  const { data: farms = [] } = useQuery({ queryKey:['farms'], queryFn: async () => { const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[] } })
+  const { data: feedTypes = [] } = useQuery({
+    queryKey: ['feed_types'],
+    queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').order('sort_order'); return data ?? [] }
+  })
+  const { data: transfers = [] } = useQuery({
+    queryKey: ['recon_transfers'],
+    queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('farm_id,feed_type_id,quantity_kg'); return data ?? [] }
+  })
+  const { data: flocks = [] } = useQuery({
+    queryKey: ['recon_flocks'],
+    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,laying_farm_id,rearing_farm_id'); return data ?? [] }
+  })
+  const { data: dailyFeed = [] } = useQuery({
+    queryKey: ['recon_daily_feed'],
+    queryFn: async () => { const { data } = await supabase.from('daily_feed').select('flock_id,feed_type,female_kg,male_kg'); return data ?? [] }
+  })
+
+  // map feed_type code -> feed_type_id
+  const codeToTypeId: Record<string, string> = {}
+  for (const ft of (feedTypes as any[])) { if (ft.code) codeToTypeId[String(ft.code).trim().toLowerCase()] = ft.id }
+  // map flock_id -> farm_id (prefer laying, fall back to rearing)
+  const flockFarm: Record<string, string> = {}
+  for (const fl of (flocks as any[])) { flockFarm[fl.id] = fl.laying_farm_id ?? fl.rearing_farm_id ?? '' }
+
+  // dispatched: by farm_id + feed_type_id
+  const dispatched: Record<string, number> = {}  // key = farmId|typeId
+  for (const t of (transfers as any[])) {
+    if (!t.farm_id || !t.feed_type_id) continue
+    const k = `${t.farm_id}|${t.feed_type_id}`
+    dispatched[k] = (dispatched[k] ?? 0) + Number(t.quantity_kg ?? 0)
+  }
+
+  // consumed: daily_feed grouped by flock's farm + feed_type code mapped to id
+  const consumed: Record<string, number> = {}
+  for (const d of (dailyFeed as any[])) {
+    const farmId = flockFarm[d.flock_id]
+    const typeId = codeToTypeId[String(d.feed_type ?? '').trim().toLowerCase()]
+    if (!farmId || !typeId) continue
+    const k = `${farmId}|${typeId}`
+    consumed[k] = (consumed[k] ?? 0) + Number(d.female_kg ?? 0) + Number(d.male_kg ?? 0)
+  }
+
+  const farmName: Record<string, string> = {}
+  for (const f of (farms as any[])) farmName[f.id] = f.name
+  const typeCode: Record<string, string> = {}
+  for (const ft of (feedTypes as any[])) typeCode[ft.id] = ft.code
+
+  const keys = new Set([...Object.keys(dispatched), ...Object.keys(consumed)])
+  let rows = Array.from(keys).map(k => {
+    const [farmId, typeId] = k.split('|')
+    const disp = dispatched[k] ?? 0
+    const cons = consumed[k] ?? 0
+    return { farmId, typeId, farm: farmName[farmId] ?? farmId, type: typeCode[typeId] ?? typeId, dispatched: disp, consumed: cons, balance: disp - cons }
+  })
+  if (farm) rows = rows.filter(r => r.farmId === farm)
+  rows.sort((a, b) => (a.farm + a.type).localeCompare(b.farm + b.type))
+
+  const totalDisp = rows.reduce((s, r) => s + r.dispatched, 0)
+  const totalCons = rows.reduce((s, r) => s + r.consumed, 0)
+  const totalBal  = rows.reduce((s, r) => s + r.balance, 0)
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader title="Feed Reconciliation" subtitle="Dispatched to farm vs consumed by flocks, per farm and feed type." />
+      <Card>
+        <div className="flex flex-wrap gap-3 p-3 items-center">
+          <Sel value={farm} onChange={e => setFarm(e.target.value)} className="w-48 text-sm" placeholder="All Farms">
+            {(farms as any[]).map((f:any) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </Sel>
+          {farm && <Button size="sm" variant="ghost" onClick={() => setFarm('')}>Clear</Button>}
+          <span className="text-xs text-gray-400 ml-auto">{rows.length} row(s)</span>
+        </div>
+      </Card>
+      <Card padding={false}>
+        <Table>
+          <thead><tr>
+            <Th>Farm</Th>
+            <Th>Feed Type</Th>
+            <Th right>Dispatched (kg)</Th>
+            <Th right>Consumed (kg)</Th>
+            <Th right>Balance (kg)</Th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={`${r.farmId}|${r.typeId}`} className="hover:bg-gray-50">
+                <Td>{r.farm}</Td>
+                <Td><Badge color="blue">{r.type}</Badge></Td>
+                <Td right className="text-blue-600">{r.dispatched.toLocaleString('en-IN')}</Td>
+                <Td right>{r.consumed.toLocaleString('en-IN')}</Td>
+                <Td right className={r.balance < 0 ? 'text-red-600 font-semibold' : 'text-green-700 font-semibold'}>{r.balance.toLocaleString('en-IN')}</Td>
+              </tr>
+            ))}
+          </tbody>
+          {rows.length > 1 && (
+            <tfoot><tr className="bg-gray-50 font-semibold">
+              <Td colSpan={2}>TOTAL</Td>
+              <Td right className="text-blue-600">{totalDisp.toLocaleString('en-IN')}</Td>
+              <Td right>{totalCons.toLocaleString('en-IN')}</Td>
+              <Td right className={totalBal < 0 ? 'text-red-600' : 'text-green-700'}>{totalBal.toLocaleString('en-IN')}</Td>
+            </tr></tfoot>
+          )}
+        </Table>
+        {rows.length === 0 && <EmptyState title="No dispatch or consumption records" />}
+      </Card>
     </div>
   )
 }

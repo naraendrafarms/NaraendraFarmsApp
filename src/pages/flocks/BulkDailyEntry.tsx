@@ -5,6 +5,7 @@ import { today } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput } from '@/components/ui'
 import { Save, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
+import { useFeedRates } from '@/hooks/useFeedRates'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 
@@ -71,6 +72,7 @@ const shedSort = (a: any, b: any) => {
 // ── Component ─────────────────────────────────────────────────────────────────
 export const BulkDailyEntry: React.FC = () => {
   const qc = useQueryClient()
+  const feedRates = useFeedRates()
   const [date, setDate] = useState(today())
   const [saving, setSaving] = useState(false)
   const [selectedFarm, setSelectedFarm] = useState('')
@@ -373,16 +375,16 @@ export const BulkDailyEntry: React.FC = () => {
         const ftM = r.feed_type_m || 'BCM'
         if (ftF === ftM) {
           await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: Math.round(ff * feedRates.rate(ftF) * 100) / 100, male_cost: Math.round(fm * feedRates.rate(ftF) * 100) / 100 },
             { onConflict: 'flock_id,feed_date,feed_type' }
           )
         } else {
           if (ff > 0) await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: 0, male_cost: 0 },
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: Math.round(ff * feedRates.rate(ftF) * 100) / 100, male_cost: 0 },
             { onConflict: 'flock_id,feed_date,feed_type' }
           )
           if (fm > 0) await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: 0 },
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: Math.round(fm * feedRates.rate(ftM) * 100) / 100 },
             { onConflict: 'flock_id,feed_date,feed_type' }
           )
         }
@@ -471,16 +473,16 @@ export const BulkDailyEntry: React.FC = () => {
           const ftM = r.feed_type_m || 'BCM'
           if (ftF === ftM) {
             await supabase.from('daily_feed').upsert(
-              { flock_id: flock.id, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
+              { flock_id: flock.id, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: Math.round(ff * feedRates.rate(ftF) * 100) / 100, male_cost: Math.round(fm * feedRates.rate(ftF) * 100) / 100 },
               { onConflict: 'flock_id,feed_date,feed_type' }
             )
           } else {
             if (ff) await supabase.from('daily_feed').upsert(
-              { flock_id: flock.id, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: 0, male_cost: 0 },
+              { flock_id: flock.id, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: Math.round(ff * feedRates.rate(ftF) * 100) / 100, male_cost: 0 },
               { onConflict: 'flock_id,feed_date,feed_type' }
             )
             if (fm) await supabase.from('daily_feed').upsert(
-              { flock_id: flock.id, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: 0 },
+              { flock_id: flock.id, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: Math.round(fm * feedRates.rate(ftM) * 100) / 100 },
               { onConflict: 'flock_id,feed_date,feed_type' }
             )
           }

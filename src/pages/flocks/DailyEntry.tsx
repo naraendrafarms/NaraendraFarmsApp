@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
+import { useFeedRates } from '@/hooks/useFeedRates'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Divider,
@@ -23,6 +24,7 @@ const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',440,400,30,10,0,0,5,
 export const DailyEntry: React.FC = () => {
   const qc = useQueryClient()
   const { applyFlockFarmFilter, farmId } = useFarmScope()
+  const feedRates = useFeedRates()
   const [selectedFlock, setSelectedFlock] = useState(() => localStorage.getItem('de_flock') ?? '')
   const [selectedShed, setSelectedShed] = useState(() => localStorage.getItem('de_shed') ?? '')
   const [date, setDate] = useState(() => localStorage.getItem('de_date') ?? today())
@@ -341,16 +343,16 @@ export const DailyEntry: React.FC = () => {
         const ftM = form.feed_type_m || 'BCM'
         if (ftF === ftM) {
           await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: 0, male_cost: 0 },
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: Math.round(ff * feedRates.rate(ftF) * 100) / 100, male_cost: Math.round(fm * feedRates.rate(ftF) * 100) / 100 },
             { onConflict: 'flock_id,feed_date,feed_type' }
           )
         } else {
           if (ff > 0) await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: 0, male_cost: 0 },
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: Math.round(ff * feedRates.rate(ftF) * 100) / 100, male_cost: 0 },
             { onConflict: 'flock_id,feed_date,feed_type' }
           )
           if (fm > 0) await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: 0 },
+            { flock_id: selectedFlock, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: Math.round(fm * feedRates.rate(ftM) * 100) / 100 },
             { onConflict: 'flock_id,feed_date,feed_type' }
           )
         }
