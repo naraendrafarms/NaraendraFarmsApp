@@ -600,13 +600,16 @@ export const BulkDailyEntry: React.FC = () => {
   // ── SHED MODE: template / export / import ────────────────────────────────────
   const SHED_HEADERS = ['Shed No','Open F','Open M','Feed F kg','Feed Type F','Feed M kg','Feed Type M',
     'Transfer F','Transfer M','Cull F','Cull M','Death F','Death M','HE','JE','TE','BE','LE',
-    'Wastage HE','Wastage JE','Wastage TE','Wastage BE','Close F','Close M','Lighting Hrs','Medicine','Med Qty','Remarks']
+    'Wastage HE','Wastage JE','Wastage TE','Wastage BE','Close F','Close M',
+    'Grade A','Grade B','Grade C','Lighting Hrs','Medicine','Med Qty','Remarks']
 
+  // NOTE: Grade A/B/C are FLOCK-LEVEL (one set for the whole flock, entered after grading all sheds).
+  // In the sheet, put them on the FIRST shed row only — they apply to the flock, not each shed.
   const shedTemplate = () => downloadXlsxTemplate('bulk_flockwise_template.xlsx', SHED_HEADERS,
-    ['1','1000','100','120','BCM','30','MALE','0','0','0','0','2','1','500','40','20','10','5','','','','','998','99','16','','','OK'])
+    ['1','1000','100','120','BCM','30','MALE','0','0','0','0','2','1','500','40','20','10','5','','','','','998','99','300','150','50','16','','','OK (Grade A/B/C = flock total, first row only)'])
 
   const shedExport = () => {
-    const data = flockSheds.map((shed: any) => {
+    const data = flockSheds.map((shed: any, i: number) => {
       const r = shedRows[shed.id] ?? emptyShedRow()
       return {
         'Shed No': shed.shed_no, 'Open F': r.opening_female, 'Open M': r.opening_male,
@@ -615,7 +618,10 @@ export const BulkDailyEntry: React.FC = () => {
         'Death F': r.mortality_female, 'Death M': r.mortality_male,
         HE: r.he_eggs, JE: r.je_eggs, TE: r.te_eggs, BE: r.be_eggs, LE: r.le_eggs,
         'Wastage HE': r.wastage_he, 'Wastage JE': r.wastage_je, 'Wastage TE': r.wastage_te, 'Wastage BE': r.wastage_be,
-        'Close F': r.closing_female, 'Close M': r.closing_male, 'Lighting Hrs': r.lighting_hrs,
+        'Close F': r.closing_female, 'Close M': r.closing_male,
+        // Flock-level grade on first row only
+        'Grade A': i === 0 ? gradeRow.he_grade_a : '', 'Grade B': i === 0 ? gradeRow.he_grade_b : '', 'Grade C': i === 0 ? gradeRow.he_grade_c : '',
+        'Lighting Hrs': r.lighting_hrs,
         Medicine: r.med_id ? (medIdToName[r.med_id] ?? '') : '', 'Med Qty': r.med_qty, Remarks: r.remarks,
       }
     })
@@ -635,12 +641,22 @@ export const BulkDailyEntry: React.FC = () => {
         cf: idx('Cull F'), cm: idx('Cull M'), df: idx('Death F'), dm: idx('Death M'),
         he: idx('HE'), je: idx('JE'), te: idx('TE'), be: idx('BE'), le: idx('LE'),
         whe: idx('Wastage HE'), wje: idx('Wastage JE'), wte: idx('Wastage TE'), wbe: idx('Wastage BE'),
-        clf: idx('Close F'), clm: idx('Close M'), lt: idx('Lighting Hrs'), med: idx('Medicine'), mq: idx('Med Qty'), rem: idx('Remarks'),
+        clf: idx('Close F'), clm: idx('Close M'),
+        ga: idx('Grade A'), gb: idx('Grade B'), gc: idx('Grade C'),
+        lt: idx('Lighting Hrs'), med: idx('Medicine'), mq: idx('Med Qty'), rem: idx('Remarks'),
       }
       if (ci.shed < 0) { toast.error('File needs a "Shed No" column'); return }
       const shedByNo: Record<string, any> = {}
       for (const s of flockSheds) shedByNo[String(s.shed_no).trim()] = s
       let matched = 0
+      // Flock-level grade: take from whichever row has any grade value
+      const gv = (i: number, row: any) => i >= 0 ? String(row[i] ?? '').trim() : ''
+      let gA = '', gB = '', gC = ''
+      for (const row of (rows as any[])) {
+        const a = gv(ci.ga, row), b = gv(ci.gb, row), c = gv(ci.gc, row)
+        if (a || b || c) { gA = a || gA; gB = b || gB; gC = c || gC }
+      }
+      if (gA || gB || gC) setGradeRow(g => ({ ...g, he_grade_a: gA || g.he_grade_a, he_grade_b: gB || g.he_grade_b, he_grade_c: gC || g.he_grade_c }))
       setShedRows(prev => {
         const next = { ...prev }
         for (const row of (rows as any[])) {
