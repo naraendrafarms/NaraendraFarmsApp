@@ -66,6 +66,12 @@ export const SalaryHistoryPage: React.FC = () => {
       <CardHeader title="Employee Salary History" subtitle="View all months for one employee"
         action={empId ? <Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button> : undefined} />
 
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        ⚠️ This page shows the <strong>last saved calculation</strong> per month. It does not recalculate by itself.
+        After changing advances, deductions, or <strong>Extra Days per Designation</strong>, re-run
+        <strong> Bulk Salary → "Save &amp; Calculate Salaries"</strong> for the affected month to refresh these numbers.
+      </div>
+
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div className="min-w-[220px]">
           <label className="block text-xs text-gray-500 mb-1">Employee</label>

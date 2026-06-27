@@ -102,6 +102,12 @@ export const SalaryRegisterPage: React.FC = () => {
       <CardHeader title={`Salary Register — ${monthLabel(month)}`} subtitle="All employees, one row per person"
         action={<Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button>} />
 
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        ⚠️ This page shows the <strong>last saved calculation</strong>. It does not recalculate by itself.
+        If you change advances, deductions, or <strong>Extra Days per Designation</strong>, go to
+        <strong> Bulk Salary → select the month → "Save &amp; Calculate Salaries"</strong> to refresh these numbers.
+      </div>
+
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div>
           <label className="block text-xs text-gray-500 mb-1">Month</label>
