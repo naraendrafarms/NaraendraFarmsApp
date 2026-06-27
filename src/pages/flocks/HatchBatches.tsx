@@ -104,7 +104,7 @@ function downloadTemplate() {
   const headers = [['Flock No','Invoice No','DC No','Hatchery Name','Setting No',
     'Setting Date (DD/MM/YYYY)','Hatch Date (DD/MM/YYYY)','Eggs Weight',
     'Received','Broken in Transit','Infertile','Blasters','Hatched Chicks',
-    'Culled Chicks','Std Chicks','Unhatched','Rejects','Chicks Sold','Chick Rate','Remarks']]
+    'Culled Chicks','Unhatched','Rejects','Chicks Sold','Chick Rate','Remarks']]
   const ws = XLSX.utils.aoa_to_sheet(headers)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Template')
@@ -345,7 +345,8 @@ export const HatchBatches: React.FC = () => {
         blasters:       parseInt(r['Blasters']) || 0,
         hatched_chicks: parseInt(r['Hatched Chicks']) || null,
         culled_chicks:  parseInt(r['Culled Chicks']) || 0,
-        std_chicks:     parseInt(r['Std Chicks']) || null,
+        // std_chicks derived = hatched − culled − rejects
+        std_chicks:     ((parseInt(r['Hatched Chicks']) || 0) - (parseInt(r['Culled Chicks']) || 0) - (parseInt(r['Rejects']) || 0)) || null,
         unhatched:      parseInt(r['Unhatched']) || null,
         rejects:        parseInt(r['Rejects']) || 0,
         chicks_sold:    parseInt(r['Chicks Sold']) || null,

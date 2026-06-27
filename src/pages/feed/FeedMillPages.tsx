@@ -299,8 +299,8 @@ const FormulasTab: React.FC = () => {
   }
 
   function handleTemplate() {
-    exportXlsx('feed_formula_template.xlsx', ['formula_code','formula_name','flock_type','age_week_from','age_week_to','version','ingredient_code','ingredient_name','percentage','kg_per_1000','sort_order'], [
-      ['PS-NB','Starter (0-7th week)','Breeder',0,7,1,'11','MAIZE-12%Moisture',67.3,673.91,1]
+    exportXlsx('feed_formula_template.xlsx', ['formula_code','formula_name','flock_type','age_week_from','age_week_to','version','ingredient_code','ingredient_name','percentage','sort_order'], [
+      ['PS-NB','Starter (0-7th week)','Breeder',0,7,1,'11','MAIZE-12%Moisture',67.3,1]
     ])
   }
 
@@ -326,10 +326,12 @@ const FormulasTab: React.FC = () => {
       }
       const ingName = vals[col('ingredient_name')]?.trim()
       if (!fId || !ingName) continue
+      const pct = Number(vals[col('percentage')]) || 0
+      // kg_per_1000 derived from percentage (pct of 1000 kg = pct × 10)
       await supabase.from('feed_formula_ingredients').upsert({
         formula_id: fId, ingredient_code: vals[col('ingredient_code')] || null,
-        ingredient_name: ingName, percentage: Number(vals[col('percentage')]) || 0,
-        kg_per_1000: vals[col('kg_per_1000')] ? Number(vals[col('kg_per_1000')]) : null,
+        ingredient_name: ingName, percentage: pct,
+        kg_per_1000: pct ? +(pct * 10).toFixed(3) : null,
         sort_order: vals[col('sort_order')] ? Number(vals[col('sort_order')]) : 0,
       }, { onConflict: 'formula_id,ingredient_name', ignoreDuplicates: false })
       imported++

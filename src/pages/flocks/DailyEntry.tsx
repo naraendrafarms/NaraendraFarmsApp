@@ -16,8 +16,8 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
 }
 
-const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','total_eggs','he_eggs','he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs','wastage_eggs','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male','closing_female','closing_male','lighting_hrs','age_weeks','remarks']
-const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',450,440,400,30,10,0,0,5,5,0,0,0,0,0,1,0,499,20,16,25,'']
+const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','he_eggs','he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs','wastage_eggs','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male','lighting_hrs','age_weeks','remarks']
+const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',440,400,30,10,0,0,5,5,0,0,0,0,0,1,0,16,25,'']
 
 
 export const DailyEntry: React.FC = () => {
@@ -424,7 +424,7 @@ export const DailyEntry: React.FC = () => {
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`daily_${selectedFlockData?.flock_no}_records.csv`,
       DAILY_HEADERS,
-      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.total_eggs,r.he_eggs,r.he_grade_a,r.he_grade_b,r.he_grade_c,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.wastage_eggs,r.transfer_female??r.trcull_female,r.transfer_male??r.trcull_male,r.cull_female??0,r.cull_male??0,r.mortality_female,r.mortality_male,r.closing_female,r.closing_male,r.lighting_hrs,r.age_weeks,r.remarks])
+      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.he_eggs,r.he_grade_a,r.he_grade_b,r.he_grade_c,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.wastage_eggs,r.transfer_female??r.trcull_female,r.transfer_male??r.trcull_male,r.cull_female??0,r.cull_male??0,r.mortality_female,r.mortality_male,r.lighting_hrs,r.age_weeks,r.remarks])
     )
   }
 
@@ -442,34 +442,47 @@ export const DailyEntry: React.FC = () => {
     for (const r of rows) {
       const dateVal = r[col('date')]?.trim()
       if (!dateVal) { skipped++; continue }
+      const openingF = parseInt(r[col('opening_female')] || r[col('openingfemale')] || '0') || 0
+      const openingM = parseInt(r[col('opening_male')]   || r[col('openingmale')]   || '0') || 0
+      const heEggs   = parseInt(r[col('he_eggs')]        || r[col('heeggs')]        || '0') || 0
+      const jeEggs   = parseInt(r[col('je_eggs')]        || r[col('jeeggs')]        || '0') || 0
+      const teEggs   = parseInt(r[col('te_eggs')]        || r[col('teeggs')]        || '0') || 0
+      const beEggs   = parseInt(r[col('be_eggs')]        || r[col('beeggs')]        || '0') || 0
+      const leEggs   = parseInt(r[col('le_eggs')]        || r[col('leeggs')]        || '0') || 0
+      const transferF = parseInt(r[col('transfer_female')] || r[col('transferfemale')] || r[col('trcull_female')] || '0') || 0
+      const transferM = parseInt(r[col('transfer_male')]   || r[col('transfermale')]   || r[col('trcull_male')]   || '0') || 0
+      const cullF     = parseInt(r[col('cull_female')]     || r[col('cullfemale')]     || '0') || 0
+      const cullM     = parseInt(r[col('cull_male')]       || r[col('cullmale')]       || '0') || 0
+      const mortalityF = parseInt(r[col('mortality_female')] || r[col('mortalityfemale')] || '0') || 0
+      const mortalityM = parseInt(r[col('mortality_male')]   || r[col('mortalitymale')]   || '0') || 0
       const payload: any = {
         flock_id: selectedFlock, record_date: dateVal, farm_id: farmId,
-        opening_female:   parseInt(r[col('opening_female')] || r[col('openingfemale')] || '0') || 0,
-        opening_male:     parseInt(r[col('opening_male')]   || r[col('openingmale')]   || '0') || 0,
+        opening_female:   openingF,
+        opening_male:     openingM,
         feed_female_kg:   parseFloat(r[col('feed_female_kg')] || r[col('feedfemalekg')] || '0') || 0,
         feed_male_kg:     parseFloat(r[col('feed_male_kg')]   || r[col('feedmalekg')]   || '0') || 0,
         feed_type_f:      r[col('feed_type_f')]  || r[col('feedtypef')]  || 'L1',
         feed_type_m:      r[col('feed_type_m')]  || r[col('feedtypem')]  || 'MALE',
-        total_eggs:       parseInt(r[col('total_eggs')]       || r[col('totaleggs')]       || '0') || 0,
-        he_eggs:          parseInt(r[col('he_eggs')]          || r[col('heeggs')]          || '0') || 0,
+        total_eggs:       heEggs + jeEggs + teEggs + beEggs + leEggs,
+        he_eggs:          heEggs,
         he_grade_a:       parseInt(r[col('he_grade_a')]       || r[col('hegradea')]        || '0') || null,
         he_grade_b:       parseInt(r[col('he_grade_b')]       || r[col('hegradeb')]        || '0') || null,
         he_grade_c:       parseInt(r[col('he_grade_c')]       || r[col('hegradec')]        || '0') || null,
-        je_eggs:          parseInt(r[col('je_eggs')]          || r[col('jeeggs')]          || '0') || 0,
-        te_eggs:          parseInt(r[col('te_eggs')]          || r[col('teeggs')]          || '0') || 0,
-        be_eggs:          parseInt(r[col('be_eggs')]          || r[col('beeggs')]          || '0') || 0,
-        le_eggs:          parseInt(r[col('le_eggs')]          || r[col('leeggs')]          || '0') || 0,
+        je_eggs:          jeEggs,
+        te_eggs:          teEggs,
+        be_eggs:          beEggs,
+        le_eggs:          leEggs,
         wastage_eggs:     parseInt(r[col('wastage_eggs')]     || r[col('wastageeggs')]     || '0') || null,
-        transfer_female:  parseInt(r[col('transfer_female')]  || r[col('transferfemale')]  || r[col('trcull_female')] || '0') || 0,
-        transfer_male:    parseInt(r[col('transfer_male')]    || r[col('transfermale')]    || r[col('trcull_male')]   || '0') || 0,
-        cull_female:      parseInt(r[col('cull_female')]      || r[col('cullfemale')]      || '0') || 0,
-        cull_male:        parseInt(r[col('cull_male')]        || r[col('cullmale')]        || '0') || 0,
-        trcull_female:    (parseInt(r[col('transfer_female')]||r[col('trcull_female')]||'0')||0) + (parseInt(r[col('cull_female')]||'0')||0),
-        trcull_male:      (parseInt(r[col('transfer_male')]  ||r[col('trcull_male')]  ||'0')||0) + (parseInt(r[col('cull_male')]  ||'0')||0),
-        mortality_female: parseInt(r[col('mortality_female')] || r[col('mortalityfemale')] || '0') || 0,
-        mortality_male:   parseInt(r[col('mortality_male')]   || r[col('mortalitymale')]   || '0') || 0,
-        closing_female:   parseInt(r[col('closing_female')]   || r[col('closingfemale')]   || '0') || 0,
-        closing_male:     parseInt(r[col('closing_male')]     || r[col('closingmale')]     || '0') || 0,
+        transfer_female:  transferF,
+        transfer_male:    transferM,
+        cull_female:      cullF,
+        cull_male:        cullM,
+        trcull_female:    transferF + cullF,
+        trcull_male:      transferM + cullM,
+        mortality_female: mortalityF,
+        mortality_male:   mortalityM,
+        closing_female:   Math.max(0, openingF - mortalityF - transferF - cullF),
+        closing_male:     Math.max(0, openingM - mortalityM - transferM - cullM),
         lighting_hrs:     parseFloat(r[col('lighting_hrs')]   || r[col('lightinghrs')]     || '') || null,
         age_weeks:        parseFloat(r[col('age_weeks')]      || r[col('ageweeks')]        || '') || null,
         remarks:          r[col('remarks')] || null,

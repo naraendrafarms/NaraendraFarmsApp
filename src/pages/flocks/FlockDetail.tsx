@@ -489,7 +489,7 @@ export const FlockDetail: React.FC = () => {
 
   // CSV template download
   const handleDownloadTemplate = () => {
-    const headers = 'flock_no,record_date,opening_female,opening_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,transfer_female,transfer_male,cull_female,cull_male,mortality_female,mortality_male,closing_female,closing_male'
+    const headers = 'flock_no,record_date,opening_female,opening_male,feed_female_kg,feed_male_kg,he_eggs,transfer_female,transfer_male,cull_female,cull_male,mortality_female,mortality_male'
     const blob = new Blob([headers + '\n'], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -506,26 +506,41 @@ export const FlockDetail: React.FC = () => {
       const { headers: hdrs, rows: rawRows } = await parseFile(file)
       if (rawRows.length === 0) { toast.error('Empty file'); return }
       const records = rawRows.map(vals => { const obj: any = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
-      const rows = records.map((r: any) => ({
-        flock_id: id,
-        record_date: r.record_date,
-        opening_female: parseInt(r.opening_female) || null,
-        opening_male: parseInt(r.opening_male) || null,
-        feed_female_kg: parseFloat(r.feed_female_kg) || null,
-        feed_male_kg: parseFloat(r.feed_male_kg) || null,
-        total_eggs: parseInt(r.total_eggs) || null,
-        he_eggs: parseInt(r.he_eggs) || null,
-        transfer_female: parseInt(r.transfer_female) || parseInt(r.trcull_female) || 0,
-        transfer_male:   parseInt(r.transfer_male)   || parseInt(r.trcull_male)   || 0,
-        cull_female:     parseInt(r.cull_female) || 0,
-        cull_male:       parseInt(r.cull_male)   || 0,
-        trcull_female:   (parseInt(r.transfer_female)||0) + (parseInt(r.cull_female)||0) || parseInt(r.trcull_female) || 0,
-        trcull_male:     (parseInt(r.transfer_male)||0) + (parseInt(r.cull_male)||0) || parseInt(r.trcull_male) || 0,
-        mortality_female: parseInt(r.mortality_female) || 0,
-        mortality_male: parseInt(r.mortality_male) || 0,
-        closing_female: parseInt(r.closing_female) || null,
-        closing_male: parseInt(r.closing_male) || null,
-      })).filter((r: any) => r.record_date)
+      const rows = records.map((r: any) => {
+        const openingF = parseInt(r.opening_female) || 0
+        const openingM = parseInt(r.opening_male) || 0
+        const heEggs = parseInt(r.he_eggs) || 0
+        const jeEggs = parseInt(r.je_eggs) || 0
+        const teEggs = parseInt(r.te_eggs) || 0
+        const beEggs = parseInt(r.be_eggs) || 0
+        const leEggs = parseInt(r.le_eggs) || 0
+        const transferF = parseInt(r.transfer_female) || parseInt(r.trcull_female) || 0
+        const transferM = parseInt(r.transfer_male)   || parseInt(r.trcull_male)   || 0
+        const cullF = parseInt(r.cull_female) || 0
+        const cullM = parseInt(r.cull_male)   || 0
+        const mortalityF = parseInt(r.mortality_female) || 0
+        const mortalityM = parseInt(r.mortality_male) || 0
+        return {
+          flock_id: id,
+          record_date: r.record_date,
+          opening_female: openingF || null,
+          opening_male: openingM || null,
+          feed_female_kg: parseFloat(r.feed_female_kg) || null,
+          feed_male_kg: parseFloat(r.feed_male_kg) || null,
+          total_eggs: heEggs + jeEggs + teEggs + beEggs + leEggs,
+          he_eggs: heEggs || null,
+          transfer_female: transferF,
+          transfer_male:   transferM,
+          cull_female:     cullF,
+          cull_male:       cullM,
+          trcull_female:   transferF + cullF,
+          trcull_male:     transferM + cullM,
+          mortality_female: mortalityF,
+          mortality_male: mortalityM,
+          closing_female: Math.max(0, openingF - mortalityF - transferF - cullF),
+          closing_male: Math.max(0, openingM - mortalityM - transferM - cullM),
+        }
+      }).filter((r: any) => r.record_date)
 
       const { error } = await supabase.from('daily_records').upsert(rows, { onConflict: 'flock_id,record_date' })
       if (error) throw error

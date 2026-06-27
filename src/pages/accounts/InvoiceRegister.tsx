@@ -278,7 +278,7 @@ export const InvoiceRegister: React.FC = () => {
   }
 
   const downloadTemplate = () => {
-    const headers = ['invoice_no','invoice_date','supplier_name','source_type','flock_no','farm_name','basic_amount','gst_pct','gst_amount','total_amount','payment_status','paid_amount','due_date','remarks']
+    const headers = ['invoice_no','invoice_date','supplier_name','source_type','flock_no','farm_name','basic_amount','gst_pct','payment_status','paid_amount','due_date','remarks']
     const example = ['INV-2024-001','2024-06-01','Venkateshwara Hatcheries','chick','F21','Kethereddypally','500000','5','25000','525000','unpaid','0','2024-06-15','']
     const ws = XLSX.utils.aoa_to_sheet([headers, example])
     const wb = XLSX.utils.book_new()
@@ -310,7 +310,10 @@ export const InvoiceRegister: React.FC = () => {
         for (const r of rows) {
           const invNo = String(r.invoice_no ?? '').trim()
           const invDate = r.invoice_date ? (r.invoice_date instanceof Date ? r.invoice_date.toISOString().split('T')[0] : String(r.invoice_date).trim()) : null
-          const total = parseFloat(r.total_amount) || 0
+          const basic = parseFloat(r.basic_amount) || 0
+          const gstPct = parseFloat(r.gst_pct) || 0
+          const gstAmt = +(basic * gstPct / 100).toFixed(2)
+          const total = +(basic + gstAmt).toFixed(2)
           if (!invNo || !invDate || !total) { skipped++; continue }
 
           const flockNo = String(r.flock_no ?? '').trim()
@@ -324,9 +327,9 @@ export const InvoiceRegister: React.FC = () => {
             source_type:    ['chick','grn','medicine','electricity','labour','other'].includes(srcType) ? srcType : 'other',
             flock_id:       flockNo && flockMap[flockNo] ? flockMap[flockNo] : null,
             farm_id:        farmName && farmMap[farmName] ? farmMap[farmName] : null,
-            basic_amount:   parseFloat(r.basic_amount) || null,
-            gst_pct:        parseFloat(r.gst_pct) || 0,
-            gst_amount:     parseFloat(r.gst_amount) || null,
+            basic_amount:   basic || null,
+            gst_pct:        gstPct,
+            gst_amount:     gstAmt || null,
             total_amount:   total,
             payment_status: ['unpaid','partial','paid'].includes(String(r.payment_status)) ? r.payment_status : 'unpaid',
             paid_amount:    parseFloat(r.paid_amount) || 0,

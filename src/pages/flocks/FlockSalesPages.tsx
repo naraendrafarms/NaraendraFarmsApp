@@ -662,7 +662,7 @@ export const HEDispatch: React.FC = () => {
 
   // CSV template download
   const handleDownloadTemplate = () => {
-    const headers = 'flock_no,dispatch_date,prod_date,dc_no,grade_a,grade_b,total_dispatched,free_eggs,rate,amount,party_name,remarks'
+    const headers = 'flock_no,dispatch_date,prod_date,dc_no,grade_a,grade_b,free_eggs,rate,party_name,remarks'
     const blob = new Blob([headers + '\n'], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -683,20 +683,23 @@ export const HEDispatch: React.FC = () => {
       const rows = records.map((r: any) => {
         const flockMatch = flocks?.find((f: any) => String(f.flock_no) === String(r.flock_no))
         const partyMatch = parties?.find((p: any) => p.name === r.party_name)
-        const totalDispatched = parseInt(r.total_dispatched) || 0
+        const gradeA = parseInt(r.grade_a) || 0
+        const gradeB = parseInt(r.grade_b) || 0
+        const totalDispatched = gradeA + gradeB
         const freeEggs = parseInt(r.free_eggs) || 0
+        const rate = parseFloat(r.rate) || null
         return {
           flock_id: flockMatch?.id ?? null,
           dispatch_date: r.dispatch_date || null,
           prod_date: r.prod_date || null,
           dc_no: parseInt(r.dc_no) || null,
-          grade_a: parseInt(r.grade_a) || 0,
-          grade_b: parseInt(r.grade_b) || 0,
+          grade_a: gradeA,
+          grade_b: gradeB,
           total_dispatched: totalDispatched,
           free_eggs: freeEggs,
           invoice_eggs: totalDispatched - freeEggs,
-          rate: parseFloat(r.rate) || null,
-          amount: parseFloat(r.amount) || null,
+          rate: rate,
+          amount: rate != null ? totalDispatched * rate : null,
           party_id: partyMatch?.id ?? null,
           remarks: r.remarks || null,
         }
@@ -1866,15 +1869,15 @@ export const NHESales: React.FC = () => {
 
   // Download template
   const handleDownloadTemplate = () => {
-    const headers = 'flock_no,sale_date,sale_type,party_name,dc_no,quantity,unit,rate,amount,remarks'
+    const headers = 'flock_no,sale_date,sale_type,party_name,dc_no,quantity,unit,rate,remarks'
     const example = [
-      '19,2025-06-01,bird_cull,Party Name,DC001,100,nos,150,15000,Cull birds sale',
-      '19,2025-06-01,je,Party Name,DC002,500,nos,8.5,4250,Jumbo eggs',
+      '19,2025-06-01,bird_cull,Party Name,DC001,100,nos,150,Cull birds sale',
+      '19,2025-06-01,je,Party Name,DC002,500,nos,8.5,Jumbo eggs',
     ].join('\n')
     const notes = [
       '# sale_type values: je | te | be | bird_cull | bird_lame | bird_weak | bird_sex_error | gas | manure | other',
       '# unit: nos (birds/eggs) | kg | ltrs | bags',
-      '# amount = quantity × rate (auto-calculated if left blank)',
+      '# amount = quantity × rate (auto-calculated on import)',
     ].join('\n')
     const blob = new Blob([notes + '\n' + headers + '\n' + example], { type: 'text/csv' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
@@ -1917,7 +1920,7 @@ export const NHESales: React.FC = () => {
         quantity: r.quantity !== '' ? Number(r.quantity) : null,
         unit: r.unit || 'nos',
         rate: r.rate !== '' ? Number(r.rate) : null,
-        amount: r.amount !== '' ? Number(r.amount) : (Number(r.quantity||0) * Number(r.rate||0)) || null,
+        amount: (Number(r.quantity||0) * Number(r.rate||0)) || null,
         remarks: r.remarks || null,
       })).filter(r => r.flock_id && r.amount)
 

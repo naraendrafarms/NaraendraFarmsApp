@@ -314,8 +314,8 @@ export const GRNEntry: React.FC = () => {
 
   const handleTemplate = () => {
     exportCSV('grn_template.csv',
-      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','gst_pct','taxable_amount','tax_amount','total_amount','vehicle_no','remarks'],
-      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize',10000,'kg',200,22.5,5,225000,11250,236250,'TN01AB1234','']]
+      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','gst_pct','vehicle_no','remarks'],
+      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize',10000,'kg',200,22.5,5,'TN01AB1234','']]
     )
   }
 
@@ -340,12 +340,13 @@ export const GRNEntry: React.FC = () => {
       const toInsert = records.filter(r => r.grn_no && r.grn_date).map(r => {
         const qty   = cleanNum(r.qty)
         const price = cleanNum(r.price_per_unit)
+        // Derived amounts are computed from raw inputs (qty × price + gst_pct), not read from the file
         const amt = deriveAmounts({
           qty, price,
           gstPct:  cleanNum(r.gst_pct),
-          taxable: cleanNum(r.taxable_amount ?? r.basic_amount),
-          tax:     cleanNum(r.tax_amount ?? r.gst_amount),
-          total:   cleanNum(r.total_amount),
+          taxable: null,
+          tax:     null,
+          total:   null,
         })
         return {
           grn_no: r.grn_no,

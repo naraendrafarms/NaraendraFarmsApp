@@ -598,15 +598,16 @@ export const BulkDailyEntry: React.FC = () => {
   }
 
   // ── SHED MODE: template / export / import ────────────────────────────────────
+  // NOTE: Close F/M are NOT in the template — they are auto-calculated (Open − Death − Transfer − Cull) on import.
   const SHED_HEADERS = ['Shed No','Open F','Open M','Feed F kg','Feed Type F','Feed M kg','Feed Type M',
     'Transfer F','Transfer M','Cull F','Cull M','Death F','Death M','HE','JE','TE','BE','LE',
-    'Wastage HE','Wastage JE','Wastage TE','Wastage BE','Close F','Close M',
+    'Wastage HE','Wastage JE','Wastage TE','Wastage BE',
     'Grade A','Grade B','Grade C','Lighting Hrs','Medicine','Med Qty','Remarks']
 
   // NOTE: Grade A/B/C are FLOCK-LEVEL (one set for the whole flock, entered after grading all sheds).
   // In the sheet, put them on the FIRST shed row only — they apply to the flock, not each shed.
   const shedTemplate = () => downloadXlsxTemplate('bulk_flockwise_template.xlsx', SHED_HEADERS,
-    ['1','1000','100','120','BCM','30','MALE','0','0','0','0','2','1','500','40','20','10','5','','','','','998','99','300','150','50','16','','','OK (Grade A/B/C = flock total, first row only)'])
+    ['1','1000','100','120','BCM','30','MALE','0','0','0','0','2','1','500','40','20','10','5','','','','','300','150','50','16','','','OK (Grade A/B/C = flock total, first row only · Closing auto-calculated)'])
 
   const shedExport = () => {
     const data = flockSheds.map((shed: any, i: number) => {
@@ -618,7 +619,6 @@ export const BulkDailyEntry: React.FC = () => {
         'Death F': r.mortality_female, 'Death M': r.mortality_male,
         HE: r.he_eggs, JE: r.je_eggs, TE: r.te_eggs, BE: r.be_eggs, LE: r.le_eggs,
         'Wastage HE': r.wastage_he, 'Wastage JE': r.wastage_je, 'Wastage TE': r.wastage_te, 'Wastage BE': r.wastage_be,
-        'Close F': r.closing_female, 'Close M': r.closing_male,
         // Flock-level grade on first row only
         'Grade A': i === 0 ? gradeRow.he_grade_a : '', 'Grade B': i === 0 ? gradeRow.he_grade_b : '', 'Grade C': i === 0 ? gradeRow.he_grade_c : '',
         'Lighting Hrs': r.lighting_hrs,
@@ -641,7 +641,6 @@ export const BulkDailyEntry: React.FC = () => {
         cf: idx('Cull F'), cm: idx('Cull M'), df: idx('Death F'), dm: idx('Death M'),
         he: idx('HE'), je: idx('JE'), te: idx('TE'), be: idx('BE'), le: idx('LE'),
         whe: idx('Wastage HE'), wje: idx('Wastage JE'), wte: idx('Wastage TE'), wbe: idx('Wastage BE'),
-        clf: idx('Close F'), clm: idx('Close M'),
         ga: idx('Grade A'), gb: idx('Grade B'), gc: idx('Grade C'),
         lt: idx('Lighting Hrs'), med: idx('Medicine'), mq: idx('Med Qty'), rem: idx('Remarks'),
       }
@@ -667,19 +666,26 @@ export const BulkDailyEntry: React.FC = () => {
           const g = (i: number) => i >= 0 ? String(row[i] ?? '').trim() : ''
           const cur = next[s.id] ?? emptyShedRow()
           const medName = g(ci.med).toLowerCase()
+          // Auto-calculate closing = opening − death − transfer − cull (never read from Excel)
+          const openF = g(ci.of) || cur.opening_female, openM = g(ci.om) || cur.opening_male
+          const dF = g(ci.df) || cur.mortality_female, dM = g(ci.dm) || cur.mortality_male
+          const trF = g(ci.trf) || cur.transfer_female, trM = g(ci.trm) || cur.transfer_male
+          const cF = g(ci.cf) || cur.cull_female, cM = g(ci.cm) || cur.cull_male
+          const closeF = (parseInt(openF) || 0) > 0 ? String(Math.max(0, (parseInt(openF)||0) - (parseInt(dF)||0) - (parseInt(trF)||0) - (parseInt(cF)||0))) : cur.closing_female
+          const closeM = (parseInt(openM) || 0) > 0 ? String(Math.max(0, (parseInt(openM)||0) - (parseInt(dM)||0) - (parseInt(trM)||0) - (parseInt(cM)||0))) : cur.closing_male
           next[s.id] = {
             ...cur,
-            opening_female: g(ci.of) || cur.opening_female, opening_male: g(ci.om) || cur.opening_male,
+            opening_female: openF, opening_male: openM,
             feed_female_kg: g(ci.ff) || cur.feed_female_kg, feed_type_f: g(ci.ftf) || cur.feed_type_f,
             feed_male_kg: g(ci.fm) || cur.feed_male_kg, feed_type_m: g(ci.ftm) || cur.feed_type_m,
-            transfer_female: g(ci.trf) || cur.transfer_female, transfer_male: g(ci.trm) || cur.transfer_male,
-            cull_female: g(ci.cf) || cur.cull_female, cull_male: g(ci.cm) || cur.cull_male,
-            mortality_female: g(ci.df) || cur.mortality_female, mortality_male: g(ci.dm) || cur.mortality_male,
+            transfer_female: trF, transfer_male: trM,
+            cull_female: cF, cull_male: cM,
+            mortality_female: dF, mortality_male: dM,
             he_eggs: g(ci.he) || cur.he_eggs, je_eggs: g(ci.je) || cur.je_eggs, te_eggs: g(ci.te) || cur.te_eggs,
             be_eggs: g(ci.be) || cur.be_eggs, le_eggs: g(ci.le) || cur.le_eggs,
             wastage_he: g(ci.whe) || cur.wastage_he, wastage_je: g(ci.wje) || cur.wastage_je,
             wastage_te: g(ci.wte) || cur.wastage_te, wastage_be: g(ci.wbe) || cur.wastage_be,
-            closing_female: g(ci.clf) || cur.closing_female, closing_male: g(ci.clm) || cur.closing_male,
+            closing_female: closeF, closing_male: closeM,
             lighting_hrs: g(ci.lt) || cur.lighting_hrs,
             med_id: medName && medNameToId[medName] ? medNameToId[medName] : cur.med_id,
             med_qty: g(ci.mq) || cur.med_qty, remarks: g(ci.rem) || cur.remarks,
