@@ -436,7 +436,7 @@ export const BankLedgerPage: React.FC = () => {
     label: `${a.bank_name} — ${a.account_no}`,
   }))
 
-  const CATEGORIES = ['', 'Vendor Payment', 'Salary', 'Electricity', 'Bank Charges', 'Cash Withdrawal', 'Customer Receipt', 'Other']
+  const CATEGORIES = ['', 'Vendor Payment', 'Partner Remuneration', 'Salary', 'Electricity', 'Bank Charges', 'Cash Withdrawal', 'Customer Receipt', 'Other']
 
   return (
     <div className="space-y-4">
