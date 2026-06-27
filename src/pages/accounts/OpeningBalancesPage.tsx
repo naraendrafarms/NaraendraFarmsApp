@@ -40,6 +40,9 @@ export const OpeningBalancesPage: React.FC = () => {
   const inv = () => {
     qc.invalidateQueries({ queryKey: ['opening_balances', fy] })
     qc.invalidateQueries({ queryKey: ['party_ledger'] })
+    qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+    qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+    qc.invalidateQueries({ queryKey: ['cms_pending_payments'] })
   }
 
   const save = useMutation({
@@ -47,15 +50,42 @@ export const OpeningBalancesPage: React.FC = () => {
       if (!targetId) throw new Error(`Select a ${kind}`)
       const amt = parseFloat(amount) || 0
       if (amt <= 0) throw new Error('Enter an amount')
+      const asOf = fyStartDate(fy)
       const payload: any = {
-        fy, as_of_date: fyStartDate(fy), amount: amt, dr_cr: drcr, remarks: remarks || null,
+        fy, as_of_date: asOf, amount: amt, dr_cr: drcr, remarks: remarks || null,
         party_id: kind === 'party' ? targetId : null,
         partner_id: kind === 'partner' ? targetId : null,
       }
-      const { error } = await supabase.from('opening_balances').insert(payload)
+      const { data: obRow, error } = await supabase.from('opening_balances').insert(payload).select('id').single()
       if (error) throw error
+
+      // Payable openings (Cr = we owe them) → create a payable bill so it can be paid & bank-linked
+      if (drcr === 'Cr' && obRow) {
+        const name = kind === 'party'
+          ? (parties as any[]).find((p: any) => p.id === targetId)?.name
+          : (partners as any[]).find((p: any) => p.id === targetId)?.name
+        const { error: ppErr } = await supabase.from('pending_payments').insert({
+          vendor_name: name ?? 'Opening',
+          party_id: kind === 'party' ? targetId : null,
+          partner_id: kind === 'partner' ? targetId : null,
+          is_opening: true,
+          opening_balance_id: obRow.id,
+          invoice_no: `OPENING-${fy}`,
+          invoice_amount: amt, net_payable: amt,
+          invoice_date: asOf, grn_date: asOf, pay_before_date: asOf,
+          payment_type: 'NEFT', payment_status: 'Pending', po_raised_by: 'Opening',
+        })
+        if (ppErr) throw ppErr
+      }
     },
-    onSuccess: () => { toast.success('Opening balance saved'); inv(); setTargetId(''); setAmount(''); setRemarks('') },
+    onSuccess: () => {
+      toast.success('Opening balance saved')
+      inv()
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      qc.invalidateQueries({ queryKey: ['cms_pending_payments'] })
+      setTargetId(''); setAmount(''); setRemarks('')
+    },
     onError: (e: any) => toast.error(e.message)
   })
 
