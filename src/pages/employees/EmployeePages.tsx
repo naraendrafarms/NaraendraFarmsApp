@@ -629,9 +629,16 @@ export const SalaryAbstractPage: React.FC = () => {
 const _EG1 = ['MANAGER FINANCE','ADMINISTRATIVE MANAGER','ACCOUNTANT','SITE MANAGER','STORE KEEPER','POULTRY ASSISTANT','ELECTRICIAN']
 const _EG2 = ['ASST.SUPERVISOR-MALE','ASST.SUPERVISOR-FEMALE','SECURITY-MALE','DRIVER-MALE','WORKER-MALE','WORKER-FEMALE','MEDIUM VECHICLE DRIVER','ATTENDER']
 
-function calcExtraDaysM(designation: string|null|undefined, paidDays: number): number {
+// Extra-days config map: { "WORKER-MALE": { ge15: 1, lt15: 0 }, ... }
+// When provided (from designation_extra_days table), it overrides the hard-coded EG1/EG2 rules.
+export type ExtraDaysConfig = Record<string, { ge15: number; lt15: number }>
+
+function calcExtraDaysM(designation: string|null|undefined, paidDays: number, cfg?: ExtraDaysConfig): number {
   if (!paidDays || !designation) return 0
   const d = designation.toUpperCase().trim()
+  // Prefer DB-backed config when available
+  if (cfg && cfg[d]) return paidDays >= 15 ? cfg[d].ge15 : cfg[d].lt15
+  // Fallback to hard-coded rules
   if (_EG1.includes(d)) return paidDays >= 15 ? 2 : 1
   if (_EG2.includes(d)) return paidDays >= 15 ? 1 : 0
   return 0
@@ -640,11 +647,12 @@ function calcExtraDaysM(designation: string|null|undefined, paidDays: number): n
 function computeSalaryForEmp(emp: any, opts: {
   absentDays?: number; monthDays?: number; furtherAdvance?: number;
   otherDeduction?: number; advanceOpening?: number; vpf?: number; lwf?: number; tds?: number;
+  extraDaysConfig?: ExtraDaysConfig;
 }) {
   const monthDays  = opts.monthDays ?? 30
   const absentDays = opts.absentDays ?? 0
   const paidDays   = Math.max(0, monthDays - absentDays)
-  const extraDays  = calcExtraDaysM(emp.designation, paidDays)
+  const extraDays  = calcExtraDaysM(emp.designation, paidDays, opts.extraDaysConfig)
 
   const grossRate  = emp.base_salary ?? 0
   const basicRate  = Math.round(grossRate * 0.5)
@@ -701,6 +709,27 @@ function computeSalaryForEmp(emp: any, opts: {
     monthly_ctc: monthlyCTC || null,
     is_paid: false,
   }
+}
+
+// ── Hook: extra-days-per-designation config (designation_extra_days table) ──
+function useExtraDaysConfig() {
+  const { data } = useQuery({
+    queryKey: ['designation_extra_days'],
+    queryFn: async () => {
+      const { data } = await supabase.from('designation_extra_days')
+        .select('designation,extra_days_ge15,extra_days_lt15')
+      const map: ExtraDaysConfig = {}
+      for (const r of (data ?? [])) {
+        map[String(r.designation).toUpperCase().trim()] = {
+          ge15: Number(r.extra_days_ge15 ?? 0),
+          lt15: Number(r.extra_days_lt15 ?? 0),
+        }
+      }
+      return map
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  return data ?? {}
 }
 
 // ── SALARY ENTRY ──────────────────────────────────────────────────
@@ -2893,6 +2922,7 @@ export const BulkSalaryPage: React.FC = () => {
   const [tab, setTab] = useState<'attendance'|'salary'|'payment'>('attendance')
   const [filterFarm, setFilterFarm] = useState('')
   const [saving, setSaving] = useState(false)
+  const extraDaysConfig = useExtraDaysConfig()
   const [absentMap, setAbsentMap] = useState<Record<string,string>>({})
 
   const monthDate = month + '-01'
@@ -2997,6 +3027,7 @@ export const BulkSalaryPage: React.FC = () => {
         const calc = computeSalaryForEmp(emp, {
           absentDays,
           monthDays: daysInMonth,
+          extraDaysConfig,
           furtherAdvance: (advances as any)?.[emp.id] ?? 0,
           otherDeduction: (deductions as any)?.[emp.id] ?? 0,
         })

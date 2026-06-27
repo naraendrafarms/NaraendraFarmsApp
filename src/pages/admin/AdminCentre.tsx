@@ -632,6 +632,137 @@ const InlineConfig: React.FC<{ title: string; grp: string; placeholder: string }
   )
 }
 
+// Editor for designation_extra_days (extra days paid per designation)
+const ExtraDaysConfigCard: React.FC = () => {
+  const qc = useQueryClient()
+  const [editId, setEditId] = useState<string|null>(null)
+  const [eGe, setEGe] = useState('')
+  const [eLt, setELt] = useState('')
+  const [newDesig, setNewDesig] = useState('')
+  const [newGe, setNewGe] = useState('')
+  const [newLt, setNewLt] = useState('')
+  const [confirmDelId, setConfirmDelId] = useState<string|null>(null)
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['designation_extra_days_admin'],
+    queryFn: async () => {
+      const { data } = await supabase.from('designation_extra_days')
+        .select('id,designation,extra_days_ge15,extra_days_lt15').order('designation')
+      return data ?? []
+    }
+  })
+
+  const inv = () => {
+    qc.invalidateQueries({ queryKey: ['designation_extra_days_admin'] })
+    qc.invalidateQueries({ queryKey: ['designation_extra_days'] })
+  }
+
+  const addMut = useMutation({
+    mutationFn: async () => {
+      if (!newDesig.trim()) throw new Error('Designation required')
+      const { error } = await supabase.from('designation_extra_days').insert({
+        designation: newDesig.trim().toUpperCase(),
+        extra_days_ge15: Number(newGe) || 0,
+        extra_days_lt15: Number(newLt) || 0,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Added!'); inv(); setNewDesig(''); setNewGe(''); setNewLt('') },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const saveMut = useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { error } = await supabase.from('designation_extra_days').update({
+        extra_days_ge15: Number(eGe) || 0,
+        extra_days_lt15: Number(eLt) || 0,
+        updated_at: new Date().toISOString(),
+      }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Saved!'); inv(); setEditId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('designation_extra_days').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Deleted!'); inv(); setConfirmDelId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  return (
+    <Card className="space-y-3 sm:col-span-2 lg:col-span-3">
+      <div>
+        <p className="font-semibold text-gray-700 text-sm">Extra Days per Designation</p>
+        <p className="text-xs text-gray-400">Extra days added to salary based on designation. "≥15 days" applies when paid days ≥ 15, otherwise "&lt;15 days" applies. Extra pay = gross rate ÷ month days × extra days.</p>
+      </div>
+      {isLoading ? <Spinner /> : (
+        <div className="overflow-x-auto">
+          <Table>
+            <thead><tr>
+              <Th>Designation</Th>
+              <Th right>Extra Days (≥15 paid)</Th>
+              <Th right>Extra Days (&lt;15 paid)</Th>
+              <Th></Th>
+            </tr></thead>
+            <tbody>
+              {(rows as any[]).map((r: any) => (
+                <tr key={r.id} className="hover:bg-gray-50">
+                  <Td className="font-medium">{r.designation}</Td>
+                  {editId === r.id ? (
+                    <>
+                      <Td right><Input label="" type="number" value={eGe} onChange={e => setEGe(e.target.value)} className="w-20 text-right" /></Td>
+                      <Td right><Input label="" type="number" value={eLt} onChange={e => setELt(e.target.value)} className="w-20 text-right" /></Td>
+                      <Td>
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" onClick={() => saveMut.mutate({ id: r.id })} loading={saveMut.isPending}>Save</Button>
+                          <Button size="sm" variant="secondary" onClick={() => setEditId(null)}>Cancel</Button>
+                        </div>
+                      </Td>
+                    </>
+                  ) : confirmDelId === r.id ? (
+                    <>
+                      <Td colSpan={2} className="text-right text-xs text-red-600">Delete "{r.designation}"?</Td>
+                      <Td>
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" variant="danger" onClick={() => delMut.mutate(r.id)} loading={delMut.isPending}>Yes</Button>
+                          <Button size="sm" variant="secondary" onClick={() => setConfirmDelId(null)}>No</Button>
+                        </div>
+                      </Td>
+                    </>
+                  ) : (
+                    <>
+                      <Td right>{r.extra_days_ge15}</Td>
+                      <Td right>{r.extra_days_lt15}</Td>
+                      <Td>
+                        <div className="flex gap-1 justify-end">
+                          <button onClick={() => { setEditId(r.id); setEGe(String(r.extra_days_ge15)); setELt(String(r.extra_days_lt15)) }}
+                            className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                          <button onClick={() => setConfirmDelId(r.id)}
+                            className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                        </div>
+                      </Td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2 items-end pt-1 border-t border-gray-100">
+        <Input label="Designation" value={newDesig} onChange={e => setNewDesig(e.target.value)} placeholder="e.g. SUPERVISOR" className="flex-1 min-w-[160px]" />
+        <Input label="Extra (≥15)" type="number" value={newGe} onChange={e => setNewGe(e.target.value)} className="w-24" />
+        <Input label="Extra (&lt;15)" type="number" value={newLt} onChange={e => setNewLt(e.target.value)} className="w-24" />
+        <Button size="sm" icon={<Plus size={14}/>} onClick={() => addMut.mutate()} loading={addMut.isPending}>Add</Button>
+      </div>
+    </Card>
+  )
+}
+
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div>
     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">{title}</p>
@@ -691,6 +822,7 @@ const MastersHub: React.FC = () => (
       <InlineConfig title="Designations" grp="designation" placeholder="e.g. Farm Manager" />
       <InlineConfig title="Attendance Status" grp="attendance_status" placeholder="e.g. P, A, H" />
       <InlineConfig title="Advance Types" grp="advance_type" placeholder="e.g. Cash, Egg" />
+      <ExtraDaysConfigCard />
     </Section>
 
     <p className="text-xs text-gray-400">
