@@ -335,7 +335,7 @@ export const MonthAttendancePage: React.FC = () => {
     queryFn: async () => {
       let q = supabase.from('employees').select('id,name,emp_id,farm_id')
       if (farmId) q = q.eq('farm_id', farmId)
-      const { data } = await q.order('name')
+      const { data } = await q.order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     },
     enabled: !!farmId
@@ -556,7 +556,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
     queryFn: async () => {
       let q = supabase.from('employees').select('id,name,emp_id,farm_id')
       if (farmId) q = q.eq('farm_id', farmId)
-      const { data } = await q.order('name')
+      const { data } = await q.order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     }
   })
@@ -842,7 +842,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     queryFn: async () => {
       let q = supabase.from('employees')
         .select('id,emp_id,name,designation,farm_id,farms(name)')
-        .eq('is_active', true).order('name')
+        .eq('is_active', true).order('emp_id', { ascending: true, nullsFirst: false })
       if (farmId) q = q.eq('farm_id', farmId)
       const { data } = await q
       return data ?? []

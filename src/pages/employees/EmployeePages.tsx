@@ -841,7 +841,7 @@ export const SalaryEntryPage: React.FC = () => {
     queryFn:async()=>{
       let q=supabase.from('employees')
         .select('id,name,emp_id,designation,base_salary,esi_applicable,pf_applicable,pt_applicable,restrict_pf,farms(name,code)')
-        .eq('is_active',true).order('name')
+        .eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
       if(filterFarm)q=q.eq('farm_id',filterFarm)
       const{data}=await q;return data??[]
     }
@@ -1499,7 +1499,7 @@ export const BonusPage: React.FC = () => {
   const importRef = useRef<HTMLInputElement>(null)
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
-  const {data:employees}=useQuery({queryKey:['employees',filterFarm],queryFn:async()=>{let q=supabase.from('employees').select('id,name,emp_id,farms(name,code)').eq('is_active',true).order('name');if(filterFarm)q=q.eq('farm_id',filterFarm);const{data}=await q;return data??[]}})
+  const {data:employees}=useQuery({queryKey:['employees',filterFarm],queryFn:async()=>{let q=supabase.from('employees').select('id,name,emp_id,farms(name,code)').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false });if(filterFarm)q=q.eq('farm_id',filterFarm);const{data}=await q;return data??[]}})
   const {data:bonuses,isLoading}=useQuery({queryKey:['bonuses'],queryFn:async()=>{const{data}=await supabase.from('bonus').select('*, employees(name,emp_id,farms(name,code))').order('paid_date',{ascending:false});return data??[]}})
 
   const mut=useMutation({
@@ -2331,7 +2331,7 @@ export const PayslipGeneratorPage: React.FC = () => {
     queryKey: ['employees_all'], queryFn: async () => {
       const { data } = await supabase.from('employees')
         .select('id,emp_id,name,designation,farm_id,base_salary,esi_applicable,pf_applicable,pt_applicable,bank_name,account_no,ifsc,uan_no,esi_no,farms(name)')
-        .eq('is_active', true).order('name')
+        .eq('is_active', true).order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     }
   })
@@ -2936,7 +2936,7 @@ export const BulkSalaryPage: React.FC = () => {
     queryFn: async () => {
       let q = supabase.from('employees')
         .select('id,emp_id,name,designation,base_salary,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name,code)')
-        .eq('is_active',true).order('name')
+        .eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
       if (filterFarm) q = q.eq('farm_id', filterFarm)
       const { data } = await q; return data ?? []
     }

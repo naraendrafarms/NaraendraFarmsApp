@@ -46,7 +46,7 @@ export const SalaryRegisterPage: React.FC = () => {
         .from('salary_monthly')
         .select(`*, employees(emp_id,name,designation,emp_category,zone_area,farms(name))`)
         .eq('month', month + '-01')
-        .order('employees(name)')
+        .order('emp_id', { referencedTable: 'employees', ascending: true, nullsFirst: false })
       const { data, error } = await q
       if (error) throw error
       let result = data ?? []

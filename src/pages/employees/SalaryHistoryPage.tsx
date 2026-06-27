@@ -21,7 +21,7 @@ export const SalaryHistoryPage: React.FC = () => {
   const { data: employees } = useQuery({
     queryKey: ['employees_list'],
     queryFn: async () => {
-      const { data } = await supabase.from('employees').select('id,emp_id,name,designation,farms(name)').eq('is_active',true).order('name')
+      const { data } = await supabase.from('employees').select('id,emp_id,name,designation,farms(name)').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     }
   })
