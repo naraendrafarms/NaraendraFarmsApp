@@ -123,6 +123,7 @@ const WaitingToLink: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
       setLinkModal(null)
       setSelectedPaymentId('')
       toast.success('Linked and marked as paid')
@@ -131,6 +132,40 @@ const WaitingToLink: React.FC = () => {
     } finally {
       setLinking(false)
     }
+  }
+
+  // Already-linked (auto or manual) bank transactions — so wrong matches can be undone
+  const { data: matchedTxns } = useQuery({
+    queryKey: ['bank_txn_matched'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('bank_transactions')
+        .select('id,txn_date,description,reference_no,amount,category,match_status,linked_payment_id')
+        .eq('imported', true)
+        .in('match_status', ['auto_matched', 'manually_matched'])
+        .order('txn_date', { ascending: false })
+      return (data ?? []) as any[]
+    }
+  })
+
+  const handleUnlink = async (t: any) => {
+    try {
+      // Revert the linked vendor bill back to unpaid
+      if (t.linked_payment_id) {
+        await supabase.from('pending_payments').update({
+          payment_status: 'Pending', paid_amount: 0, paid_date: null, transaction_ref: null,
+        }).eq('id', t.linked_payment_id)
+      }
+      // Send the bank transaction back to "waiting" so it can be re-linked or ignored
+      await supabase.from('bank_transactions').update({
+        match_status: 'waiting', linked_payment_id: null,
+      }).eq('id', t.id)
+      qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
+      qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      toast.success('Unlinked — bill set back to Pending')
+    } catch (e: any) { toast.error(e.message) }
   }
 
   if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>
@@ -193,6 +228,53 @@ const WaitingToLink: React.FC = () => {
             </table>
           </div>
         </Card>
+      )}
+
+      {/* Already-linked transactions — undo wrong matches here */}
+      {(matchedTxns ?? []).length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-gray-700 mt-4">Linked Transactions ({(matchedTxns ?? []).length})</h3>
+          <p className="text-xs text-gray-400">Auto-matched or manually-linked bank debits. If a link is wrong, click <strong>Unlink</strong> — it sets the vendor bill back to Pending and returns the transaction to "Waiting to Link".</p>
+          <Card padding={false}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase text-left">
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">Description</th>
+                    <th className="px-3 py-2">Reference</th>
+                    <th className="px-3 py-2 text-right">Amount</th>
+                    <th className="px-3 py-2">Match</th>
+                    <th className="px-3 py-2 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(matchedTxns ?? []).map((t: any, i: number) => (
+                    <tr key={t.id} className={`border-b border-gray-100 hover:bg-gray-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                      <td className="px-3 py-2 text-gray-600">{t.txn_date}</td>
+                      <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate">{t.description || '—'}</td>
+                      <td className="px-3 py-2 text-gray-500">{t.reference_no || '—'}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-red-600">₹{fmt(t.amount)}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] ${t.match_status === 'auto_matched' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                          {t.match_status === 'auto_matched' ? 'Auto' : 'Manual'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={() => { if (confirm('Unlink this transaction and set the bill back to Pending?')) handleUnlink(t) }}
+                          className="flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 text-xs rounded hover:bg-red-200 mx-auto"
+                        >
+                          <X size={11} /> Unlink
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
 
       {/* Link modal */}
