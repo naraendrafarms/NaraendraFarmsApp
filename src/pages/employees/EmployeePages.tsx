@@ -3145,11 +3145,12 @@ export const BulkSalaryPage: React.FC = () => {
   const farmOptions = (farms as any[]??[]).map((f:any)=>({value:f.id,label:f.name}))
   const monthLabel = (() => { const [y,m] = month.split('-'); return `${MONTH_NAMES[parseInt(m)-1]} ${y}` })()
   const salaryTotals = React.useMemo(() => (salaries??[]).reduce((acc:any,r:any)=>({
+    extraPay: acc.extraPay+(r.extra_pay??0),
     earning: acc.earning+(r.total_earning??r.gross_salary??0),
     esi: acc.esi+(r.esi_employee??0), pf: acc.pf+(r.pf_employee??0),
     pt: acc.pt+(r.pt??0), advance: acc.advance+(r.advance??0),
     net: acc.net+(r.net_salary??0), ctc: acc.ctc+(r.monthly_ctc??0),
-  }),{earning:0,esi:0,pf:0,pt:0,advance:0,net:0,ctc:0}),[salaries])
+  }),{extraPay:0,earning:0,esi:0,pf:0,pt:0,advance:0,net:0,ctc:0}),[salaries])
 
   return (
     <div className="space-y-5">
@@ -3255,7 +3256,7 @@ export const BulkSalaryPage: React.FC = () => {
               <Table>
                 <thead><tr>
                   <Th>Code</Th><Th>Name</Th><Th>Site</Th>
-                  <Th right>Paid Days</Th><Th right>Extra</Th><Th right>Total Earning</Th>
+                  <Th right>Paid Days</Th><Th right>Extra Days</Th><Th right>Extra Pay</Th><Th right>Total Earning</Th>
                   <Th right>ESI</Th><Th right>PF</Th><Th right>PT</Th>
                   <Th right>Advance</Th><Th right>Flock Ded.</Th><Th right>Net Payable</Th><Th right>CTC</Th>
                 </tr></thead>
@@ -3269,6 +3270,7 @@ export const BulkSalaryPage: React.FC = () => {
                         <Td className="text-xs text-gray-500">{emp.farms?.name??'—'}</Td>
                         <Td right>{r.total_paid_days??r.days_worked??'—'}</Td>
                         <Td right className="text-green-600">{r.extra_days??0}</Td>
+                        <Td right className="text-green-600 text-xs">{(r.extra_pay??0)>0?inr(r.extra_pay):'—'}</Td>
                         <Td right className="font-medium">{inr(r.total_earning??r.gross_salary??0)}</Td>
                         <Td right className="text-xs">{(r.esi_employee??0)>0?inr(r.esi_employee):'—'}</Td>
                         <Td right className="text-xs">{(r.pf_employee??0)>0?inr(r.pf_employee):'—'}</Td>
@@ -3283,6 +3285,7 @@ export const BulkSalaryPage: React.FC = () => {
                   {(salaries as any[]??[]).length>0 && (
                     <tr className="bg-gray-50 font-semibold">
                       <Td colSpan={5}>TOTAL ({salaries?.length})</Td>
+                      <Td right className="text-green-700">{inr(salaryTotals.extraPay)}</Td>
                       <Td right>{inr(salaryTotals.earning)}</Td>
                       <Td right className="text-xs">{inr(salaryTotals.esi)}</Td>
                       <Td right className="text-xs">{inr(salaryTotals.pf)}</Td>
@@ -3293,7 +3296,7 @@ export const BulkSalaryPage: React.FC = () => {
                       <Td right className="text-brand-700">{inr(salaryTotals.ctc)}</Td>
                     </tr>
                   )}
-                  {!salaries?.length && <tr><Td colSpan={13} className="text-center text-gray-400 py-6">No salary data — go to Attendance tab and save first</Td></tr>}
+                  {!salaries?.length && <tr><Td colSpan={14} className="text-center text-gray-400 py-6">No salary data — go to Attendance tab and save first</Td></tr>}
                 </tbody>
               </Table>
             </Card>
