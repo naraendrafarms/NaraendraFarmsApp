@@ -6,7 +6,7 @@ import { useAuth, can } from '@/lib/auth'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, SectionHeader, Spinner, Table, Th, Td, Button, Input, Select, Modal,
-  Badge, StatCard, EmptyState, DateInput,
+  Badge, StatCard, EmptyState, DateInput, SearchableSelect,
 } from '@/components/ui'
 import {
   Boxes, Package, SlidersHorizontal,
@@ -327,6 +327,14 @@ const AdjustmentsTab: React.FC = () => {
   const importRef = useRef<HTMLInputElement>(null)
 
   const { data: rows = [], isLoading } = useAdjustments()
+  // Items Master = source of item names for the picker
+  const { data: itemsMaster = [] } = useQuery({
+    queryKey: ['items_master_adj'],
+    queryFn: async () => {
+      const { data } = await supabase.from('items').select('name,unit,is_active').eq('is_active', true).order('name')
+      return data ?? []
+    }
+  })
   const [typeFilter, setTypeFilter] = useState('')
   const [q, setQ] = useState('')
   const filtered = useMemo(() => (rows as any[]).filter((r: any) => {
@@ -472,7 +480,10 @@ const AdjustmentsTab: React.FC = () => {
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Save</Button></div>}>
         <div className="grid grid-cols-2 gap-3">
           <DateInput label="Date" value={form.adjustment_date} onChange={e => s('adjustment_date', e.target.value)} />
-          <Input label="Item Name" value={form.ingredient_name} onChange={e => s('ingredient_name', e.target.value)} />
+          <SearchableSelect label="Item Name" required placeholder="Search item from master…"
+            options={(itemsMaster as any[]).map((it: any) => ({ value: it.name, label: it.name }))}
+            value={form.ingredient_name}
+            onChange={(v) => { const it = (itemsMaster as any[]).find((x: any) => x.name === v); setForm((p: any) => ({ ...p, ingredient_name: v, unit: it?.unit ?? p.unit })) }} />
           <Select label="Type" value={form.adjustment_type} onChange={e => s('adjustment_type', e.target.value)} options={ADJ_TYPES.map(t => ({ value: t, label: t }))} />
           <Select label="Unit" value={form.unit} onChange={e => s('unit', e.target.value)} options={UNITS.map(u => ({ value: u, label: u }))} />
           <Input label="Qty (negative to reduce)" value={form.adjustment_kg} onChange={e => s('adjustment_kg', e.target.value)} />
