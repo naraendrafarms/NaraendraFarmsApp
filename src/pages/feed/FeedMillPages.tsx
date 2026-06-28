@@ -649,22 +649,31 @@ const ProductionTab: React.FC = () => {
   const [fFarm, setFFarm] = useState('')
   const [detail, setDetail] = useState<any | null>(null)
 
-  // Latest GRN price per feed ingredient (item name) — to show item-wise production rate
+  // GRN prices per feed ingredient WITH dates — so we can take the rate prevailing on
+  // the production date (point-in-time), not just the latest.
   const { data: grnRates = {} } = useQuery({
     queryKey: ['feed_grn_rates_prod'],
     queryFn: async () => {
       const { data } = await supabase.from('grn')
         .select('item_name,price_per_unit,grn_date').eq('category','Feed')
         .order('grn_date', { ascending: false })
-      const m: Record<string, number> = {}
+      const m: Record<string, { date: string; price: number }[]> = {}
       for (const g of (data ?? [])) {
         const k = String(g.item_name ?? '').trim().toLowerCase()
-        if (k && !(k in m) && g.price_per_unit) m[k] = Number(g.price_per_unit)
+        if (k && g.price_per_unit) (m[k] ??= []).push({ date: g.grn_date ?? '', price: Number(g.price_per_unit) })
       }
-      return m
+      return m  // each list is newest-first
     }
   })
-  const ingRate = (name: string) => grnRates[String(name ?? '').trim().toLowerCase()] ?? 0
+  // Rate of an ingredient as of a date: latest GRN price with grn_date <= asOf.
+  // Falls back to the oldest known price if the production predates all purchases.
+  const ingRate = (name: string, asOf?: string) => {
+    const list = grnRates[String(name ?? '').trim().toLowerCase()]
+    if (!list || !list.length) return 0
+    if (!asOf) return list[0].price
+    const onOrBefore = list.find(x => x.date && x.date <= asOf)
+    return (onOrBefore ?? list[list.length - 1]).price
+  }
 
   const { data: farms = [] } = useQuery({ queryKey:['farms'], queryFn: async () => { const {data} = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[] }})
   const { data: formulas = [] } = useQuery({ queryKey:['feed_formulas'], queryFn: async () => { const {data} = await supabase.from('feed_formulas').select('id,formula_code,formula_name,feed_types(code,name)').eq('is_active',true).order('formula_code'); return data??[] }})
@@ -847,7 +856,7 @@ const ProductionTab: React.FC = () => {
           let totCost = 0
           const rows = ings.map((i: any) => {
             const qty = Number(i.quantity_kg ?? i.qty_used_kg ?? 0)
-            const rate = ingRate(i.ingredient_name)
+            const rate = ingRate(i.ingredient_name, detail.production_date)
             const cost = qty * rate
             totCost += cost
             return { name: i.ingredient_name, qty, rate, cost }
@@ -857,7 +866,7 @@ const ProductionTab: React.FC = () => {
             <div className="space-y-2">
               <div className="overflow-x-auto">
                 <Table>
-                  <thead><tr><Th>Ingredient</Th><Th right>Qty (kg)</Th><Th right>Rate ₹/kg (latest GRN)</Th><Th right>Cost ₹</Th></tr></thead>
+                  <thead><tr><Th>Ingredient</Th><Th right>Qty (kg)</Th><Th right>Rate ₹/kg (GRN as of date)</Th><Th right>Cost ₹</Th></tr></thead>
                   <tbody>
                     {rows.map((r: any, i: number) => (
                       <tr key={i} className="hover:bg-gray-50">
@@ -876,7 +885,7 @@ const ProductionTab: React.FC = () => {
                   </tbody>
                 </Table>
               </div>
-              <p className="text-xs text-gray-400">Rates are the latest GRN purchase price per ingredient. Cost/kg of this batch = total cost ÷ total kg.</p>
+              <p className="text-xs text-gray-400">Rates are the GRN purchase price prevailing on the production date ({fmtDate(detail.production_date)}) — the latest purchase on or before that date. Cost/kg of this batch = total cost ÷ total kg.</p>
             </div>
           )
         })()}
