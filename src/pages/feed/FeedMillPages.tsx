@@ -647,6 +647,24 @@ const ProductionTab: React.FC = () => {
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
   const [fFarm, setFFarm] = useState('')
+  const [detail, setDetail] = useState<any | null>(null)
+
+  // Latest GRN price per feed ingredient (item name) — to show item-wise production rate
+  const { data: grnRates = {} } = useQuery({
+    queryKey: ['feed_grn_rates_prod'],
+    queryFn: async () => {
+      const { data } = await supabase.from('grn')
+        .select('item_name,price_per_unit,grn_date').eq('category','Feed')
+        .order('grn_date', { ascending: false })
+      const m: Record<string, number> = {}
+      for (const g of (data ?? [])) {
+        const k = String(g.item_name ?? '').trim().toLowerCase()
+        if (k && !(k in m) && g.price_per_unit) m[k] = Number(g.price_per_unit)
+      }
+      return m
+    }
+  })
+  const ingRate = (name: string) => grnRates[String(name ?? '').trim().toLowerCase()] ?? 0
 
   const { data: farms = [] } = useQuery({ queryKey:['farms'], queryFn: async () => { const {data} = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[] }})
   const { data: formulas = [] } = useQuery({ queryKey:['feed_formulas'], queryFn: async () => { const {data} = await supabase.from('feed_formulas').select('id,formula_code,formula_name,feed_types(code,name)').eq('is_active',true).order('formula_code'); return data??[] }})
@@ -791,7 +809,12 @@ const ProductionTab: React.FC = () => {
                 </Td>
                 <Td>{l.farms?.code ?? l.farms?.name ?? '—'}</Td>
                 <Td className="font-semibold">{Number(l.quantity_kg).toLocaleString()}</Td>
-                <Td className="text-xs text-gray-500">{(l.feed_production_ingredients??[]).length} items</Td>
+                <Td className="text-xs">
+                  {(l.feed_production_ingredients??[]).length > 0
+                    ? <button className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 active:bg-blue-100"
+                        onClick={() => setDetail(l)} title="View item-wise rates & cost">{(l.feed_production_ingredients??[]).length} items 🔍</button>
+                    : <span className="text-gray-400">0 items</span>}
+                </Td>
                 <Td className="text-xs">{l.remarks}</Td>
                 <Td>
                   <div className="flex gap-2">
@@ -814,6 +837,48 @@ const ProductionTab: React.FC = () => {
           onSave={(d: any) => saveMut.mutate(d)}
           loading={saveMut.isPending}
         />
+      </Modal>
+
+      <Modal open={!!detail} onClose={() => setDetail(null)}
+        title={detail ? `Production Cost — ${detail.feed_formulas?.formula_code ?? ''} · ${Number(detail.quantity_kg).toLocaleString()} kg · ${fmtDate(detail.production_date)}` : ''} size="lg">
+        {detail && (() => {
+          const ings = detail.feed_production_ingredients ?? []
+          let totCost = 0
+          const rows = ings.map((i: any) => {
+            const qty = Number(i.quantity_kg ?? i.qty_used_kg ?? 0)
+            const rate = ingRate(i.ingredient_name)
+            const cost = qty * rate
+            totCost += cost
+            return { name: i.ingredient_name, qty, rate, cost }
+          })
+          const totKg = rows.reduce((s: number, r: any) => s + r.qty, 0)
+          return (
+            <div className="space-y-2">
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr><Th>Ingredient</Th><Th right>Qty (kg)</Th><Th right>Rate ₹/kg (latest GRN)</Th><Th right>Cost ₹</Th></tr></thead>
+                  <tbody>
+                    {rows.map((r: any, i: number) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <Td className="text-xs">{r.name}</Td>
+                        <Td right className="text-xs">{r.qty.toFixed(3)}</Td>
+                        <Td right className="text-xs">{r.rate > 0 ? `₹${r.rate}` : <span className="text-gray-400">—</span>}</Td>
+                        <Td right className="text-xs font-semibold">{inr(r.cost)}</Td>
+                      </tr>
+                    ))}
+                    <tr className="bg-gray-50 font-semibold">
+                      <Td>TOTAL</Td>
+                      <Td right>{totKg.toFixed(1)} kg</Td>
+                      <Td right>{totKg > 0 ? `₹${(totCost/totKg).toFixed(2)}/kg` : ''}</Td>
+                      <Td right>{inr(totCost)}</Td>
+                    </tr>
+                  </tbody>
+                </Table>
+              </div>
+              <p className="text-xs text-gray-400">Rates are the latest GRN purchase price per ingredient. Cost/kg of this batch = total cost ÷ total kg.</p>
+            </div>
+          )
+        })()}
       </Modal>
     </div>
   )
