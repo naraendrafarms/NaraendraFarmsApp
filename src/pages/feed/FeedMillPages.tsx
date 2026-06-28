@@ -836,11 +836,21 @@ const ProductionForm: React.FC<{
     existingIngs.map((i:any) => ({ingredient_name:i.ingredient_name, quantity_kg: String(i.quantity_kg)}))
   )
 
+  // ingredient kg = kg_per_1000 × batch/1000  OR  percentage/100 × batch (fallback,
+  // because user-created formulas usually store percentage, not kg_per_1000).
+  function ingKg(i: any, qtyNum: number): string {
+    if (!qtyNum) return ''
+    if (i.kg_per_1000 != null) return String(+(i.kg_per_1000 * qtyNum / 1000).toFixed(3))
+    if (i.percentage != null)  return String(+(i.percentage / 100 * qtyNum).toFixed(3))
+    return ''
+  }
+
   function handleFormulaChange(formulaId: string) {
     setForm((f: any) => ({...f, formula_id: formulaId}))
     if (!formulaId) { setIngs([]); return }
     const fIngs = allIngredients[formulaId] ?? []
-    setIngs(fIngs.map((i: any) => ({ ingredient_name: i.ingredient_name, quantity_kg: '' })))
+    const qtyNum = Number(form.quantity_kg) || 0
+    setIngs(fIngs.map((i: any) => ({ ingredient_name: i.ingredient_name, quantity_kg: ingKg(i, qtyNum) })))
   }
 
   function recalcKg(qty: string) {
@@ -848,10 +858,7 @@ const ProductionForm: React.FC<{
     if (!qty || !form.formula_id) return
     const qtyNum = Number(qty)
     const fIngs = allIngredients[form.formula_id] ?? []
-    setIngs(fIngs.map((i: any) => ({
-      ingredient_name: i.ingredient_name,
-      quantity_kg: i.kg_per_1000 != null ? String(+(i.kg_per_1000 * qtyNum / 1000).toFixed(3)) : ''
-    })))
+    setIngs(fIngs.map((i: any) => ({ ingredient_name: i.ingredient_name, quantity_kg: ingKg(i, qtyNum) })))
   }
 
   function submit(e: React.FormEvent) {
@@ -1739,8 +1746,8 @@ const ReconciliationTab: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,laying_farm_id,rearing_farm_id'); return data ?? [] }
   })
   const { data: dailyFeed = [] } = useQuery({
-    queryKey: ['recon_daily_feed'],
-    queryFn: async () => { const { data } = await supabase.from('daily_feed').select('flock_id,feed_type,female_kg,male_kg'); return data ?? [] }
+    queryKey: ['recon_daily_records'],
+    queryFn: async () => { const { data } = await supabase.from('daily_records').select('flock_id,feed_type_f,feed_female_kg,feed_type_m,feed_male_kg'); return data ?? [] }
   })
 
   // map feed_type code -> feed_type_id
@@ -1758,14 +1765,19 @@ const ReconciliationTab: React.FC = () => {
     dispatched[k] = (dispatched[k] ?? 0) + Number(t.quantity_kg ?? 0)
   }
 
-  // consumed: daily_feed grouped by flock's farm + feed_type code mapped to id
+  // consumed: daily_records grouped by flock's farm + feed type (female and male
+  // each by their own feed type code mapped to id)
   const consumed: Record<string, number> = {}
+  const addConsumed = (farmId: string, code: string, kg: number) => {
+    const typeId = codeToTypeId[String(code ?? '').trim().toLowerCase()]
+    if (!farmId || !typeId || !kg) return
+    const k = `${farmId}|${typeId}`
+    consumed[k] = (consumed[k] ?? 0) + kg
+  }
   for (const d of (dailyFeed as any[])) {
     const farmId = flockFarm[d.flock_id]
-    const typeId = codeToTypeId[String(d.feed_type ?? '').trim().toLowerCase()]
-    if (!farmId || !typeId) continue
-    const k = `${farmId}|${typeId}`
-    consumed[k] = (consumed[k] ?? 0) + Number(d.female_kg ?? 0) + Number(d.male_kg ?? 0)
+    addConsumed(farmId, d.feed_type_f, Number(d.feed_female_kg ?? 0))
+    addConsumed(farmId, d.feed_type_m, Number(d.feed_male_kg ?? 0))
   }
 
   const farmName: Record<string, string> = {}

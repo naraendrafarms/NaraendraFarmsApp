@@ -769,6 +769,16 @@ export const SalaryEntryPage: React.FC = () => {
         .select('employee_id').eq('month', monthStr)
       if (exErr) throw exErr
       const existingIds = new Set((existing ?? []).map((r: any) => r.employee_id))
+      // Pull this month's advances so they are deducted and shown (abstract + register voucher).
+      // advance_type 'other' = other deduction; anything else = salary advance.
+      const { data: advRows } = await supabase.from('employee_advances')
+        .select('employee_id,amount,advance_type').eq('salary_month', genMonth)
+      const advByEmp: Record<string, number> = {}
+      const otherDedByEmp: Record<string, number> = {}
+      for (const a of (advRows ?? [])) {
+        if ((a.advance_type ?? '') === 'other') otherDedByEmp[a.employee_id] = (otherDedByEmp[a.employee_id] ?? 0) + (a.amount ?? 0)
+        else advByEmp[a.employee_id] = (advByEmp[a.employee_id] ?? 0) + (a.amount ?? 0)
+      }
       const toInsert = (emps ?? []).filter((e: any) => !existingIds.has(e.id)).map((e: any) => {
         const base = e.base_salary ?? 0
         const gross = base
@@ -777,14 +787,18 @@ export const SalaryEntryPage: React.FC = () => {
         const pf_emp  = e.pf_applicable ? Math.round(base * 0.12) : 0
         const pf_er   = e.pf_applicable ? Math.round(base * 0.12) : 0
         const pt      = e.pt_applicable ? (gross <= 15000 ? 0 : gross <= 20000 ? 150 : 200) : 0
-        const net     = gross - esi_emp - pf_emp - pt
+        const advance = advByEmp[e.id] ?? 0
+        const otherDed = otherDedByEmp[e.id] ?? 0
+        const net     = Math.max(0, gross - esi_emp - pf_emp - pt - advance - otherDed)
         return {
           employee_id: e.id,
           month: monthStr,
           basic_salary: base,
           earned_salary: gross,
           gross_salary: gross,
-          advance: 0,
+          advance,
+          further_advance: advance,
+          other_deduction: otherDed,
           net_salary: net,
           esi_employee: esi_emp, esi_employer: esi_er,
           pf_employee: pf_emp, pf_employer: pf_er,
