@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
-import { Card, CardHeader, Button, Select, Table, Th, Td, Spinner, EmptyState } from '@/components/ui'
+import { Card, CardHeader, Button, Select, Table, Th, Td, Spinner, EmptyState, Modal, Badge } from '@/components/ui'
 import { IndianRupee, Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
@@ -32,6 +32,20 @@ export const SalaryRegisterPage: React.FC = () => {
   const today = new Date()
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
   const [filterFarm, setFilterFarm] = useState('')
+  const [voucherEmp, setVoucherEmp] = useState<{ id: string; name: string } | null>(null)
+
+  // Advance voucher: the actual employee_advances entries behind a register's advance amount
+  const { data: voucherRows } = useQuery({
+    queryKey: ['adv_voucher', voucherEmp?.id, month],
+    enabled: !!voucherEmp,
+    queryFn: async () => {
+      const { data } = await supabase.from('employee_advances')
+        .select('advance_date,advance_type,amount,narration,salary_month')
+        .eq('employee_id', voucherEmp!.id).eq('salary_month', month)
+        .order('advance_date')
+      return data ?? []
+    }
+  })
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -178,7 +192,12 @@ export const SalaryRegisterPage: React.FC = () => {
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.pf_employee??0)}</td>
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.esi_employee??0)}</td>
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.pt??0)}</td>
-                    <td className="px-2 py-1.5 text-right text-red-500">{inr(r.advance??0)}</td>
+                    <td className="px-2 py-1.5 text-right text-red-500">
+                      {(r.advance??0) > 0
+                        ? <button className="underline decoration-dotted hover:text-red-700" title="View advance voucher"
+                            onClick={() => setVoucherEmp({ id: r.employee_id, name: emp.name })}>{inr(r.advance)}</button>
+                        : inr(r.advance??0)}
+                    </td>
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.other_deduction??0)}</td>
                     <td className="px-2 py-1.5 text-right font-bold text-green-800 bg-green-50">{inr(r.net_salary??0)}</td>
                   </tr>
@@ -201,6 +220,35 @@ export const SalaryRegisterPage: React.FC = () => {
             </tfoot>
           </table>
         </div>
+      )}
+
+      {voucherEmp && (
+        <Modal open={!!voucherEmp} onClose={() => setVoucherEmp(null)} title={`Advance Voucher — ${voucherEmp.name} · ${monthLabel(month)}`} size="md">
+          {!voucherRows ? <Spinner /> : (voucherRows as any[]).length === 0 ? (
+            <EmptyState icon={<IndianRupee size={28}/>} title="No advance entries for this month" subtitle="The advance shown may be a carried/opening balance — check Employees → Advances" />
+          ) : (
+            <div className="space-y-2">
+              <Table>
+                <thead><tr><Th>Date</Th><Th>Type</Th><Th>Narration</Th><Th right>Amount</Th></tr></thead>
+                <tbody>
+                  {(voucherRows as any[]).map((v: any, i: number) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-2 py-1.5 text-xs">{v.advance_date ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-xs"><Badge color="blue">{v.advance_type ?? '—'}</Badge></td>
+                      <td className="px-2 py-1.5 text-xs text-gray-500">{v.narration ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-right font-medium">{inr(v.amount ?? 0)}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-gray-50 font-semibold">
+                    <td colSpan={3} className="px-2 py-2 text-right">Total Advance</td>
+                    <td className="px-2 py-2 text-right">{inr((voucherRows as any[]).reduce((s: number, v: any) => s + (v.amount ?? 0), 0))}</td>
+                  </tr>
+                </tbody>
+              </Table>
+              <p className="text-xs text-gray-400">These are the actual entries from Employees → Advances for this salary month. Delete a wrong one there, then re-run Bulk Salary → Save &amp; Calculate.</p>
+            </div>
+          )}
+        </Modal>
       )}
     </div>
   )

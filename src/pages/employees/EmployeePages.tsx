@@ -2924,6 +2924,7 @@ export const BulkSalaryPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const extraDaysConfig = useExtraDaysConfig()
   const [absentMap, setAbsentMap] = useState<Record<string,string>>({})
+  const [tdsMap, setTdsMap] = useState<Record<string,string>>({})
 
   const monthDate = month + '-01'
 
@@ -3012,8 +3013,13 @@ export const BulkSalaryPage: React.FC = () => {
   React.useEffect(() => {
     if (!salaries) return
     const map: Record<string,string> = {}
-    for (const s of (salaries as any[])) if (s.employee_id) map[s.employee_id] = String(s.absent_days ?? 0)
+    const tmap: Record<string,string> = {}
+    for (const s of (salaries as any[])) if (s.employee_id) {
+      map[s.employee_id] = String(s.absent_days ?? 0)
+      tmap[s.employee_id] = String(s.tds ?? 0)
+    }
     setAbsentMap(map)
+    setTdsMap(tmap)
   }, [salaries, monthDate])
 
   const saveAttendance = async () => {
@@ -3028,6 +3034,7 @@ export const BulkSalaryPage: React.FC = () => {
           absentDays,
           monthDays: daysInMonth,
           extraDaysConfig,
+          tds: parseFloat(tdsMap[emp.id] ?? '0') || 0,
           furtherAdvance: (advances as any)?.[emp.id] ?? 0,
           otherDeduction: (deductions as any)?.[emp.id] ?? 0,
         })
@@ -3201,7 +3208,7 @@ export const BulkSalaryPage: React.FC = () => {
               <thead><tr>
                 <Th>Code</Th><Th>Name</Th><Th>Site</Th><Th>Designation</Th>
                 <Th right>Base Salary</Th><Th right>Advances</Th><Th right>Flock Ded.</Th>
-                <Th right>From Daily Att.</Th><Th right>Absent Days</Th>
+                <Th right>From Daily Att.</Th><Th right>Absent Days</Th><Th right>TDS</Th>
               </tr></thead>
               <tbody>
                 {(employees as any[]??[]).map((emp:any)=>{
@@ -3228,10 +3235,15 @@ export const BulkSalaryPage: React.FC = () => {
                           onChange={e=>setAbsentMap(m=>({...m,[emp.id]:e.target.value}))}
                           className="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-brand-500"/>
                       </Td>
+                      <Td right>
+                        <input type="number" min={0} step={1} value={tdsMap[emp.id]??'0'} placeholder="0"
+                          onChange={e=>setTdsMap(m=>({...m,[emp.id]:e.target.value}))}
+                          className="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-brand-500"/>
+                      </Td>
                     </tr>
                   )
                 })}
-                {!employees?.length && <tr><Td colSpan={9} className="text-center text-gray-400 py-6">No employees found</Td></tr>}
+                {!employees?.length && <tr><Td colSpan={10} className="text-center text-gray-400 py-6">No employees found</Td></tr>}
               </tbody>
             </Table>
           </Card>
