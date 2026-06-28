@@ -763,6 +763,57 @@ const ExtraDaysConfigCard: React.FC = () => {
   )
 }
 
+// Read-only reference of the statutory rules the salary code applies (ESI / PF / PT).
+const StatutoryRulesCard: React.FC = () => (
+  <Card className="space-y-4 sm:col-span-2 lg:col-span-3">
+    <div>
+      <p className="font-semibold text-gray-700 text-sm">Statutory Rules used in salary calculation</p>
+      <p className="text-xs text-gray-400">These are the exact rates/ceilings the app applies. Reference only — set ESI/PF/PT applicability and "Restrict PF" per employee in Employees.</p>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* ESI */}
+      <div className="border border-gray-100 rounded-lg p-3 space-y-1.5">
+        <p className="text-sm font-semibold text-purple-700">ESI</p>
+        <p className="text-xs text-gray-600">Applies only when <b>gross ≤ ₹21,000</b>. If gross &gt; 21,000 → ESI = 0.</p>
+        <ul className="text-xs text-gray-700 list-disc ml-4 space-y-0.5">
+          <li>Employee: <b>0.75%</b> of gross</li>
+          <li>Employer: <b>3.25%</b> of gross</li>
+        </ul>
+      </div>
+
+      {/* PF */}
+      <div className="border border-gray-100 rounded-lg p-3 space-y-1.5">
+        <p className="text-sm font-semibold text-blue-700">PF (EPF)</p>
+        <p className="text-xs text-gray-600">On <b>Basic</b>. If <b>Restrict PF</b> is on, Basic is capped at <b>₹15,000</b> (max PF ₹1,800).</p>
+        <ul className="text-xs text-gray-700 list-disc ml-4 space-y-0.5">
+          <li>Employee PF: <b>12%</b> of Basic (capped)</li>
+          <li>Employer EPS: <b>8.33%</b> of min(Basic, 15,000)</li>
+          <li>Employer EPF diff: PF − EPS</li>
+          <li>Admin charges: <b>0.5%</b> of min(Basic, 15,000)</li>
+          <li>EDLI: <b>0.5%</b> of min(Basic, 15,000)</li>
+        </ul>
+      </div>
+
+      {/* PT */}
+      <div className="border border-gray-100 rounded-lg p-3 space-y-1.5">
+        <p className="text-sm font-semibold text-green-700">PT (Professional Tax)</p>
+        <p className="text-xs text-gray-600">Telangana / AP slab, on monthly gross:</p>
+        <ul className="text-xs text-gray-700 list-disc ml-4 space-y-0.5">
+          <li>gross ≤ ₹15,000 → <b>₹0</b></li>
+          <li>₹15,001 – ₹20,000 → <b>₹150</b></li>
+          <li>above ₹20,000 → <b>₹200</b></li>
+        </ul>
+      </div>
+    </div>
+
+    <p className="text-xs text-gray-400">
+      Net = Earned − PF(employee) − VPF − ESI(employee) − PT − LWF − TDS − Other Deduction − Advance.
+      Extra-days pay per designation is configured above.
+    </p>
+  </Card>
+)
+
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div>
     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">{title}</p>
@@ -823,6 +874,10 @@ const MastersHub: React.FC = () => (
       <InlineConfig title="Attendance Status" grp="attendance_status" placeholder="e.g. P, A, H" />
       <InlineConfig title="Advance Types" grp="advance_type" placeholder="e.g. Cash, Egg" />
       <ExtraDaysConfigCard />
+    </Section>
+
+    <Section title="Statutory (ESI / PF / PT)">
+      <StatutoryRulesCard />
     </Section>
 
     <p className="text-xs text-gray-400">
