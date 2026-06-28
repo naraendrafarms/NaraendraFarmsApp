@@ -38,7 +38,7 @@ const emptyForm = () => ({
   invoice_no: '', invoice_date: today(), category: 'Feed Ingredient',
   item_id: '', item_name: '', flock_id: '',
   qty: '', unit: '', bags: '', price_per_unit: '',
-  basic_amount: '', gst_pct: '0', gst_amount: '', total_amount: '',
+  basic_amount: '', gst_pct: '0', gst_amount: '', other_charges: '', total_amount: '',
   batch_no: '', expiry_date: '', vehicle_no: '', remarks: ''
 })
 
@@ -70,7 +70,12 @@ export const GRNPage: React.FC = () => {
 
   const basicCalc = (parseFloat(form.qty) || 0) * (parseFloat(form.price_per_unit) || 0)
   const gstCalc = basicCalc * (parseFloat(form.gst_pct) || 0) / 100
-  const totalCalc = basicCalc + gstCalc
+  const otherCharges = parseFloat(form.other_charges) || 0
+  const totalCalc = basicCalc + gstCalc + otherCharges
+  // Landed rate/unit = material rate + transport per unit (what stock/production cost uses)
+  const landedRate = (parseFloat(form.qty) || 0) > 0
+    ? (parseFloat(form.price_per_unit) || 0) + otherCharges / (parseFloat(form.qty) || 1)
+    : (parseFloat(form.price_per_unit) || 0)
 
   const isChick = form.category === 'Chicks'
   const needsBatch = BATCH_CATS.has(form.category)
@@ -179,6 +184,7 @@ export const GRNPage: React.FC = () => {
       basic_amount: g.basic_amount?.toString() ?? '',
       gst_pct: g.gst_pct?.toString() ?? '0',
       gst_amount: g.gst_amount?.toString() ?? '',
+      other_charges: g.other_charges?.toString() ?? '',
       total_amount: g.total_amount?.toString() ?? '',
       batch_no: g.batch_no ?? '',
       expiry_date: g.expiry_date ?? '',
@@ -206,6 +212,7 @@ export const GRNPage: React.FC = () => {
     basic_amount: parseFloat(form.basic_amount) || basicCalc || null,
     gst_pct: parseFloat(form.gst_pct) || 0,
     gst_amount: parseFloat(form.gst_amount) || (gstCalc > 0 ? +gstCalc.toFixed(2) : null),
+    other_charges: otherCharges || null,
     total_amount: parseFloat(form.total_amount) || totalCalc || null,
     batch_no: needsBatch ? (form.batch_no || null) : null,
     expiry_date: needsBatch ? (form.expiry_date || null) : null,
@@ -655,11 +662,28 @@ export const GRNPage: React.FC = () => {
               hint={basicCalc > 0 ? `Auto: ${inr(basicCalc)}` : undefined}
             />
             <Input
+              label="Transport / Other Charges"
+              type="number"
+              value={form.other_charges}
+              onChange={e => s('other_charges', e.target.value)}
+              hint="Freight you pay — added to landed cost"
+            />
+          </FormRow>
+          <FormRow cols={2}>
+            <Input
               label="Total Amount"
               type="number"
               value={form.total_amount}
               onChange={e => s('total_amount', e.target.value)}
-              hint={totalCalc > 0 ? `Auto: ${inr(totalCalc)}` : undefined}
+              hint={totalCalc > 0 ? `Auto (incl. transport): ${inr(totalCalc)}` : undefined}
+            />
+            <Input
+              label="Landed Rate / Unit"
+              type="number"
+              value={landedRate ? landedRate.toFixed(3) : ''}
+              onChange={() => {}}
+              disabled
+              hint="Material + transport ÷ qty — used for stock & production cost"
             />
           </FormRow>
 

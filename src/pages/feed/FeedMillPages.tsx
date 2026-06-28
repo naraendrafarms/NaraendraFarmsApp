@@ -655,12 +655,16 @@ const ProductionTab: React.FC = () => {
     queryKey: ['feed_grn_rates_prod'],
     queryFn: async () => {
       const { data } = await supabase.from('grn')
-        .select('item_name,price_per_unit,grn_date').eq('category','Feed')
+        .select('item_name,price_per_unit,qty,other_charges,grn_date').eq('category','Feed')
         .order('grn_date', { ascending: false })
       const m: Record<string, { date: string; price: number }[]> = {}
       for (const g of (data ?? [])) {
         const k = String(g.item_name ?? '').trim().toLowerCase()
-        if (k && g.price_per_unit) (m[k] ??= []).push({ date: g.grn_date ?? '', price: Number(g.price_per_unit) })
+        if (!k || !g.price_per_unit) continue
+        // landed rate = material rate + transport per unit
+        const qty = Number(g.qty) || 0
+        const landed = Number(g.price_per_unit) + (qty > 0 ? (Number(g.other_charges) || 0) / qty : 0)
+        ;(m[k] ??= []).push({ date: g.grn_date ?? '', price: landed })
       }
       return m  // each list is newest-first
     }

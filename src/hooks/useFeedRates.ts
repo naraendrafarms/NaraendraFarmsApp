@@ -25,7 +25,7 @@ export function useFeedRates(): FeedRates {
       // 1. Latest GRN price per ingredient (feed category)
       const { data: grn } = await supabase
         .from('grn')
-        .select('item_name,price_per_unit,grn_date,feed_ingredients(name)')
+        .select('item_name,price_per_unit,qty,other_charges,grn_date,feed_ingredients(name)')
         .eq('category', 'Feed')
         .order('grn_date', { ascending: false })
       const rateByIng: Record<string, number> = {}
@@ -33,7 +33,10 @@ export function useFeedRates(): FeedRates {
         const name = (g as any).item_name || (g as any).feed_ingredients?.name
         if (name && g.price_per_unit) {
           const k = String(name).trim().toLowerCase()
-          if (!(k in rateByIng)) rateByIng[k] = Number(g.price_per_unit)
+          // landed rate = material rate + transport per unit (latest GRN wins)
+          const qty = Number((g as any).qty) || 0
+          const landed = Number(g.price_per_unit) + (qty > 0 ? (Number((g as any).other_charges) || 0) / qty : 0)
+          if (!(k in rateByIng)) rateByIng[k] = landed
         }
       }
 
