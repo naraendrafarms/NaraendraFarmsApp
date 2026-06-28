@@ -9,6 +9,7 @@ import {
 , DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle, Printer } from 'lucide-react'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
+import { useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 import { supplyType, splitTax, GST_RATE_OPTIONS } from '@/lib/gst'
@@ -1394,7 +1395,8 @@ export const NHESales: React.FC = () => {
   const [flockFilter, setFlockFilter] = useState('')
   const [typeFilter, setTypeFilter]   = useState('')
   const [partyFilter, setPartyFilter] = useState('')
-  const [empFilter, setEmpFilter] = useState('')
+  const [searchParams] = useSearchParams()
+  const [empFilter, setEmpFilter] = useState(searchParams.get('emp') ?? '')
   const [fromDate, setFromDate]   = useState('')
   const [toDate, setToDate]       = useState('')
   const [sel, setSel]             = useState<Set<string>>(new Set())
@@ -1723,26 +1725,29 @@ export const NHESales: React.FC = () => {
         })
       }
 
-      // Create employee deduction record when sale is on salary deduction
-      if (form.is_employee_sale && form.deduct_salary && form.employee_id && savedId) {
-        const { category: cbCategory } = nheCashCategory(form.sale_type)
-        const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
-        const empName = employees?.find((e: any) => e.id === form.employee_id)?.name ?? ''
-        const saleMonth = form.sale_date.slice(0, 7)
-        const saleMonthFull = saleMonth + '-01'
+      // Employee sale: only the UNPAID portion is deducted from salary. If the employee
+      // paid cash/online, that part is NOT a salary deduction (was wrongly deducting the
+      // full amount even when cash was received).
+      if (form.is_employee_sale && form.employee_id && savedId) {
+        // Always clear any prior deduction for this sale first (covers edits + paid-off)
         if (editing) {
           await supabase.from('employee_deductions').delete().eq('nhe_sale_id', editing.id)
         }
-        // Single source of truth: employee_deductions only. (We no longer also write a
-        // duplicate employee_advances 'other' row — that caused two diverging totals.)
-        await supabase.from('employee_deductions').insert({
-          employee_id: form.employee_id,
-          nhe_sale_id: savedId,
-          description: `Sale F-${flockNo ?? ''} ${cbCategory} to ${empName}`,
-          amount: finalAmt,
-          deduction_month: saleMonthFull,
-          status: 'pending',
-        })
+        const deductAmt = Math.max(0, finalAmt - cashAmt - onlineAmt)
+        if (form.deduct_salary && deductAmt > 0) {
+          const { category: cbCategory } = nheCashCategory(form.sale_type)
+          const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
+          const empName = employees?.find((e: any) => e.id === form.employee_id)?.name ?? ''
+          const saleMonthFull = form.sale_date.slice(0, 7) + '-01'
+          await supabase.from('employee_deductions').insert({
+            employee_id: form.employee_id,
+            nhe_sale_id: savedId,
+            description: `Sale F-${flockNo ?? ''} ${cbCategory} to ${empName}`,
+            amount: deductAmt,
+            deduction_month: saleMonthFull,
+            status: 'pending',
+          })
+        }
       }
 
       // Sync daily_records cull counts from total of ALL nhe_sales for this flock+date

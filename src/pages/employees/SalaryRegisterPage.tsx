@@ -3,8 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Table, Th, Td, Spinner, EmptyState, Modal, Badge } from '@/components/ui'
-import { IndianRupee, Download } from 'lucide-react'
+import { IndianRupee, Download, ExternalLink } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -32,6 +33,7 @@ export const SalaryRegisterPage: React.FC = () => {
   const today = new Date()
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
   const [filterFarm, setFilterFarm] = useState('')
+  const navigate = useNavigate()
   const [voucherEmp, setVoucherEmp] = useState<{ id: string; name: string } | null>(null)
   const [dedEmp, setDedEmp] = useState<{ id: string; name: string } | null>(null)
 
@@ -330,7 +332,10 @@ export const SalaryRegisterPage: React.FC = () => {
                   </tr>
                 </tbody>
               </Table>
-              <p className="text-xs text-gray-400">These are egg/bird purchases set to deduct from salary (Employees → from the flock sale). Fix a wrong one at source, then re-run Bulk Salary → Save &amp; Calculate.</p>
+              <Button size="sm" variant="outline" onClick={() => navigate(`/flocks/nhe-sales?emp=${dedEmp.id}`)}>
+                <ExternalLink size={14} className="mr-1"/>Open these sales in NHE Sales
+              </Button>
+              <p className="text-xs text-gray-400">These are egg/bird purchases set to deduct from salary. Click above to open the actual sale entries in NHE Sales (filtered to this employee), where you can edit or delete them; then re-run Bulk Salary → Save &amp; Calculate.</p>
             </div>
           )}
         </Modal>
