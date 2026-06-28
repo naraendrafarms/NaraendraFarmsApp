@@ -194,8 +194,8 @@ export const SalaryRegisterPage: React.FC = () => {
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.pt??0)}</td>
                     <td className="px-2 py-1.5 text-right text-red-500">
                       {(r.advance??0) > 0
-                        ? <button className="underline decoration-dotted hover:text-red-700" title="View advance voucher"
-                            onClick={() => setVoucherEmp({ id: r.employee_id, name: emp.name })}>{inr(r.advance)}</button>
+                        ? <button className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-red-50 text-red-700 font-medium border border-red-200 active:bg-red-100" title="Tap to view advance voucher"
+                            onClick={() => setVoucherEmp({ id: r.employee_id, name: emp.name })}>{inr(r.advance)} 🔍</button>
                         : inr(r.advance??0)}
                     </td>
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.other_deduction??0)}</td>
