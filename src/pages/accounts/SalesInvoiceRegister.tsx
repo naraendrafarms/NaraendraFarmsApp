@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fyRange, FY_OPTIONS } from '@/lib/utils'
 import {
   Card, Button, Select, SectionHeader, Spinner,
   Table, Th, Td, Badge, StatCard, DateInput,
@@ -39,6 +39,12 @@ export const SalesInvoiceRegister: React.FC = () => {
   const [filterSeries, setFilterSeries] = useState('')
   const [filterFrom, setFilterFrom]     = useState('')
   const [filterTo, setFilterTo]         = useState('')
+  const [filterFy, setFilterFy]         = useState('')
+
+  const applyFy = (v: string) => {
+    setFilterFy(v)
+    if (v) { const r = fyRange(v); setFilterFrom(r.start); setFilterTo(r.end) }
+  }
 
   // HE Dispatch invoices
   const { data: heRows, isLoading: heLoading } = useQuery({
@@ -145,11 +151,16 @@ export const SalesInvoiceRegister: React.FC = () => {
               options={seriesOptions}
               value={filterSeries} onChange={e => setFilterSeries(e.target.value)} />
           </div>
-          <DateInput label="From" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
-          <DateInput label="To"   value={filterTo}   onChange={e => setFilterTo(e.target.value)}   />
-          {(filterSeries || filterFrom || filterTo) && (
+          <div className="w-36">
+            <Select label="Financial Year" placeholder="— FY —"
+              options={FY_OPTIONS.map(f => ({ value: f, label: `FY ${f}` }))}
+              value={filterFy} onChange={e => applyFy(e.target.value)} />
+          </div>
+          <DateInput label="From" value={filterFrom} onChange={e => { setFilterFrom(e.target.value); setFilterFy('') }} />
+          <DateInput label="To"   value={filterTo}   onChange={e => { setFilterTo(e.target.value); setFilterFy('') }}   />
+          {(filterSeries || filterFrom || filterTo || filterFy) && (
             <Button variant="outline" size="sm"
-              onClick={() => { setFilterSeries(''); setFilterFrom(''); setFilterTo('') }}>
+              onClick={() => { setFilterSeries(''); setFilterFrom(''); setFilterTo(''); setFilterFy('') }}>
               Clear
             </Button>
           )}

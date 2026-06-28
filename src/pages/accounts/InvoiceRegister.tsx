@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fyRange, FY_OPTIONS } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, Badge,
   SectionHeader, Spinner, Table, Th, Td, StatCard
@@ -51,11 +51,17 @@ export const InvoiceRegister: React.FC = () => {
   const importRef = useRef<HTMLInputElement>(null)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
+  const [filterFy, setFilterFy] = useState('')
   const [markPayId, setMarkPayId] = useState<string|null>(null)
   const [payAmt, setPayAmt] = useState('')
   const [delId, setDelId] = useState<string|null>(null)
 
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const applyFy = (v: string) => {
+    setFilterFy(v)
+    if (v) { const r = fyRange(v); setFilterFrom(r.start); setFilterTo(r.end) }
+  }
 
   const { data: invoices, isLoading } = useQuery({
     queryKey: ['supplier_invoices'],
@@ -388,10 +394,15 @@ export const InvoiceRegister: React.FC = () => {
               options={['unpaid','partial','paid'].map(v => ({ value: v, label: v.charAt(0).toUpperCase()+v.slice(1) }))}
               value={filterStatus} onChange={e => setFilterStatus(e.target.value)} />
           </div>
-          <DateInput label="From" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
-          <DateInput label="To" value={filterTo} onChange={e => setFilterTo(e.target.value)} />
-          {(filterType || filterStatus || filterFrom || filterTo) && (
-            <Button variant="outline" size="sm" onClick={() => { setFilterType(''); setFilterStatus(''); setFilterFrom(''); setFilterTo('') }}>
+          <div className="w-36">
+            <Select label="Financial Year" placeholder="— FY —"
+              options={FY_OPTIONS.map(f => ({ value: f, label: `FY ${f}` }))}
+              value={filterFy} onChange={e => applyFy(e.target.value)} />
+          </div>
+          <DateInput label="From" value={filterFrom} onChange={e => { setFilterFrom(e.target.value); setFilterFy('') }} />
+          <DateInput label="To" value={filterTo} onChange={e => { setFilterTo(e.target.value); setFilterFy('') }} />
+          {(filterType || filterStatus || filterFrom || filterTo || filterFy) && (
+            <Button variant="outline" size="sm" onClick={() => { setFilterType(''); setFilterStatus(''); setFilterFrom(''); setFilterTo(''); setFilterFy('') }}>
               Clear
             </Button>
           )}

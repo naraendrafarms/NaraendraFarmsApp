@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fyRange, FY_OPTIONS } from '@/lib/utils'
 import { Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -18,7 +18,13 @@ const TDS_RATE_OPTIONS = [
 export const TDSPayable: React.FC = () => {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [fy, setFy] = useState('')
   const [rateFilter, setRateFilter] = useState('')
+
+  const applyFy = (v: string) => {
+    setFy(v)
+    if (v) { const r = fyRange(v); setDateFrom(r.start); setDateTo(r.end) }
+  }
   const [statusFilter, setStatusFilter] = useState('')
 
   const { data: rows = [], isLoading } = useQuery({
@@ -96,8 +102,10 @@ export const TDSPayable: React.FC = () => {
       {/* Filters */}
       <Card>
         <div className="flex flex-wrap gap-3 items-end">
-          <DateInput label="From Date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <DateInput label="To Date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          <Select label="Financial Year" value={fy} onChange={e => applyFy(e.target.value)}
+            options={[{ value: '', label: '— FY —' }, ...FY_OPTIONS.map(f => ({ value: f, label: `FY ${f}` }))]} />
+          <DateInput label="From Date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setFy('') }} />
+          <DateInput label="To Date" value={dateTo} onChange={e => { setDateTo(e.target.value); setFy('') }} />
           <Select label="TDS Rate" value={rateFilter} onChange={e => setRateFilter(e.target.value)}
             options={TDS_RATE_OPTIONS} />
           <Select label="Status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}

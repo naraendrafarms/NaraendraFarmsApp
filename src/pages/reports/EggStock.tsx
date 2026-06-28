@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { today } from '@/lib/utils'
+import { today, fyRange, FY_OPTIONS } from '@/lib/utils'
 import {
   Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge
 } from '@/components/ui'
@@ -14,7 +14,13 @@ const fmtN = (n: number) => n.toLocaleString('en-IN')
 export const EggStockPage: React.FC = () => {
   const [toDate, setToDate] = useState(today())
   const [fromDate, setFromDate] = useState('')
+  const [fy, setFy] = useState('')
   const [flockFilter, setFlockFilter] = useState('')
+
+  const applyFy = (v: string) => {
+    setFy(v)
+    if (v) { const r = fyRange(v); setFromDate(r.start); setToDate(r.end) }
+  }
 
   // Flocks
   const { data: flocks, isLoading: flocksLoading } = useQuery({
@@ -483,17 +489,25 @@ export const EggStockPage: React.FC = () => {
           className="w-44"
         />
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
+          FY
+          <select value={fy} onChange={e => applyFy(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm">
+            <option value="">— FY —</option>
+            {FY_OPTIONS.map(f => <option key={f} value={f}>FY {f}</option>)}
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600">
           From
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+          <input type="date" value={fromDate} onChange={e => { setFromDate(e.target.value); setFy('') }}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           To
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+          <input type="date" value={toDate} onChange={e => { setToDate(e.target.value); setFy('') }}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
         {(flockFilter || fromDate) && (
-          <button onClick={() => { setFlockFilter(''); setFromDate('') }}
+          <button onClick={() => { setFlockFilter(''); setFromDate(''); setFy('') }}
             className="text-sm text-gray-500 hover:text-gray-700 underline">
             Clear Filters
           </button>
