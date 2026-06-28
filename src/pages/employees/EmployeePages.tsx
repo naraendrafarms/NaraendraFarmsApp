@@ -769,16 +769,17 @@ export const SalaryEntryPage: React.FC = () => {
         .select('employee_id').eq('month', monthStr)
       if (exErr) throw exErr
       const existingIds = new Set((existing ?? []).map((r: any) => r.employee_id))
-      // Pull this month's advances so they are deducted and shown (abstract + register voucher).
-      // advance_type 'other' = other deduction; anything else = salary advance.
+      // Match the single-entry form exactly to avoid double counting:
+      //  - salary advances = employee_advances with advance_type <> 'other'
+      //  - other deductions = pending employee_deductions (flock egg/bird sales)
       const { data: advRows } = await supabase.from('employee_advances')
-        .select('employee_id,amount,advance_type').eq('salary_month', genMonth)
+        .select('employee_id,amount').eq('salary_month', genMonth).neq('advance_type', 'other')
+      const { data: dedRows } = await supabase.from('employee_deductions')
+        .select('employee_id,amount').eq('deduction_month', monthStr).eq('status', 'pending')
       const advByEmp: Record<string, number> = {}
       const otherDedByEmp: Record<string, number> = {}
-      for (const a of (advRows ?? [])) {
-        if ((a.advance_type ?? '') === 'other') otherDedByEmp[a.employee_id] = (otherDedByEmp[a.employee_id] ?? 0) + (a.amount ?? 0)
-        else advByEmp[a.employee_id] = (advByEmp[a.employee_id] ?? 0) + (a.amount ?? 0)
-      }
+      for (const a of (advRows ?? [])) advByEmp[a.employee_id] = (advByEmp[a.employee_id] ?? 0) + (a.amount ?? 0)
+      for (const d of (dedRows ?? [])) otherDedByEmp[d.employee_id] = (otherDedByEmp[d.employee_id] ?? 0) + (d.amount ?? 0)
       const toInsert = (emps ?? []).filter((e: any) => !existingIds.has(e.id)).map((e: any) => {
         const base = e.base_salary ?? 0
         const gross = base
