@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
+import { useFeedRates } from '@/hooks/useFeedRates'
 import { Card, CardHeader, Button, Select, Spinner } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -60,10 +61,14 @@ export const FlockPLSummary: React.FC = () => {
     }
   })
 
+  // Feed read from daily_records (authoritative) and costed with recipe rates — same as
+  // the Flock Feed tab — so P&L can't drift from the daily_feed mirror.
+  const feedRates = useFeedRates()
   const { data: dailyFeed } = useQuery({
-    queryKey: ['pl_summary_daily_feed'],
+    queryKey: ['pl_summary_daily_records_feed'],
     queryFn: async () => {
-      const { data } = await supabase.from('daily_feed').select('flock_id,female_cost,male_cost,female_kg,male_kg')
+      const { data } = await supabase.from('daily_records')
+        .select('flock_id,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m')
       return data ?? []
     }
   })
@@ -114,7 +119,9 @@ export const FlockPLSummary: React.FC = () => {
 
       const feedCost = dailyFeed
         .filter((r: any) => r.flock_id === fid)
-        .reduce((s: number, r: any) => s + (r.female_cost ?? 0) + (r.male_cost ?? 0), 0)
+        .reduce((s: number, r: any) =>
+          s + (r.feed_female_kg ?? 0) * feedRates.rate(r.feed_type_f)
+            + (r.feed_male_kg ?? 0)   * feedRates.rate(r.feed_type_m), 0)
 
       const medicineCost = medicineUsage
         .filter((r: any) => r.flock_id === fid)
@@ -147,7 +154,7 @@ export const FlockPLSummary: React.FC = () => {
         margin,
       }
     })
-  }, [flocks, heDispatch, nheSales, dailyFeed, medicineUsage, electricityAlloc, fy, statusFilter, start, end])
+  }, [flocks, heDispatch, nheSales, dailyFeed, feedRates, medicineUsage, electricityAlloc, fy, statusFilter, start, end])
 
   const totals = useMemo(() => {
     return rows.reduce((acc, r) => ({

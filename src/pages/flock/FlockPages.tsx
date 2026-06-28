@@ -1349,35 +1349,29 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
 // ── FEED TAB ──────────────────────────────────────────────────────────────────
 
-const FEED_FIELDS: FieldDef[] = [
-  { key: 'feed_date',   label: 'Date',       type: 'date' },
-  { key: 'feed_type',   label: 'Feed Type',  type: 'text' },
-  { key: 'female_kg',   label: 'Female KG',  type: 'number', step: '0.1' },
-  { key: 'male_kg',     label: 'Male KG',    type: 'number', step: '0.1' },
-  { key: 'female_cost', label: 'Female Cost',type: 'number', step: '0.01' },
-  { key: 'male_cost',   label: 'Male Cost',  type: 'number', step: '0.01' },
-]
-
 const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
-  const qc = useQueryClient()
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
-  const [editRow,     setEditRow]     = useState<any | null>(null)
-  const [deleteRow,   setDeleteRow]   = useState<any | null>(null)
-  const [sel,         setSel]         = useState<Set<string>>(new Set())
-  const [bulkConfirm, setBulkConfirm] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
 
+  // Read feed DIRECTLY from daily_records (the authoritative entry table) so the Feed
+  // tab can never drift from what was actually entered. Each daily record is split into
+  // a female line and a male line so each can show its own feed type and recipe rate.
   const { data: feedData, isLoading } = useQuery({
-    queryKey: ['flock_daily_feed', flockId],
+    queryKey: ['flock_feed_from_records', flockId],
     queryFn: async () => {
       const { data } = await supabase
-        .from('daily_feed')
-        .select('*')
+        .from('daily_records')
+        .select('id,record_date,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m')
         .eq('flock_id', flockId)
-        .order('feed_date', { ascending: false })
-      return data ?? []
+        .order('record_date', { ascending: false })
+      const rows: any[] = []
+      for (const r of (data ?? [])) {
+        if ((r.feed_female_kg ?? 0) > 0)
+          rows.push({ id: `${r.id}-f`, feed_date: r.record_date, feed_type: r.feed_type_f, sex: 'Female', female_kg: r.feed_female_kg, male_kg: 0 })
+        if ((r.feed_male_kg ?? 0) > 0)
+          rows.push({ id: `${r.id}-m`, feed_date: r.record_date, feed_type: r.feed_type_m, sex: 'Male', female_kg: 0, male_kg: r.feed_male_kg })
+      }
+      return rows
     }
   })
 
@@ -1385,69 +1379,24 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   // the SAME source used by Daily Entry and the P&L. No fuzzy GRN name matching.
   const feedRates = useFeedRates()
 
-  const deleteMut = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('daily_feed').delete().eq('id', id)
-      if (error) throw error
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setDeleteRow(null) },
-    onError: (e: any) => toast.error('Feed delete: ' + (e.details || e.hint || e.message))
-  })
-
-  const bulkDelMutFeed = useMutation({
-    mutationFn: async (ids: string[]) => { await chunkedDelete('daily_feed', ids) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setSel(new Set()); setBulkConfirm(false) },
-    onError: (e: any) => toast.error('Feed delete: ' + (e.details || e.hint || e.message))
-  })
-
-  const updateMut = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('daily_feed').update(data).eq('id', id) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] }); setEditRow(null) }
-  })
-
-  const handleDownloadFeedTemplate = () => {
-    const headers = 'feed_date,feed_type,female_kg,male_kg,female_cost,male_cost'
-    const example = '2025-06-01,Chick,2150.0,57.0,,'
-    const blob = new Blob([headers + '\n' + example], { type: 'text/csv' })
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
-    a.download = 'feed_template.csv'; a.click()
-  }
-
-  const handleImportFeed = async (file: File) => {
-    setImporting(true)
-    try {
-      const { headers: header, rows: rawRows } = await parseFile(file)
-      const rows = rawRows.map(vals => {
-        const obj: any = {}
-        header.forEach((h, i) => { obj[h] = vals[i] ?? '' })
-        return {
-          flock_id: flockId,
-          feed_date:   obj.feed_date,
-          feed_type:   obj.feed_type || null,
-          female_kg:   obj.female_kg   !== '' ? Number(obj.female_kg)   : null,
-          male_kg:     obj.male_kg     !== '' ? Number(obj.male_kg)     : null,
-          female_cost: obj.female_cost !== '' ? Number(obj.female_cost) : null,
-          male_cost:   obj.male_cost   !== '' ? Number(obj.male_cost)   : null,
-        }
-      }).filter((r: any) => r.feed_date)
-      const { error } = await supabase.from('daily_feed').upsert(rows, { onConflict: 'flock_id,feed_date,feed_type' })
-      if (error) throw error
-      qc.invalidateQueries({ queryKey: ['flock_daily_feed', flockId] })
-      toast.success(`Imported ${rows.length} feed records!`)
-    } catch (e: any) {
-      toast.error('Import failed: ' + e.message)
-    } finally {
-      setImporting(false)
-      if (fileRef.current) fileRef.current.value = ''
-    }
-  }
-
   // Recipe cost/kg for a feed type; null when no formula maps to it (so we show "—"
   // instead of a guessed number).
   const getFeedGrnRate = (feedType: string) => {
     if (!feedType) return null
     const r = feedRates.rate(feedType)
     return r > 0 ? r : null
+  }
+
+  const handleExportFeed = () => {
+    const headers = 'date,sex,feed_type,kg,recipe_rate_per_kg,cost'
+    const lines = filtered.map((r: any) => {
+      const kg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
+      const rate = getFeedGrnRate(r.feed_type)
+      return [r.feed_date, r.sex, r.feed_type ?? '', kg, rate ?? '', rate != null ? Math.round(kg * rate * 100) / 100 : ''].join(',')
+    })
+    const blob = new Blob([headers + '\n' + lines.join('\n')], { type: 'text/csv' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+    a.download = 'flock_feed.csv'; a.click()
   }
 
   const filtered = (feedData ?? []).filter((r: any) => {
@@ -1458,11 +1407,6 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const totalFemaleKg = filtered.reduce((s: number, r: any) => s + (r.female_kg ?? 0), 0)
   const totalMaleKg   = filtered.reduce((s: number, r: any) => s + (r.male_kg ?? 0), 0)
-  const feedIds = filtered.map((r: any) => r.id)
-  const allSel = feedIds.length > 0 && feedIds.every((id: string) => sel.has(id))
-  const someSel = feedIds.some((id: string) => sel.has(id))
-  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const toggleAll = () => setSel(s => { const n = new Set(s); allSel ? feedIds.forEach((id: string) => n.delete(id)) : feedIds.forEach((id: string) => n.add(id)); return n })
   const totalCostGrn  = filtered.reduce((s: number, r: any) => {
     const rate = getFeedGrnRate(r.feed_type) ?? 0
     return s + ((r.female_kg ?? 0) + (r.male_kg ?? 0)) * rate
@@ -1482,16 +1426,13 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         </div>
       </Card>
 
-      <div className="flex gap-2 flex-wrap">
-        <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadFeedTemplate}>
-          Download Template
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-xs text-gray-500">
+          Feed is read directly from your daily records. To add or edit feed, use Daily Entry / Bulk Daily Entry.
+        </p>
+        <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportFeed}>
+          Export
         </Button>
-        <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing}
-          onClick={() => fileRef.current?.click()}>
-          Import CSV
-        </Button>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
-          onChange={e => { const f = e.target.files?.[0]; if (f) handleImportFeed(f) }} />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -1501,76 +1442,32 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </div>
 
       {isLoading ? <Spinner /> : (
-        <>
-          <BulkBar count={sel.size} loading={bulkDelMutFeed.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
-          <Card padding={false}>
-            <Table>
-              <thead><tr>
-                <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
-                <Th>Date</Th><Th>Feed Type</Th>
-                <Th right>Female KG</Th><Th right>Male KG</Th>
-                <Th right>Total KG</Th><Th right>Recipe Rate/kg</Th><Th right>Cost (Recipe)</Th>
-                <Th></Th>
-              </tr></thead>
-              <tbody>
-                {filtered.map((r: any) => {
-                  const grnRate = getFeedGrnRate(r.feed_type)
-                  const totalKg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
-                  const costGrn = grnRate != null ? totalKg * grnRate : null
-                  return (
-                    <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-red-50' : ''}`}>
-                      <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)}/></Td>
-                      <Td className="text-xs">{fmtDate(r.feed_date)}</Td>
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Date</Th><Th>Sex</Th><Th>Feed Type</Th>
+              <Th right>KG</Th><Th right>Recipe Rate/kg</Th><Th right>Cost (Recipe)</Th>
+            </tr></thead>
+            <tbody>
+              {filtered.map((r: any) => {
+                const grnRate = getFeedGrnRate(r.feed_type)
+                const totalKg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
+                const costGrn = grnRate != null ? totalKg * grnRate : null
+                return (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <Td className="text-xs">{fmtDate(r.feed_date)}</Td>
+                    <Td className="text-xs">{r.sex}</Td>
                     <Td className="text-xs"><Badge color="blue">{r.feed_type ?? '—'}</Badge></Td>
-                    <Td right className="text-xs">{r.female_kg != null ? (r.female_kg as number).toFixed(1) : '—'}</Td>
-                    <Td right className="text-xs">{r.male_kg != null ? (r.male_kg as number).toFixed(1) : '—'}</Td>
                     <Td right className="text-xs font-semibold">{totalKg.toFixed(1)}</Td>
                     <Td right className="text-xs">{grnRate != null ? <span className="text-green-700">₹{grnRate}/kg</span> : <span className="text-gray-400">—</span>}</Td>
                     <Td right className="text-xs font-semibold">{costGrn != null ? inr(costGrn) : '—'}</Td>
-                    <Td>
-                      <div className="flex gap-1 justify-end">
-                        <button onClick={() => setEditRow(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
-                        <button onClick={() => setDeleteRow(r)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
-                      </div>
-                    </Td>
                   </tr>
                 )
               })}
             </tbody>
           </Table>
-            {filtered.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
-          </Card>
-        </>
-      )}
-
-      {editRow && (
-        <EditModal
-          title={`Edit Feed — ${fmtDate(editRow.feed_date)}`}
-          fields={FEED_FIELDS}
-          data={editRow}
-          saving={updateMut.isPending}
-          onClose={() => setEditRow(null)}
-          onSave={form => updateMut.mutate({ id: editRow.id, data: {
-            feed_date:   form.feed_date,
-            feed_type:   form.feed_type || null,
-            female_kg:   form.female_kg   !== '' ? Number(form.female_kg)   : null,
-            male_kg:     form.male_kg     !== '' ? Number(form.male_kg)     : null,
-            female_cost: form.female_cost !== '' ? Number(form.female_cost) : null,
-            male_cost:   form.male_cost   !== '' ? Number(form.male_cost)   : null,
-          }})}
-        />
-      )}
-
-      {deleteRow && (
-        <ConfirmDelete
-          label={`Date: ${fmtDate(deleteRow.feed_date)} · ${deleteRow.feed_type ?? ''}`}
-          onConfirm={() => deleteMut.mutate(deleteRow.id)}
-          onCancel={() => setDeleteRow(null)}
-        />
-      )}
-      {bulkConfirm && (
-        <ConfirmDelete label={`Delete ${sel.size} feed records?`}
-          onConfirm={() => bulkDelMutFeed.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
+          {filtered.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
+        </Card>
       )}
     </div>
   )

@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, currentFY, fyRange, FY_OPTIONS } from '@/lib/utils'
+import { useFeedRates } from '@/hooks/useFeedRates'
 import {
   Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Input
 } from '@/components/ui'
@@ -173,19 +174,11 @@ export const PLReport: React.FC = () => {
     queryKey: ['pl_med_usage', flockId], enabled,
     queryFn: async () => { const { data } = await supabase.from('medicine_usage').select('quantity,rate,amount').eq('flock_id', flockId); return data ?? [] }
   })
-  // Feed: daily_feed consumed by flock × latest GRN rate
+  // Feed: read from daily_records (authoritative) and costed with recipe rates.
+  const feedRates = useFeedRates()
   const { data: dailyFeed } = useQuery({
-    queryKey: ['pl_feed', flockId], enabled,
-    queryFn: async () => { const { data } = await supabase.from('daily_feed').select('female_kg,male_kg,female_cost,male_cost,feed_type').eq('flock_id', flockId); return data ?? [] }
-  })
-  const { data: grnRates } = useQuery({
-    queryKey: ['grn_rates_pl'],
-    queryFn: async () => {
-      const { data } = await supabase.from('grn').select('item_name,price_per_unit,grn_date').order('grn_date', { ascending: false })
-      const map: Record<string, number> = {}
-      for (const g of (data ?? [])) { const k = (g.item_name ?? '').trim().toLowerCase(); if (k && !(k in map)) map[k] = g.price_per_unit }
-      return map
-    }
+    queryKey: ['pl_feed_records', flockId], enabled,
+    queryFn: async () => { const { data } = await supabase.from('daily_records').select('feed_female_kg,feed_type_f,feed_male_kg,feed_type_m').eq('flock_id', flockId); return data ?? [] }
   })
   // Electricity: bills for flock's farm
   const { data: elecBills } = useQuery({
@@ -216,13 +209,9 @@ export const PLReport: React.FC = () => {
   const chickCost = flock?.chick_cost ?? 0
   const medCost   = (medicineUsage ?? []).reduce((s: number, r: any) => s + (r.amount ?? ((r.quantity ?? 0) * (r.rate ?? 0))), 0)
 
-  const getFeedRate = (ft: string) => { if (!grnRates || !ft) return 0; const k = ft.trim().toLowerCase(); if (grnRates[k] !== undefined) return grnRates[k]; const found = Object.keys(grnRates).find(x => x.includes(k) || k.includes(x)); return found ? grnRates[found] : 0 }
-  const feedCost = (dailyFeed ?? []).reduce((s: number, r: any) => {
-    const stored = (r.female_cost ?? 0) + (r.male_cost ?? 0)
-    if (stored > 0) return s + stored
-    const rate = getFeedRate(r.feed_type ?? '')
-    return s + ((r.female_kg ?? 0) + (r.male_kg ?? 0)) * rate
-  }, 0)
+  const feedCost = (dailyFeed ?? []).reduce((s: number, r: any) =>
+    s + (r.feed_female_kg ?? 0) * feedRates.rate(r.feed_type_f)
+      + (r.feed_male_kg ?? 0)   * feedRates.rate(r.feed_type_m), 0)
 
   const elecCost   = (elecBills ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
   const salaryCost = (salaryAbstracts ?? []).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0)
