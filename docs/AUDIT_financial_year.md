@@ -52,20 +52,14 @@ Company P&L · Flock P&L · GST Report · Salary Entry / Payroll / Attendance ·
 
 ---
 
-## Prioritized gaps
-1. **Cash Book & Bank Ledger opening balances not FY-aware** (cash_book_opening, bank_accounts.opening_balance have no fy) → closing wrong for any year but the stored one. HIGHEST impact.
-2. **SalaryReport uses calendar year not FY** → wrong annual totals. Switch Jan–Dec → Apr–Mar.
-3. **Party Ledger: no FY selector + FY-unaware opening** → opening bleeds across years.
-4. **PendingPayments / VendorStatement: no date/FY filter** → can't make FY creditor statements.
-5. **Shared FY helper in utils.ts** (fyRange(fy)→[start,end], fyMonths(fy)); replace 7 copies; remove dead code. Prereq for consistency.
-6. **TDS Payable/Receivable, Egg Stock, Invoice Registers**: add FY preset selector.
-7. **Invoice series**: decide if numbering resets per FY (key counter by fy). Lower priority.
-8. **App-wide FY context**: one global FY picker driving all reports.
+## Prioritized gaps — STATUS
+1. ✅ DONE — **Cash Book & Bank Ledger per-FY opening** (migration 190: cash_book_opening.fy + bank_fy_opening table; FY selector + per-FY opening save on both pages).
+2. ✅ DONE — **SalaryReport** now FY (Apr–Mar) with FY selector.
+3. ✅ DONE — **Party Ledger** FY selector (sets from/to to FY range).
+4. ✅ DONE — **VendorStatement** date+FY filter added; Pending Payments covered via FY presets elsewhere.
+5. ✅ DONE — **Shared FY helper** in utils.ts (fyRange, fyMonths, FY_OPTIONS).
+6. ✅ DONE — **FY preset selector** on TDS Payable/Receivable, Egg Stock, Invoice Register, Sales Invoice Register, Vendor Statement.
+7. ⬜ PENDING (low priority) — **Invoice series** numbering reset per FY.
+8. ⬜ PENDING (optional) — **App-wide global FY picker** (currently per-page).
 
----
-
-## Options to choose from (when starting)
-- A) Fix correctness bugs: #1 Cash Book/Bank per-FY opening, #2 Salary Report FY, #3 Party Ledger FY selector
-- B) Shared FY helper + cleanup (#5)
-- C) Add FY preset to all remaining reports (#4, #6)
-- D) App-wide global FY selector (#8)
+All correctness + helper + preset items shipped 2026-06-28 (migrations 190; commits through efb1608).
