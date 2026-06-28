@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate } from '@/lib/utils'
+import { inr, fmtDate, currentFY, fyRange, FY_OPTIONS } from '@/lib/utils'
 import {
   Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Input
 } from '@/components/ui'
@@ -322,15 +322,16 @@ export const PLReport: React.FC = () => {
 
 // ── SALARY REPORT ────────────────────────────────────────────────
 export const SalaryReport: React.FC = () => {
-  const [filterYear, setFilterYear] = useState(new Date().getFullYear().toString())
+  const [filterYear, setFilterYear] = useState(currentFY())
 
   const { data: abstracts, isLoading } = useQuery({
     queryKey: ['salary_report', filterYear],
     queryFn: async () => {
+      const { start, end } = fyRange(filterYear)
       const { data } = await supabase.from('salary_abstract')
         .select('*, farms(name,code)')
-        .gte('month', `${filterYear}-01-01`)
-        .lte('month', `${filterYear}-12-31`)
+        .gte('month', start)
+        .lte('month', end)
         .order('month')
       return data ?? []
     }
@@ -366,7 +367,7 @@ export const SalaryReport: React.FC = () => {
       <SectionHeader title="Salary Report" subtitle="Site-wise monthly salary summary"
         action={<Button variant="secondary" icon={<Download size={16}/>} onClick={exportExcel}>Export Excel</Button>}/>
       <div className="flex gap-3">
-        <Select label="" options={['2023','2024','2025','2026','2027']} value={filterYear} onChange={e=>setFilterYear(e.target.value)} className="w-32"/>
+        <Select label="" options={FY_OPTIONS} value={filterYear} onChange={e=>setFilterYear(e.target.value)} className="w-32"/>
       </div>
       {isLoading ? <Spinner/> : (
         <>

@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, inr } from '@/lib/utils'
+import { fmtDate, inr, currentFY, fyRange, FY_OPTIONS } from '@/lib/utils'
 import {
-  Card, SearchableSelect, Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, DateInput
+  Card, SearchableSelect, Select, Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, DateInput
 } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -23,6 +23,16 @@ export const PartyLedgerPage: React.FC = () => {
   const [partyId, setPartyId] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [fy, setFy] = useState(currentFY())
+
+  const applyFY = (val: string) => {
+    setFy(val)
+    if (val) {
+      const { start, end } = fyRange(val)
+      setFromDate(start)
+      setToDate(end)
+    }
+  }
 
   const { data: parties = [] } = useQuery({
     queryKey: ['parties_all'],
@@ -120,12 +130,21 @@ export const PartyLedgerPage: React.FC = () => {
           />
         </div>
         <div>
+          <label className="block text-xs text-gray-500 mb-1">Financial Year</label>
+          <Select
+            value={fy}
+            onChange={e => applyFY(e.target.value)}
+            options={[{ value: '', label: '— Custom —' }, ...FY_OPTIONS.map(o => ({ value: o, label: o }))]}
+            className="w-32"
+          />
+        </div>
+        <div>
           <label className="block text-xs text-gray-500 mb-1">From Date</label>
-          <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <DateInput value={fromDate} onChange={e => { setFromDate(e.target.value); setFy('') }} />
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">To Date</label>
-          <DateInput value={toDate} onChange={e => setToDate(e.target.value)} />
+          <DateInput value={toDate} onChange={e => { setToDate(e.target.value); setFy('') }} />
         </div>
       </Card>
 

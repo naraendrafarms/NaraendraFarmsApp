@@ -89,6 +89,20 @@ export const currentFY = (): string => {
   return `${startYear}-${String(startYear + 1).slice(-2)}`
 }
 
+// FY date range — start/end as YYYY-MM-DD for a FY string like "2026-27"
+export const fyRange = (fy: string): { start: string; end: string } => {
+  const y = parseInt(fy.split('-')[0]); return { start: `${y}-04-01`, end: `${y + 1}-03-31` }
+}
+
+// FY months as ['YYYY-MM', ...] from Apr..Mar
+export const fyMonths = (fy: string): string[] => {
+  const y = parseInt(fy.split('-')[0]); const out: string[] = []
+  for (let i = 0; i < 12; i++) { const m = ((3 + i) % 12) + 1; const yr = (3 + i) <= 11 ? y : y + 1; out.push(`${yr}-${String(m).padStart(2, '0')}`) }
+  return out
+}
+
+export const FY_OPTIONS = ['2024-25', '2025-26', '2026-27', '2027-28']
+
 // First day of month
 export const firstOfMonth = (d: Date = new Date()): string => {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0')
