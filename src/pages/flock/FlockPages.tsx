@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 import { inr, fmtDate } from '@/lib/utils'
 import { parseFile } from '@/lib/parseFile'
+import { useFeedRates } from '@/hooks/useFeedRates'
 import {
   Card, CardHeader, Button, Input, Select,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
@@ -1380,26 +1381,9 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
-  const { data: feedGrnRates } = useQuery({
-    queryKey: ['grn_feed_rates'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('grn')
-        .select('item_name,price_per_unit,grn_date,feed_ingredients(name)')
-        .eq('category', 'Feed')
-        .order('grn_date', { ascending: false })
-      if (!data) return {} as Record<string, number>
-      const map: Record<string, number> = {}
-      for (const g of data) {
-        const name = g.item_name || (g as any).feed_ingredients?.name
-        if (name && g.price_per_unit) {
-          const k = name.trim().toLowerCase()
-          if (!(k in map)) map[k] = g.price_per_unit
-        }
-      }
-      return map
-    }
-  })
+  // Recipe cost/kg per feed type (formula ingredient % × latest GRN ingredient price),
+  // the SAME source used by Daily Entry and the P&L. No fuzzy GRN name matching.
+  const feedRates = useFeedRates()
 
   const deleteMut = useMutation({
     mutationFn: async (id: string) => {
@@ -1458,11 +1442,12 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   }
 
+  // Recipe cost/kg for a feed type; null when no formula maps to it (so we show "—"
+  // instead of a guessed number).
   const getFeedGrnRate = (feedType: string) => {
-    if (!feedGrnRates || !feedType) return null
-    const ft = feedType.trim().toLowerCase()
-    const found = Object.keys(feedGrnRates).find(k => k.includes(ft) || ft.includes(k))
-    return found ? feedGrnRates[found] : null
+    if (!feedType) return null
+    const r = feedRates.rate(feedType)
+    return r > 0 ? r : null
   }
 
   const filtered = (feedData ?? []).filter((r: any) => {
@@ -1512,7 +1497,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <StatCard title="Total Female KG" value={`${numFmt(Math.round(totalFemaleKg))} kg`} icon={<Package size={18}/>} color="text-pink-600" />
         <StatCard title="Total Male KG"   value={`${numFmt(Math.round(totalMaleKg))} kg`}   icon={<Package size={18}/>} color="text-blue-600" />
-        <StatCard title="Cost (GRN Rates)" value={inr(totalCostGrn)} icon={<TrendingUp size={18}/>} color="text-green-600" />
+        <StatCard title="Cost (Recipe Rates)" value={inr(totalCostGrn)} icon={<TrendingUp size={18}/>} color="text-green-600" />
       </div>
 
       {isLoading ? <Spinner /> : (
@@ -1524,7 +1509,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                 <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
                 <Th>Date</Th><Th>Feed Type</Th>
                 <Th right>Female KG</Th><Th right>Male KG</Th>
-                <Th right>Total KG</Th><Th right>GRN Rate/kg</Th><Th right>Cost (GRN)</Th>
+                <Th right>Total KG</Th><Th right>Recipe Rate/kg</Th><Th right>Cost (Recipe)</Th>
                 <Th></Th>
               </tr></thead>
               <tbody>
