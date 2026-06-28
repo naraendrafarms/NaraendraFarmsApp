@@ -1394,6 +1394,7 @@ export const NHESales: React.FC = () => {
   const [flockFilter, setFlockFilter] = useState('')
   const [typeFilter, setTypeFilter]   = useState('')
   const [partyFilter, setPartyFilter] = useState('')
+  const [empFilter, setEmpFilter] = useState('')
   const [fromDate, setFromDate]   = useState('')
   const [toDate, setToDate]       = useState('')
   const [sel, setSel]             = useState<Set<string>>(new Set())
@@ -1446,14 +1447,15 @@ export const NHESales: React.FC = () => {
     finally { setGenningInv(false) }
   }
 
-  const hasFilter = !!(flockFilter || fromDate || toDate)
+  const hasFilter = !!(flockFilter || empFilter || fromDate || toDate)
 
   const { data: sales, isLoading } = useQuery({
-    queryKey: ['nhe_sales', flockFilter, fromDate, toDate],
+    queryKey: ['nhe_sales', flockFilter, empFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount)')
         .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
+      if (empFilter) q = q.eq('employee_id', empFilter)
       if (fromDate) q = q.gte('sale_date', fromDate)
       if (toDate) q = q.lte('sale_date', toDate)
       if (!hasFilter) q = q.limit(200)
@@ -2010,6 +2012,9 @@ export const NHESales: React.FC = () => {
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        <Select label="" placeholder="All Employees"
+          options={(employees ?? []).map((e: any) => ({ value: e.id, label: `${e.emp_id ? e.emp_id + ' — ' : ''}${e.name}` }))}
+          value={empFilter} onChange={e => setEmpFilter(e.target.value)} className="w-48" />
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
           className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
           <option value="">All Types</option>

@@ -33,6 +33,7 @@ export const SalaryRegisterPage: React.FC = () => {
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
   const [filterFarm, setFilterFarm] = useState('')
   const [voucherEmp, setVoucherEmp] = useState<{ id: string; name: string } | null>(null)
+  const [dedEmp, setDedEmp] = useState<{ id: string; name: string } | null>(null)
 
   // Advance voucher: the actual employee_advances entries behind a register's advance amount
   const { data: voucherRows } = useQuery({
@@ -43,6 +44,19 @@ export const SalaryRegisterPage: React.FC = () => {
         .select('advance_date,advance_type,amount,narration,salary_month')
         .eq('employee_id', voucherEmp!.id).eq('salary_month', month)
         .order('advance_date')
+      return data ?? []
+    }
+  })
+
+  // Deduction voucher: the employee_deductions (egg/bird purchases) behind Other Deduction
+  const { data: dedRows } = useQuery({
+    queryKey: ['ded_voucher', dedEmp?.id, month],
+    enabled: !!dedEmp,
+    queryFn: async () => {
+      const { data } = await supabase.from('employee_deductions')
+        .select('deduction_month,description,amount,status')
+        .eq('employee_id', dedEmp!.id).eq('deduction_month', month + '-01')
+        .order('description')
       return data ?? []
     }
   })
@@ -110,6 +124,9 @@ export const SalaryRegisterPage: React.FC = () => {
   const farmNames = Array.from(new Set((farms as any[])?.map((f: any) => f.name) ?? []))
   const totals = (rows as any[] ?? []).reduce((acc: any, r: any) => {
     acc.gross_rate     = (acc.gross_rate??0) + (r.gross_rate??0)
+    acc.basic_salary   = (acc.basic_salary??0) + (r.basic_salary??0)
+    acc.hra            = (acc.hra??0) + (r.hra??0)
+    acc.allowance      = (acc.allowance??0) + ((r.gross_salary??0)-(r.basic_salary??0)-(r.hra??0))
     acc.total_earning  = (acc.total_earning??0) + (r.total_earning??0)
     acc.extra_pay      = (acc.extra_pay??0) + (r.extra_pay??0)
     acc.pf_employee    = (acc.pf_employee??0) + (r.pf_employee??0)
@@ -163,6 +180,9 @@ export const SalaryRegisterPage: React.FC = () => {
                 <th className="px-2 py-2 text-right font-semibold text-gray-600">Paid</th>
                 <th className="px-2 py-2 text-right font-semibold text-gray-600">Extra</th>
                 <th className="px-2 py-2 text-right font-semibold text-green-700">Gross Rate</th>
+                <th className="px-2 py-2 text-right font-semibold text-gray-600">Basic</th>
+                <th className="px-2 py-2 text-right font-semibold text-gray-600">HRA</th>
+                <th className="px-2 py-2 text-right font-semibold text-gray-600">Allowance</th>
                 <th className="px-2 py-2 text-right font-semibold text-blue-700">Total Earning</th>
                 <th className="px-2 py-2 text-right font-semibold text-orange-600">Extra Pay</th>
                 <th className="px-2 py-2 text-right font-semibold text-red-600">PF</th>
@@ -187,6 +207,9 @@ export const SalaryRegisterPage: React.FC = () => {
                     <td className="px-2 py-1.5 text-right">{r.days_worked??0}</td>
                     <td className="px-2 py-1.5 text-right text-orange-600">{r.extra_days??0}</td>
                     <td className="px-2 py-1.5 text-right text-green-700">{inr(r.gross_rate??0)}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-600">{inr(r.basic_salary??0)}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-600">{inr(r.hra??0)}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-600">{inr((r.gross_salary??0)-(r.basic_salary??0)-(r.hra??0))}</td>
                     <td className="px-2 py-1.5 text-right text-blue-700">{inr(r.total_earning??0)}</td>
                     <td className="px-2 py-1.5 text-right text-orange-600">{inr(r.extra_pay??0)}</td>
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.pf_employee??0)}</td>
@@ -198,7 +221,12 @@ export const SalaryRegisterPage: React.FC = () => {
                             onClick={() => setVoucherEmp({ id: r.employee_id, name: emp.name })}>{inr(r.advance)} 🔍</button>
                         : inr(r.advance??0)}
                     </td>
-                    <td className="px-2 py-1.5 text-right text-red-500">{inr(r.other_deduction??0)}</td>
+                    <td className="px-2 py-1.5 text-right text-red-500">
+                      {(r.other_deduction??0) > 0
+                        ? <button className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-red-50 text-red-700 font-medium border border-red-200 active:bg-red-100" title="Tap to view deduction voucher"
+                            onClick={() => setDedEmp({ id: r.employee_id, name: emp.name })}>{inr(r.other_deduction)} 🔍</button>
+                        : inr(r.other_deduction??0)}
+                    </td>
                     <td className="px-2 py-1.5 text-right font-bold text-green-800 bg-green-50">{inr(r.net_salary??0)}</td>
                   </tr>
                 )
@@ -208,6 +236,9 @@ export const SalaryRegisterPage: React.FC = () => {
               <tr>
                 <td colSpan={8} className="px-2 py-2 text-right text-gray-700">TOTAL ({rows.length} employees)</td>
                 <td className="px-2 py-2 text-right text-green-700">{inr(totals.gross_rate??0)}</td>
+                <td className="px-2 py-2 text-right text-gray-600">{inr(totals.basic_salary??0)}</td>
+                <td className="px-2 py-2 text-right text-gray-600">{inr(totals.hra??0)}</td>
+                <td className="px-2 py-2 text-right text-gray-600">{inr(totals.allowance??0)}</td>
                 <td className="px-2 py-2 text-right text-blue-700">{inr(totals.total_earning??0)}</td>
                 <td className="px-2 py-2 text-right text-orange-600">{inr(totals.extra_pay??0)}</td>
                 <td className="px-2 py-2 text-right text-red-500">{inr(totals.pf_employee??0)}</td>
@@ -246,6 +277,34 @@ export const SalaryRegisterPage: React.FC = () => {
                 </tbody>
               </Table>
               <p className="text-xs text-gray-400">These are the actual entries from Employees → Advances for this salary month. Delete a wrong one there, then re-run Bulk Salary → Save &amp; Calculate.</p>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {dedEmp && (
+        <Modal open={!!dedEmp} onClose={() => setDedEmp(null)} title={`Deduction Voucher — ${dedEmp.name} · ${monthLabel(month)}`} size="md">
+          {!dedRows ? <Spinner /> : (dedRows as any[]).length === 0 ? (
+            <EmptyState icon={<IndianRupee size={28}/>} title="No deduction entries for this month" subtitle="These come from employee egg/bird purchases (deduct from salary)." />
+          ) : (
+            <div className="space-y-2">
+              <Table>
+                <thead><tr><Th>Description</Th><Th>Status</Th><Th right>Amount</Th></tr></thead>
+                <tbody>
+                  {(dedRows as any[]).map((v: any, i: number) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-2 py-1.5 text-xs">{v.description ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-xs"><Badge color="blue">{v.status ?? '—'}</Badge></td>
+                      <td className="px-2 py-1.5 text-right font-medium">{inr(v.amount ?? 0)}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-gray-50 font-semibold">
+                    <td colSpan={2} className="px-2 py-2 text-right">Total Deduction</td>
+                    <td className="px-2 py-2 text-right">{inr((dedRows as any[]).reduce((s: number, v: any) => s + (v.amount ?? 0), 0))}</td>
+                  </tr>
+                </tbody>
+              </Table>
+              <p className="text-xs text-gray-400">These are egg/bird purchases set to deduct from salary (Employees → from the flock sale). Fix a wrong one at source, then re-run Bulk Salary → Save &amp; Calculate.</p>
             </div>
           )}
         </Modal>
