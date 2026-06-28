@@ -764,7 +764,7 @@ export const SalaryEntryPage: React.FC = () => {
     try {
       const monthStr = genMonth + '-01'
       const { data: empsRaw, error: empErr } = await supabase.from('employees')
-        .select('id,base_salary,esi_applicable,pf_applicable,pt_applicable,leaving_date').eq('is_active', true)
+        .select('id,base_salary,esi_applicable,pf_applicable,pt_applicable,restrict_pf,leaving_date').eq('is_active', true)
       if (empErr) throw empErr
       // Skip anyone who left before this salary month (leaving_date < 1st of month)
       const emps = (empsRaw ?? []).filter((e: any) => !e.leaving_date || e.leaving_date >= monthStr)
@@ -789,8 +789,12 @@ export const SalaryEntryPage: React.FC = () => {
         const gross = base
         const esi_emp = e.esi_applicable && gross <= 21000 ? Math.round(gross * 0.0075) : 0
         const esi_er  = e.esi_applicable && gross <= 21000 ? Math.round(gross * 0.0325) : 0
-        const pf_emp  = e.pf_applicable ? Math.round(base * 0.12) : 0
-        const pf_er   = e.pf_applicable ? Math.round(base * 0.12) : 0
+        // PF on Basic, capped at the ₹15,000 wage ceiling when restrict_pf is set
+        // (matches the detailed payslip + computeSalaryForEmp). Was previously 12% of
+        // full basic here, which gave wrong PF in Quick Generate.
+        const pfBase  = e.pf_applicable ? (e.restrict_pf ? Math.min(base, 15000) : base) : 0
+        const pf_emp  = Math.round(pfBase * 0.12)
+        const pf_er   = Math.round(pfBase * 0.12)
         const pt      = e.pt_applicable ? (gross <= 15000 ? 0 : gross <= 20000 ? 150 : 200) : 0
         const advance = advByEmp[e.id] ?? 0
         const otherDed = otherDedByEmp[e.id] ?? 0
