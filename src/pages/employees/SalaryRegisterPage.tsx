@@ -51,6 +51,15 @@ export const SalaryRegisterPage: React.FC = () => {
       if (error) throw error
       let result = data ?? []
       if (filterFarm) result = result.filter((r: any) => r.employees?.farms?.name === filterFarm)
+      // Sort by Employee ID (1 → last, site-wise) — PostgREST referencedTable order
+      // only sorts the embedded object, not the rows, so sort here.
+      const empNo = (r: any) => {
+        const id = String(r.employees?.emp_id ?? '')
+        const n = parseInt(id.replace(/\D/g, ''))
+        return isNaN(n) ? Number.MAX_SAFE_INTEGER : n
+      }
+      result = [...result].sort((a: any, b: any) =>
+        empNo(a) - empNo(b) || String(a.employees?.emp_id ?? '').localeCompare(String(b.employees?.emp_id ?? '')))
       return result
     }
   })
@@ -65,15 +74,16 @@ export const SalaryRegisterPage: React.FC = () => {
       'PF Emp','ESI Emp','PT','Other Deduction','Advance',
       'Net Salary'
     ]
+    const R = (v: any) => Math.round(Number(v) || 0)  // whole rupees, matches voucher
     const data = (rows as any[]).map(r => {
       const emp = r.employees ?? {}
       return [
         emp.emp_id??'', emp.name??'', emp.emp_category??'', emp.designation??'', emp.farms?.name??'',
         r.month_days??'', r.absent_days??0, r.days_worked??0, r.extra_days??0,
-        r.gross_rate??0, r.basic_rate??0, r.hra_rate??0, r.other_defray??0,
-        r.basic_salary??0, r.hra??0, (r.gross_salary??0)-(r.basic_salary??0)-(r.hra??0), r.gross_salary??0, r.extra_pay??0, r.total_earning??0,
-        r.pf_employee??0, r.esi_employee??0, r.pt??0, r.other_deduction??0, r.advance??0,
-        r.net_salary??0
+        R(r.gross_rate), R(r.basic_rate), R(r.hra_rate), R(r.other_defray),
+        R(r.basic_salary), R(r.hra), R((r.gross_salary??0)-(r.basic_salary??0)-(r.hra??0)), R(r.gross_salary), R(r.extra_pay), R(r.total_earning),
+        R(r.pf_employee), R(r.esi_employee), R(r.pt), R(r.other_deduction), R(r.advance),
+        R(r.net_salary)
       ]
     })
     const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
