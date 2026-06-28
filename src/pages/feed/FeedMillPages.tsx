@@ -242,8 +242,21 @@ const FormulasTab: React.FC = () => {
       for (const c of COLS) if (d[c] !== undefined) fData[c] = d[c]
       let fId = d.id
       if (fId) {
-        const { error } = await supabase.from('feed_formulas').update(fData).eq('id', fId)
+        // Update and confirm a row actually matched (guards against a stale id)
+        const { data: upd, error } = await supabase.from('feed_formulas').update(fData).eq('id', fId).select('id')
         if (error) throw error
+        if (!upd || upd.length === 0) {
+          // Stale id — the formula row doesn't exist. Re-match by formula_code, else create.
+          const { data: byCode } = await supabase.from('feed_formulas').select('id').eq('formula_code', fData.formula_code).limit(1)
+          if (byCode && byCode.length) {
+            fId = byCode[0].id
+            await supabase.from('feed_formulas').update(fData).eq('id', fId)
+          } else {
+            const { data: ins, error: e2 } = await supabase.from('feed_formulas').insert(fData).select('id').single()
+            if (e2) throw e2
+            fId = ins?.id
+          }
+        }
       } else {
         const { data: ins, error } = await supabase.from('feed_formulas').insert(fData).select('id').single()
         if (error) throw error
@@ -251,6 +264,9 @@ const FormulasTab: React.FC = () => {
         fId = ins.id
       }
       if (!fId) throw new Error('Missing formula id — cannot save ingredients')
+      // Final safety: make sure the formula really exists before touching ingredients
+      const { data: chk } = await supabase.from('feed_formulas').select('id').eq('id', fId).limit(1)
+      if (!chk || chk.length === 0) throw new Error('Formula not found — please refresh and try again')
       // save ingredients if provided inline
       if (ings) {
         await supabase.from('feed_formula_ingredients').delete().eq('formula_id', fId)
