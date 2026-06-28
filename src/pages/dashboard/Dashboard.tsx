@@ -42,7 +42,7 @@ const AlertsWidget: React.FC = () => {
   const { data: feedItems } = useQuery({
     queryKey: ['alerts_feed_items'],
     queryFn: async () => {
-      const { data } = await supabase.from('items').select('id,reorder_level').eq('category', 'Feed Ingredient').eq('is_active', true)
+      const { data } = await supabase.from('items').select('id,name,reorder_level').eq('category', 'Feed Ingredient').eq('is_active', true)
       return data ?? []
     }
   })
@@ -52,7 +52,7 @@ const AlertsWidget: React.FC = () => {
     queryFn: async () => {
       let all: any[] = [], from = 0
       while (true) {
-        const { data } = await supabase.from('stock_ledger').select('item_id,txn_type,qty').range(from, from + 999)
+        const { data } = await supabase.from('stock_ledger').select('item_id,item_name,txn_type,qty').range(from, from + 999)
         if (!data || !data.length) break
         all = all.concat(data); if (data.length < 1000) break; from += 1000
       }
@@ -77,15 +77,17 @@ const AlertsWidget: React.FC = () => {
   const lowStockCount = React.useMemo(() => {
     if (!feedItems || !ledgerData) return 0
     const OUT = new Set(['production_out', 'medicine_out', 'adjustment_out', 'transfer_out'])
-    const bal: Record<string, number> = {}
+    const nrm = (s: any) => (s ?? '').toString().trim().toLowerCase()
+    const balById: Record<string, number> = {}, balByName: Record<string, number> = {}
     for (const r of ledgerData) {
-      if (!r.item_id) continue
-      const q = Number(r.qty ?? 0)
-      bal[r.item_id] = (bal[r.item_id] ?? 0) + (OUT.has(r.txn_type) ? -q : q)
+      const q = Number(r.qty ?? 0) * (OUT.has(r.txn_type) ? -1 : 1)
+      if (r.item_id) balById[r.item_id] = (balById[r.item_id] ?? 0) + q
+      const nm = nrm(r.item_name)
+      if (nm) balByName[nm] = (balByName[nm] ?? 0) + q
     }
-    // Only count actual feed-ingredient items that are at/below their reorder level (or out of stock)
+    // Count feed-ingredient items at/below reorder (or out of stock), matching by id or name
     return (feedItems as any[]).filter((it: any) => {
-      const b = bal[it.id] ?? 0
+      const b = (it.id in balById) ? balById[it.id] : (balByName[nrm(it.name)] ?? 0)
       const reorder = Number(it.reorder_level ?? 0)
       return reorder > 0 ? b <= reorder : b <= 0
     }).length

@@ -21,7 +21,7 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
       let all: any[] = [], from = 0
       while (true) {
         const { data } = await supabase.from('stock_ledger')
-          .select('item_id,txn_type,qty,unit_price,txn_date')
+          .select('item_id,item_name,txn_type,qty,unit_price,txn_date')
           .order('txn_date', { ascending: true }).range(from, from + 999)
         if (!data || !data.length) break
         all = all.concat(data); if (data.length < 1000) break; from += 1000
@@ -36,44 +36,44 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
   })
 
   const OUT_TYPES = new Set(['production_out', 'medicine_out', 'adjustment_out', 'transfer_out'])
+  const norm = (s?: string | null) => (s ?? '').trim().toLowerCase()
   const stockMap = React.useMemo(() => {
     if (!ingredients) return []
-    const inMap: Record<string, number> = {}
-    const outMap: Record<string, number> = {}
-    const priceMap: Record<string, number> = {}
-    const dateMap: Record<string, string> = {}
+    // Aggregate by BOTH item_id and normalized item_name, so rows linked either way are caught
+    const inById: Record<string, number> = {}, outById: Record<string, number> = {}
+    const inByName: Record<string, number> = {}, outByName: Record<string, number> = {}
+    const priceById: Record<string, number> = {}, dateById: Record<string, string> = {}
+    const priceByName: Record<string, number> = {}, dateByName: Record<string, string> = {}
 
     for (const r of ledger ?? []) {
-      const id = r.item_id
-      if (!id) continue
       const q = Number(r.qty ?? 0)
-      if (OUT_TYPES.has(r.txn_type)) {
-        outMap[id] = (outMap[id] ?? 0) + q
-      } else {
-        inMap[id] = (inMap[id] ?? 0) + q
-        // latest rate by date for grn_in rows
-        if (r.txn_type === 'grn_in' && (r.txn_date ?? '') >= (dateMap[id] ?? '')) {
-          priceMap[id] = Number(r.unit_price ?? 0); dateMap[id] = r.txn_date
-        }
+      const nm = norm(r.item_name)
+      const isOut = OUT_TYPES.has(r.txn_type)
+      if (r.item_id) {
+        if (isOut) outById[r.item_id] = (outById[r.item_id] ?? 0) + q
+        else { inById[r.item_id] = (inById[r.item_id] ?? 0) + q
+          if (r.txn_type === 'grn_in' && (r.txn_date ?? '') >= (dateById[r.item_id] ?? '')) { priceById[r.item_id] = Number(r.unit_price ?? 0); dateById[r.item_id] = r.txn_date } }
+      }
+      if (nm) {
+        if (isOut) outByName[nm] = (outByName[nm] ?? 0) + q
+        else { inByName[nm] = (inByName[nm] ?? 0) + q
+          if (r.txn_type === 'grn_in' && (r.txn_date ?? '') >= (dateByName[nm] ?? '')) { priceByName[nm] = Number(r.unit_price ?? 0); dateByName[nm] = r.txn_date } }
       }
     }
 
-    return ingredients
-      .map((ing: any) => {
-        const totalIn = inMap[ing.id] ?? 0
-        const totalOut = outMap[ing.id] ?? 0
-        const balance = totalIn - totalOut
-        const rate = priceMap[ing.id] ?? 0
-        return {
-          ...ing,
-          total_in: totalIn,
-          total_out: totalOut,
-          balance,
-          rate,
-          value: balance * rate,
-          last_grn: dateMap[ing.id] ?? null,
-        }
-      })
+    return ingredients.map((ing: any) => {
+      const nm = norm(ing.name)
+      // Prefer id-linked totals; if none for this item, fall back to name-linked
+      const hasById = (inById[ing.id] ?? 0) !== 0 || (outById[ing.id] ?? 0) !== 0
+      const totalIn  = hasById ? (inById[ing.id] ?? 0)  : (inByName[nm] ?? 0)
+      const totalOut = hasById ? (outById[ing.id] ?? 0) : (outByName[nm] ?? 0)
+      const balance = totalIn - totalOut
+      const rate = (priceById[ing.id] ?? 0) || (priceByName[nm] ?? 0)
+      return {
+        ...ing, total_in: totalIn, total_out: totalOut, balance, rate,
+        value: balance * rate, last_grn: dateById[ing.id] ?? dateByName[nm] ?? null,
+      }
+    })
   }, [ingredients, ledger])
 
   const totalValue = stockMap.reduce((s, r) => s + (r.value ?? 0), 0)
