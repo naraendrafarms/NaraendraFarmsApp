@@ -717,7 +717,8 @@ const ProductionTab: React.FC = () => {
           const ingredient_id = byName[key] ?? byCode[key] ?? null
           return { production_id: logData.id, ingredient_name: i.ingredient_name, quantity_kg: i.quantity_kg, ingredient_id }
         })
-        await supabase.from('feed_production_ingredients').insert(rows)
+        const { error: ingErr } = await supabase.from('feed_production_ingredients').insert(rows)
+        if (ingErr) throw new Error('Production saved, but ingredients failed: ' + (ingErr.message || ingErr.details))
       }
     },
     onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); setShowForm(false); setEditing(null); toast.success('Saved') },
