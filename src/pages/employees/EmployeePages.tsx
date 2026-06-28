@@ -530,23 +530,24 @@ export const SalaryAbstractPage: React.FC = () => {
     queryFn: async () => {
       let q = supabase
         .from('salary_monthly')
-        .select('month, earned_salary, advance, tds, net_salary, employees!inner(farm_id, farms(name,code))')
+        .select('month, earned_salary, advance, tds, other_deduction, net_salary, employees!inner(farm_id, farms(name,code))')
         .order('month', { ascending: false })
       if (filterMonth) q = q.eq('month', filterMonth + '-01')
       const { data, error } = await q
       if (error) throw error
 
-      const agg: Record<string, { farm: string; farmCode: string; month: string; earned: number; advance: number; tds: number; net: number; count: number }> = {}
+      const agg: Record<string, { farm: string; farmCode: string; month: string; earned: number; advance: number; tds: number; deduction: number; net: number; count: number }> = {}
       for (const r of (data ?? [])) {
         const emp = (r as any).employees
         const farm = emp?.farms?.name ?? 'Unknown'
         const farmCode = emp?.farms?.code ?? ''
         const key = `${emp?.farm_id ?? 'x'}__${r.month}`
-        if (!agg[key]) agg[key] = { farm, farmCode, month: r.month, earned: 0, advance: 0, tds: 0, net: 0, count: 0 }
-        agg[key].earned  += (r as any).earned_salary ?? 0
-        agg[key].advance += (r as any).advance ?? 0
-        agg[key].tds     += (r as any).tds ?? 0
-        agg[key].net     += (r as any).net_salary ?? 0
+        if (!agg[key]) agg[key] = { farm, farmCode, month: r.month, earned: 0, advance: 0, tds: 0, deduction: 0, net: 0, count: 0 }
+        agg[key].earned    += (r as any).earned_salary ?? 0
+        agg[key].advance   += (r as any).advance ?? 0
+        agg[key].tds       += (r as any).tds ?? 0
+        agg[key].deduction += (r as any).other_deduction ?? 0
+        agg[key].net       += (r as any).net_salary ?? 0
         agg[key].count++
       }
       return Object.values(agg).sort((a, b) => b.month.localeCompare(a.month) || a.farm.localeCompare(b.farm))
@@ -567,8 +568,8 @@ export const SalaryAbstractPage: React.FC = () => {
   const handleExport = () => {
     if (!rows?.length) return
     exportCSV('salary_abstract.csv',
-      ['Month','Site','Site Code','Employees','Earned Salary','Advance','TDS','Net Salary'],
-      rows.map(r => [fmtMonth(r.month), r.farm, r.farmCode, r.count, Math.round(r.earned), Math.round(r.advance), Math.round(r.tds), Math.round(r.net)])
+      ['Month','Site','Site Code','Employees','Earned Salary','Advance','TDS','Other Deduction','Net Salary'],
+      rows.map(r => [fmtMonth(r.month), r.farm, r.farmCode, r.count, Math.round(r.earned), Math.round(r.advance), Math.round(r.tds), Math.round(r.deduction), Math.round(r.net)])
     )
   }
 
@@ -586,6 +587,7 @@ export const SalaryAbstractPage: React.FC = () => {
           const totEarned = farmRows.reduce((s,r)=>s+r.earned,0)
           const totAdv    = farmRows.reduce((s,r)=>s+r.advance,0)
           const totTds    = farmRows.reduce((s,r)=>s+(r.tds||0),0)
+          const totDed    = farmRows.reduce((s,r)=>s+(r.deduction||0),0)
           const totNet    = farmRows.reduce((s,r)=>s+r.net,0)
           const totCount  = farmRows.reduce((s,r)=>s+r.count,0)
           return (
@@ -597,7 +599,7 @@ export const SalaryAbstractPage: React.FC = () => {
               <Table>
                 <thead><tr>
                   <Th>Site</Th><Th right>Employees</Th><Th right>Earned Salary</Th>
-                  <Th right>Advance</Th><Th right>TDS</Th><Th right>Net Salary</Th>
+                  <Th right>Advance</Th><Th right>TDS</Th><Th right>Other Deduction</Th><Th right>Net Salary</Th>
                 </tr></thead>
                 <tbody>
                   {farmRows.map(r=>(
@@ -607,6 +609,7 @@ export const SalaryAbstractPage: React.FC = () => {
                       <Td right>{inr(r.earned)}</Td>
                       <Td right className="text-orange-600">{r.advance>0?inr(r.advance):'—'}</Td>
                       <Td right className="text-red-500">{(r.tds||0)>0?inr(r.tds):'—'}</Td>
+                      <Td right className="text-red-500">{(r.deduction||0)>0?inr(r.deduction):'—'}</Td>
                       <Td right className="font-semibold text-green-700">{inr(r.net)}</Td>
                     </tr>
                   ))}
@@ -617,6 +620,7 @@ export const SalaryAbstractPage: React.FC = () => {
                   <Td right>{inr(totEarned)}</Td>
                   <Td right className="text-orange-600">{totAdv>0?inr(totAdv):'—'}</Td>
                   <Td right className="text-red-500">{totTds>0?inr(totTds):'—'}</Td>
+                  <Td right className="text-red-500">{totDed>0?inr(totDed):'—'}</Td>
                   <Td right className="text-green-700">{inr(totNet)}</Td>
                 </tr></tfoot>
               </Table>

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { FeedTransfer } from '@/pages/feed/FeedPages'
 import { StockPage } from '@/pages/feed/StockPage'
@@ -844,6 +844,18 @@ const ProductionForm: React.FC<{
     if (i.percentage != null)  return String(+(i.percentage / 100 * qtyNum).toFixed(3))
     return ''
   }
+
+  // When editing an entry that has a formula + quantity but no saved ingredient lines
+  // (e.g. older productions saved with 0 items), auto-populate them from the formula so
+  // they can be edited and so consumption gets recorded on save.
+  useEffect(() => {
+    const qtyNum = Number(form.quantity_kg) || 0
+    if (form.formula_id && qtyNum > 0 && ings.length === 0) {
+      const fIngs = allIngredients[form.formula_id] ?? []
+      if (fIngs.length) setIngs(fIngs.map((i: any) => ({ ingredient_name: i.ingredient_name, quantity_kg: ingKg(i, qtyNum) })))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.formula_id, allIngredients])
 
   function handleFormulaChange(formulaId: string) {
     setForm((f: any) => ({...f, formula_id: formulaId}))
