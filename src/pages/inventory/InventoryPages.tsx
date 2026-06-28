@@ -196,9 +196,11 @@ function useStockRows(asOf: string) {
         row.adjusted += qty
       } else {
         row.received += qty
-        if ((r.txn_date ?? '') >= row.lastDate) {
-          row.rate = Number(r.unit_price ?? 0); row.lastDate = r.txn_date
-        }
+      }
+      // Rate = latest dated unit_price from ANY inward txn (opening, GRN, adjustment),
+      // so opening-stock rate/value shows even with no GRN purchase.
+      if (!OUT_TYPES.has(r.txn_type) && r.unit_price != null && (r.txn_date ?? '') >= row.lastDate) {
+        row.rate = Number(r.unit_price ?? 0); row.lastDate = r.txn_date ?? ''
       }
       // Prefer items master unit; fall back to ledger unit
       if (!row.unit && r.unit) row.unit = r.unit
