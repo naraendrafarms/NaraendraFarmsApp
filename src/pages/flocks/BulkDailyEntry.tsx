@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
-import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput } from '@/components/ui'
+import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput, SearchableSelect } from '@/components/ui'
 import { Save, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import { useFeedRates } from '@/hooks/useFeedRates'
@@ -869,10 +869,7 @@ export const BulkDailyEntry: React.FC = () => {
                               <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_male, u('closing_male'), 'w-14', t2(7))}</td>
                               <td className="px-1 py-1">{numInput(r.lighting_hrs, u('lighting_hrs'), 'w-14', t2(8))}</td>
                               <td className="px-1 py-1">
-                                <select tabIndex={t2(9)} value={r.med_id} onChange={e => updateShedRow(shed.id, 'med_id', e.target.value)}
-                                  className="w-full border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
-                                  {medOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                                </select>
+                                <SearchableSelect value={r.med_id} onChange={(v) => updateShedRow(shed.id, 'med_id', v)} options={medOptions} placeholder="Search medicine…" />
                               </td>
                               <td className="px-1 py-1">
                                 <input type="number" min="0" value={r.med_qty} placeholder="qty" disabled={!r.med_id}
@@ -1080,10 +1077,7 @@ export const BulkDailyEntry: React.FC = () => {
                             </td>
                           ))}
                           <td className="px-1 py-1">
-                            <select value={r.med_id} onChange={e => updateFlockRow(flock.id, 'med_id', e.target.value)}
-                              className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
-                              {medOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
+                            <SearchableSelect value={r.med_id} onChange={(v) => updateFlockRow(flock.id, 'med_id', v)} options={medOptions} placeholder="Search medicine…" />
                           </td>
                           <td className="px-1 py-1">
                             <input type="number" min="0" value={r.med_qty} placeholder="qty" disabled={!r.med_id}

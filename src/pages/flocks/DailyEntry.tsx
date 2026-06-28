@@ -8,7 +8,7 @@ import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Divider,
   SectionHeader, Spinner, Badge
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Save, ChevronLeft, ChevronRight, Download, Upload, Plus, Trash2 } from 'lucide-react'
 
@@ -778,15 +778,14 @@ export const DailyEntry: React.FC = () => {
                     <div key={i} className="flex gap-2 items-end flex-wrap bg-gray-50 rounded-lg px-3 py-2">
                       <div className="w-44">
                         <label className="text-xs text-gray-500 mb-1 block">Medicine / Vaccine</label>
-                        <select className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                        <SearchableSelect
                           value={row.medicine_id}
-                          onChange={e => {
-                            const med = (medicines??[]).find((m: any) => m.id === e.target.value)
-                            setMedRows(rows => rows.map((r, j) => j===i ? { ...r, medicine_id: e.target.value, unit: med?.unit??r.unit, rate: med?.rate?.toString()??r.rate } : r))
-                          }}>
-                          <option value="">— Select —</option>
-                          {(medicines??[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                        </select>
+                          onChange={(v) => {
+                            const med = (medicines??[]).find((m: any) => m.id === v)
+                            setMedRows(rows => rows.map((r, j) => j===i ? { ...r, medicine_id: v, unit: med?.unit??r.unit, rate: med?.rate?.toString()??r.rate } : r))
+                          }}
+                          options={(medicines??[]).map((m: any) => ({ value: m.id, label: m.name }))}
+                          placeholder="Search medicine…" />
                       </div>
                       <div className="w-20">
                         <label className="text-xs text-gray-500 mb-1 block">Qty</label>
