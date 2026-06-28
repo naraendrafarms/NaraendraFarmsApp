@@ -235,17 +235,22 @@ const FormulasTab: React.FC = () => {
 
   const saveMut = useMutation({
     mutationFn: async (d: any) => {
-      // strip joined/relational fields that aren't real columns on feed_formulas
-      const { ingredients: ings, feed_types, ...fData } = d
-      let fId = fData.id
+      const ings = d.ingredients
+      // Only send REAL feed_formulas columns (avoids joined objects like feed_types breaking the write)
+      const COLS = ['formula_code','formula_name','flock_type','age_week_from','age_week_to','version','notes','is_active','feed_type_id']
+      const fData: any = {}
+      for (const c of COLS) if (d[c] !== undefined) fData[c] = d[c]
+      let fId = d.id
       if (fId) {
         const { error } = await supabase.from('feed_formulas').update(fData).eq('id', fId)
         if (error) throw error
       } else {
         const { data: ins, error } = await supabase.from('feed_formulas').insert(fData).select('id').single()
         if (error) throw error
+        if (!ins?.id) throw new Error('Formula was not saved (no id returned)')
         fId = ins.id
       }
+      if (!fId) throw new Error('Missing formula id — cannot save ingredients')
       // save ingredients if provided inline
       if (ings) {
         await supabase.from('feed_formula_ingredients').delete().eq('formula_id', fId)
