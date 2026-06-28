@@ -14,21 +14,19 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
     queryFn: async () => { const { data } = await supabase.from('items').select('id,name,short_name,code,unit,category').eq('category', 'Feed Ingredient').eq('is_active', true).order('code'); return data ?? [] }
   })
 
-  const { data: grns, isLoading: loadGrn } = useQuery({
-    queryKey: ['grn_stock'],
-    queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty').eq('category', 'Feed'); return data ?? [] }
-  })
-
-  const { data: productionUsage, isLoading: loadProd } = useQuery({
-    queryKey: ['prod_usage_stock'],
-    queryFn: async () => { const { data } = await supabase.from('feed_production_ingredients').select('ingredient_id,qty_used_kg'); return data ?? [] }
-  })
-
-  const { data: latestGrns } = useQuery({
-    queryKey: ['grn_latest'],
+  // Unified stock source: stock_ledger (correct item_id, grn_in / production_out / adjustments)
+  const { data: ledger, isLoading: loadLedger } = useQuery({
+    queryKey: ['feed_stock_ledger'],
     queryFn: async () => {
-      const { data } = await supabase.from('grn').select('ingredient_id,grn_date,price_per_unit,qty').eq('category', 'Feed').order('grn_date', { ascending: false }).limit(200)
-      return data ?? []
+      let all: any[] = [], from = 0
+      while (true) {
+        const { data } = await supabase.from('stock_ledger')
+          .select('item_id,txn_type,qty,unit_price,txn_date')
+          .order('txn_date', { ascending: true }).range(from, from + 999)
+        if (!data || !data.length) break
+        all = all.concat(data); if (data.length < 1000) break; from += 1000
+      }
+      return all
     }
   })
 
@@ -37,6 +35,7 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
     queryFn: async () => { const { data } = await supabase.from('v_medicine_stock').select('*').order('name'); return data ?? [] }
   })
 
+  const OUT_TYPES = new Set(['production_out', 'medicine_out', 'adjustment_out', 'transfer_out'])
   const stockMap = React.useMemo(() => {
     if (!ingredients) return []
     const inMap: Record<string, number> = {}
@@ -44,21 +43,21 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
     const priceMap: Record<string, number> = {}
     const dateMap: Record<string, string> = {}
 
-    for (const g of grns ?? []) {
-      if (!g.ingredient_id) continue
-      inMap[g.ingredient_id] = (inMap[g.ingredient_id] ?? 0) + (g.qty ?? 0)
-    }
-    for (const u of productionUsage ?? []) {
-      if (!u.ingredient_id) continue
-      outMap[u.ingredient_id] = (outMap[u.ingredient_id] ?? 0) + (u.qty_used_kg ?? 0)
-    }
-    for (const g of latestGrns ?? []) {
-      if (!g.ingredient_id || priceMap[g.ingredient_id]) continue
-      priceMap[g.ingredient_id] = g.price_per_unit ?? 0
-      dateMap[g.ingredient_id] = g.grn_date
+    for (const r of ledger ?? []) {
+      const id = r.item_id
+      if (!id) continue
+      const q = Number(r.qty ?? 0)
+      if (OUT_TYPES.has(r.txn_type)) {
+        outMap[id] = (outMap[id] ?? 0) + q
+      } else {
+        inMap[id] = (inMap[id] ?? 0) + q
+        // latest rate by date for grn_in rows
+        if (r.txn_type === 'grn_in' && (r.txn_date ?? '') >= (dateMap[id] ?? '')) {
+          priceMap[id] = Number(r.unit_price ?? 0); dateMap[id] = r.txn_date
+        }
+      }
     }
 
-    const FEED_CATS = feedCats.length ? feedCats : ['grain','protein','mineral','supplement','additive','other']
     return ingredients
       .map((ing: any) => {
         const totalIn = inMap[ing.id] ?? 0
@@ -75,12 +74,10 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
           last_grn: dateMap[ing.id] ?? null,
         }
       })
-      // Hide items with no category (auto-added/wrong table) that have zero stock
-      .filter((r: any) => FEED_CATS.includes(r.category) || r.total_in > 0)
-  }, [ingredients, grns, productionUsage, latestGrns])
+  }, [ingredients, ledger])
 
   const totalValue = stockMap.reduce((s, r) => s + (r.value ?? 0), 0)
-  const isFeedLoading = loadIng || loadGrn || loadProd
+  const isFeedLoading = loadIng || loadLedger
 
   const tabs = [
     { key: 'feed' as const,     label: 'Feed Ingredients' },

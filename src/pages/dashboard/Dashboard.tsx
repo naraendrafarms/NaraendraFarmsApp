@@ -38,19 +38,25 @@ const AlertsWidget: React.FC = () => {
     }
   })
 
-  const { data: grnData } = useQuery({
-    queryKey: ['alerts_grn'],
+  // Feed ingredient items + unified stock_ledger (same source as Feed Mill Raw Materials Stock)
+  const { data: feedItems } = useQuery({
+    queryKey: ['alerts_feed_items'],
     queryFn: async () => {
-      const { data } = await supabase.from('grn').select('ingredient_id, qty').eq('category', 'Feed')
+      const { data } = await supabase.from('items').select('id,reorder_level').eq('category', 'Feed Ingredient').eq('is_active', true)
       return data ?? []
     }
   })
 
-  const { data: prodData } = useQuery({
-    queryKey: ['alerts_prod'],
+  const { data: ledgerData } = useQuery({
+    queryKey: ['alerts_stock_ledger'],
     queryFn: async () => {
-      const { data } = await supabase.from('feed_production_ingredients').select('ingredient_id, quantity_kg')
-      return data ?? []
+      let all: any[] = [], from = 0
+      while (true) {
+        const { data } = await supabase.from('stock_ledger').select('item_id,txn_type,qty').range(from, from + 999)
+        if (!data || !data.length) break
+        all = all.concat(data); if (data.length < 1000) break; from += 1000
+      }
+      return all
     }
   })
 
@@ -69,14 +75,21 @@ const AlertsWidget: React.FC = () => {
   }, [hdData])
 
   const lowStockCount = React.useMemo(() => {
-    if (!grnData || !prodData) return 0
-    const stockIn: Record<string, number> = {}
-    const stockOut: Record<string, number> = {}
-    for (const r of grnData) stockIn[r.ingredient_id] = (stockIn[r.ingredient_id] ?? 0) + (r.qty ?? 0)
-    for (const r of prodData) stockOut[r.ingredient_id] = (stockOut[r.ingredient_id] ?? 0) + (r.quantity_kg ?? 0)
-    const allIds = new Set([...Object.keys(stockIn), ...Object.keys(stockOut)])
-    return [...allIds].filter(id => ((stockIn[id] ?? 0) - (stockOut[id] ?? 0)) < 500).length
-  }, [grnData, prodData])
+    if (!feedItems || !ledgerData) return 0
+    const OUT = new Set(['production_out', 'medicine_out', 'adjustment_out', 'transfer_out'])
+    const bal: Record<string, number> = {}
+    for (const r of ledgerData) {
+      if (!r.item_id) continue
+      const q = Number(r.qty ?? 0)
+      bal[r.item_id] = (bal[r.item_id] ?? 0) + (OUT.has(r.txn_type) ? -q : q)
+    }
+    // Only count actual feed-ingredient items that are at/below their reorder level (or out of stock)
+    return (feedItems as any[]).filter((it: any) => {
+      const b = bal[it.id] ?? 0
+      const reorder = Number(it.reorder_level ?? 0)
+      return reorder > 0 ? b <= reorder : b <= 0
+    }).length
+  }, [feedItems, ledgerData])
 
   const overdueCount = overdueData?.length ?? 0
   const overdueAmt = overdueData?.reduce((s: number, r: any) => s + (r.amount ?? 0), 0) ?? 0
