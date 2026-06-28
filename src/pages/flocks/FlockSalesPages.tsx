@@ -1730,13 +1730,9 @@ export const NHESales: React.FC = () => {
         const saleMonthFull = saleMonth + '-01'
         if (editing) {
           await supabase.from('employee_deductions').delete().eq('nhe_sale_id', editing.id)
-          // Also remove any existing employee_advances entry for this sale (by narration match)
-          await supabase.from('employee_advances')
-            .delete().eq('employee_id', form.employee_id)
-            .eq('advance_date', form.sale_date)
-            .eq('advance_type', 'other')
-            .like('narration', `%NHE Sale%F-${flockNo}%`)
         }
+        // Single source of truth: employee_deductions only. (We no longer also write a
+        // duplicate employee_advances 'other' row — that caused two diverging totals.)
         await supabase.from('employee_deductions').insert({
           employee_id: form.employee_id,
           nhe_sale_id: savedId,
@@ -1744,16 +1740,6 @@ export const NHESales: React.FC = () => {
           amount: finalAmt,
           deduction_month: saleMonthFull,
           status: 'pending',
-        })
-        // Also insert into employee_advances so it shows on the Advances page
-        // and is auto-picked up by salary auto-fill
-        await supabase.from('employee_advances').insert({
-          employee_id: form.employee_id,
-          advance_date: form.sale_date,
-          advance_type: 'other',
-          amount: finalAmt,
-          narration: `NHE Sale F-${flockNo ?? ''} ${cbCategory} (salary deduction)`,
-          salary_month: saleMonth,
         })
       }
 
