@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, today } from '@/lib/utils'
+import { inr, today, FY_OPTIONS, currentFY, fyRange } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState } from '@/components/ui'
 import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -126,8 +126,17 @@ export const BankLedgerPage: React.FC = () => {
   const qc = useQueryClient()
   const [tab, setTab] = useState<'ledger' | 'import'>('ledger')
   const [selectedAccount, setSelectedAccount] = useState<string>('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const [fy, setFy] = useState(currentFY())
+  const [fromDate, setFromDate] = useState(fyRange(currentFY()).start)
+  const [toDate, setToDate] = useState(fyRange(currentFY()).end)
+  const [obInput, setObInput] = useState('')
+
+  // When the FY changes, reset the displayed date range to that FY's range
+  React.useEffect(() => {
+    const r = fyRange(fy)
+    setFromDate(r.start)
+    setToDate(r.end)
+  }, [fy])
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [editId, setEditId] = useState<string | null>(null)
@@ -178,8 +187,32 @@ export const BankLedgerPage: React.FC = () => {
     enabled: !!selectedAccount,
   })
 
+  // Per-FY opening balance for the selected account
+  const { data: fyOpeningRow } = useQuery({
+    queryKey: ['bank_fy_opening', selectedAccount, fy],
+    queryFn: async () => {
+      if (!selectedAccount) return null
+      const { data } = await supabase
+        .from('bank_fy_opening')
+        .select('opening_balance')
+        .eq('bank_account_id', selectedAccount)
+        .eq('fy', fy)
+        .maybeSingle()
+      return data ?? null
+    },
+    enabled: !!selectedAccount,
+  })
+
   const selectedAccountData = (accounts as any[])?.find((a: any) => a.id === selectedAccount)
-  const openingBalance = selectedAccountData?.opening_balance ?? 0
+  // Prefer the per-FY opening; fall back to the account's single opening_balance
+  const openingBalance = (fyOpeningRow as any)?.opening_balance != null
+    ? Number((fyOpeningRow as any).opening_balance)
+    : (selectedAccountData?.opening_balance ?? 0)
+
+  // Keep the editable opening field in sync with the current FY/account opening
+  React.useEffect(() => {
+    setObInput(String(openingBalance))
+  }, [openingBalance, selectedAccount, fy])
 
   const { filteredRows, summary } = useMemo(() => {
     if (!transactions) return { filteredRows: [], summary: { credits: 0, debits: 0, closing: 0 } }
@@ -213,6 +246,21 @@ export const BankLedgerPage: React.FC = () => {
       summary: { credits, debits, closing },
     }
   }, [transactions, fromDate, toDate, openingBalance])
+
+  const saveOpeningMutation = useMutation({
+    mutationFn: async (v: number) => {
+      if (!selectedAccount) throw new Error('Select an account first')
+      const { error } = await supabase.from('bank_fy_opening')
+        .upsert({ bank_account_id: selectedAccount, fy, opening_balance: v },
+                { onConflict: 'bank_account_id,fy' })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bank_fy_opening', selectedAccount, fy] })
+      toast.success('Opening balance saved')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -493,6 +541,40 @@ export const BankLedgerPage: React.FC = () => {
       {/* ── Ledger tab ── */}
       {tab === 'ledger' && (
         <>
+          {/* FY selector + per-FY opening balance */}
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-40">
+              <Select
+                label="Financial Year"
+                value={fy}
+                onChange={e => setFy((e.target as HTMLSelectElement).value)}
+                options={FY_OPTIONS.map(o => ({ value: o, label: `FY ${o}` }))}
+              />
+            </div>
+            <div className="w-44">
+              <Input
+                label={`Opening Balance (FY ${fy})`}
+                type="number"
+                value={obInput}
+                onChange={e => setObInput(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              loading={saveOpeningMutation.isPending}
+              disabled={!selectedAccount}
+              onClick={() => {
+                const v = parseFloat(obInput)
+                if (isNaN(v)) { toast.error('Enter a valid number'); return }
+                saveOpeningMutation.mutate(v)
+              }}
+            >
+              Save Opening
+            </Button>
+          </div>
+
           {/* Date filter */}
           <div className="flex flex-wrap items-end gap-3">
             <div>

@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, inr } from '@/lib/utils'
-import { today } from '@/lib/utils'
+import { today, FY_OPTIONS, currentFY, fyRange } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
@@ -105,10 +105,20 @@ export const CashBookPage: React.FC = () => {
   const CATEGORIES   = useConfigOptions('cashbook_category', CATEGORIES_FB)
   const PAYMENT_MODES = useConfigOptions('payment_method', PAYMENT_MODES_FB)
 
-  // Date range filter — default current month
-  const defaultRange = currentMonthRange()
-  const [filterFrom, setFilterFrom] = useState(defaultRange.from)
-  const [filterTo,   setFilterTo]   = useState(defaultRange.to)
+  // Financial year selector — drives opening balance + default date range
+  const [fy, setFy] = useState(currentFY())
+
+  // Date range filter — default to the selected FY range
+  const fyDefault = fyRange(fy)
+  const [filterFrom, setFilterFrom] = useState(fyDefault.start)
+  const [filterTo,   setFilterTo]   = useState(fyDefault.end)
+
+  // When the FY changes, reset the date range to that FY's range
+  React.useEffect(() => {
+    const r = fyRange(fy)
+    setFilterFrom(r.start)
+    setFilterTo(r.end)
+  }, [fy])
 
   // Location filter: '' = all, 'ho' = Head Office (farm_id IS NULL), or a farm UUID
   const [filterLocation, setFilterLocation] = useState('')
@@ -124,14 +134,17 @@ export const CashBookPage: React.FC = () => {
   const { data: openingRows } = useQuery({
     queryKey: ['cash_book_opening'],
     queryFn: async () => {
-      const { data } = await supabase.from('cash_book_opening').select('location_key,balance')
+      const { data } = await supabase.from('cash_book_opening').select('location_key,balance,fy')
       return data ?? []
     }
   })
   const openingBalance = useMemo(() => {
-    const row = (openingRows ?? []).find((r: any) => r.location_key === obKey(filterLocation))
+    const key = obKey(filterLocation)
+    const rows = (openingRows ?? []).filter((r: any) => r.location_key === key)
+    // Prefer the row matching the selected FY; else fall back to the legacy fy IS NULL row
+    const row = rows.find((r: any) => r.fy === fy) ?? rows.find((r: any) => r.fy == null)
     return row ? Number(row.balance) : 0
-  }, [openingRows, filterLocation])
+  }, [openingRows, filterLocation, fy])
 
   // Internal Transfer modal
   const [showTransfer, setShowTransfer] = useState(false)
@@ -330,10 +343,20 @@ export const CashBookPage: React.FC = () => {
 
   const obMut = useMutation({
     mutationFn: async (v: number) => {
-      const { error } = await supabase.from('cash_book_opening')
-        .upsert({ location_key: obKey(filterLocation), balance: v, updated_at: new Date().toISOString() },
-                { onConflict: 'location_key' })
-      if (error) throw error
+      const key = obKey(filterLocation)
+      // Update the (location_key, fy) row if it exists, else insert a new one.
+      const { data: existing } = await supabase.from('cash_book_opening')
+        .select('id').eq('location_key', key).eq('fy', fy).maybeSingle()
+      if (existing) {
+        const { error } = await supabase.from('cash_book_opening')
+          .update({ balance: v, updated_at: new Date().toISOString() })
+          .eq('id', (existing as any).id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('cash_book_opening')
+          .insert({ location_key: key, fy, balance: v, updated_at: new Date().toISOString() })
+        if (error) throw error
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cash_book_opening'] })
@@ -510,6 +533,11 @@ export const CashBookPage: React.FC = () => {
 
       {/* Filters */}
       <Card>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end mb-3">
+          <Select label="Financial Year"
+            options={FY_OPTIONS.map(o => ({ value: o, label: `FY ${o}` }))}
+            value={fy} onChange={e => setFy(e.target.value)} />
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
           <DateInput label="From Date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
           <DateInput label="To Date"   value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
