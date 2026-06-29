@@ -1456,15 +1456,17 @@ export const NHESales: React.FC = () => {
     queryKey: ['nhe_emp_dues'],
     queryFn: async () => {
       const { data } = await supabase.from('nhe_sales')
-        .select('employee_id,amount,amount_received,payment_status,employees(name,emp_id)')
+        .select('employee_id,amount,amount_received,sale_type,employees(name,emp_id)')
         .eq('is_employee_sale', true)
       const m: Record<string, any> = {}
       for (const r of (data ?? [])) {
         const id = r.employee_id; if (!id) continue
-        const e = (m[id] ??= { name: (r as any).employees?.name ?? '—', emp_id: (r as any).employees?.emp_id ?? '', vouchers: 0, total: 0, received: 0 })
+        const e = (m[id] ??= { name: (r as any).employees?.name ?? '—', emp_id: (r as any).employees?.emp_id ?? '', vouchers: 0, total: 0, received: 0, byType: {} as Record<string, number> })
         e.vouchers += 1
         e.total += Number(r.amount ?? 0)
         e.received += Number(r.amount_received ?? 0)
+        const t = r.sale_type ?? 'other'
+        e.byType[t] = (e.byType[t] ?? 0) + Number(r.amount ?? 0)
       }
       return Object.entries(m).map(([id, v]: any) => ({ id, ...v, pending: v.total - v.received }))
         .sort((a: any, b: any) => b.pending - a.pending)
@@ -2047,8 +2049,13 @@ export const NHESales: React.FC = () => {
                 <thead><tr><Th>Employee</Th><Th right>Vouchers</Th><Th right>Total</Th><Th right>Received</Th><Th right>Pending</Th><Th></Th></tr></thead>
                 <tbody>
                   {empDues!.map((r: any) => (
-                    <tr key={r.id} className="hover:bg-gray-50">
-                      <Td className="text-xs">{r.emp_id ? `${r.emp_id} — ` : ''}{r.name}</Td>
+                    <tr key={r.id} className="hover:bg-gray-50 align-top">
+                      <Td className="text-xs">
+                        {r.emp_id ? `${r.emp_id} — ` : ''}{r.name}
+                        <div className="text-[10px] text-gray-400 mt-0.5">
+                          {Object.entries(r.byType).map(([t, amt]: any) => `${t}: ${inr(amt)}`).join('  ·  ')}
+                        </div>
+                      </Td>
                       <Td right className="text-xs">{r.vouchers}</Td>
                       <Td right className="text-xs">{inr(r.total)}</Td>
                       <Td right className="text-xs text-green-700">{inr(r.received)}</Td>

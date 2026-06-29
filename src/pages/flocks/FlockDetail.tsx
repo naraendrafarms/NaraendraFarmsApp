@@ -326,6 +326,25 @@ export const FlockDetail: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  const deleteTransferMut = useMutation({
+    mutationFn: async (t: any) => {
+      const { error } = await supabase.from('flock_transfers').delete().eq('id', t.id)
+      if (error) throw error
+      // reverse the daily-record deduction that the transfer made
+      const trF = t.female_count || 0, trM = t.male_count || 0
+      if (trF || trM) {
+        const { data: dr } = await supabase.from('daily_records')
+          .select('id,transfer_female,transfer_male').eq('flock_id', id!).eq('record_date', t.transfer_date).maybeSingle()
+        if (dr) await supabase.from('daily_records').update({
+          transfer_female: Math.max(0, (dr.transfer_female ?? 0) - trF),
+          transfer_male: Math.max(0, (dr.transfer_male ?? 0) - trM),
+        }).eq('id', dr.id)
+      }
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_transfers', id] }); qc.invalidateQueries({ queryKey: ['daily_records'] }); toast.success('Transfer deleted') },
+    onError: (e: any) => toast.error('Delete failed: ' + (e.message || e.details)),
+  })
+
   const handleTransferImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return
     const text = await file.text()
@@ -1274,6 +1293,8 @@ export const FlockDetail: React.FC = () => {
                           })
                           setShowTransferForm(true)
                         }}>Edit</button>
+                        <button className="text-xs text-red-600 hover:underline ml-3"
+                          onClick={() => { if (confirm('Delete this transfer? Bird counts will be restored.')) deleteTransferMut.mutate(t) }}>Delete</button>
                       </td>
                     </tr>
                   ))}
