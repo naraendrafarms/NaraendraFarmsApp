@@ -1748,18 +1748,22 @@ export const ESIPFReportPage: React.FC = () => {
     acc.esi_emp   += r.esi_employee??0
     acc.esi_er    += r.esi_employer??0
     acc.pf_emp    += r.pf_employee??0
-    acc.pf_er     += r.pf_employer??0
+    acc.eps       += r.employer_eps??0
+    acc.epf       += r.employer_epf_diff??0
+    acc.admin     += r.admin_charges??0
+    acc.edli      += r.edli_charge??0
     acc.pt        += r.pt??0
     return acc
-  }, {esi_emp:0,esi_er:0,pf_emp:0,pf_er:0,pt:0})
+  }, {esi_emp:0,esi_er:0,pf_emp:0,eps:0,epf:0,admin:0,edli:0,pt:0})
 
   const handleExport = () => {
     if (!rows?.length) return
     exportCSV(`esipf_${filterMonth}.csv`,
-      ['Emp ID','Name','Site','Gross','ESI Employee','ESI Employer','PF Employee','PF Employer','PT'],
+      ['Emp ID','Name','Site','Gross','ESI Employee','ESI Employer','PF Employee','Empr EPS','Empr EPF','Admin','EDLI','PT'],
       (rows??[]).map((r:any)=>[
         r.employees?.emp_id, r.employees?.name, r.employees?.farms?.name,
-        r.gross_salary, r.esi_employee, r.esi_employer, r.pf_employee, r.pf_employer, r.pt
+        r.gross_salary, r.esi_employee, r.esi_employer, r.pf_employee,
+        r.employer_eps, r.employer_epf_diff, r.admin_charges, r.edli_charge, r.pt
       ])
     )
   }
@@ -1777,12 +1781,15 @@ export const ESIPFReportPage: React.FC = () => {
         {filterFarm&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           {label:'ESI Employee',val:totals.esi_emp,color:'text-blue-700'},
           {label:'ESI Employer',val:totals.esi_er,color:'text-blue-900'},
           {label:'PF Employee',val:totals.pf_emp,color:'text-purple-700'},
-          {label:'PF Employer',val:totals.pf_er,color:'text-purple-900'},
+          {label:'Empr EPS (8.33%)',val:totals.eps,color:'text-purple-900'},
+          {label:'Empr EPF (3.67%)',val:totals.epf,color:'text-purple-900'},
+          {label:'Admin (0.5%)',val:totals.admin,color:'text-purple-500'},
+          {label:'EDLI (0.5%)',val:totals.edli,color:'text-purple-500'},
           {label:'Prof. Tax (PT)',val:totals.pt,color:'text-orange-700'},
         ].map(c=>(
           <Card key={c.label}>
@@ -1798,7 +1805,7 @@ export const ESIPFReportPage: React.FC = () => {
             <thead><tr>
               <Th>Employee</Th><Th>Site</Th><Th right>Gross</Th>
               <Th right>ESI (Emp)</Th><Th right>ESI (Employer)</Th>
-              <Th right>PF (Emp)</Th><Th right>PF (Employer)</Th><Th right>PT</Th>
+              <Th right>PF (Emp)</Th><Th right>Empr EPS</Th><Th right>Empr EPF</Th><Th right>Admin</Th><Th right>EDLI</Th><Th right>PT</Th>
               <Th right>Net</Th><Th>Paid</Th><Th></Th>
             </tr></thead>
             <tbody>
@@ -1810,7 +1817,10 @@ export const ESIPFReportPage: React.FC = () => {
                   <Td right>{r.esi_employee>0?inr(r.esi_employee):'—'}</Td>
                   <Td right>{r.esi_employer>0?inr(r.esi_employer):'—'}</Td>
                   <Td right>{r.pf_employee>0?inr(r.pf_employee):'—'}</Td>
-                  <Td right>{r.pf_employer>0?inr(r.pf_employer):'—'}</Td>
+                  <Td right>{r.employer_eps>0?inr(r.employer_eps):'—'}</Td>
+                  <Td right>{r.employer_epf_diff>0?inr(r.employer_epf_diff):'—'}</Td>
+                  <Td right>{r.admin_charges>0?inr(r.admin_charges):'—'}</Td>
+                  <Td right>{r.edli_charge>0?inr(r.edli_charge):'—'}</Td>
                   <Td right>{r.pt>0?inr(r.pt):'—'}</Td>
                   <Td right className="font-semibold text-green-700">{r.net_salary?inr(r.net_salary):'—'}</Td>
                   <Td><Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge></Td>
@@ -1824,7 +1834,10 @@ export const ESIPFReportPage: React.FC = () => {
                   <Td right>{inr(totals.esi_emp)}</Td>
                   <Td right>{inr(totals.esi_er)}</Td>
                   <Td right>{inr(totals.pf_emp)}</Td>
-                  <Td right>{inr(totals.pf_er)}</Td>
+                  <Td right>{inr(totals.eps)}</Td>
+                  <Td right>{inr(totals.epf)}</Td>
+                  <Td right>{inr(totals.admin)}</Td>
+                  <Td right>{inr(totals.edli)}</Td>
                   <Td right>{inr(totals.pt)}</Td>
                   <Td right className="text-green-700">{inr((rows??[]).reduce((s:number,r:any)=>s+(r.net_salary??0),0))}</Td>
                   <Td colSpan={2}></Td>
