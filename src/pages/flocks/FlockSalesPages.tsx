@@ -1451,6 +1451,27 @@ export const NHESales: React.FC = () => {
 
   const hasFilter = !!(flockFilter || empFilter || fromDate || toDate)
 
+  // Employee dues summary across ALL employee sales (vouchers, received, pending)
+  const { data: empDues } = useQuery({
+    queryKey: ['nhe_emp_dues'],
+    queryFn: async () => {
+      const { data } = await supabase.from('nhe_sales')
+        .select('employee_id,amount,amount_received,payment_status,employees(name,emp_id)')
+        .eq('is_employee_sale', true)
+      const m: Record<string, any> = {}
+      for (const r of (data ?? [])) {
+        const id = r.employee_id; if (!id) continue
+        const e = (m[id] ??= { name: (r as any).employees?.name ?? '—', emp_id: (r as any).employees?.emp_id ?? '', vouchers: 0, total: 0, received: 0 })
+        e.vouchers += 1
+        e.total += Number(r.amount ?? 0)
+        e.received += Number(r.amount_received ?? 0)
+      }
+      return Object.entries(m).map(([id, v]: any) => ({ id, ...v, pending: v.total - v.received }))
+        .sort((a: any, b: any) => b.pending - a.pending)
+    }
+  })
+  const [showDues, setShowDues] = useState(false)
+
   const { data: sales, isLoading } = useQuery({
     queryKey: ['nhe_sales', flockFilter, empFilter, fromDate, toDate],
     queryFn: async () => {
@@ -2012,6 +2033,35 @@ export const NHESales: React.FC = () => {
         subtitle="Non-hatching eggs, bird sales, gas, manure income"
         action={<Button icon={<Plus size={16}/>} onClick={openNew}>Add Sale</Button>}
       />
+
+      {(empDues?.length ?? 0) > 0 && (
+        <Card className="p-3">
+          <button className="flex items-center justify-between w-full text-sm font-semibold text-gray-700"
+            onClick={() => setShowDues(v => !v)}>
+            <span>Employee Dues — {empDues!.length} employees · Pending {inr(empDues!.reduce((s: number, r: any) => s + r.pending, 0))}</span>
+            <span className="text-xs text-brand-600">{showDues ? 'Hide ▲' : 'Show ▼'}</span>
+          </button>
+          {showDues && (
+            <div className="overflow-x-auto mt-2">
+              <Table>
+                <thead><tr><Th>Employee</Th><Th right>Vouchers</Th><Th right>Total</Th><Th right>Received</Th><Th right>Pending</Th><Th></Th></tr></thead>
+                <tbody>
+                  {empDues!.map((r: any) => (
+                    <tr key={r.id} className="hover:bg-gray-50">
+                      <Td className="text-xs">{r.emp_id ? `${r.emp_id} — ` : ''}{r.name}</Td>
+                      <Td right className="text-xs">{r.vouchers}</Td>
+                      <Td right className="text-xs">{inr(r.total)}</Td>
+                      <Td right className="text-xs text-green-700">{inr(r.received)}</Td>
+                      <Td right className={`text-xs font-semibold ${r.pending > 0 ? 'text-red-600' : 'text-gray-400'}`}>{inr(r.pending)}</Td>
+                      <Td><button className="text-xs text-brand-600 hover:underline" onClick={() => setEmpFilter(r.id)}>View</button></Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Toolbar */}
       <div className="flex gap-3 flex-wrap items-end">

@@ -39,7 +39,7 @@ const emptyForm = () => ({
   item_id: '', item_name: '', flock_id: '',
   qty: '', unit: '', bags: '', price_per_unit: '',
   basic_amount: '', gst_pct: '0', gst_amount: '', other_charges: '', total_amount: '',
-  batch_no: '', expiry_date: '', vehicle_no: '', remarks: ''
+  free_qty: '', batch_no: '', expiry_date: '', vehicle_no: '', remarks: ''
 })
 
 export const GRNPage: React.FC = () => {
@@ -185,6 +185,7 @@ export const GRNPage: React.FC = () => {
       gst_pct: g.gst_pct?.toString() ?? '0',
       gst_amount: g.gst_amount?.toString() ?? '',
       other_charges: g.other_charges?.toString() ?? '',
+      free_qty: g.free_qty?.toString() ?? '',
       total_amount: g.total_amount?.toString() ?? '',
       batch_no: g.batch_no ?? '',
       expiry_date: g.expiry_date ?? '',
@@ -217,6 +218,7 @@ export const GRNPage: React.FC = () => {
     batch_no: needsBatch ? (form.batch_no || null) : null,
     expiry_date: needsBatch ? (form.expiry_date || null) : null,
     flock_id: (isChick || needsBatch) ? (form.flock_id || null) : null,
+    free_qty: isChick ? (parseInt(form.free_qty) || 0) : null,
     vehicle_no: form.vehicle_no || null,
     remarks: form.remarks || null
   })
@@ -709,13 +711,22 @@ export const GRNPage: React.FC = () => {
           )}
 
           {isChick && (
-            <Select
-              label="Flock"
-              required
-              value={form.flock_id}
-              onChange={e => s('flock_id', e.target.value)}
-              options={[{ value: '', label: 'Select Flock' }, ...(flocks ?? []).map((f: any) => ({ value: f.id, label: f.flock_no }))]}
-            />
+            <FormRow cols={2}>
+              <Select
+                label="Flock"
+                required
+                value={form.flock_id}
+                onChange={e => s('flock_id', e.target.value)}
+                options={[{ value: '', label: 'Select Flock' }, ...(flocks ?? []).map((f: any) => ({ value: f.id, label: f.flock_no }))]}
+              />
+              <Input
+                label="Free Chicks"
+                type="number"
+                value={form.free_qty}
+                onChange={e => s('free_qty', e.target.value)}
+                hint={`Free birds received (not charged). Total received = ${(parseInt(form.qty)||0)+(parseInt(form.free_qty)||0)}`}
+              />
+            </FormRow>
           )}
 
           <Input

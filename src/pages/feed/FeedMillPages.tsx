@@ -666,7 +666,19 @@ const ProductionTab: React.FC = () => {
         const landed = Number(g.price_per_unit) + (qty > 0 ? (Number(g.other_charges) || 0) / qty : 0)
         ;(m[k] ??= []).push({ date: g.grn_date ?? '', price: landed })
       }
-      return m  // each list is newest-first
+      // Also include opening-stock / adjustment rates (item may have no GRN purchase)
+      const { data: sl } = await supabase.from('stock_ledger')
+        .select('item_name,unit_price,txn_date,txn_type')
+        .in('txn_type', ['opening', 'adjustment_in'])
+        .order('txn_date', { ascending: false })
+      for (const r of (sl ?? [])) {
+        const k = String(r.item_name ?? '').trim().toLowerCase()
+        if (!k || !r.unit_price) continue
+        ;(m[k] ??= []).push({ date: r.txn_date ?? '', price: Number(r.unit_price) })
+      }
+      // keep each list newest-first
+      for (const k of Object.keys(m)) m[k].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      return m
     }
   })
   // Rate of an ingredient as of a date: latest GRN price with grn_date <= asOf.
@@ -985,30 +997,39 @@ const ProductionForm: React.FC<{
       </div>
       <Field label="Remarks"><Input value={form.remarks} onChange={e => setForm((f:any) => ({...f,remarks:e.target.value}))} /></Field>
 
-      {ings.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold text-gray-600 mb-2">Ingredients Consumed (auto-calculated, editable)</p>
-          <div className="border rounded overflow-hidden max-h-60 overflow-y-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50 sticky top-0">
-                <tr><th className="px-2 py-1.5 text-left">Ingredient</th><th className="px-2 py-1.5 text-right w-28">Kg</th></tr>
-              </thead>
-              <tbody>
-                {ings.map((ing, idx) => (
-                  <tr key={idx} className="border-t border-gray-100">
-                    <td className="px-2 py-1">{ing.ingredient_name}</td>
-                    <td className="px-2 py-1">
-                      <input type="number" step="0.001" className="w-full text-right border border-gray-200 rounded px-1 py-0.5 text-xs"
-                        value={ing.quantity_kg}
-                        onChange={e => setIngs(prev => prev.map((x,i) => i===idx ? {...x,quantity_kg:e.target.value} : x))} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold text-gray-600">Ingredients Consumed (editable — add/remove items, change qty)</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => setIngs(prev => [...prev, { ingredient_name: '', quantity_kg: '' }])}><Plus size={12}/> Add</Button>
         </div>
-      )}
+        <div className="border rounded overflow-hidden max-h-72 overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 sticky top-0">
+              <tr><th className="px-2 py-1.5 text-left">Ingredient / Medicine</th><th className="px-2 py-1.5 text-right w-28">Kg</th><th className="w-8"></th></tr>
+            </thead>
+            <tbody>
+              {ings.map((ing, idx) => (
+                <tr key={idx} className="border-t border-gray-100">
+                  <td className="px-2 py-1">
+                    <input className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs" placeholder="Ingredient / medicine name"
+                      value={ing.ingredient_name}
+                      onChange={e => setIngs(prev => prev.map((x,i) => i===idx ? {...x,ingredient_name:e.target.value} : x))} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input type="number" step="0.001" className="w-full text-right border border-gray-200 rounded px-1 py-0.5 text-xs"
+                      value={ing.quantity_kg}
+                      onChange={e => setIngs(prev => prev.map((x,i) => i===idx ? {...x,quantity_kg:e.target.value} : x))} />
+                  </td>
+                  <td className="px-1 py-1 text-center">
+                    <button type="button" onClick={() => setIngs(prev => prev.filter((_,i) => i!==idx))} className="text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                  </td>
+                </tr>
+              ))}
+              {ings.length === 0 && <tr><td colSpan={3} className="px-2 py-3 text-center text-gray-400">Pick a formula to auto-fill, or click Add to enter items manually.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="submit" loading={loading}>Save Production</Button>

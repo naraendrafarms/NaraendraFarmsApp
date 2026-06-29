@@ -39,6 +39,16 @@ export function useFeedRates(): FeedRates {
           if (!(k in rateByIng)) rateByIng[k] = landed
         }
       }
+      // Fall back to opening-stock / adjustment rate for items with no GRN purchase
+      const { data: slRates } = await supabase
+        .from('stock_ledger')
+        .select('item_name,unit_price,txn_date,txn_type')
+        .in('txn_type', ['opening', 'adjustment_in'])
+        .order('txn_date', { ascending: false })
+      for (const r of (slRates ?? [])) {
+        const k = String((r as any).item_name ?? '').trim().toLowerCase()
+        if (k && r.unit_price && !(k in rateByIng)) rateByIng[k] = Number(r.unit_price)
+      }
 
       // 2. Formulas with their feed type
       const { data: formulas } = await supabase
