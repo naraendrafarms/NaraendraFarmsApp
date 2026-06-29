@@ -11,6 +11,7 @@ import { FlockList } from '@/pages/flocks/FlockList'
 import { FlockDetail } from '@/pages/flocks/FlockDetail'
 import { DailyEntry } from '@/pages/flocks/DailyEntry'
 import { HEDispatch, NHESales, MedicineEntry, MedicinePurchases } from '@/pages/flocks/FlockSalesPages'
+import { ShedTransferPage } from '@/pages/flocks/ShedTransferPage'
 import { BulkDailyEntry } from '@/pages/flocks/BulkDailyEntry'
 import { EggConversions } from '@/pages/flocks/EggConversions'
 import { HatchBatches } from '@/pages/flocks/HatchBatches'
@@ -131,6 +132,7 @@ export const App: React.FC = () => {
             <Route path="flocks/bulk-daily" element={<BulkDailyEntry />} />
             <Route path="flocks/he-dispatch" element={<HEDispatch />} />
             <Route path="flocks/nhe-sales" element={<NHESales />} />
+            <Route path="flocks/shed-transfer" element={<ShedTransferPage />} />
             <Route path="flocks/egg-conversions" element={<EggConversions />} />
             <Route path="flocks/hatch-batches" element={<HatchBatches />} />
             <Route path="flocks/medicine" element={<MedicineEntry />} />

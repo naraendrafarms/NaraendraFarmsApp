@@ -1054,18 +1054,21 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const deleteMut = useMutation({
-    mutationFn: async (id: string) => { await supabase.from('bird_transfers').delete().eq('id', id) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setDeleteRow(null) }
+    mutationFn: async (id: string) => { const { error } = await supabase.from('bird_transfers').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setDeleteRow(null); toast.success('Deleted') },
+    onError: (e: any) => toast.error('Delete failed: ' + (e.message || e.details))
   })
 
   const updateMut = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => { await supabase.from('bird_transfers').update(data).eq('id', id) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setEditRow(null) }
+    mutationFn: async ({ id, data }: { id: string; data: any }) => { const { error } = await supabase.from('bird_transfers').update(data).eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setEditRow(null); toast.success('Saved') },
+    onError: (e: any) => toast.error('Update failed: ' + (e.message || e.details))
   })
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => { await chunkedDelete('bird_transfers', ids) },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setSel(new Set()); setBulkConfirm(false) }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_bird_transfers', flockId] }); setSel(new Set()); setBulkConfirm(false); toast.success('Deleted') },
+    onError: (e: any) => toast.error('Delete failed: ' + (e.message || e.details))
   })
 
   const filtered = (transfers ?? []).filter((r: any) => {
