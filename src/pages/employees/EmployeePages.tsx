@@ -787,8 +787,9 @@ export const SalaryEntryPage: React.FC = () => {
       const toInsert = (emps ?? []).filter((e: any) => !existingIds.has(e.id)).map((e: any) => {
         const base = e.base_salary ?? 0
         const gross = base
-        const esi_emp = e.esi_applicable && gross <= 21000 ? Math.round(gross * 0.0075) : 0
-        const esi_er  = e.esi_applicable && gross <= 21000 ? Math.round(gross * 0.0325) : 0
+        // ESI on BASIC (farm practice), matching computeSalaryForEmp
+        const esi_emp = e.esi_applicable ? Math.ceil(base * 0.0075) : 0
+        const esi_er  = e.esi_applicable ? Math.round(base * 0.0325) : 0
         // PF on Basic, capped at the ₹15,000 wage ceiling when restrict_pf is set
         // (matches the detailed payslip + computeSalaryForEmp). Was previously 12% of
         // full basic here, which gave wrong PF in Quick Generate.
@@ -2416,7 +2417,7 @@ export const PayslipGeneratorPage: React.FC = () => {
         ot_bonus: (data?.ot_bonus ?? 0).toString(),
         arrears: (data?.arrears ?? 0).toString(),
         pf_employee: pfOn ? Math.round(basic * 0.12).toString() : '0',
-        esi_employee: esiOn ? Math.round(g * 0.0075).toString() : '0',
+        esi_employee: esiOn ? Math.round(basic * 0.0075).toString() : '0',
         pt: ptOn ? calcPT(g).toString() : '0',
         tds: (data?.tds ?? 0).toString(),
         advance: (data?.advance ?? 0).toString(),
@@ -2445,7 +2446,7 @@ export const PayslipGeneratorPage: React.FC = () => {
     setSlip(prev => ({
       ...prev,
       pf_employee: autoCalcPF ? Math.round(parseFloat(prev.basic_salary||'0') * 0.12).toString() : prev.pf_employee,
-      esi_employee: autoCalcESI ? Math.round(gross * 0.0075).toString() : prev.esi_employee,
+      esi_employee: autoCalcESI ? Math.round(parseFloat(prev.basic_salary||'0') * 0.0075).toString() : prev.esi_employee,
       pt: autoCalcPT ? calcPT(gross).toString() : prev.pt,
     }))
   }, [gross, slip.basic_salary, autoCalcPF, autoCalcESI, autoCalcPT])
@@ -2453,7 +2454,7 @@ export const PayslipGeneratorPage: React.FC = () => {
   const totalDed = n('pf_employee') + n('esi_employee') + n('pt') + n('tds') + n('advance') + n('hold') + n('other_deduction')
   const netSalary = gross - totalDed
   const pfEmployer = autoCalcPF ? Math.round(n('basic_salary') * 0.12) : 0
-  const esiEmployer = autoCalcESI ? Math.round(gross * 0.0325) : 0
+  const esiEmployer = autoCalcESI ? Math.round(n('basic_salary') * 0.0325) : 0
 
   const sv = (k: keyof typeof EMPTY_SLIP) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setSlip(prev => ({ ...prev, [k]: e.target.value }))

@@ -11,6 +11,7 @@ import { FlockList } from '@/pages/flocks/FlockList'
 import { FlockDetail } from '@/pages/flocks/FlockDetail'
 import { DailyEntry } from '@/pages/flocks/DailyEntry'
 import { HEDispatch, NHESales, MedicineEntry, MedicinePurchases } from '@/pages/flocks/FlockSalesPages'
+import { StatutoryFilingPage } from '@/pages/employees/StatutoryFilingPage'
 import { BulkDailyEntry } from '@/pages/flocks/BulkDailyEntry'
 import { EggConversions } from '@/pages/flocks/EggConversions'
 import { HatchBatches } from '@/pages/flocks/HatchBatches'
@@ -172,6 +173,7 @@ export const App: React.FC = () => {
             <Route path="employees/advances" element={<EmployeeAdvancesPage />} />
             <Route path="employees/payslip" element={<PayslipGeneratorPage />} />
             <Route path="employees/bulk-salary" element={<BulkSalaryPage />} />
+            <Route path="employees/statutory" element={<StatutoryFilingPage />} />
             <Route path="employees/salary-register" element={<SalaryRegisterPage />} />
             <Route path="employees/salary-history" element={<SalaryHistoryPage />} />
             <Route path="employees/partner-remuneration" element={<PartnerRemunerationPage />} />
