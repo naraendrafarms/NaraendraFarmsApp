@@ -763,6 +763,124 @@ const ExtraDaysConfigCard: React.FC = () => {
   )
 }
 
+// Editor for skill_wages (minimum-wage floor per skill category, drives Basic split)
+const SkillWagesCard: React.FC = () => {
+  const qc = useQueryClient()
+  const [editId, setEditId] = useState<number|null>(null)
+  const [eName, setEName] = useState('')
+  const [eWage, setEWage] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newWage, setNewWage] = useState('')
+  const [confirmDelId, setConfirmDelId] = useState<number|null>(null)
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['skill_wages_admin'],
+    queryFn: async () => {
+      const { data } = await supabase.from('skill_wages')
+        .select('id,skill_category,min_wage,sort_order').order('sort_order').order('skill_category')
+      return data ?? []
+    }
+  })
+  const inv = () => {
+    qc.invalidateQueries({ queryKey: ['skill_wages_admin'] })
+    qc.invalidateQueries({ queryKey: ['skill_wages'] })
+  }
+
+  const addMut = useMutation({
+    mutationFn: async () => {
+      if (!newName.trim()) throw new Error('Category name required')
+      const maxOrder = (rows as any[]).reduce((m: number, r: any) => Math.max(m, r.sort_order ?? 0), 0)
+      const { error } = await supabase.from('skill_wages').insert({
+        skill_category: newName.trim(), min_wage: Number(newWage) || 0, sort_order: maxOrder + 1,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Added!'); inv(); setNewName(''); setNewWage('') },
+    onError: (e: any) => toast.error(e.message)
+  })
+  const saveMut = useMutation({
+    mutationFn: async ({ id }: { id: number }) => {
+      if (!eName.trim()) throw new Error('Category name required')
+      const { error } = await supabase.from('skill_wages').update({
+        skill_category: eName.trim(), min_wage: Number(eWage) || 0, updated_at: new Date().toISOString(),
+      }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Saved!'); inv(); setEditId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+  const delMut = useMutation({
+    mutationFn: async (id: number) => {
+      const { error } = await supabase.from('skill_wages').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Deleted!'); inv(); setConfirmDelId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  return (
+    <Card className="space-y-3 sm:col-span-2 lg:col-span-3">
+      <div>
+        <p className="font-semibold text-gray-700 text-sm">Skill Category — Minimum Wage (Basic floor)</p>
+        <p className="text-xs text-gray-400">Sets the minimum Basic for each skill category. When PF applies, Basic = max(50% of gross, this floor). Editable — changes apply to the next salary generation.</p>
+      </div>
+      {isLoading ? <Spinner /> : (
+        <div className="overflow-x-auto">
+          <Table>
+            <thead><tr><Th>Skill Category</Th><Th right>Min Wage (₹)</Th><Th></Th></tr></thead>
+            <tbody>
+              {(rows as any[]).map((r: any) => (
+                <tr key={r.id} className="hover:bg-gray-50">
+                  {editId === r.id ? (
+                    <>
+                      <Td><Input label="" value={eName} onChange={e => setEName(e.target.value)} className="min-w-[160px]" /></Td>
+                      <Td right><Input label="" type="number" value={eWage} onChange={e => setEWage(e.target.value)} className="w-28 text-right" /></Td>
+                      <Td>
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" onClick={() => saveMut.mutate({ id: r.id })} loading={saveMut.isPending}>Save</Button>
+                          <Button size="sm" variant="secondary" onClick={() => setEditId(null)}>Cancel</Button>
+                        </div>
+                      </Td>
+                    </>
+                  ) : confirmDelId === r.id ? (
+                    <>
+                      <Td colSpan={2} className="text-right text-xs text-red-600">Delete "{r.skill_category}"?</Td>
+                      <Td>
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" variant="danger" onClick={() => delMut.mutate(r.id)} loading={delMut.isPending}>Yes</Button>
+                          <Button size="sm" variant="secondary" onClick={() => setConfirmDelId(null)}>No</Button>
+                        </div>
+                      </Td>
+                    </>
+                  ) : (
+                    <>
+                      <Td className="font-medium">{r.skill_category}</Td>
+                      <Td right>{inr(r.min_wage)}</Td>
+                      <Td>
+                        <div className="flex gap-1 justify-end">
+                          <button onClick={() => { setEditId(r.id); setEName(r.skill_category); setEWage(String(r.min_wage)) }}
+                            className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                          <button onClick={() => setConfirmDelId(r.id)}
+                            className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                        </div>
+                      </Td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2 items-end pt-1 border-t border-gray-100">
+        <Input label="Skill Category" value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. UnSkilled" className="flex-1 min-w-[160px]" />
+        <Input label="Min Wage (₹)" type="number" value={newWage} onChange={e => setNewWage(e.target.value)} className="w-32" />
+        <Button size="sm" icon={<Plus size={14}/>} onClick={() => addMut.mutate()} loading={addMut.isPending}>Add</Button>
+      </div>
+    </Card>
+  )
+}
+
 // Read-only reference of the statutory rules the salary code applies (ESI / PF / PT).
 const StatutoryRulesCard: React.FC = () => (
   <Card className="space-y-4 sm:col-span-2 lg:col-span-3">
@@ -779,6 +897,19 @@ const StatutoryRulesCard: React.FC = () => (
         <ul className="text-xs text-gray-700 list-disc ml-4 space-y-0.5">
           <li>Employee: <b>0.75%</b> of gross</li>
           <li>Employer: <b>3.25%</b> of gross</li>
+        </ul>
+      </div>
+
+      {/* Basic split */}
+      <div className="border border-gray-100 rounded-lg p-3 space-y-1.5">
+        <p className="text-sm font-semibold text-amber-700">Basic / HRA / Allowance split</p>
+        <p className="text-xs text-gray-600">From <b>Monthly Gross</b>:</p>
+        <ul className="text-xs text-gray-700 list-disc ml-4 space-y-0.5">
+          <li>PF <b>not</b> applicable → whole amount = Basic (all to employee)</li>
+          <li>PF applicable → Basic = max(<b>50%</b> gross, skill <b>min-wage</b>)</li>
+          <li>HRA = min(<b>30%</b> gross, gross − Basic)</li>
+          <li>Allowance = balance</li>
+          <li>Per-employee Basic/HRA/Allowance overrides win when set</li>
         </ul>
       </div>
 
@@ -873,6 +1004,7 @@ const MastersHub: React.FC = () => (
       <InlineConfig title="Designations" grp="designation" placeholder="e.g. Farm Manager" />
       <InlineConfig title="Attendance Status" grp="attendance_status" placeholder="e.g. P, A, H" />
       <InlineConfig title="Advance Types" grp="advance_type" placeholder="e.g. Cash, Egg" />
+      <SkillWagesCard />
       <ExtraDaysConfigCard />
     </Section>
 
