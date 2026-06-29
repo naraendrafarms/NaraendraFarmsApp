@@ -1876,7 +1876,7 @@ export const PayrollSummaryPage: React.FC = () => {
     queryKey:['payroll_summary',selectedFY],
     queryFn:async()=>{
       const{data,error}=await supabase.from('salary_monthly')
-        .select('month,gross_salary,net_salary,advance,esi_employee,esi_employer,pf_employee,pf_employer,pt,employees!inner(farm_id,farms(name,code))')
+        .select('month,gross_salary,net_salary,advance,esi_employee,esi_employer,pf_employee,pf_employer,employer_eps,employer_epf_diff,admin_charges,edli_charge,pt,employees!inner(farm_id,farms(name,code))')
         .gte('month',startM).lte('month',endM)
       if(error)throw error
       return data??[]
@@ -1893,11 +1893,11 @@ export const PayrollSummaryPage: React.FC = () => {
   })
   const totalBonus = (bonusData??[]).reduce((s:number,b:any)=>s+(b.amount??0),0)
 
-  const byMonth: Record<string,{label:string,gross:number,net:number,advance:number,esi:number,pf:number,pt:number,count:number}> = {}
+  const byMonth: Record<string,{label:string,gross:number,net:number,advance:number,esi:number,pf:number,eps:number,epf:number,admin:number,edli:number,pt:number,count:number}> = {}
   for (const m of months) {
     const key = m.slice(0,7)
     const [yr,mn] = key.split('-')
-    byMonth[key] = {label:`${MONTH_NAMES[parseInt(mn)-1]} ${yr}`,gross:0,net:0,advance:0,esi:0,pf:0,pt:0,count:0}
+    byMonth[key] = {label:`${MONTH_NAMES[parseInt(mn)-1]} ${yr}`,gross:0,net:0,advance:0,esi:0,pf:0,eps:0,epf:0,admin:0,edli:0,pt:0,count:0}
   }
   for (const r of (summaryData??[])) {
     const key = r.month.slice(0,7)
@@ -1907,6 +1907,10 @@ export const PayrollSummaryPage: React.FC = () => {
       byMonth[key].advance += r.advance??0
       byMonth[key].esi += (r.esi_employee??0) + (r.esi_employer??0)
       byMonth[key].pf += (r.pf_employee??0) + (r.pf_employer??0)
+      byMonth[key].eps += r.employer_eps??0
+      byMonth[key].epf += r.employer_epf_diff??0
+      byMonth[key].admin += r.admin_charges??0
+      byMonth[key].edli += r.edli_charge??0
       byMonth[key].pt += r.pt??0
       byMonth[key].count++
     }
@@ -1915,13 +1919,14 @@ export const PayrollSummaryPage: React.FC = () => {
   const chartData = Object.values(byMonth)
   const totals = Object.values(byMonth).reduce((acc,m)=>({
     gross: acc.gross+m.gross, net: acc.net+m.net, advance: acc.advance+m.advance,
-    esi: acc.esi+m.esi, pf: acc.pf+m.pf, pt: acc.pt+m.pt
-  }), {gross:0,net:0,advance:0,esi:0,pf:0,pt:0})
+    esi: acc.esi+m.esi, pf: acc.pf+m.pf, eps: acc.eps+m.eps, epf: acc.epf+m.epf,
+    admin: acc.admin+m.admin, edli: acc.edli+m.edli, pt: acc.pt+m.pt
+  }), {gross:0,net:0,advance:0,esi:0,pf:0,eps:0,epf:0,admin:0,edli:0,pt:0})
 
   const handleExport = () => {
     exportCSV(`payroll_summary_${selectedFY}.csv`,
-      ['Month','Employees','Gross','Net','Advance','ESI (Total)','PF (Total)','PT'],
-      Object.entries(byMonth).map(([,m])=>[m.label,m.count,m.gross,m.net,m.advance,m.esi,m.pf,m.pt])
+      ['Month','Employees','Gross','Net','Advance','ESI (Total)','PF (Total)','Empr EPS','Empr EPF','Admin','EDLI','PT'],
+      Object.entries(byMonth).map(([,m])=>[m.label,m.count,m.gross,m.net,m.advance,m.esi,m.pf,m.eps,m.epf,m.admin,m.edli,m.pt])
     )
   }
 
@@ -1978,8 +1983,9 @@ export const PayrollSummaryPage: React.FC = () => {
           <Table>
             <thead><tr>
               <Th>Month</Th><Th right>Employees</Th><Th right>Gross</Th>
-              <Th right>ESI</Th><Th right>PF</Th><Th right>PT</Th>
-              <Th right>Advance</Th><Th right>Net</Th>
+              <Th right>ESI</Th><Th right>PF</Th>
+              <Th right>Empr EPS</Th><Th right>Empr EPF</Th><Th right>Admin</Th><Th right>EDLI</Th>
+              <Th right>PT</Th><Th right>Advance</Th><Th right>Net</Th>
             </tr></thead>
             <tbody>
               {Object.entries(byMonth).map(([key,m])=>(
@@ -1989,6 +1995,10 @@ export const PayrollSummaryPage: React.FC = () => {
                   <Td right>{m.gross?inr(m.gross):'—'}</Td>
                   <Td right className="text-blue-600">{m.esi?inr(m.esi):'—'}</Td>
                   <Td right className="text-purple-600">{m.pf?inr(m.pf):'—'}</Td>
+                  <Td right className="text-purple-500">{m.eps?inr(m.eps):'—'}</Td>
+                  <Td right className="text-purple-500">{m.epf?inr(m.epf):'—'}</Td>
+                  <Td right className="text-purple-500">{m.admin?inr(m.admin):'—'}</Td>
+                  <Td right className="text-purple-500">{m.edli?inr(m.edli):'—'}</Td>
                   <Td right className="text-orange-600">{m.pt?inr(m.pt):'—'}</Td>
                   <Td right className="text-orange-500">{m.advance?inr(m.advance):'—'}</Td>
                   <Td right className="font-semibold text-green-700">{m.net?inr(m.net):'—'}</Td>
@@ -2000,6 +2010,10 @@ export const PayrollSummaryPage: React.FC = () => {
                 <Td right>{inr(totals.gross)}</Td>
                 <Td right className="text-blue-600">{inr(totals.esi)}</Td>
                 <Td right className="text-purple-600">{inr(totals.pf)}</Td>
+                <Td right className="text-purple-500">{inr(totals.eps)}</Td>
+                <Td right className="text-purple-500">{inr(totals.epf)}</Td>
+                <Td right className="text-purple-500">{inr(totals.admin)}</Td>
+                <Td right className="text-purple-500">{inr(totals.edli)}</Td>
                 <Td right className="text-orange-600">{inr(totals.pt)}</Td>
                 <Td right className="text-orange-500">{inr(totals.advance)}</Td>
                 <Td right className="text-green-700">{inr(totals.net)}</Td>
