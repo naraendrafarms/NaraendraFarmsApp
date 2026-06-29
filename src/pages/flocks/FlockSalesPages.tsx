@@ -2020,6 +2020,8 @@ export const NHESales: React.FC = () => {
     if (partyFilter.trim()) {
       const q = partyFilter.trim().toLowerCase()
       if (!(s.parties?.name ?? '').toLowerCase().includes(q) &&
+          !(s.employees?.name ?? '').toLowerCase().includes(q) &&
+          !(s.employees?.emp_id ?? '').toLowerCase().includes(q) &&
           !(s.dc_no ?? '').toLowerCase().includes(q)) return false
     }
     return true
@@ -2137,9 +2139,9 @@ export const NHESales: React.FC = () => {
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
-        <Select label="" placeholder="All Employees"
-          options={(employees ?? []).map((e: any) => ({ value: e.id, label: `${e.emp_id ? e.emp_id + ' — ' : ''}${e.name}` }))}
-          value={empFilter} onChange={e => setEmpFilter(e.target.value)} className="w-48" />
+        <SearchableSelect placeholder="All Employees"
+          options={[{ value: '', label: 'All Employees' }, ...(employees ?? []).map((e: any) => ({ value: e.id, label: `${e.emp_id ? e.emp_id + ' — ' : ''}${e.name}` }))]}
+          value={empFilter} onChange={v => setEmpFilter(v)} className="w-48" />
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
           className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
           <option value="">All Types</option>
@@ -2162,7 +2164,7 @@ export const NHESales: React.FC = () => {
         </label>
         <input
           type="text"
-          placeholder="Search party / DC No…"
+          placeholder="Search party / employee / DC No…"
           value={partyFilter}
           onChange={e => setPartyFilter(e.target.value)}
           className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-48"
