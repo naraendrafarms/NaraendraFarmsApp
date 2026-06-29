@@ -103,7 +103,7 @@ export const SalaryRegisterPage: React.FC = () => {
       'Basic Earned','HRA Earned','Other Earned','Gross Earned','Extra Pay','Total Earning',
       'PF Emp','ESI Emp','PT','TDS','Other Deduction','Advance',
       'Net Salary',
-      'PF Employer','ESI Employer','Admin Charges','EDLI','CTC'
+      'Employer EPS','Employer EPF','ESI Employer','Admin Charges','EDLI','CTC'
     ]
     const R = (v: any) => Math.round(Number(v) || 0)  // whole rupees, matches voucher
     const data = (rows as any[]).map(r => {
@@ -115,7 +115,7 @@ export const SalaryRegisterPage: React.FC = () => {
         R(r.basic_salary), R(r.hra), R((r.gross_salary??0)-(r.basic_salary??0)-(r.hra??0)), R(r.gross_salary), R(r.extra_pay), R(r.total_earning),
         R(r.pf_employee), R(r.esi_employee), R(r.pt), R(r.tds), R(r.other_deduction), R(r.advance),
         R(r.net_salary),
-        R(r.pf_employer), R(r.esi_employer), R(r.admin_charges), R(r.edli_charge), R(r.monthly_ctc)
+        R(r.employer_eps), R(r.employer_epf_diff), R(r.esi_employer), R(r.admin_charges), R(r.edli_charge), R(r.monthly_ctc)
       ]
     })
     const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
@@ -140,7 +140,8 @@ export const SalaryRegisterPage: React.FC = () => {
     acc.other_deduction = (acc.other_deduction??0) + (r.other_deduction??0)
     acc.advance        = (acc.advance??0) + (r.advance??0)
     acc.net_salary     = (acc.net_salary??0) + (r.net_salary??0)
-    acc.pf_employer    = (acc.pf_employer??0) + (r.pf_employer??0)
+    acc.employer_eps      = (acc.employer_eps??0) + (r.employer_eps??0)
+    acc.employer_epf_diff = (acc.employer_epf_diff??0) + (r.employer_epf_diff??0)
     acc.esi_employer   = (acc.esi_employer??0) + (r.esi_employer??0)
     acc.admin_charges  = (acc.admin_charges??0) + (r.admin_charges??0)
     acc.edli_charge    = (acc.edli_charge??0) + (r.edli_charge??0)
@@ -202,7 +203,8 @@ export const SalaryRegisterPage: React.FC = () => {
                 <th className="px-2 py-2 text-right font-semibold text-red-600">Adv</th>
                 <th className="px-2 py-2 text-right font-semibold text-red-600">Other Ded</th>
                 <th className="px-2 py-2 text-right font-semibold text-green-800 bg-green-50">Net Salary</th>
-                <th className="px-2 py-2 text-right font-semibold text-purple-700">PF (Empr)</th>
+                <th className="px-2 py-2 text-right font-semibold text-purple-700">Empr EPS (8.33%)</th>
+                <th className="px-2 py-2 text-right font-semibold text-purple-700">Empr EPF (3.67%)</th>
                 <th className="px-2 py-2 text-right font-semibold text-purple-700">ESI (Empr)</th>
                 <th className="px-2 py-2 text-right font-semibold text-purple-700">Admin</th>
                 <th className="px-2 py-2 text-right font-semibold text-purple-700">EDLI</th>
@@ -245,7 +247,8 @@ export const SalaryRegisterPage: React.FC = () => {
                         : inr(r.other_deduction??0)}
                     </td>
                     <td className="px-2 py-1.5 text-right font-bold text-green-800 bg-green-50">{inr(r.net_salary??0)}</td>
-                    <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.pf_employer??0)}</td>
+                    <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.employer_eps??0)}</td>
+                    <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.employer_epf_diff??0)}</td>
                     <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.esi_employer??0)}</td>
                     <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.admin_charges??0)}</td>
                     <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.edli_charge??0)}</td>
@@ -270,7 +273,8 @@ export const SalaryRegisterPage: React.FC = () => {
                 <td className="px-2 py-2 text-right text-red-500">{inr(totals.advance??0)}</td>
                 <td className="px-2 py-2 text-right text-red-500">{inr(totals.other_deduction??0)}</td>
                 <td className="px-2 py-2 text-right font-bold text-green-800 bg-green-100">{inr(totals.net_salary??0)}</td>
-                <td className="px-2 py-2 text-right text-purple-700">{inr(totals.pf_employer??0)}</td>
+                <td className="px-2 py-2 text-right text-purple-700">{inr(totals.employer_eps??0)}</td>
+                <td className="px-2 py-2 text-right text-purple-700">{inr(totals.employer_epf_diff??0)}</td>
                 <td className="px-2 py-2 text-right text-purple-700">{inr(totals.esi_employer??0)}</td>
                 <td className="px-2 py-2 text-right text-purple-700">{inr(totals.admin_charges??0)}</td>
                 <td className="px-2 py-2 text-right text-purple-700">{inr(totals.edli_charge??0)}</td>
