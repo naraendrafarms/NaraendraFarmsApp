@@ -1397,6 +1397,7 @@ export const NHESales: React.FC = () => {
   const [partyFilter, setPartyFilter] = useState('')
   const [searchParams] = useSearchParams()
   const [empFilter, setEmpFilter] = useState(searchParams.get('emp') ?? '')
+  const [payFilter, setPayFilter] = useState('')
   const [fromDate, setFromDate]   = useState('')
   const [toDate, setToDate]       = useState('')
   const [sel, setSel]             = useState<Set<string>>(new Set())
@@ -1449,7 +1450,31 @@ export const NHESales: React.FC = () => {
     finally { setGenningInv(false) }
   }
 
-  const hasFilter = !!(flockFilter || empFilter || fromDate || toDate)
+  const hasFilter = !!(flockFilter || empFilter || payFilter || fromDate || toDate)
+
+  // Party (buyer) dues summary across ALL non-employee sales
+  const { data: partyDues } = useQuery({
+    queryKey: ['nhe_party_dues'],
+    queryFn: async () => {
+      const { data } = await supabase.from('nhe_sales')
+        .select('party_id,amount,amount_received,sale_type,parties(name)')
+        .or('is_employee_sale.is.null,is_employee_sale.eq.false')
+      const m: Record<string, any> = {}
+      for (const r of (data ?? [])) {
+        const id = r.party_id; if (!id) continue
+        const e = (m[id] ??= { name: (r as any).parties?.name ?? '—', vouchers: 0, total: 0, received: 0, byType: {} as Record<string, number> })
+        e.vouchers += 1
+        e.total += Number(r.amount ?? 0)
+        e.received += Number(r.amount_received ?? 0)
+        const t = r.sale_type ?? 'other'
+        e.byType[t] = (e.byType[t] ?? 0) + Number(r.amount ?? 0)
+      }
+      return Object.entries(m).map(([id, v]: any) => ({ id, ...v, pending: v.total - v.received }))
+        .filter((r: any) => r.pending !== 0 || r.total !== 0)
+        .sort((a: any, b: any) => b.pending - a.pending)
+    }
+  })
+  const [showPartyDues, setShowPartyDues] = useState(false)
 
   // Employee dues summary across ALL employee sales (vouchers, received, pending)
   const { data: empDues } = useQuery({
@@ -1475,12 +1500,13 @@ export const NHESales: React.FC = () => {
   const [showDues, setShowDues] = useState(false)
 
   const { data: sales, isLoading } = useQuery({
-    queryKey: ['nhe_sales', flockFilter, empFilter, fromDate, toDate],
+    queryKey: ['nhe_sales', flockFilter, empFilter, payFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount)')
         .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (empFilter) q = q.eq('employee_id', empFilter)
+      if (payFilter) q = q.eq('payment_status', payFilter)
       if (fromDate) q = q.gte('sale_date', fromDate)
       if (toDate) q = q.lte('sale_date', toDate)
       if (!hasFilter) q = q.limit(200)
@@ -2015,6 +2041,10 @@ export const NHESales: React.FC = () => {
   }, {})
 
   // Bird sales summary: total birds + weight + value (follows all active filters)
+  const payTotSale = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const payTotRecd = filtered.reduce((s: number, r: any) => s + (r.amount_received ?? 0), 0)
+  const payTotDue  = Math.max(0, payTotSale - payTotRecd)
+
   const birdSales = filtered.filter((s: any) => isBirdSale(s.sale_type))
   const birdTotalBirds  = birdSales.reduce((s: number, r: any) => s + (r.quantity ?? 0), 0)
   const birdTotalWeight = birdSales.reduce((s: number, r: any) => s + (r.total_weight_kg ?? 0), 0)
@@ -2070,6 +2100,39 @@ export const NHESales: React.FC = () => {
         </Card>
       )}
 
+      {(partyDues?.length ?? 0) > 0 && (
+        <Card className="p-3">
+          <button className="flex items-center justify-between w-full text-sm font-semibold text-gray-700"
+            onClick={() => setShowPartyDues(v => !v)}>
+            <span>Party (Buyer) Dues — {partyDues!.length} parties · Pending {inr(partyDues!.reduce((s: number, r: any) => s + r.pending, 0))}</span>
+            <span className="text-xs text-brand-600">{showPartyDues ? 'Hide ▲' : 'Show ▼'}</span>
+          </button>
+          {showPartyDues && (
+            <div className="overflow-x-auto mt-2">
+              <Table>
+                <thead><tr><Th>Party</Th><Th right>Vouchers</Th><Th right>Total</Th><Th right>Received</Th><Th right>Pending</Th></tr></thead>
+                <tbody>
+                  {partyDues!.map((r: any) => (
+                    <tr key={r.id} className="hover:bg-gray-50 align-top">
+                      <Td className="text-xs">
+                        {r.name}
+                        <div className="text-[10px] text-gray-400 mt-0.5">
+                          {Object.entries(r.byType).map(([t, amt]: any) => `${t}: ${inr(amt)}`).join('  ·  ')}
+                        </div>
+                      </Td>
+                      <Td right className="text-xs">{r.vouchers}</Td>
+                      <Td right className="text-xs">{inr(r.total)}</Td>
+                      <Td right className="text-xs text-green-700">{inr(r.received)}</Td>
+                      <Td right className={`text-xs font-semibold ${r.pending > 0 ? 'text-red-600' : 'text-gray-400'}`}>{inr(r.pending)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Toolbar */}
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
@@ -2081,6 +2144,13 @@ export const NHESales: React.FC = () => {
           className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
           <option value="">All Types</option>
           {NHE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+        <select value={payFilter} onChange={e => setPayFilter(e.target.value)}
+          className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <option value="">All Payments</option>
+          <option value="Received">Paid</option>
+          <option value="Partial">Partial</option>
+          <option value="Pending">Due</option>
         </select>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           From <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
@@ -2097,13 +2167,19 @@ export const NHESales: React.FC = () => {
           onChange={e => setPartyFilter(e.target.value)}
           className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-48"
         />
-        {(hasFilter || typeFilter || partyFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setTypeFilter(''); setPartyFilter('') }}>Clear</Button>}
+        {(hasFilter || typeFilter || partyFilter || payFilter) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setEmpFilter(''); setPayFilter(''); setFromDate(''); setToDate(''); setTypeFilter(''); setPartyFilter('') }}>Clear</Button>}
         <div className="ml-auto flex gap-2">
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Template</Button>
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
           <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => fileRef.current?.click()}>Import</Button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
         </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard title="Total Sales" value={inr(payTotSale)} icon={<Package size={18}/>} color="text-blue-600" />
+        <StatCard title="Received (Paid)" value={inr(payTotRecd)} icon={<Package size={18}/>} color="text-green-600" />
+        <StatCard title="Due" value={inr(payTotDue)} icon={<AlertCircle size={18}/>} color="text-red-600" />
       </div>
 
       {/* Bird Sales Summary */}
