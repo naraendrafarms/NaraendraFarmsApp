@@ -695,9 +695,11 @@ export type ExtraDaysConfig = Record<string, { ge15: number; lt15: number }>
 function calcExtraDaysM(designation: string|null|undefined, paidDays: number, cfg?: ExtraDaysConfig): number {
   if (!paidDays || !designation) return 0
   const d = designation.toUpperCase().trim()
-  // Prefer DB-backed config when available
-  if (cfg && cfg[d]) return paidDays >= 15 ? cfg[d].ge15 : cfg[d].lt15
-  // Fallback to hard-coded rules
+  // DB-backed config (Admin Centre → Extra Days per Designation) is the single
+  // source of truth once loaded. A designation absent from it = 0 extra days, so
+  // deleting a row in admin actually removes the extra day.
+  if (cfg && Object.keys(cfg).length > 0) return cfg[d] ? (paidDays >= 15 ? cfg[d].ge15 : cfg[d].lt15) : 0
+  // Hard-coded fallback ONLY when the config hasn't loaded yet (network/empty).
   if (_EG1.includes(d)) return paidDays >= 15 ? 2 : 1
   if (_EG2.includes(d)) return paidDays >= 15 ? 1 : 0
   return 0
@@ -839,6 +841,7 @@ function useExtraDaysConfig() {
 export const SalaryEntryPage: React.FC = () => {
   const qc = useQueryClient()
   const { map: skillWages } = useSkillWages()
+  const extraDaysConfig = useExtraDaysConfig()
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string|null>(null)
   const [filterFarm, setFilterFarm] = useState('')
@@ -929,15 +932,10 @@ export const SalaryEntryPage: React.FC = () => {
     finally { setGenLoading(false) }
   }
 
-  const EXTRA_GROUP1 = ['MANAGER FINANCE','ADMINISTRATIVE MANAGER','ACCOUNTANT','SITE MANAGER','STORE KEEPER','POULTRY ASSISTANT','ELECTRICIAN']
-  const EXTRA_GROUP2 = ['ASST.SUPERVISOR-MALE','ASST.SUPERVISOR-FEMALE','SECURITY-MALE','DRIVER-MALE','WORKER-MALE','WORKER-FEMALE','MEDIUM VECHICLE DRIVER','ATTENDER']
-  const calcExtraDays = (designation: string|null|undefined, paidDays: number): number => {
-    if (!paidDays || !designation) return 0
-    const d = designation.toUpperCase().trim()
-    if (EXTRA_GROUP1.includes(d)) return paidDays >= 15 ? 2 : 1
-    if (EXTRA_GROUP2.includes(d)) return paidDays >= 15 ? 1 : 0
-    return 0
-  }
+  // Uses the editable DB config (Admin Centre) — same source as bulk generation,
+  // so removing a designation there removes its extra day here too.
+  const calcExtraDays = (designation: string|null|undefined, paidDays: number): number =>
+    calcExtraDaysM(designation, paidDays, extraDaysConfig)
 
   const blankForm = () => ({
     employee_id:'', month:'',
