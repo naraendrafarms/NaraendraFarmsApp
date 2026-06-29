@@ -98,7 +98,7 @@ export const EmployeeList: React.FC = () => {
 
   const [form, setForm] = useState({
     emp_id:'', name:'', designation:'', farm_id:'', department:'',
-    base_salary:'', increment:'0', bank_name:'', bank_branch:'', account_no:'', ifsc:'',
+    base_salary:'', basic_rate:'', hra_rate:'', allowance_rate:'', increment:'0', bank_name:'', bank_branch:'', account_no:'', ifsc:'',
     joining_date:'', leaving_date:'', dob:'', gender:'', mobile:'', esi_no:'', pf_no:'',
     uan_no:'', is_active:'true',
     esi_applicable:'false', pf_applicable:'false', pt_applicable:'false',
@@ -113,7 +113,9 @@ export const EmployeeList: React.FC = () => {
       setForm({
         emp_id: emp.emp_id??'', name: emp.name, designation: emp.designation??'',
         farm_id: emp.farm_id??'', department: emp.department??'',
-        base_salary: emp.base_salary?.toString()??'', increment: emp.increment?.toString()??'0',
+        base_salary: emp.base_salary?.toString()??'',
+        basic_rate: emp.basic_rate?.toString()??'', hra_rate: emp.hra_rate?.toString()??'', allowance_rate: emp.allowance_rate?.toString()??'',
+        increment: emp.increment?.toString()??'0',
         bank_name: emp.bank_name??'', bank_branch: emp.bank_branch??'',
         account_no: emp.account_no??'', ifsc: emp.ifsc??'',
         joining_date: emp.joining_date??'', leaving_date: emp.leaving_date??'',
@@ -134,7 +136,7 @@ export const EmployeeList: React.FC = () => {
     } else {
       setEditing(null)
       setForm({emp_id:'',name:'',designation:'',farm_id:'',department:'',
-        base_salary:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
+        base_salary:'',basic_rate:'',hra_rate:'',allowance_rate:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
         joining_date:'',leaving_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',
         uan_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
         restrict_pf:'false',zone_area:'',emp_category:'',location_branch:'',
@@ -150,6 +152,9 @@ export const EmployeeList: React.FC = () => {
         emp_id: form.emp_id || null, name: form.name, designation: form.designation || null,
         farm_id: form.farm_id, department: form.department || null,
         base_salary: parseFloat(form.base_salary) || null,
+        basic_rate: parseFloat(form.basic_rate) || null,
+        hra_rate: parseFloat(form.hra_rate) || null,
+        allowance_rate: parseFloat(form.allowance_rate) || null,
         increment: parseFloat(form.increment) || 0,
         bank_name: form.bank_name || null, bank_branch: form.bank_branch || null,
         account_no: form.account_no || null, ifsc: form.ifsc || null,
@@ -460,8 +465,13 @@ export const EmployeeList: React.FC = () => {
             <Input label="Department" value={form.department} onChange={e=>s('department',e.target.value)} hint="e.g. Poultry, Admin" />
           </FormRow>
           <FormRow>
-            <Input label="Basic Salary" type="number" value={form.base_salary} onChange={e=>s('base_salary',e.target.value)} />
+            <Input label="Monthly Gross Salary" type="number" value={form.base_salary} onChange={e=>s('base_salary',e.target.value)} hint="Used when Basic/HRA/Allowance below are left blank (auto-split 50/30/20)" />
             <Input label="Increment" type="number" value={form.increment} onChange={e=>s('increment',e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="Basic (monthly)" type="number" value={form.basic_rate} onChange={e=>s('basic_rate',e.target.value)} hint="Leave blank = 50% of gross. ESI/PF computed on this." />
+            <Input label="HRA (monthly)" type="number" value={form.hra_rate} onChange={e=>s('hra_rate',e.target.value)} hint="Leave blank = 30% of gross" />
+            <Input label="Allowance (monthly)" type="number" value={form.allowance_rate} onChange={e=>s('allowance_rate',e.target.value)} hint="Leave blank = remainder (~20%)" />
           </FormRow>
           <Divider label="Personal Details" />
           <FormRow>
@@ -662,10 +672,16 @@ function computeSalaryForEmp(emp: any, opts: {
   const paidDays   = Math.max(0, monthDays - absentDays)
   const extraDays  = calcExtraDaysM(emp.designation, paidDays, opts.extraDaysConfig)
 
-  const grossRate  = emp.base_salary ?? 0
-  const basicRate  = Math.round(grossRate * 0.5)
-  const hraRate    = Math.min(Math.round(grossRate * 0.3), grossRate - basicRate)
-  const otherDfr   = grossRate - basicRate - hraRate
+  // Per-employee component overrides (migration 229). When any are set, use them
+  // as the monthly rate; otherwise fall back to the 50/30/20 auto-split of base_salary.
+  const hasOverride = emp.basic_rate != null || emp.hra_rate != null || emp.allowance_rate != null
+  const basicRate  = hasOverride ? Number(emp.basic_rate ?? 0)
+                                 : Math.round((emp.base_salary ?? 0) * 0.5)
+  const hraRate    = hasOverride ? Number(emp.hra_rate ?? 0)
+                                 : Math.min(Math.round((emp.base_salary ?? 0) * 0.3), (emp.base_salary ?? 0) - basicRate)
+  const otherDfr   = hasOverride ? Number(emp.allowance_rate ?? 0)
+                                 : (emp.base_salary ?? 0) - basicRate - hraRate
+  const grossRate  = hasOverride ? basicRate + hraRate + otherDfr : (emp.base_salary ?? 0)
 
   const basicEarned  = Math.round(basicRate / monthDays * paidDays)
   const hraEarned    = Math.round(hraRate / monthDays * paidDays)
@@ -764,7 +780,7 @@ export const SalaryEntryPage: React.FC = () => {
     try {
       const monthStr = genMonth + '-01'
       const { data: empsRaw, error: empErr } = await supabase.from('employees')
-        .select('id,base_salary,esi_applicable,pf_applicable,pt_applicable,restrict_pf,leaving_date').eq('is_active', true)
+        .select('id,base_salary,basic_rate,hra_rate,allowance_rate,esi_applicable,pf_applicable,pt_applicable,restrict_pf,leaving_date').eq('is_active', true)
       if (empErr) throw empErr
       // Skip anyone who left before this salary month (leaving_date < 1st of month)
       const emps = (empsRaw ?? []).filter((e: any) => !e.leaving_date || e.leaving_date >= monthStr)
@@ -785,15 +801,17 @@ export const SalaryEntryPage: React.FC = () => {
       for (const a of (advRows ?? [])) advByEmp[a.employee_id] = (advByEmp[a.employee_id] ?? 0) + (a.amount ?? 0)
       for (const d of (dedRows ?? [])) otherDedByEmp[d.employee_id] = (otherDedByEmp[d.employee_id] ?? 0) + (d.amount ?? 0)
       const toInsert = (emps ?? []).filter((e: any) => !existingIds.has(e.id)).map((e: any) => {
-        const base = e.base_salary ?? 0
-        const gross = base
+        // Honor per-employee component overrides (migration 229); else 50/30/20 split.
+        const hasOv   = e.basic_rate != null || e.hra_rate != null || e.allowance_rate != null
+        const basicC  = hasOv ? Number(e.basic_rate ?? 0) : Math.round((e.base_salary ?? 0) * 0.5)
+        const hraC    = hasOv ? Number(e.hra_rate ?? 0) : Math.min(Math.round((e.base_salary ?? 0) * 0.3), (e.base_salary ?? 0) - basicC)
+        const allowC  = hasOv ? Number(e.allowance_rate ?? 0) : (e.base_salary ?? 0) - basicC - hraC
+        const gross   = hasOv ? basicC + hraC + allowC : (e.base_salary ?? 0)
         // ESI on BASIC (farm practice), matching computeSalaryForEmp
-        const esi_emp = e.esi_applicable ? Math.ceil(base * 0.0075) : 0
-        const esi_er  = e.esi_applicable ? Math.round(base * 0.0325) : 0
+        const esi_emp = e.esi_applicable ? Math.ceil(basicC * 0.0075) : 0
+        const esi_er  = e.esi_applicable ? Math.round(basicC * 0.0325) : 0
         // PF on Basic, capped at the ₹15,000 wage ceiling when restrict_pf is set
-        // (matches the detailed payslip + computeSalaryForEmp). Was previously 12% of
-        // full basic here, which gave wrong PF in Quick Generate.
-        const pfBase  = e.pf_applicable ? (e.restrict_pf ? Math.min(base, 15000) : base) : 0
+        const pfBase  = e.pf_applicable ? (e.restrict_pf ? Math.min(basicC, 15000) : basicC) : 0
         const pf_emp  = Math.round(pfBase * 0.12)
         const pf_er   = Math.round(pfBase * 0.12)
         const pt      = e.pt_applicable ? (gross <= 15000 ? 0 : gross <= 20000 ? 150 : 200) : 0
@@ -803,7 +821,7 @@ export const SalaryEntryPage: React.FC = () => {
         return {
           employee_id: e.id,
           month: monthStr,
-          basic_salary: base,
+          basic_salary: basicC,
           earned_salary: gross,
           gross_salary: gross,
           advance,
@@ -812,7 +830,7 @@ export const SalaryEntryPage: React.FC = () => {
           net_salary: net,
           esi_employee: esi_emp, esi_employer: esi_er,
           pf_employee: pf_emp, pf_employer: pf_er,
-          hra: 0, tds: 0, hold: 0, arrears: 0, ot_bonus: 0, pt,
+          hra: hraC, tds: 0, hold: 0, arrears: 0, ot_bonus: 0, pt,
           payment_mode: 'Cash', is_paid: false,
         }
       })
@@ -2385,7 +2403,7 @@ export const PayslipGeneratorPage: React.FC = () => {
   const { data: employees } = useQuery({
     queryKey: ['employees_all'], queryFn: async () => {
       const { data } = await supabase.from('employees')
-        .select('id,emp_id,name,designation,farm_id,base_salary,esi_applicable,pf_applicable,pt_applicable,bank_name,account_no,ifsc,uan_no,esi_no,farms(name)')
+        .select('id,emp_id,name,designation,farm_id,base_salary,basic_rate,hra_rate,allowance_rate,esi_applicable,pf_applicable,pt_applicable,bank_name,account_no,ifsc,uan_no,esi_no,farms(name)')
         .eq('is_active', true).order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     }
@@ -2416,8 +2434,11 @@ export const PayslipGeneratorPage: React.FC = () => {
       const { data } = await supabase.from('salary_monthly')
         .select('*').eq('employee_id', empId).eq('month', month).maybeSingle()
       const base = parseFloat((emp as any)?.base_salary ?? '0')
-      const basic = data ? (parseFloat(data.earned_salary ?? data.basic_salary ?? base) || base) : base
-      const hra = data ? (parseFloat(data.hra ?? '0') || Math.round(basic * 0.2)) : Math.round(basic * 0.2)
+      // Per-employee component overrides (migration 229) when no saved row exists
+      const ovBasic = (emp as any)?.basic_rate != null ? Number((emp as any).basic_rate) : Math.round(base * 0.5)
+      const ovHra   = (emp as any)?.hra_rate != null ? Number((emp as any).hra_rate) : Math.round(base * 0.3)
+      const basic = data ? (parseFloat(data.earned_salary ?? data.basic_salary ?? ovBasic) || ovBasic) : ovBasic
+      const hra = data ? (parseFloat(data.hra ?? '0') || ovHra) : ovHra
       const g = basic + hra
       const pfOn = !!(emp as any)?.pf_applicable
       const esiOn = !!(emp as any)?.esi_applicable
@@ -2991,7 +3012,7 @@ export const BulkSalaryPage: React.FC = () => {
     queryKey: ['employees_bulk', filterFarm],
     queryFn: async () => {
       let q = supabase.from('employees')
-        .select('id,emp_id,name,designation,base_salary,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name,code)')
+        .select('id,emp_id,name,designation,base_salary,basic_rate,hra_rate,allowance_rate,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name,code)')
         .eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
       if (filterFarm) q = q.eq('farm_id', filterFarm)
       const { data } = await q; return data ?? []
