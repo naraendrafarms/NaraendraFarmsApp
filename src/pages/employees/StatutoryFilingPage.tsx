@@ -25,7 +25,7 @@ export const StatutoryFilingPage: React.FC = () => {
     enabled: !!month,
     queryFn: async () => {
       const { data, error } = await supabase.from('salary_monthly')
-        .select('basic_salary,gross_salary,pf_employee,employer_eps,employer_epf_diff,esi_employee,esi_employer,pt,days_worked,month_days,absent_days,employees!inner(name,emp_id,uan_no,esi_no,restrict_pf,pf_applicable,esi_applicable,pt_applicable)')
+        .select('basic_salary,gross_salary,pf_employee,employer_eps,employer_epf_diff,esi_employee,esi_employer,pt,days_worked,month_days,absent_days,employees!inner(name,emp_id,uan_no,pf_no,esi_no,restrict_pf,pf_applicable,esi_applicable,pt_applicable)')
         .eq('month', month + '-01')
       if (error) throw error
       return (data ?? []).map((r: any) => {
@@ -35,7 +35,7 @@ export const StatutoryFilingPage: React.FC = () => {
         const epsWage = Math.min(basic, PF_CEIL)                               // EPS/EDLI wages
         const ncp = Math.max(0, Number(r.month_days ?? 0) - Number(r.days_worked ?? 0))
         return {
-          name: e.name ?? '', emp_id: e.emp_id ?? '', uan: e.uan_no ?? '', esi_no: e.esi_no ?? '',
+          name: e.name ?? '', emp_id: e.emp_id ?? '', uan: e.uan_no || e.pf_no || '', esi_no: e.esi_no ?? '',
           pf_applicable: !!e.pf_applicable, esi_applicable: !!e.esi_applicable, pt_applicable: !!e.pt_applicable,
           gross: Number(r.gross_salary ?? 0), basic, days: Number(r.days_worked ?? 0), ncp,
           pfWage, epsWage,
