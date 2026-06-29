@@ -68,7 +68,7 @@ export const FlockPLSummary: React.FC = () => {
     queryKey: ['pl_summary_daily_records_feed'],
     queryFn: async () => {
       const { data } = await supabase.from('daily_records')
-        .select('flock_id,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m')
+        .select('flock_id,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,total_eggs')
       return data ?? []
     }
   })
@@ -131,10 +131,15 @@ export const FlockPLSummary: React.FC = () => {
         .filter((r: any) => r.flock_id === fid)
         .reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
 
+      const eggs = dailyFeed
+        .filter((r: any) => r.flock_id === fid)
+        .reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0)
+
       const chickCost = flock.chick_cost ?? 0
       const totalCost = chickCost + feedCost + medicineCost + electricityCost
       const netPL = revenue - totalCost
       const margin = totalCost > 0 ? (netPL / totalCost) * 100 : 0
+      const costPerEgg = eggs > 0 ? totalCost / eggs : 0
 
       const farmName = (flock.farms as any)?.name ?? '—'
 
@@ -149,6 +154,8 @@ export const FlockPLSummary: React.FC = () => {
         medicineCost,
         electricityCost,
         totalCost,
+        eggs,
+        costPerEgg,
         revenue,
         netPL,
         margin,
@@ -163,9 +170,10 @@ export const FlockPLSummary: React.FC = () => {
       medicineCost: acc.medicineCost + r.medicineCost,
       electricityCost: acc.electricityCost + r.electricityCost,
       totalCost: acc.totalCost + r.totalCost,
+      eggs: acc.eggs + r.eggs,
       revenue: acc.revenue + r.revenue,
       netPL: acc.netPL + r.netPL,
-    }), { chickCost: 0, feedCost: 0, medicineCost: 0, electricityCost: 0, totalCost: 0, revenue: 0, netPL: 0 })
+    }), { chickCost: 0, feedCost: 0, medicineCost: 0, electricityCost: 0, totalCost: 0, eggs: 0, revenue: 0, netPL: 0 })
   }, [rows])
 
   const handleExport = () => {
@@ -179,6 +187,8 @@ export const FlockPLSummary: React.FC = () => {
       'Medicine Cost': r.medicineCost,
       'Electricity Cost': r.electricityCost,
       'Total Cost': r.totalCost,
+      'Eggs Produced': r.eggs,
+      'Cost / Egg': r.costPerEgg ? +r.costPerEgg.toFixed(2) : 0,
       'Revenue': r.revenue,
       'Net P&L': r.netPL,
       'Margin %': r.margin.toFixed(1),
@@ -233,6 +243,8 @@ export const FlockPLSummary: React.FC = () => {
                   <th className="px-3 py-2 text-right">Medicine</th>
                   <th className="px-3 py-2 text-right">Electricity</th>
                   <th className="px-3 py-2 text-right">Total Cost</th>
+                  <th className="px-3 py-2 text-right">Eggs</th>
+                  <th className="px-3 py-2 text-right">Cost / Egg</th>
                   <th className="px-3 py-2 text-right">Revenue</th>
                   <th className="px-3 py-2 text-right">Net P&amp;L</th>
                   <th className="px-3 py-2 text-right">Margin %</th>
@@ -241,7 +253,7 @@ export const FlockPLSummary: React.FC = () => {
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="text-center py-12 text-gray-400">No flocks found for selected filters</td>
+                    <td colSpan={14} className="text-center py-12 text-gray-400">No flocks found for selected filters</td>
                   </tr>
                 ) : (
                   rows.map((r, idx) => (
@@ -259,6 +271,8 @@ export const FlockPLSummary: React.FC = () => {
                       <td className="px-3 py-2 text-right text-gray-700">{inr(r.medicineCost)}</td>
                       <td className="px-3 py-2 text-right text-gray-700">{inr(r.electricityCost)}</td>
                       <td className="px-3 py-2 text-right font-medium text-gray-800">{inr(r.totalCost)}</td>
+                      <td className="px-3 py-2 text-right text-gray-600">{r.eggs.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-right font-medium text-purple-700">{r.costPerEgg ? `₹${r.costPerEgg.toFixed(2)}` : '—'}</td>
                       <td className="px-3 py-2 text-right font-medium text-blue-700">{inr(r.revenue)}</td>
                       <td className={`px-3 py-2 text-right font-semibold ${r.netPL >= 0 ? 'text-green-700' : 'text-red-600'}`}>
                         {inr(r.netPL)}
@@ -279,6 +293,8 @@ export const FlockPLSummary: React.FC = () => {
                     <td className="px-3 py-2 text-right">{inr(totals.medicineCost)}</td>
                     <td className="px-3 py-2 text-right">{inr(totals.electricityCost)}</td>
                     <td className="px-3 py-2 text-right">{inr(totals.totalCost)}</td>
+                    <td className="px-3 py-2 text-right">{totals.eggs.toLocaleString('en-IN')}</td>
+                    <td className="px-3 py-2 text-right text-purple-700">{totals.eggs > 0 ? `₹${(totals.totalCost/totals.eggs).toFixed(2)}` : '—'}</td>
                     <td className="px-3 py-2 text-right text-blue-700">{inr(totals.revenue)}</td>
                     <td className={`px-3 py-2 text-right ${totals.netPL >= 0 ? 'text-green-700' : 'text-red-600'}`}>
                       {inr(totals.netPL)}
