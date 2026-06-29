@@ -483,6 +483,37 @@ export const EmployeeList: React.FC = () => {
           <p className="text-xs text-gray-400 -mt-2">
             Auto-split: if PF not applicable → whole amount is Basic. If PF applies → Basic = max(50% of gross, skill min-wage), HRA = 30% of gross (capped), Allowance = balance. Manual overrides above win when filled.
           </p>
+          {(() => {
+            const map: Record<string, number> = {}
+            for (const r of (skillWageRows ?? [])) map[(r as any).skill_category] = Number((r as any).min_wage) || 0
+            const c = splitSalary({
+              base_salary: parseFloat(form.base_salary) || 0,
+              basic_rate: form.basic_rate ? parseFloat(form.basic_rate) : null,
+              hra_rate: form.hra_rate ? parseFloat(form.hra_rate) : null,
+              allowance_rate: form.allowance_rate ? parseFloat(form.allowance_rate) : null,
+              skill_category: form.skill_category || null,
+              pf_applicable: form.pf_applicable === 'true',
+            }, map)
+            if (!c.gross) return null
+            const isOverride = !!(form.basic_rate || form.hra_rate || form.allowance_rate)
+            const floor = form.pf_applicable === 'true' ? (map[form.skill_category] || 0) : 0
+            return (
+              <div className="-mt-1 rounded-lg border border-brand-100 bg-brand-50/50 px-3 py-2">
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+                  <span className="font-semibold text-brand-700">Preview split</span>
+                  <span>Basic <b className="text-gray-800">₹{c.basic.toLocaleString('en-IN')}</b></span>
+                  <span>HRA <b className="text-gray-800">₹{c.hra.toLocaleString('en-IN')}</b></span>
+                  <span>Allowance <b className="text-gray-800">₹{c.allowance.toLocaleString('en-IN')}</b></span>
+                  <span className="text-gray-500">Total <b>₹{c.gross.toLocaleString('en-IN')}</b></span>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  {isOverride ? 'Using your manual overrides.'
+                    : form.pf_applicable !== 'true' ? 'PF not applicable → whole amount to Basic.'
+                    : `PF applies → Basic floored at ₹${floor.toLocaleString('en-IN')}${form.skill_category ? ` (${form.skill_category})` : ' (no skill category set → 50%)'}. ESI/PF computed on Basic.`}
+                </p>
+              </div>
+            )
+          })()}
           <Divider label="Personal Details" />
           <FormRow>
             <DateInput label="Date of Birth" value={form.dob} onChange={e=>s('dob',e.target.value)} />
