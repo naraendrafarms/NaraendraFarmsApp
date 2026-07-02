@@ -360,27 +360,27 @@ export const HEDispatch: React.FC = () => {
   })
 
   // Weekly Association rate register — auto-suggests the line rate from the
-  // production date's Sun-Sat week, if the line's rate hasn't been typed yet.
+  // production date's Sun-Sat week, plus this buyer's rate differential
+  // (e.g. Hitech = Association - 1.5), if the line's rate hasn't been typed yet.
   const { data: rateRegister = [] } = useQuery({
     queryKey: ['he_rate_register_lookup'],
     queryFn: async () => { const { data } = await supabase.from('he_rate_register').select('week_start,week_end,rate'); return data ?? [] }
   })
-  const suggestedRate = (date: string) => rateRegister.find((r: any) => date >= r.week_start && date <= r.week_end)?.rate ?? null
+  const { data: vendorDiffs = [] } = useQuery({
+    queryKey: ['he_vendor_rate_diff_lookup'],
+    queryFn: async () => { const { data } = await supabase.from('he_vendor_rate_diff').select('party_id,diff'); return data ?? [] }
+  })
+  const suggestedRate = (date: string, partyId?: string) => {
+    const base = rateRegister.find((r: any) => date >= r.week_start && date <= r.week_end)?.rate
+    if (base == null) return null
+    const diff = partyId ? (vendorDiffs.find((d: any) => d.party_id === partyId)?.diff ?? 0) : 0
+    return Number(base) + Number(diff)
+  }
 
   // Dispatch lines: one row per production date with grade split
   type DispLine = { prod_date: string; grade_a: string; grade_b: string; grade_c: string; rate: string }
   const emptyLine = (): DispLine => ({ prod_date: today(), grade_a: '', grade_b: '', grade_c: '', rate: '' })
   const [lines, setLines] = useState<DispLine[]>([emptyLine()])
-  const setLine = (i: number, k: keyof DispLine, v: string) =>
-    setLines(ls => ls.map((l, idx) => {
-      if (idx !== i) return l
-      const next = { ...l, [k]: v }
-      if (k === 'prod_date' && !l.rate) {
-        const sugg = suggestedRate(v)
-        if (sugg != null) next.rate = String(sugg)
-      }
-      return next
-    }))
   const addLine = () => setLines(ls => [...ls, emptyLine()])
   const removeLine = (i: number) => setLines(ls => ls.filter((_, idx) => idx !== i))
 
@@ -394,6 +394,28 @@ export const HEDispatch: React.FC = () => {
   const [genningInv, setGenningInv] = useState(false)
   const [peekInv, setPeekInv] = useState<string | null>(null)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const setLine = (i: number, k: keyof DispLine, v: string) =>
+    setLines(ls => ls.map((l, idx) => {
+      if (idx !== i) return l
+      const next = { ...l, [k]: v }
+      if (k === 'prod_date' && !l.rate) {
+        const sugg = suggestedRate(v, form.party_id)
+        if (sugg != null) next.rate = String(sugg)
+      }
+      return next
+    }))
+  // Buyer picked (or changed) after lines already exist with their default
+  // today()'s date — backfill any line whose rate is still blank, since the
+  // per-line date onChange only fires when the date itself is edited.
+  useEffect(() => {
+    if (!form.party_id) return
+    setLines(ls => ls.map(l => {
+      if (l.rate) return l
+      const sugg = suggestedRate(l.prod_date, form.party_id)
+      return sugg != null ? { ...l, rate: String(sugg) } : l
+    }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.party_id, rateRegister, vendorDiffs])
   const HE_DRAFT_KEY = 'he_dispatch_draft'
   // Auto-save a draft of NEW (unsaved) dispatches so nothing is lost if the form is closed
   useEffect(() => {
