@@ -20,6 +20,7 @@ type PayRecord = {
   grn_no: string | null
   grn_date: string | null
   invoice_amount: number
+  tds_pct: number | null
   tds_amount: number | null
   net_payable: number | null
   paid_amount: number | null
@@ -132,6 +133,8 @@ const WaitingToLink: React.FC = () => {
 
       qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
       setLinkModal(null)
@@ -178,6 +181,8 @@ const WaitingToLink: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
       qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       toast.success('Unlinked — bill set back to Pending')
     } catch (e: any) { toast.error(e.message) }
@@ -358,7 +363,7 @@ export const PendingPaymentsPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const [editModal, setEditModal] = useState<PayRecord | null>(null)
-  const [editForm, setEditForm] = useState({ vendor_name: '', invoice_no: '', grn_no: '', invoice_amount: '', tds_amount: '', discount_amount: '', pay_before_date: '', category: '', remarks: '' })
+  const [editForm, setEditForm] = useState({ vendor_name: '', invoice_no: '', grn_no: '', invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '', category: '', remarks: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editErr, setEditErr] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -369,7 +374,7 @@ export const PendingPaymentsPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,party_id,invoice_no,grn_no,grn_date,invoice_amount,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,payment_status,category,account_type,remarks')
+        .select('id,vendor_name,party_id,invoice_no,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,payment_status,category,account_type,remarks')
         .order('grn_date', { ascending: false })
       if (error) throw error
       return (data ?? []) as PayRecord[]
@@ -457,6 +462,9 @@ export const PendingPaymentsPage: React.FC = () => {
       }).eq('id', modal.record.id)
       if (error) throw error
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       setModal(null)
     } catch (e: any) {
       setErr(e.message)
@@ -472,6 +480,7 @@ export const PendingPaymentsPage: React.FC = () => {
       invoice_no: r.invoice_no ?? '',
       grn_no: r.grn_no ?? '',
       invoice_amount: r.invoice_amount != null ? String(r.invoice_amount) : '',
+      tds_pct: r.tds_pct != null ? String(r.tds_pct) : '',
       tds_amount: r.tds_amount != null ? String(r.tds_amount) : '',
       discount_amount: r.discount_amount != null ? String(r.discount_amount) : '',
       pay_before_date: r.pay_before_date ?? '',
@@ -487,12 +496,21 @@ export const PendingPaymentsPage: React.FC = () => {
     setEditSaving(true); setEditErr('')
     try {
       const invAmt = parseFloat(editForm.invoice_amount) || 0
-      const tds = editForm.tds_amount === '' ? null : parseFloat(editForm.tds_amount) || 0
+      // TDS % and TDS amount stay in sync so every report (TDS Payable, Purchase
+      // Payments) that filters/groups by rate still finds bills entered here.
+      const pctEntered = editForm.tds_pct !== ''
+      const amtEntered = editForm.tds_amount !== ''
+      let tdsPct: number | null = pctEntered ? parseFloat(editForm.tds_pct) || 0 : null
+      let tds: number | null = amtEntered ? parseFloat(editForm.tds_amount) || 0 : null
+      if (pctEntered && !amtEntered) tds = +(invAmt * (tdsPct ?? 0) / 100).toFixed(2)
+      else if (amtEntered && !pctEntered && invAmt > 0) tdsPct = +((tds ?? 0) / invAmt * 100).toFixed(2)
+      else if (pctEntered && amtEntered) tds = +(invAmt * (tdsPct ?? 0) / 100).toFixed(2) // % wins if both given
       const { error } = await supabase.from('pending_payments').update({
         vendor_name: editForm.vendor_name.trim(),
         invoice_no: editForm.invoice_no || null,
         grn_no: editForm.grn_no || null,
         invoice_amount: invAmt,
+        tds_pct: tdsPct,
         tds_amount: tds,
         net_payable: invAmt - (tds ?? 0),
         discount_amount: editForm.discount_amount === '' ? null : parseFloat(editForm.discount_amount) || 0,
@@ -502,6 +520,9 @@ export const PendingPaymentsPage: React.FC = () => {
       }).eq('id', editModal.id)
       if (error) throw error
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       setEditModal(null)
     } catch (e: any) {
       setEditErr(e.message)
@@ -531,6 +552,9 @@ export const PendingPaymentsPage: React.FC = () => {
       const { error } = await supabase.from('pending_payments').delete().in('id', [...selectedIds])
       if (error) throw error
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       setSelectedIds(new Set())
       toast.success('Selected bills deleted')
     } catch (e: any) {
@@ -828,17 +852,24 @@ export const PendingPaymentsPage: React.FC = () => {
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">TDS</label>
-                  <input type="number" value={editForm.tds_amount} onChange={e => setEditForm(f => ({ ...f, tds_amount: e.target.value }))}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                  <label className="text-xs font-medium text-gray-600 block mb-1">TDS %</label>
+                  <input type="number" value={editForm.tds_pct} onChange={e => setEditForm(f => ({ ...f, tds_pct: e.target.value }))}
+                    placeholder="e.g. 2" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">TDS Amount</label>
+                  <input type="number" value={editForm.tds_amount} onChange={e => setEditForm(f => ({ ...f, tds_amount: e.target.value }))}
+                    placeholder="Auto from % if left blank" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Discount</label>
                   <input type="number" value={editForm.discount_amount} onChange={e => setEditForm(f => ({ ...f, discount_amount: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Pay Before Date</label>
                   <input type="date" value={editForm.pay_before_date} onChange={e => setEditForm(f => ({ ...f, pay_before_date: e.target.value }))}

@@ -189,6 +189,9 @@ export const PaymentsPage: React.FC = () => {
     onSuccess: () => {
       toast.success(editing ? 'Payment updated!' : 'Payment added!')
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['cash_book'] })
       setShowForm(false); setEditing(null); setForm(emptyForm())
     },
@@ -204,6 +207,9 @@ export const PaymentsPage: React.FC = () => {
     onSuccess: () => {
       toast.success('Deleted')
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['cash_book'] })
       setDelId(null)
     },
@@ -231,6 +237,9 @@ export const PaymentsPage: React.FC = () => {
       pending_payment_id: p.id,
     })
     qc.invalidateQueries({ queryKey: ['pending_payments'] })
+    qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+    qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+    qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
     qc.invalidateQueries({ queryKey: ['cash_book'] })
     toast.success('Marked as Paid — Cash Book updated')
   }

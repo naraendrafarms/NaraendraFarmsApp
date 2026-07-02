@@ -30,9 +30,10 @@ export const TDSPayable: React.FC = () => {
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['pending_payments_tds', dateFrom, dateTo],
     queryFn: async () => {
+      // Only require tds_amount > 0 — some bills have TDS entered as a flat
+      // amount (Pending Payments edit) without a tds_pct, so don't filter on rate.
       let q = supabase.from('pending_payments')
         .select('*')
-        .gt('tds_pct', 0)
         .gt('tds_amount', 0)
         .order('grn_date', { ascending: false })
       if (dateFrom) q = q.gte('grn_date', dateFrom)
@@ -44,10 +45,14 @@ export const TDSPayable: React.FC = () => {
     staleTime: 60_000,
   })
 
+  // Effective TDS % — use the stored rate, else derive from amount/invoice so
+  // manually-entered TDS (flat amount, no rate) still shows a sensible %.
+  const effPct = (r: any) => r.tds_pct ?? (r.invoice_amount ? +(r.tds_amount / r.invoice_amount * 100).toFixed(2) : 0)
+
   const filtered = useMemo(() => {
     return rows.filter((r: any) => {
       if (rateFilter) {
-        if (Math.abs((r.tds_pct ?? 0) - parseFloat(rateFilter)) > 0.05) return false
+        if (Math.abs(effPct(r) - parseFloat(rateFilter)) > 0.05) return false
       }
       if (statusFilter) {
         if (statusFilter === 'Pending' && r.payment_status !== 'Pending') return false
@@ -61,7 +66,7 @@ export const TDSPayable: React.FC = () => {
   const summary = useMemo(() => {
     const map: Record<string, { count: number; invoiceTotal: number; tdsTotal: number; netPayable: number }> = {}
     filtered.forEach((r: any) => {
-      const pct = r.tds_pct ?? 0
+      const pct = effPct(r)
       const key = `${pct}%`
       if (!map[key]) map[key] = { count: 0, invoiceTotal: 0, tdsTotal: 0, netPayable: 0 }
       map[key].count++
@@ -84,7 +89,7 @@ export const TDSPayable: React.FC = () => {
       'GRN #': r.grn_no ?? '',
       'Invoice #': r.invoice_no ?? '',
       'Invoice Amount': r.invoice_amount ?? 0,
-      'TDS %': r.tds_pct ?? 0,
+      'TDS %': effPct(r),
       'TDS Amount': r.tds_amount ?? 0,
       'Net Payable': r.net_payable ?? (r.invoice_amount ?? 0) - (r.tds_amount ?? 0),
       Status: r.payment_status ?? 'Pending',
@@ -184,7 +189,7 @@ export const TDSPayable: React.FC = () => {
                           <Td className="text-xs font-mono">{r.grn_no ?? '—'}</Td>
                           <Td className="text-xs font-medium text-blue-700">{r.invoice_no ?? '—'}</Td>
                           <Td right className="text-xs">{r.invoice_amount ? inr(r.invoice_amount) : '—'}</Td>
-                          <Td right className="text-xs">{r.tds_pct != null ? `${r.tds_pct}%` : '—'}</Td>
+                          <Td right className="text-xs">{effPct(r) ? `${effPct(r)}%` : '—'}</Td>
                           <Td right className="font-semibold text-red-600 text-xs">{inr(r.tds_amount)}</Td>
                           <Td right className="font-semibold text-green-700 text-xs">{inr(netPay)}</Td>
                           <Td>
