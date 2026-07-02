@@ -210,13 +210,17 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
 const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ farms, generators }) => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
-  const blank = { generator_id: '', farm_id: '', purchase_date: today(), qty_ltr: '', rate: '', supplier: '', remarks: '' }
+  const blank = { generator_id: '', farm_id: '', purchase_date: today(), qty_ltr: '', rate: '', supplier: '', payment_mode: 'Cash', bank_account_id: '', remarks: '' }
   const [form, setForm] = useState(blank)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const { data: purchases = [], isLoading } = useQuery({
     queryKey: ['generator_diesel_purchases'],
-    queryFn: async () => { const { data } = await supabase.from('generator_diesel_purchases').select('*, generators(name), farms(name)').order('purchase_date', { ascending: false }).limit(200); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('generator_diesel_purchases').select('*, generators(name), farms(name), bank_accounts(bank_name,account_name)').order('purchase_date', { ascending: false }).limit(200); return data ?? [] }
+  })
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bank_accounts'],
+    queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name'); return data ?? [] }
   })
   const { data: usageTotals } = useQuery({
     queryKey: ['generator_usage_totals'],
@@ -230,13 +234,34 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
   const saveMut = useMutation({
     mutationFn: async () => {
       const qty = parseFloat(form.qty_ltr) || 0, rate = parseFloat(form.rate) || 0
-      const { error } = await supabase.from('generator_diesel_purchases').insert({
+      const amt = qty * rate
+      if (form.payment_mode === 'Bank' && !form.bank_account_id) throw new Error('Pick a bank account')
+      const { data: purchase, error } = await supabase.from('generator_diesel_purchases').insert({
         generator_id: form.generator_id || null, farm_id: form.farm_id || null, purchase_date: form.purchase_date,
-        qty_ltr: qty, rate: rate || null, amount: qty * rate || null, supplier: form.supplier || null, remarks: form.remarks || null,
-      })
+        qty_ltr: qty, rate: rate || null, amount: amt || null, supplier: form.supplier || null,
+        payment_mode: form.payment_mode, bank_account_id: form.payment_mode === 'Bank' ? form.bank_account_id : null,
+        remarks: form.remarks || null,
+      }).select('id').single()
       if (error) throw error
+      // Real expense — post to Cash Book (Cash) or Bank Ledger (Bank), same
+      // pattern as Bag Sales / NHE sales payments.
+      const description = `Diesel purchase${form.supplier ? ` — ${form.supplier}` : ''} (${qty} Ltr)`
+      if (amt > 0 && form.payment_mode === 'Cash') {
+        const { error: cbErr } = await supabase.from('cash_book').insert({
+          txn_date: form.purchase_date, txn_type: 'payment', category: 'expense',
+          description, party_name: form.supplier || null, farm_id: form.farm_id || null,
+          amount_in: 0, amount_out: amt, payment_mode: 'cash', diesel_purchase_id: purchase.id,
+        })
+        if (cbErr) throw new Error('Purchase saved, but Cash Book entry failed: ' + cbErr.message)
+      } else if (amt > 0 && form.payment_mode === 'Bank' && form.bank_account_id) {
+        const { error: btErr } = await supabase.from('bank_transactions').insert({
+          bank_account_id: form.bank_account_id, txn_date: form.purchase_date, txn_type: 'Debit',
+          category: 'Diesel Purchase', reference_no: null, description, amount: amt,
+        })
+        if (btErr) throw new Error('Purchase saved, but Bank Ledger entry failed: ' + btErr.message)
+      }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_diesel_purchases'] }); setShowForm(false); setForm(blank); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_diesel_purchases'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); setShowForm(false); setForm(blank); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
@@ -283,6 +308,14 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
           <FormRow>
             <Input label="Rate (₹/Ltr)" type="number" value={form.rate} onChange={e => s('rate', e.target.value)} />
             <Input label="Supplier" value={form.supplier} onChange={e => s('supplier', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Select label="Paid From" value={form.payment_mode} onChange={e => s('payment_mode', e.target.value)}
+              options={[{ value: 'Cash', label: 'Cash' }, { value: 'Bank', label: 'Bank' }]} />
+            {form.payment_mode === 'Bank' && (
+              <Select label="Bank Account *" value={form.bank_account_id} onChange={e => s('bank_account_id', e.target.value)}
+                placeholder="Select Bank" options={bankAccounts.map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — ' + b.account_name : ''}` }))} />
+            )}
           </FormRow>
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
         </div>

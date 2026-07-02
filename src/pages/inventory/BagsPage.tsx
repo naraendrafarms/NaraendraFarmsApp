@@ -37,36 +37,49 @@ export const BagsPage: React.FC = () => {
 const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
-  const blank = { sale_date: today(), farm_id: '', buyer_name: '', qty: '', rate: '', remarks: '' }
+  const blank = { sale_date: today(), farm_id: '', buyer_name: '', qty: '', rate: '', payment_mode: 'Cash', bank_account_id: '', remarks: '' }
   const [form, setForm] = useState(blank)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const { data: sales = [], isLoading } = useQuery({
     queryKey: ['bag_sales'],
-    queryFn: async () => { const { data } = await supabase.from('bag_sales').select('*, farms(name)').order('sale_date', { ascending: false }); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('bag_sales').select('*, farms(name), bank_accounts(bank_name,account_name)').order('sale_date', { ascending: false }); return data ?? [] }
+  })
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bank_accounts'],
+    queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name'); return data ?? [] }
   })
 
   const saveMut = useMutation({
     mutationFn: async () => {
       const qty = parseInt(form.qty) || 0, rate = parseFloat(form.rate) || 0
       if (!qty) throw new Error('Enter qty')
+      if (form.payment_mode === 'Bank' && !form.bank_account_id) throw new Error('Pick a bank account')
       const { data: sale, error } = await supabase.from('bag_sales').insert({
         sale_date: form.sale_date, farm_id: form.farm_id || null, buyer_name: form.buyer_name || null,
-        qty, rate: rate || null, amount: qty * rate || null, remarks: form.remarks || null,
+        qty, rate: rate || null, amount: qty * rate || null,
+        payment_mode: form.payment_mode, bank_account_id: form.payment_mode === 'Bank' ? form.bank_account_id : null,
+        remarks: form.remarks || null,
       }).select('id').single()
       if (error) throw error
-      // Auto-post to Cash Book, same pattern as NHE sales / HE dispatch
-      if (qty * rate > 0) {
+      const amt = qty * rate
+      const description = `Empty bags sold${form.buyer_name ? ` to ${form.buyer_name}` : ''} (${qty} bags)`
+      if (amt > 0 && form.payment_mode === 'Cash') {
         const { error: cbErr } = await supabase.from('cash_book').insert({
           txn_date: form.sale_date, txn_type: 'receipt', category: 'other',
-          description: `Empty bags sold${form.buyer_name ? ` to ${form.buyer_name}` : ''} (${qty} bags)`,
-          party_name: form.buyer_name || null, farm_id: form.farm_id || null,
-          amount_in: qty * rate, amount_out: 0, payment_mode: 'cash', bag_sale_id: sale.id,
+          description, party_name: form.buyer_name || null, farm_id: form.farm_id || null,
+          amount_in: amt, amount_out: 0, payment_mode: 'cash', bag_sale_id: sale.id,
         })
         if (cbErr) throw new Error('Sale saved, but Cash Book entry failed: ' + cbErr.message)
+      } else if (amt > 0 && form.payment_mode === 'Bank' && form.bank_account_id) {
+        const { error: btErr } = await supabase.from('bank_transactions').insert({
+          bank_account_id: form.bank_account_id, txn_date: form.sale_date, txn_type: 'Credit',
+          category: 'Bag Sale', reference_no: null, description, amount: amt,
+        })
+        if (btErr) throw new Error('Sale saved, but Bank Ledger entry failed: ' + btErr.message)
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bag_sales'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); setShowForm(false); setForm(blank); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bag_sales'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); setShowForm(false); setForm(blank); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
@@ -118,6 +131,14 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
           <FormRow>
             <Input label="Qty (bags) *" type="number" value={form.qty} onChange={e => s('qty', e.target.value)} />
             <Input label="Rate (₹/bag)" type="number" value={form.rate} onChange={e => s('rate', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Select label="Received Into" value={form.payment_mode} onChange={e => s('payment_mode', e.target.value)}
+              options={[{ value: 'Cash', label: 'Cash' }, { value: 'Bank', label: 'Bank' }]} />
+            {form.payment_mode === 'Bank' && (
+              <Select label="Bank Account *" value={form.bank_account_id} onChange={e => s('bank_account_id', e.target.value)}
+                placeholder="Select Bank" options={bankAccounts.map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — ' + b.account_name : ''}` }))} />
+            )}
           </FormRow>
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
         </div>
