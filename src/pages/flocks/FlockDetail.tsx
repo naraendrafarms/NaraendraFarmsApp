@@ -246,11 +246,19 @@ export const FlockDetail: React.FC = () => {
       const { error } = await supabase.from('flock_transfers').insert(payload)
       if (error) throw error
 
-      // Auto-deduct transferred birds from daily record for that date
+      // Auto-deduct transferred birds from the SOURCE shed's daily record for
+      // that date. Must filter by shed_id (and farm_id) — a flock can have a
+      // separate daily_records row per shed, and matching on flock_id+date
+      // alone can grab the DESTINATION shed's row instead (its transfer_in
+      // credit gets wiped out by an equal-and-opposite "transfer out" written
+      // onto the same row). unique key is (flock_id, record_date, farm_id, shed_id).
       if (trF > 0 || trM > 0) {
-        const { data: dr } = await supabase.from('daily_records')
+        let drQuery = supabase.from('daily_records')
           .select('id,transfer_female,transfer_male,opening_female,opening_male,cull_female,cull_male,mortality_female,mortality_male')
-          .eq('flock_id', id!).eq('record_date', transferForm.transfer_date).maybeSingle()
+          .eq('flock_id', id!).eq('record_date', transferForm.transfer_date)
+        drQuery = transferForm.from_shed_id ? drQuery.eq('shed_id', transferForm.from_shed_id) : drQuery.is('shed_id', null)
+        drQuery = transferForm.from_farm_id ? drQuery.eq('farm_id', transferForm.from_farm_id) : drQuery.is('farm_id', null)
+        const { data: dr } = await drQuery.maybeSingle()
         const newTrF = (dr?.transfer_female ?? 0) + trF
         const newTrM = (dr?.transfer_male ?? 0) + trM
         const closingF = Math.max(0, (dr?.opening_female ?? 0) - newTrF - (dr?.cull_female ?? 0) - (dr?.mortality_female ?? 0))
@@ -266,6 +274,7 @@ export const FlockDetail: React.FC = () => {
         } else {
           await supabase.from('daily_records').insert({
             flock_id: id!, record_date: transferForm.transfer_date,
+            farm_id: transferForm.from_farm_id || null, shed_id: transferForm.from_shed_id || null,
             transfer_female: trF, transfer_male: trM,
             trcull_female: trF, trcull_male: trM,
             cull_female: 0, cull_male: 0,
@@ -330,11 +339,16 @@ export const FlockDetail: React.FC = () => {
     mutationFn: async (t: any) => {
       const { error } = await supabase.from('flock_transfers').delete().eq('id', t.id)
       if (error) throw error
-      // reverse the daily-record deduction that the transfer made
+      // reverse the daily-record deduction that the transfer made — must match
+      // the SOURCE shed's row specifically (same fix as addTransferMut), or
+      // this can reverse the deduction on the wrong shed entirely.
       const trF = t.female_count || 0, trM = t.male_count || 0
       if (trF || trM) {
-        const { data: dr } = await supabase.from('daily_records')
-          .select('id,transfer_female,transfer_male').eq('flock_id', id!).eq('record_date', t.transfer_date).maybeSingle()
+        let drQuery = supabase.from('daily_records')
+          .select('id,transfer_female,transfer_male').eq('flock_id', id!).eq('record_date', t.transfer_date)
+        drQuery = t.from_shed_id ? drQuery.eq('shed_id', t.from_shed_id) : drQuery.is('shed_id', null)
+        drQuery = t.from_farm_id ? drQuery.eq('farm_id', t.from_farm_id) : drQuery.is('farm_id', null)
+        const { data: dr } = await drQuery.maybeSingle()
         if (dr) await supabase.from('daily_records').update({
           transfer_female: Math.max(0, (dr.transfer_female ?? 0) - trF),
           transfer_male: Math.max(0, (dr.transfer_male ?? 0) - trM),
