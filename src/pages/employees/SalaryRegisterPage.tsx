@@ -34,6 +34,7 @@ export const SalaryRegisterPage: React.FC = () => {
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
   const [filterFarm, setFilterFarm] = useState('')
   const [filterGender, setFilterGender] = useState('')
+  const [filterDesignation, setFilterDesignation] = useState('')
   const navigate = useNavigate()
   const [voucherEmp, setVoucherEmp] = useState<{ id: string; name: string } | null>(null)
   const [dedEmp, setDedEmp] = useState<{ id: string; name: string } | null>(null)
@@ -69,8 +70,16 @@ export const SalaryRegisterPage: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] }
   })
 
+  const { data: designations = [] } = useQuery({
+    queryKey: ['employee_designations'],
+    queryFn: async () => {
+      const { data } = await supabase.from('employees').select('designation').eq('is_active', true)
+      return Array.from(new Set((data ?? []).map((e: any) => e.designation).filter(Boolean))).sort()
+    }
+  })
+
   const { data: rows, isLoading } = useQuery({
-    queryKey: ['salary_register', month, filterFarm, filterGender],
+    queryKey: ['salary_register', month, filterFarm, filterGender, filterDesignation],
     enabled: !!month,
     queryFn: async () => {
       let q = supabase
@@ -83,6 +92,7 @@ export const SalaryRegisterPage: React.FC = () => {
       let result = data ?? []
       if (filterFarm) result = result.filter((r: any) => r.employees?.farms?.name === filterFarm)
       if (filterGender) result = result.filter((r: any) => r.employees?.gender === filterGender)
+      if (filterDesignation) result = result.filter((r: any) => r.employees?.designation === filterDesignation)
       // Sort by Employee ID (1 → last, site-wise) — PostgREST referencedTable order
       // only sorts the embedded object, not the rows, so sort here.
       const empNo = (r: any) => {
@@ -177,6 +187,11 @@ export const SalaryRegisterPage: React.FC = () => {
           <label className="block text-xs text-gray-500 mb-1">Gender</label>
           <Select value={filterGender} onChange={e => setFilterGender(e.target.value)}
             options={[{ value: '', label: 'All Genders' }, { value: 'Male', label: 'Male' }, { value: 'Female', label: 'Female' }]} />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Designation</label>
+          <Select value={filterDesignation} onChange={e => setFilterDesignation(e.target.value)}
+            options={[{ value: '', label: 'All Designations' }, ...designations.map((d: string) => ({ value: d, label: d }))]} />
         </div>
       </Card>
 

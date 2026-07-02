@@ -148,11 +148,12 @@ export const DailyEntry: React.FC = () => {
   const { data: medicineStockRates } = useQuery({
     queryKey: ['v_medicine_stock_rates'],
     queryFn: async () => {
-      const { data } = await supabase.from('v_medicine_stock').select('medicine_id,purchased_qty,purchase_value')
+      const { data } = await supabase.from('v_medicine_stock').select('medicine_id,purchased_qty,purchase_value,adjustment_rate')
       const m: Record<string, number> = {}
       for (const r of (data ?? [])) {
         const qty = Number(r.purchased_qty) || 0
         if (r.medicine_id && qty > 0) m[r.medicine_id] = Number(r.purchase_value) / qty
+        else if (r.medicine_id && Number(r.adjustment_rate) > 0) m[r.medicine_id] = Number(r.adjustment_rate)
       }
       return m
     }
