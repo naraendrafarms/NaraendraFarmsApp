@@ -153,7 +153,11 @@ export const GRNEntry: React.FC = () => {
   const total  = basic + gstAmt
 
   const isFeed = form.category === 'Feed Ingredient'
-  const isMedOrVax = form.category === 'Medicine' || form.category === 'Vaccine'
+  // medicines_master isn't limited to Medicine/Vaccine — it also covers
+  // Sanitizer, Disinfectant etc. (anything used at flock level), so any
+  // category besides Feed/Chicks should still resolve to a medicine_id
+  // instead of silently falling back to free-text with no master link.
+  const isMedOrVax = !isFeed && form.category !== 'Chicks'
   const isChick = form.category === 'Chicks'
 
   const payload = () => ({
@@ -592,7 +596,7 @@ export const GRNEntry: React.FC = () => {
             </FormRow>
           ) : isMedOrVax ? (
             <FormRow cols={3}>
-              <Select label={form.category === 'Vaccine' ? 'Vaccine' : 'Medicine'} placeholder="— Select from master —" options={medOptions}
+              <Select label={form.category || 'Item'} placeholder="— Select from master —" options={medOptions}
                 value={form.medicine_id} onChange={e => {
                   s('medicine_id', e.target.value)
                   const med = medicines?.find((m: any) => m.id === e.target.value)
