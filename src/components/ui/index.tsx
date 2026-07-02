@@ -421,13 +421,21 @@ export const StatCard: React.FC<{
 )
 
 // ── TABLE ─────────────────────────────────────────────────────
+// Header row freezes to the top of the viewport on scroll (like Excel freeze
+// panes) on every page using this shared Table/Th — this is deliberately the
+// one central place that controls it, instead of each page reimplementing
+// sticky headers itself. overflow-y is explicitly kept "visible" so the
+// sticky positioning context is the page viewport, not this wrapper div
+// (setting only overflow-x-auto would otherwise silently make browsers
+// promote overflow-y to "auto" too, trapping sticky inside an unscrolled div
+// where it never appears to float — the classic sticky-in-table footgun).
 export const Table: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className='' }) => (
-  <div className={`overflow-x-auto rounded-xl border border-gray-100 ${className}`}>
+  <div className={`overflow-x-auto overflow-y-visible rounded-xl border border-gray-100 ${className}`}>
     <table className="w-full text-sm">{children}</table>
   </div>
 )
 export const Th: React.FC<{ children?: React.ReactNode; className?: string; right?: boolean; colSpan?: number }> = ({ children, className='', right, colSpan }) => (
-  <th colSpan={colSpan} className={`px-3 py-2.5 text-xs font-semibold text-gray-600 uppercase tracking-wide bg-gray-50
+  <th colSpan={colSpan} className={`sticky top-0 z-10 px-3 py-2.5 text-xs font-semibold text-gray-600 uppercase tracking-wide bg-gray-50
     border-b border-gray-100 ${right?'text-right':'text-left'} ${className}`}>
     {children}
   </th>
