@@ -1,5 +1,5 @@
 // Indian number format — Rs 1,23,45,678
-export const inr = (v: number | null | undefined, decimals = 0): string => {
+export const inr = (v: number | null | undefined, decimals = 2): string => {
   if (v == null) return '—'
   const abs = Math.abs(v)
   const parts = abs.toFixed(decimals).split('.')
@@ -20,7 +20,7 @@ export const inr = (v: number | null | undefined, decimals = 0): string => {
 }
 
 // Plain Indian number without Rs
-export const inrNum = (v: number | null | undefined, decimals = 0): string => {
+export const inrNum = (v: number | null | undefined, decimals = 2): string => {
   if (v == null) return '—'
   return Math.abs(v).toLocaleString('en-IN', {
     minimumFractionDigits: decimals,
