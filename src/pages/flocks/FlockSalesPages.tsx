@@ -64,6 +64,12 @@ const ReceivePaymentModal: React.FC<{
     try {
       const amt = parseFloat(amtReceived) || 0
       const isAdvance = mode === 'Advance'
+      // Never let a non-cash receipt flip to "Received" without a bank account —
+      // that used to silently post to no ledger at all (money marked received
+      // but invisible in both Cash Book and Bank Ledger).
+      if (!isAdvance && mode !== 'Cash' && amt > 0 && status !== 'Pending' && !bankId) {
+        throw new Error('Select a Bank Account for this payment mode, or it won\'t be recorded in any ledger')
+      }
 
       if (isAdvance) {
         if (!selectedAdvanceId) throw new Error('Select which advance to use')
@@ -1055,7 +1061,12 @@ export const HEDispatch: React.FC = () => {
         farms={farms ?? []}
         table={receiptSale?._table ?? 'he_dispatch'}
         onClose={() => setReceiptSale(null)}
-        onSaved={() => { setReceiptSale(null); qc.invalidateQueries({ queryKey: ['he_dispatch'] }) }}
+        onSaved={() => {
+          setReceiptSale(null)
+          qc.invalidateQueries({ queryKey: ['he_dispatch'] })
+          qc.invalidateQueries({ queryKey: ['cash_book'] })
+          qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+        }}
       />
 
       {/* Print Options Modal */}
@@ -1683,6 +1694,11 @@ export const NHESales: React.FC = () => {
       }
       const cashAmt   = parseFloat(form.payment_cash)   || 0
       const onlineAmt = parseFloat(form.payment_online) || 0
+      // Same guard as the Receive Payment modal — an online amount with no bank
+      // account picked used to mark the sale Received while posting to no ledger.
+      if (onlineAmt > 0 && !form.bank_account_id) {
+        throw new Error('Select a Bank Account for the online payment, or it won\'t be recorded in any ledger')
+      }
       if (bird) {
         payload.bird_sex       = form.bird_sex || null
         payload.bird_category  = form.bird_category || null
@@ -1864,6 +1880,8 @@ export const NHESales: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['nhe_sales'] })
       qc.invalidateQueries({ queryKey: ['daily_record'] })
       qc.invalidateQueries({ queryKey: ['flock_daily'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
       setPeekInv(null); setShowForm(false); setEditing(null); setNheLines([emptyNheLine()])
     },
     onError: (e: any) => toast.error(e.message)
@@ -2340,7 +2358,12 @@ export const NHESales: React.FC = () => {
         farms={farmsNhe ?? []}
         table="nhe_sales"
         onClose={() => setReceiptSale(null)}
-        onSaved={() => { setReceiptSale(null); qc.invalidateQueries({ queryKey: ['nhe_sales'] }) }}
+        onSaved={() => {
+          setReceiptSale(null)
+          qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+          qc.invalidateQueries({ queryKey: ['cash_book'] })
+          qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+        }}
       />
 
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}

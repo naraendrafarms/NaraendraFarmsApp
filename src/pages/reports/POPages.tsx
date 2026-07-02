@@ -111,7 +111,7 @@ export const PurchaseOrdersPage: React.FC = () => {
 // PO TAB
 // ══════════════════════════════════════════════════════════════════
 const EMPTY_PO = {
-  po_no:'', po_date:'', fiscal_year:currentFY(), vendor_name:'', item_name:'',
+  po_no:'', po_date:'', fiscal_year:currentFY(), vendor_name:'', party_id:'', item_name:'',
   material_type:'', quantity:'', unit:'', rate:'', gst_pct:'', total_amount:'',
   grn_no:'', grn_date:'', material_status:'Pending', credit_limit_days:'',
 }
@@ -146,6 +146,15 @@ const POTab: React.FC = () => {
   const [receiptPO, setReceiptPO]     = useState<any>(null)
   const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', farm_id: '', remarks: '' })
   const { data: farms=[] } = useQuery({ queryKey: ['farms_po'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
+  const { data: parties=[] } = useQuery({
+    queryKey: ['parties_supp'],
+    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type', ['supplier', 'both']).order('name'); return data ?? [] }
+  })
+  const partyOptions = parties.map((p: any) => ({ value: p.id, label: p.name }))
+  const setVendorParty = (partyId: string) => {
+    const p = parties.find((x: any) => x.id === partyId)
+    setForm((f: any) => ({ ...f, party_id: partyId, vendor_name: p?.name ?? f.vendor_name }))
+  }
   const rf = (k: string) => (e: any) => setReceiptForm((p: any) => ({...p,[k]:e.target.value}))
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
 
@@ -196,7 +205,7 @@ const POTab: React.FC = () => {
         // Single-row edit
         const payload = {
           po_no: form.po_no, po_date: form.po_date || null, fiscal_year: form.fiscal_year,
-          vendor_name: form.vendor_name, item_name: form.item_name || null,
+          vendor_name: form.vendor_name, party_id: form.party_id || null, item_name: form.item_name || null,
           material_type: form.material_type || null,
           quantity: form.quantity ? Number(form.quantity) : null,
           unit: form.unit || null,
@@ -215,7 +224,7 @@ const POTab: React.FC = () => {
         if (!validLines.length) throw new Error('Add at least one item')
         const rows = validLines.map(l => ({
           po_no: form.po_no, po_date: form.po_date || null, fiscal_year: form.fiscal_year,
-          vendor_name: form.vendor_name,
+          vendor_name: form.vendor_name, party_id: form.party_id || null,
           item_name: l.item_name || null,
           material_type: l.material_type || null,
           quantity: l.quantity ? Number(l.quantity) : null,
@@ -604,7 +613,8 @@ const POTab: React.FC = () => {
             <Sel label="Fiscal Year" value={form.fiscal_year} onChange={f('fiscal_year')} options={FY_OPTIONS} />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Vendor Name *" value={form.vendor_name} onChange={f('vendor_name')} required />
+            <Sel label="Vendor (Supplier) *" value={form.party_id} onChange={(e: any) => setVendorParty(e.target.value)}
+              options={[{ value: '', label: 'Select Supplier — add new ones in Purchase > Suppliers' }, ...partyOptions]} />
             <Input label="Credit Limit (days)" type="number" value={form.credit_limit_days} onChange={f('credit_limit_days')} placeholder="e.g. 30" />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -1025,7 +1035,8 @@ const RateAnalysisTab: React.FC = () => {
   const [preview, setPreview] = useState<{rows:any[], mapped:Record<string,string>, headers:string[]} | null>(null)
   const [selectedItem, setSelectedItem] = useState('')
   const [selectedVendor, setSelectedVendor] = useState('')
-  const [viewMode, setViewMode] = useState<'trend'|'vendor'|'table'|'grn'>('trend')
+  const [viewMode, setViewMode] = useState<'trend'|'vendor'|'table'|'grn'|'grn_trend'>('trend')
+  const [grnItem, setGrnItem] = useState('')
 
   // All PO data for analysis
   const { data: pos, isLoading } = useQuery({
@@ -1048,7 +1059,9 @@ const RateAnalysisTab: React.FC = () => {
       return data ?? []
     }
   })
-  const [onlyMismatch, setOnlyMismatch] = useState(true)
+  // Default OFF — most GRNs here aren't linked to a PO, so "only mismatches"
+  // (which requires a PO match) was hiding almost everything by default.
+  const [onlyMismatch, setOnlyMismatch] = useState(false)
   const [grnSearch, setGrnSearch] = useState('')
   const grnFiltered = useMemo(() => (grnRates as any[]).filter((r: any) => {
     const itemName = r.grn_item_name ?? r.item_name ?? ''
@@ -1056,6 +1069,64 @@ const RateAnalysisTab: React.FC = () => {
     if (onlyMismatch && (r.po_rate == null || Math.abs(Number(r.rate_diff ?? 0)) < 0.005)) return false
     return true
   }), [grnRates, grnSearch, onlyMismatch])
+
+  // ── GRN Rate Trend — pure GRN received-rate history, independent of any PO.
+  // Landed rate = price_per_unit + other_charges/qty (transport etc.), matching
+  // the same formula the Feed Mill ingredient rate uses (useFeedRates.ts).
+  const { data: grnAll=[] } = useQuery({
+    queryKey: ['grn_rate_trend'],
+    queryFn: async () => {
+      const { data } = await supabase.from('grn')
+        .select('item_name,category,price_per_unit,other_charges,qty,grn_date,party_id,parties(name)')
+        .not('price_per_unit', 'is', null)
+        .order('grn_date', { ascending: true })
+      return (data ?? []).map((g: any) => {
+        const qty = Number(g.qty) || 0
+        const landed = Number(g.price_per_unit) + (qty > 0 ? (Number(g.other_charges) || 0) / qty : 0)
+        return {
+          item_name: g.item_name, category: g.category, grn_date: g.grn_date,
+          vendor_name: g.parties?.name ?? 'Unknown', rate: +landed.toFixed(2),
+        }
+      })
+    }
+  })
+  const grnItems = useMemo(() => [...new Set(grnAll.map((g: any) => g.item_name).filter(Boolean))].sort(), [grnAll])
+  // Month-wise average landed rate per vendor, for the selected item
+  const grnTrendData = useMemo(() => {
+    if (!grnItem) return []
+    const filtered = grnAll.filter((g: any) => g.item_name === grnItem)
+    const byMonth: Record<string, Record<string, {sum:number,cnt:number}>> = {}
+    for (const g of filtered) {
+      const month = g.grn_date ? String(g.grn_date).slice(0,7) : 'Unknown'
+      const v = g.vendor_name
+      if (!byMonth[month]) byMonth[month] = {}
+      if (!byMonth[month][v]) byMonth[month][v] = { sum:0, cnt:0 }
+      byMonth[month][v].sum += g.rate
+      byMonth[month][v].cnt++
+    }
+    const allVendors = [...new Set(filtered.map((g: any) => g.vendor_name))]
+    return Object.entries(byMonth).sort(([a],[b])=>a.localeCompare(b)).map(([month, vmap]) => {
+      const row: any = { month }
+      for (const v of allVendors) if (vmap[v]) row[v] = +(vmap[v].sum / vmap[v].cnt).toFixed(2)
+      return row
+    })
+  }, [grnAll, grnItem])
+  const grnTrendVendors = useMemo(() => {
+    if (!grnItem) return []
+    return [...new Set(grnAll.filter((g: any) => g.item_name === grnItem).map((g: any) => g.vendor_name))]
+  }, [grnAll, grnItem])
+  const grnVendorComp = useMemo(() => {
+    if (!grnItem) return []
+    const byVendor: Record<string, number[]> = {}
+    for (const g of grnAll.filter((x: any) => x.item_name === grnItem)) {
+      if (!byVendor[g.vendor_name]) byVendor[g.vendor_name] = []
+      byVendor[g.vendor_name].push(g.rate)
+    }
+    return Object.entries(byVendor).map(([vendor, rates]) => ({
+      vendor, avg: +(rates.reduce((s,r)=>s+r,0)/rates.length).toFixed(2),
+      min: +Math.min(...rates).toFixed(2), max: +Math.max(...rates).toFixed(2), receipts: rates.length,
+    })).sort((a,b)=>a.avg-b.avg)
+  }, [grnAll, grnItem])
 
   const importMut = useMutation({
     mutationFn: async (rows: any[]) => {
@@ -1310,21 +1381,31 @@ const RateAnalysisTab: React.FC = () => {
           {/* View mode switcher + item selector */}
           <div className="flex flex-wrap gap-3 items-end">
             <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-              {(['trend','vendor','table','grn'] as const).map(m=>(
+              {(['trend','vendor','table','grn','grn_trend'] as const).map(m=>(
                 <button key={m} onClick={()=>setViewMode(m)}
-                  className={`px-4 py-1.5 text-sm font-medium transition-colors capitalize
+                  className={`px-4 py-1.5 text-sm font-medium transition-colors whitespace-nowrap
                     ${viewMode===m?'bg-brand-600 text-white':'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                  {m==='trend'?'Yearly Trend':m==='vendor'?'Vendor Compare':m==='table'?'Rate Table':'PO vs GRN'}
+                  {m==='trend'?'PO Yearly Trend':m==='vendor'?'PO Vendor Compare':m==='table'?'PO Rate Table':m==='grn'?'PO vs GRN':'GRN Rate Trend'}
                 </button>
               ))}
             </div>
-            {viewMode !== 'table' && viewMode !== 'grn' && (
+            {viewMode !== 'table' && viewMode !== 'grn' && viewMode !== 'grn_trend' && (
               <div className="flex-1 min-w-48">
                 <label className="block text-xs text-gray-500 mb-1">Select Item / Product</label>
                 <select value={selectedItem} onChange={e=>setSelectedItem(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
                   <option value="">— All Items —</option>
                   {items.map(i=><option key={i} value={i}>{i}</option>)}
+                </select>
+              </div>
+            )}
+            {viewMode === 'grn_trend' && (
+              <div className="flex-1 min-w-48">
+                <label className="block text-xs text-gray-500 mb-1">Select Item (from actual GRN receipts)</label>
+                <select value={grnItem} onChange={e=>setGrnItem(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                  <option value="">— Select an item —</option>
+                  {grnItems.map((i: string)=><option key={i} value={i}>{i}</option>)}
                 </select>
               </div>
             )}
@@ -1496,6 +1577,54 @@ const RateAnalysisTab: React.FC = () => {
                 </Table>
               </div>
             </Card>
+          )}
+
+          {/* GRN RATE TREND VIEW — pure GRN landed-rate history, no PO needed */}
+          {viewMode === 'grn_trend' && (
+            <div className="space-y-4">
+              {!grnItem ? (
+                <Card><p className="text-sm text-gray-500 text-center py-8">Select an item above to see its actual received-rate trend from GRN entries</p></Card>
+              ) : grnTrendData.length === 0 ? (
+                <Card><p className="text-sm text-gray-400 text-center py-8">No GRN receipts found for {grnItem}</p></Card>
+              ) : (
+                <>
+                  <Card>
+                    <p className="font-semibold text-gray-800 mb-1">GRN Received Rate Trend — {grnItem}</p>
+                    <p className="text-xs text-gray-400 mb-4">Month-wise average landed rate (price + transport/other charges per unit) actually paid on receipt, by vendor.</p>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <ReLineChart data={grnTrendData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
+                        <XAxis dataKey="month" tick={{fontSize:12}}/>
+                        <YAxis tick={{fontSize:12}} tickFormatter={v=>`₹${v}`}/>
+                        <Tooltip formatter={(v:number)=>`₹${v.toLocaleString('en-IN')}`}/>
+                        <Legend/>
+                        {grnTrendVendors.map((v: string,i: number)=>(
+                          <Line key={v} type="monotone" dataKey={v} stroke={COLORS[i%COLORS.length]}
+                            strokeWidth={2} dot={{r:4}} name={v}/>
+                        ))}
+                      </ReLineChart>
+                    </ResponsiveContainer>
+                  </Card>
+                  <Card padding={false}>
+                    <div className="px-4 py-3 border-b border-gray-100"><p className="font-semibold text-gray-800">Vendor Comparison — {grnItem}</p></div>
+                    <Table>
+                      <thead><tr><Th>Vendor</Th><Th right>Avg Rate</Th><Th right>Min</Th><Th right>Max</Th><Th right>Receipts</Th></tr></thead>
+                      <tbody>
+                        {grnVendorComp.map((v: any) => (
+                          <tr key={v.vendor} className="hover:bg-gray-50">
+                            <Td className="font-medium">{v.vendor}</Td>
+                            <Td right className="font-semibold">₹{v.avg.toLocaleString('en-IN')}</Td>
+                            <Td right className="text-green-700">₹{v.min.toLocaleString('en-IN')}</Td>
+                            <Td right className="text-red-600">₹{v.max.toLocaleString('en-IN')}</Td>
+                            <Td right>{v.receipts}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </Card>
+                </>
+              )}
+            </div>
           )}
 
           {/* RATE TABLE VIEW */}

@@ -954,14 +954,17 @@ export const PendingPaymentsPage: React.FC = () => {
             <h3 className="font-bold text-gray-900 text-lg">{editModal === 'new' ? 'Add Bill' : 'Edit Bill'}</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-gray-600 block mb-1">Vendor</label>
-                <input value={editForm.vendor_name} onChange={e => setEditForm(f => ({ ...f, vendor_name: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-gray-600 block mb-1">Link to Party (optional — for Party Ledger)</label>
-                <Select label="" placeholder="— No party link —" options={partyOptions}
-                  value={editForm.party_id} onChange={e => setEditForm(f => ({ ...f, party_id: e.target.value }))} />
+                <label className="text-xs font-medium text-gray-600 block mb-1">Vendor (Supplier)</label>
+                <Select label="" placeholder="Select Supplier — add new ones in Purchase > Suppliers" options={partyOptions}
+                  value={editForm.party_id} onChange={e => {
+                    const p = (parties ?? []).find((x: any) => x.id === e.target.value)
+                    setEditForm(f => ({ ...f, party_id: e.target.value, vendor_name: p?.name ?? f.vendor_name }))
+                  }} />
+                {!editForm.party_id && (
+                  <input value={editForm.vendor_name} onChange={e => setEditForm(f => ({ ...f, vendor_name: e.target.value }))}
+                    placeholder="Or type vendor name if not in Suppliers list"
+                    className="w-full mt-1.5 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
