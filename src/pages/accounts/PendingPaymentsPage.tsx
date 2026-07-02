@@ -1012,13 +1012,24 @@ export const PendingPaymentsPage: React.FC = () => {
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">TDS %</label>
                   <select value={TDS_PCT_OPTIONS.some(o => o.value === editForm.tds_pct) ? editForm.tds_pct : 'custom'}
-                    onChange={e => setEditForm(f => ({ ...f, tds_pct: e.target.value === 'custom' ? '' : e.target.value }))}
+                    onChange={e => {
+                      const pct = e.target.value === 'custom' ? '' : e.target.value
+                      const invAmt = parseFloat(editForm.invoice_amount) || 0
+                      const autoAmt = pct !== '' ? (invAmt * (parseFloat(pct) || 0) / 100).toFixed(2) : ''
+                      setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: autoAmt }))
+                    }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
                     {TDS_PCT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     <option value="custom">Custom %…</option>
                   </select>
                   {!TDS_PCT_OPTIONS.some(o => o.value === editForm.tds_pct) && (
-                    <input type="number" value={editForm.tds_pct} onChange={e => setEditForm(f => ({ ...f, tds_pct: e.target.value }))}
+                    <input type="number" value={editForm.tds_pct}
+                      onChange={e => {
+                        const pct = e.target.value
+                        const invAmt = parseFloat(editForm.invoice_amount) || 0
+                        const autoAmt = pct !== '' ? (invAmt * (parseFloat(pct) || 0) / 100).toFixed(2) : ''
+                        setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: autoAmt }))
+                      }}
                       placeholder="e.g. 3.75" className="w-full mt-1.5 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                   )}
                 </div>

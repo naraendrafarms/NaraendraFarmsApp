@@ -43,6 +43,10 @@ export const InvoiceRegister: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<string|null>(null)
+  // The pending_payments row this invoice is mirrored to is keyed by
+  // (vendor_name, invoice_no) — if either changes on edit, the upsert below
+  // targets a NEW key and the old mirrored row is orphaned unless deleted.
+  const [editOrigKey, setEditOrigKey] = useState<{ vendor_name: string; invoice_no: string } | null>(null)
   const [form, setForm] = useState({ ...EMPTY })
   const [filterType, setFilterType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -133,6 +137,15 @@ export const InvoiceRegister: React.FC = () => {
 
       // Sync to pending_payments so this invoice appears in payment planning
       const vendorName = form.supplier_name || (parties ?? []).find((p: any) => p.id === form.party_id)?.name || ''
+      // If editing and the vendor name or invoice number changed, the upsert
+      // below targets a different (vendor_name, invoice_no) key — clean up
+      // the old mirrored row first so it doesn't linger as a duplicate.
+      if (editId && editOrigKey && (editOrigKey.vendor_name !== vendorName || editOrigKey.invoice_no !== form.invoice_no.trim())) {
+        if (editOrigKey.vendor_name && editOrigKey.invoice_no) {
+          await supabase.from('pending_payments').delete()
+            .eq('vendor_name', editOrigKey.vendor_name).eq('invoice_no', editOrigKey.invoice_no)
+        }
+      }
       if (vendorName) {
         const ppStatus = payStatus === 'paid' ? 'Paid' : 'Pending'
         const ppPayload = {
@@ -158,7 +171,7 @@ export const InvoiceRegister: React.FC = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
-      setForm({ ...EMPTY }); setEditId(null); setShowForm(false)
+      setForm({ ...EMPTY }); setEditId(null); setEditOrigKey(null); setShowForm(false)
       toast.success(editId ? 'Invoice updated' : 'Invoice saved')
     },
     onError: (e: any) => toast.error(e.message)
@@ -235,7 +248,9 @@ export const InvoiceRegister: React.FC = () => {
       due_date:       inv.due_date ?? '',
       remarks:        inv.remarks ?? '',
     })
-    setEditId(inv.id); setShowForm(true)
+    setEditId(inv.id)
+    setEditOrigKey({ vendor_name: inv.supplier_name || inv.party?.name || '', invoice_no: inv.invoice_no ?? '' })
+    setShowForm(true)
   }
 
   // Auto-compute GST amount when basic_amount or gst_pct changes
@@ -367,7 +382,7 @@ export const InvoiceRegister: React.FC = () => {
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={downloadTemplate}>Template</Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportExcel}>Export</Button>
-            <Button size="sm" icon={<Plus size={14}/>} onClick={() => { setForm({ ...EMPTY }); setEditId(null); setShowForm(true) }}>Add Invoice</Button>
+            <Button size="sm" icon={<Plus size={14}/>} onClick={() => { setForm({ ...EMPTY }); setEditId(null); setEditOrigKey(null); setShowForm(true) }}>Add Invoice</Button>
             <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
           </div>
         }
@@ -480,7 +495,7 @@ export const InvoiceRegister: React.FC = () => {
             </div>
 
             <div className="flex gap-2 justify-end pt-2">
-              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditId(null) }}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setEditId(null); setEditOrigKey(null) }}>Cancel</Button>
               <Button size="sm" loading={saveMut.isPending} onClick={() => saveMut.mutate()}>
                 {editId ? 'Update Invoice' : 'Save Invoice'}
               </Button>

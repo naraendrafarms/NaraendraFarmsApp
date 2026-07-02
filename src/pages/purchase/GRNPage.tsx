@@ -640,6 +640,7 @@ export const GRNPage: React.FC = () => {
               type="number"
               value={form.bags}
               onChange={e => s('bags', e.target.value)}
+              hint={(() => { const q = parseFloat(form.qty) || 0, b = parseInt(form.bags) || 0; return q > 0 && b > 0 ? `Avg Bag Weight: ${(q / b).toFixed(2)} ${form.unit || ''}` : undefined })()}
             />
             <Select
               label="GST %"
