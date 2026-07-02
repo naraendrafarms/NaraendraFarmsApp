@@ -6,8 +6,9 @@ import {
   Card, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 } from '@/components/ui'
-import { Plus, Edit2, Shield, UserCheck, UserX, Trash2 } from 'lucide-react'
+import { Plus, Edit2, Shield, UserCheck, UserX, Trash2, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { exportCSV } from '@/lib/utils'
 
 const ROLES: { value: Role; label: string; desc: string }[] = [
   { value: 'admin',         label: 'Administrator',  desc: 'Full access — all data, users, masters' },
@@ -134,7 +135,14 @@ export const UserManagement: React.FC = () => {
   return (
     <div className="space-y-5">
       <SectionHeader title="User Management" subtitle="Manage who can access the app and what they can do"
-        action={<Button icon={<Plus size={16}/>} onClick={openAdd}>Add User</Button>} />
+        action={<div className="flex gap-2">
+          <Button variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV(
+            'users.csv',
+            ['Name','Email','Role','Site','Status'],
+            (users as any[] ?? []).map(u => [u.full_name ?? '', u.email ?? '', u.role ?? '', u.farms?.name ?? '', u.is_active ? 'Active' : 'Inactive'])
+          )}>Export Excel</Button>
+          <Button icon={<Plus size={16}/>} onClick={openAdd}>Add User</Button>
+        </div>} />
 
       {/* Role guide */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

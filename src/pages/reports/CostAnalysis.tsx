@@ -1,15 +1,15 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr } from '@/lib/utils'
+import { inr, exportCSV } from '@/lib/utils'
 import {
-  Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge
+  Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Button
 } from '@/components/ui'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line
 } from 'recharts'
-import { Zap, Users, TrendingUp } from 'lucide-react'
+import { Zap, Users, TrendingUp, Download } from 'lucide-react'
 
 const SITES = ['BPET1', 'BPET2', 'PPALLY', 'KPALLY', 'FEEDMILL']
 const SITE_COLORS: Record<string, string> = {
@@ -81,7 +81,12 @@ export const ElectricityCostPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Electricity Cost Analysis" subtitle="Monthly bills by site — all 8 meters" />
+      <SectionHeader title="Electricity Cost Analysis" subtitle="Monthly bills by site — all 8 meters"
+        action={<Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
+          'electricity_cost_analysis.csv',
+          ['Month', ...SITES, 'Total'],
+          (monthly as any[]).map(r => [r.label, ...SITES.map(s => r[s] ?? 0), r.total ?? 0])
+        )}>Export Excel</Button>} />
 
       <div className="flex gap-3">
         <Select label="" placeholder="" options={fyOptions} value={fyFilter} onChange={e => setFyFilter(e.target.value)} className="w-44" />
@@ -229,7 +234,12 @@ export const SalaryCostPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Salary Cost Analysis" subtitle="Monthly net salary paid by site" />
+      <SectionHeader title="Salary Cost Analysis" subtitle="Monthly net salary paid by site"
+        action={<Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
+          'salary_cost_analysis.csv',
+          ['Month', ...sites, 'Total'],
+          (monthly as any[]).map(r => [r.label, ...sites.map(s => r[s] ?? 0), r.total ?? 0])
+        )}>Export Excel</Button>} />
 
       <div className="flex gap-3">
         <Select label="" placeholder="" options={fyOptions} value={fyFilter} onChange={e => setFyFilter(e.target.value)} className="w-40" />
@@ -354,7 +364,12 @@ export const CostOverviewPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Cost Overview" subtitle="Annual electricity + salary summary" />
+      <SectionHeader title="Cost Overview" subtitle="Annual electricity + salary summary"
+        action={<Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
+          'cost_overview.csv',
+          ['FY', 'Electricity', 'Salary'],
+          (combined as any[]).map(r => [r.fy, r.electricity ?? 0, r.salary ?? 0])
+        )}>Export Excel</Button>} />
 
       <div className="flex gap-2 border-b border-gray-200 pb-0">
         {(['combined', 'electricity', 'salary'] as const).map(t => (

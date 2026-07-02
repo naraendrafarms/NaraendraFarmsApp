@@ -16,8 +16,8 @@ import {
   FormRow,
   Modal,
   DateInput } from '@/components/ui'
-import { pct, fmtDate, today } from '@/lib/utils'
-import { Plus, Edit2, Trash2 } from 'lucide-react'
+import { pct, fmtDate, today, exportCSV } from '@/lib/utils'
+import { Plus, Edit2, Trash2, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   ResponsiveContainer,
@@ -1129,6 +1129,11 @@ export const HatchabilityPage: React.FC = () => {
       <SectionHeader
         title="Hatchability Report"
         subtitle={`${stats.settings} setting records — comprehensive hatch performance`}
+        action={<Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
+          'hatchability_report.csv',
+          ['Flock','Setting Date','Hatch Date','Hatchery','DC No','Eggs Set','Chicks Hatched','Hatch %'],
+          rows.map((r: any) => [r.flocks?.flock_no ?? '', r.setting_date ? fmtDate(r.setting_date) : '', r.hatch_date ? fmtDate(r.hatch_date) : '', r.hatchery ?? '', r.dc_no ?? '', r.eggs_set ?? 0, r.chicks_hatched ?? 0, r.hatch_pct != null ? (r.hatch_pct * 100).toFixed(2) + '%' : ''])
+        )}>Export Excel</Button>}
       />
 
       {/* Filter bar */}

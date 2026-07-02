@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, currentFY } from '@/lib/utils'
+import { inr, currentFY, exportCSV, fmtDate } from '@/lib/utils'
 import { Card, CardHeader, Button, Input, Select, Table, Th, Td, Spinner, EmptyState, DateInput, Badge } from '@/components/ui'
-import { Plus, Trash2, Save, Wallet } from 'lucide-react'
+import { Plus, Trash2, Save, Wallet, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const FY_OPTIONS = ['2024-25', '2025-26', '2026-27', '2027-28']
@@ -104,7 +104,12 @@ export const OpeningBalancesPage: React.FC = () => {
 
   return (
     <div className="p-4 space-y-4 max-w-5xl mx-auto">
-      <CardHeader title="Opening Balances" subtitle="Enter financial-year opening dues for suppliers, buyers & partners — shows as the opening row in Party Ledger" />
+      <CardHeader title="Opening Balances" subtitle="Enter financial-year opening dues for suppliers, buyers & partners — shows as the opening row in Party Ledger"
+        action={<Button variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV(
+          `opening_balances_${fy}.csv`,
+          ['FY','As Of','Party/Partner','Amount','Dr/Cr','Remarks'],
+          (rows as any[]).map(r => [r.fy, r.as_of_date ? fmtDate(r.as_of_date) : '', r.parties?.name ?? r.partners?.name ?? '', r.amount ?? 0, r.dr_cr ?? '', r.remarks ?? ''])
+        )}>Export Excel</Button>} />
 
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div>

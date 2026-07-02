@@ -1,12 +1,12 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, inr, today } from '@/lib/utils'
+import { fmtDate, inr, today, exportCSV } from '@/lib/utils'
 import {
   Card, Button, Input, Select, SearchableSelect, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, DateInput
 } from '@/components/ui'
-import { Plus, Trash2, Pencil } from 'lucide-react'
+import { Plus, Trash2, Pencil, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const EMPTY = {
@@ -228,9 +228,16 @@ export const BuyerAdvancesPage: React.FC = () => {
         title="Buyer Advances"
         subtitle="Record advances received from buyers — deducted when sale payment is received"
         action={
-          <Button onClick={openAdd}>
-            <Plus size={16} className="mr-1" /> Add Advance
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV(
+              'buyer_advances.csv',
+              ['Date','Party','Amount','Used','Mode','Ref No','Remarks'],
+              (advances as any[]).map(a => [a.advance_date ? fmtDate(a.advance_date) : '', a.parties?.name ?? '', a.amount ?? 0, a.amount_used ?? 0, a.payment_mode ?? '', a.reference_no ?? '', a.remarks ?? ''])
+            )}>Export Excel</Button>
+            <Button onClick={openAdd}>
+              <Plus size={16} className="mr-1" /> Add Advance
+            </Button>
+          </div>
         }
       />
 

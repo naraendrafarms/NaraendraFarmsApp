@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, pct, fmtDate, flockAgeWeeks } from '@/lib/utils'
+import { inr, pct, fmtDate, flockAgeWeeks, exportCSV } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Badge, Table, Th, Td,
   SectionHeader, Spinner, StatCard, Divider, Input, Select
@@ -738,6 +738,13 @@ export const FlockDetail: React.FC = () => {
           <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>
               Download Template
+            </Button>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
+              `flock_${flock?.flock_no ?? id}_daily_records.csv`,
+              ['Date','Opening F','Opening M','Closing F','Closing M','Mortality F','Mortality M','Cull F','Cull M','Transfer F','Transfer M'],
+              (daily as any[] ?? []).map((d: any) => [d.record_date, d.opening_female ?? 0, d.opening_male ?? 0, d.closing_female ?? 0, d.closing_male ?? 0, d.mortality_female ?? 0, d.mortality_male ?? 0, d.cull_female ?? 0, d.cull_male ?? 0, d.transfer_female ?? 0, d.transfer_male ?? 0])
+            )}>
+              Export Excel
             </Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>}
               loading={importing}

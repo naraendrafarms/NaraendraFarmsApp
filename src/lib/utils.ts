@@ -142,3 +142,15 @@ export const excelDateToISO = (serial: number): string => {
   const d = new Date((serial - 25569) * 86400 * 1000)
   return d.toISOString().split('T')[0]
 }
+
+// Shared CSV export — opens directly in Excel. One place instead of every
+// page reimplementing its own escaping/download logic.
+export function exportCSV(filename: string, headers: string[], rows: (string | number | null | undefined)[][]) {
+  const esc = (v: string | number | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const csv = [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+}

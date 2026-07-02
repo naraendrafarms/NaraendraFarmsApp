@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr } from '@/lib/utils'
-import { Card, SectionHeader, Spinner, Table, Th, Td, Badge } from '@/components/ui'
+import { inr, exportCSV } from '@/lib/utils'
+import { Card, SectionHeader, Spinner, Table, Th, Td, Badge, Button } from '@/components/ui'
+import { Download } from 'lucide-react'
 import { useConfigValues } from '@/hooks/useConfigOptions'
 
 export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }) => {
@@ -86,7 +87,14 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Feed Stock Status" subtitle="Feed ingredients stock (GRN received − production used). For medicine/vaccine stock see Medicine & Vaccine tab."/>
+      <SectionHeader title="Feed Stock Status" subtitle="Feed ingredients stock (GRN received − production used). For medicine/vaccine stock see Medicine & Vaccine tab."
+        action={<Button variant="outline" icon={<Download size={14}/>} onClick={() => tab === 'feed'
+          ? exportCSV('feed_stock.csv', ['Code','Ingredient','Unit','In','Out','Balance','Rate','Value','Last GRN'],
+              stockMap.map((r: any) => [r.code ?? '', r.name ?? '', r.unit ?? '', r.total_in ?? 0, r.total_out ?? 0, r.balance ?? 0, r.rate ?? 0, r.value ?? 0, r.last_grn ?? '']))
+          : exportCSV('medicine_vaccine_stock.csv', ['Name','Type','Unit','Total In','Used','Balance','Last Rate'],
+              (medStock as any[] ?? []).filter((r: any) => (r.purchased_qty ?? 0) > 0)
+                .map((r: any) => [r.name ?? '', r.type ?? '', r.unit ?? '', r.purchased_qty ?? 0, r.used_qty ?? 0, r.balance_qty ?? 0, r.master_rate ?? 0]))
+        }>Export Excel</Button>} />
 
       {/* Tab bar — hidden when feedOnly */}
       {!feedOnly && (

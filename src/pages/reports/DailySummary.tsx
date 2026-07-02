@@ -5,7 +5,8 @@ import { Card, Button, Spinner , DateInput } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Copy, CheckCircle } from 'lucide-react'
 
-import { fmtDate } from '@/lib/utils'
+import { fmtDate, exportCSV } from '@/lib/utils'
+import { Download } from 'lucide-react'
 function num(n: number) { return n.toLocaleString('en-IN') }
 
 export const DailySummaryPage: React.FC = () => {
@@ -106,6 +107,11 @@ export const DailySummaryPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <DateInput value={date} onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
+            `daily_summary_${date}.csv`,
+            ['Flock','Site','HE Eggs','NHE Eggs','Total Eggs','HD %','Deaths','Feed (kg)'],
+            rows.map((r: any) => [r.flock.flock_no, r.flock.farms?.code ?? '', r.he, r.nhe, r.total, r.hd != null ? r.hd.toFixed(1) : '', r.deaths, r.feed])
+          )}>Export</Button>
           <Button onClick={copyText} variant={copied ? 'secondary' : 'primary'} size="sm">
             {copied
               ? <><CheckCircle size={15} className="mr-1" />Copied!</>
