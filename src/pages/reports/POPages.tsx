@@ -10,7 +10,7 @@ import { useAuth, can } from '@/lib/auth'
 import {
   Card, SectionHeader, Spinner, Table, Th, Td,
   Button, Input, Modal, Badge, StatCard, EmptyState
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import {
   ShoppingCart, Clock, CheckCircle, AlertCircle, Plus, Pencil, Trash2,
   TrendingUp, Download, PackageCheck, BarChart3, Upload, LineChart,
@@ -833,6 +833,7 @@ const AGING_BUCKETS = [
 ]
 
 const AgingReportTab: React.FC = () => {
+  const [search, setSearch] = useState('')
   const { data: payments=[], isLoading } = useQuery({
     queryKey: ['pending_payments'],
     queryFn: async () => {
@@ -845,7 +846,14 @@ const AgingReportTab: React.FC = () => {
     }
   })
 
-  const unpaid = payments.filter((p: any) => p.payment_status !== 'Paid')
+  const unpaid = payments.filter((p: any) => {
+    if (p.payment_status === 'Paid') return false
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      if (!`${p.vendor_name ?? ''} ${p.invoice_no ?? ''} ${p.grn_no ?? ''}`.toLowerCase().includes(q)) return false
+    }
+    return true
+  })
 
   const buckets = useMemo(() => {
     const today = Date.now()
@@ -908,11 +916,13 @@ const AgingReportTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h3 className="font-semibold text-gray-800">Payment Aging Report</h3>
           <p className="text-xs text-gray-500">Total outstanding: {inr(totalUnpaid)} across {unpaid.length} invoices</p>
         </div>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor / invoice / GRN…"
+          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-64" />
         <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV('aging_report.csv', unpaid, [
           {key:'vendor_name',label:'Vendor'},{key:'invoice_no',label:'Invoice No'},{key:'invoice_date',label:'Invoice Date'},
           {key:'invoice_amount',label:'Amount'},{key:'pay_before_date',label:'Pay Before'},{key:'payment_status',label:'Status'},{key:'payment_type',label:'Type'}
@@ -1037,6 +1047,7 @@ const RateAnalysisTab: React.FC = () => {
   const [selectedVendor, setSelectedVendor] = useState('')
   const [viewMode, setViewMode] = useState<'trend'|'vendor'|'table'|'grn'|'grn_trend'>('trend')
   const [grnItem, setGrnItem] = useState('')
+  const [tableSearch, setTableSearch] = useState('')
 
   // All PO data for analysis
   const { data: pos, isLoading } = useQuery({
@@ -1391,22 +1402,16 @@ const RateAnalysisTab: React.FC = () => {
             </div>
             {viewMode !== 'table' && viewMode !== 'grn' && viewMode !== 'grn_trend' && (
               <div className="flex-1 min-w-48">
-                <label className="block text-xs text-gray-500 mb-1">Select Item / Product</label>
-                <select value={selectedItem} onChange={e=>setSelectedItem(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-                  <option value="">— All Items —</option>
-                  {items.map(i=><option key={i} value={i}>{i}</option>)}
-                </select>
+                <SearchableSelect label="Select Item / Product" placeholder="— All Items — (type to search)"
+                  options={items.map(i=>({value:i,label:i}))}
+                  value={selectedItem} onChange={v=>setSelectedItem(v)} />
               </div>
             )}
             {viewMode === 'grn_trend' && (
               <div className="flex-1 min-w-48">
-                <label className="block text-xs text-gray-500 mb-1">Select Item (from actual GRN receipts)</label>
-                <select value={grnItem} onChange={e=>setGrnItem(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-                  <option value="">— Select an item —</option>
-                  {grnItems.map((i: string)=><option key={i} value={i}>{i}</option>)}
-                </select>
+                <SearchableSelect label="Select Item (from actual GRN receipts)" placeholder="— Select an item — (type to search)"
+                  options={grnItems.map((i: string)=>({value:i,label:i}))}
+                  value={grnItem} onChange={v=>setGrnItem(v)} />
               </div>
             )}
           </div>
@@ -1628,14 +1633,20 @@ const RateAnalysisTab: React.FC = () => {
           )}
 
           {/* RATE TABLE VIEW */}
-          {viewMode === 'table' && (
+          {viewMode === 'table' && (() => {
+            const rateTableFiltered = tableSearch.trim()
+              ? rateTable.filter(r => r.item.toLowerCase().includes(tableSearch.trim().toLowerCase()))
+              : rateTable
+            return (
             <Card padding={false}>
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
                 <p className="font-semibold text-gray-800">All Items — Avg Rate by FY</p>
+                <input value={tableSearch} onChange={e=>setTableSearch(e.target.value)} placeholder="Search item…"
+                  className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-48" />
                 <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>{
                   exportFlatCSV('rate_analysis.csv',
                     ['Item',...fiscalYears.flatMap(fy=>[`${fy} Avg Rate`,`${fy} Cheapest Vendor`,`${fy} Cheapest Rate`])],
-                    rateTable.map(r=>[r.item,...fiscalYears.flatMap(fy=>{
+                    rateTableFiltered.map(r=>[r.item,...fiscalYears.flatMap(fy=>{
                       const d=r.fys.find(f=>f.fy===fy)
                       return d?[d.avg,d.cheapest,d.cheapestRate]:['—','—','—']
                     })])
@@ -1654,7 +1665,7 @@ const RateAnalysisTab: React.FC = () => {
                     ))}
                   </tr></thead>
                   <tbody>
-                    {rateTable.map(row=>(
+                    {rateTableFiltered.map(row=>(
                       <tr key={row.item} className="hover:bg-gray-50">
                         <Td className="font-medium text-sm">{row.item}</Td>
                         {fiscalYears.map(fy=>{
@@ -1685,12 +1696,13 @@ const RateAnalysisTab: React.FC = () => {
                         })}
                       </tr>
                     ))}
-                    {rateTable.length===0&&<tr><Td colSpan={fiscalYears.length*2+1} className="text-center text-gray-400 py-6">No rate data yet. Import your Excel file above.</Td></tr>}
+                    {rateTableFiltered.length===0&&<tr><Td colSpan={fiscalYears.length*2+1} className="text-center text-gray-400 py-6">{tableSearch?'No items match your search.':'No rate data yet. Import your Excel file above.'}</Td></tr>}
                   </tbody>
                 </Table>
               </div>
             </Card>
-          )}
+            )
+          })()}
         </>
       )}
     </div>
