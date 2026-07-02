@@ -10,3 +10,25 @@
   ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 }
+
+/* ── Print (Ctrl+P → Save as PDF) ─────────────────────────────────────
+   App-wide, not per-page: hides the sidebar/app-header/mobile overlay and
+   anything explicitly marked .no-print, lets content flow across pages
+   instead of being clipped to one screen (main has overflow-y-auto on
+   screen), and turns off sticky table headers during print — printed
+   <thead> already repeats on every page natively, so sticky positioning
+   only gets in the way once content is paginated. */
+@media print {
+  aside, header, nav, .no-print { display: none !important; }
+  main { overflow: visible !important; height: auto !important; }
+  body, #root { height: auto !important; overflow: visible !important; }
+  thead th { position: static !important; }
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  /* Several pages (Monthly Attendance Grid, Bulk Salary, Purchase Orders,
+     Pending Payments) bound their table wrapper to a fixed viewport height
+     (max-h-[..vh]) with its own scrollbar for on-screen use — on print that
+     would clip everything past one screen's worth of rows. Un-bound any such
+     wrapper so the full table prints across as many pages as it needs. */
+  main [class*="max-h-"] { max-height: none !important; overflow: visible !important; }
+}
