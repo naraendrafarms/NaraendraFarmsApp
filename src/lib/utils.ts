@@ -1,18 +1,7 @@
 // Indian number format — Rs 1,23,45,678
 export const inr = (v: number | null | undefined, decimals = 2): string => {
   if (v == null) return '—'
-  const abs = Math.abs(v)
-  const parts = abs.toFixed(decimals).split('.')
-  const int = parts[0]
-  let res = ''
-  const mod = int.length % 2
-  for (let i = 0; i < int.length; i++) {
-    if (i > 0 && (i - mod) % 2 === 0 && mod ? i > 1 : i > 1) res += ','
-    res += int[i]
-  }
-  // Standard Indian grouping
-  const n = parseInt(parts[0])
-  res = n.toLocaleString('en-IN', {
+  const res = Math.abs(v).toLocaleString('en-IN', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals
   })
