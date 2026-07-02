@@ -1074,26 +1074,28 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       ) : !(employees as any[]).length ? (
         <div className="text-center text-gray-400 py-12">No employees found{farmId ? ' for this site' : ''}</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+        <div className="overflow-auto max-h-[72vh] rounded-xl border border-gray-200 shadow-sm">
           <table className="min-w-full text-xs border-collapse">
             <thead>
-              {/* Day-of-week row */}
+              {/* Day-of-week row — frozen to the top (like Excel freeze panes) so the
+                  dates stay visible while scrolling through a long employee list.
+                  The "#"/"Employee" corner cells freeze to BOTH top and left. */}
               <tr className="bg-gray-50">
-                <th className="sticky left-0 z-20 bg-gray-50 border-b border-r border-gray-200 px-2 py-1 text-left w-8">#</th>
-                <th className="sticky left-8 z-20 bg-gray-50 border-b border-r border-gray-200 px-3 py-1 text-left min-w-[140px]">Employee</th>
+                <th className="sticky left-0 top-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-2 py-1 text-left w-8">#</th>
+                <th className="sticky left-8 top-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-3 py-1 text-left min-w-[140px]">Employee</th>
                 {dayLabels.map(({ d, label, isSun }) => (
-                  <th key={d} className={`border-b border-r border-gray-200 px-1 py-1 text-center w-9 ${isSun ? 'bg-red-50 text-red-400' : 'text-gray-400'}`}>
+                  <th key={d} className={`sticky top-0 z-20 border-b border-r border-gray-200 px-1 py-1 text-center w-9 ${isSun ? 'bg-red-50 text-red-400' : 'bg-gray-50 text-gray-400'}`}>
                     <div>{label}</div>
                     <div className="font-bold text-gray-700">{d}</div>
                   </th>
                 ))}
-                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-green-50 text-green-700 w-8">P</th>
-                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-red-50 text-red-600 w-8">A</th>
-                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-amber-50 text-amber-600 w-8">H</th>
-                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-gray-50 text-gray-500 w-9">WO</th>
-                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-blue-50 text-blue-600 w-8">OT</th>
-                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-yellow-50 text-yellow-700 w-9">—</th>
-                <th className="border-b border-gray-200 px-1 py-1 text-center bg-blue-50 text-blue-500 w-12">OT Hrs</th>
+                <th className="sticky top-0 z-20 border-b border-r border-gray-200 px-1 py-1 text-center bg-green-50 text-green-700 w-8">P</th>
+                <th className="sticky top-0 z-20 border-b border-r border-gray-200 px-1 py-1 text-center bg-red-50 text-red-600 w-8">A</th>
+                <th className="sticky top-0 z-20 border-b border-r border-gray-200 px-1 py-1 text-center bg-amber-50 text-amber-600 w-8">H</th>
+                <th className="sticky top-0 z-20 border-b border-r border-gray-200 px-1 py-1 text-center bg-gray-50 text-gray-500 w-9">WO</th>
+                <th className="sticky top-0 z-20 border-b border-r border-gray-200 px-1 py-1 text-center bg-blue-50 text-blue-600 w-8">OT</th>
+                <th className="sticky top-0 z-20 border-b border-r border-gray-200 px-1 py-1 text-center bg-yellow-50 text-yellow-700 w-9">—</th>
+                <th className="sticky top-0 z-20 border-b border-gray-200 px-1 py-1 text-center bg-blue-50 text-blue-500 w-12">OT Hrs</th>
               </tr>
             </thead>
             <tbody>
