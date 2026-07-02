@@ -11,6 +11,9 @@ import { Download } from 'lucide-react'
 
 const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtDate = (d: string) => d ? d.split('-').reverse().join('/') : '—'
+// .toFixed(2) rounds half-to-even / has float precision quirks (e.g. 2.005
+// can come out as 2.00) — round half-up (>=.5 rounds up) explicitly instead.
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
 // ── Single shared ledger sync — every page/action that marks a vendor bill
 // Paid/Unpaid goes through these two functions, so Cash Book always reflects
@@ -417,7 +420,7 @@ export const PendingPaymentsPage: React.FC = () => {
   const [err, setErr] = useState('')
   const [editModal, setEditModal] = useState<PayRecord | 'new' | null>(null)
   const blankEditForm = () => ({
-    vendor_name: '', party_id: '', invoice_no: '', po_no: '', grn_no: '', invoice_date: today(),
+    vendor_name: '', party_id: '', invoice_no: '', po_no: '', grn_no: '', invoice_date: today(), grn_date: '',
     invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '',
     payment_status: 'Pending', account_type: 'NEFT', utr_no: '', cheque_no: '', category: '', remarks: '',
   })
@@ -570,6 +573,7 @@ export const PendingPaymentsPage: React.FC = () => {
       po_no: r.po_no ?? '',
       grn_no: r.grn_no ?? '',
       invoice_date: r.invoice_date ?? today(),
+      grn_date: r.grn_date ?? '',
       invoice_amount: r.invoice_amount != null ? String(r.invoice_amount) : '',
       tds_pct: r.tds_pct != null ? String(r.tds_pct) : '',
       tds_amount: r.tds_amount != null ? String(r.tds_amount) : '',
@@ -598,9 +602,9 @@ export const PendingPaymentsPage: React.FC = () => {
       const amtEntered = editForm.tds_amount !== ''
       let tdsPct: number | null = pctEntered ? parseFloat(editForm.tds_pct) || 0 : null
       let tds: number | null = amtEntered ? parseFloat(editForm.tds_amount) || 0 : null
-      if (pctEntered && !amtEntered) tds = +(invAmt * (tdsPct ?? 0) / 100).toFixed(2)
-      else if (amtEntered && !pctEntered && invAmt > 0) tdsPct = +((tds ?? 0) / invAmt * 100).toFixed(2)
-      else if (pctEntered && amtEntered) tds = +(invAmt * (tdsPct ?? 0) / 100).toFixed(2) // % wins if both given
+      if (pctEntered && !amtEntered) tds = round2(invAmt * (tdsPct ?? 0) / 100)
+      else if (amtEntered && !pctEntered && invAmt > 0) tdsPct = round2((tds ?? 0) / invAmt * 100)
+      else if (pctEntered && amtEntered) tds = round2(invAmt * (tdsPct ?? 0) / 100) // % wins if both given
       const netPayable = invAmt - (tds ?? 0)
       const payload = {
         vendor_name: editForm.vendor_name.trim(),
@@ -609,6 +613,7 @@ export const PendingPaymentsPage: React.FC = () => {
         po_no: editForm.po_no || null,
         grn_no: editForm.grn_no || null,
         invoice_date: editForm.invoice_date || null,
+        grn_date: editForm.grn_date || null,
         invoice_amount: invAmt,
         tds_pct: tdsPct,
         tds_amount: tds,
@@ -824,7 +829,9 @@ export const PendingPaymentsPage: React.FC = () => {
                 </th>
                 <th className="px-3 py-2">Vendor</th>
                 <th className="px-2 py-2">Category</th>
-                <th className="px-2 py-2">Invoice / GRN</th>
+                <th className="px-2 py-2">Invoice No</th>
+                <th className="px-2 py-2">Invoice Date</th>
+                <th className="px-2 py-2">GRN No</th>
                 <th className="px-2 py-2">GRN Date</th>
                 <th className="px-2 py-2 text-right">Invoice Amt</th>
                 <th className="px-2 py-2 text-right">TDS</th>
@@ -851,10 +858,9 @@ export const PendingPaymentsPage: React.FC = () => {
                     </td>
                     <td className="px-3 py-2 font-medium text-gray-800 max-w-[160px] truncate">{r.vendor_name}</td>
                     <td className="px-2 py-2 text-gray-500">{r.category ?? '—'}</td>
-                    <td className="px-2 py-2">
-                      <div className="text-gray-700">{r.invoice_no ?? '—'}</div>
-                      <div className="text-gray-400">{r.grn_no ?? ''}</div>
-                    </td>
+                    <td className="px-2 py-2 text-gray-700">{r.invoice_no ?? '—'}</td>
+                    <td className="px-2 py-2 text-gray-600">{r.invoice_date ? fmtDate(r.invoice_date) : '—'}</td>
+                    <td className="px-2 py-2 text-gray-700">{r.grn_no ?? '—'}</td>
                     <td className="px-2 py-2 text-gray-600">{r.grn_date ? fmtDate(r.grn_date) : '—'}</td>
                     <td className="px-2 py-2 text-right">{fmt(r.invoice_amount ?? 0)}</td>
                     <td className="px-2 py-2 text-right text-orange-600">{r.tds_amount ? fmt(r.tds_amount) : '—'}</td>
@@ -1005,6 +1011,13 @@ export const PendingPaymentsPage: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">GRN Date</label>
+                  <input type="date" value={editForm.grn_date} onChange={e => setEditForm(f => ({ ...f, grn_date: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Invoice Amount</label>
                   <input type="number" value={editForm.invoice_amount} onChange={e => setEditForm(f => ({ ...f, invoice_amount: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
@@ -1015,7 +1028,7 @@ export const PendingPaymentsPage: React.FC = () => {
                     onChange={e => {
                       const pct = e.target.value === 'custom' ? '' : e.target.value
                       const invAmt = parseFloat(editForm.invoice_amount) || 0
-                      const autoAmt = pct !== '' ? (invAmt * (parseFloat(pct) || 0) / 100).toFixed(2) : ''
+                      const autoAmt = pct !== '' ? String(round2(invAmt * (parseFloat(pct) || 0) / 100)) : ''
                       setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: autoAmt }))
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
@@ -1027,7 +1040,7 @@ export const PendingPaymentsPage: React.FC = () => {
                       onChange={e => {
                         const pct = e.target.value
                         const invAmt = parseFloat(editForm.invoice_amount) || 0
-                        const autoAmt = pct !== '' ? (invAmt * (parseFloat(pct) || 0) / 100).toFixed(2) : ''
+                        const autoAmt = pct !== '' ? String(round2(invAmt * (parseFloat(pct) || 0) / 100)) : ''
                         setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: autoAmt }))
                       }}
                       placeholder="e.g. 3.75" className="w-full mt-1.5 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
