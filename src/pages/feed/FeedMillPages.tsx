@@ -915,6 +915,13 @@ const ProductionForm: React.FC<{
   onSave: (d: any) => void; loading: boolean
 }> = ({ initial, farms, formulas, allIngredients, onSave, loading }) => {
   const existingIngs = initial?.feed_production_ingredients ?? []
+  // Same source as the Formula editor's raw-material dropdown, so manually
+  // added rows resolve to a real feed_ingredients master row (ingredient_id)
+  // instead of free-typed text that never matches at save time.
+  const { data: rawMaterials = [] } = useQuery({
+    queryKey: ['raw_materials_feed'],
+    queryFn: async () => { const { data } = await supabase.from('items').select('name,code').eq('category', 'Feed Ingredient').eq('is_active', true).order('name'); return data ?? [] }
+  })
   const [form, setForm] = useState({
     id: initial?.id ?? undefined,
     production_date: initial?.production_date ?? today(),
@@ -1011,9 +1018,16 @@ const ProductionForm: React.FC<{
               {ings.map((ing, idx) => (
                 <tr key={idx} className="border-t border-gray-100">
                   <td className="px-2 py-1">
-                    <input className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs" placeholder="Ingredient / medicine name"
+                    <SearchableSelect
                       value={ing.ingredient_name}
-                      onChange={e => setIngs(prev => prev.map((x,i) => i===idx ? {...x,ingredient_name:e.target.value} : x))} />
+                      onChange={(v) => setIngs(prev => prev.map((x,i) => i===idx ? {...x,ingredient_name:v} : x))}
+                      placeholder="Search ingredient / medicine…"
+                      options={[
+                        ...(ing.ingredient_name && !(rawMaterials as any[]).some((r: any) => r.name === ing.ingredient_name)
+                          ? [{ value: ing.ingredient_name, label: `${ing.ingredient_name} (not in master)` }] : []),
+                        ...(rawMaterials as any[]).map((r: any) => ({ value: r.name, label: r.name })),
+                      ]}
+                    />
                   </td>
                   <td className="px-2 py-1">
                     <input type="number" step="0.001" className="w-full text-right border border-gray-200 rounded px-1 py-0.5 text-xs"
