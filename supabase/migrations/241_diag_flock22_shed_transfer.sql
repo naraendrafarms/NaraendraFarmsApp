@@ -1,9 +1,7 @@
 SELECT
-  ft.transfer_date, ft.female_count, ft.male_count,
-  fs.shed_no AS from_shed_no, ts.shed_no AS to_shed_no, ft.to_shed_id
-FROM public.flock_transfers ft
-JOIN public.flocks f ON f.id = ft.flock_id
-LEFT JOIN public.sheds fs ON fs.id = ft.from_shed_id
-LEFT JOIN public.sheds ts ON ts.id = ft.to_shed_id
-WHERE f.flock_no = 22
-ORDER BY ft.transfer_date DESC LIMIT 5;
+  (SELECT id FROM public.flocks WHERE flock_no = 22 LIMIT 1) AS flock22_id,
+  (SELECT count(*) FROM public.flocks WHERE flock_no = 22) AS flock22_matches,
+  (SELECT count(*) FROM public.flock_transfers ft JOIN public.flocks f ON f.id=ft.flock_id WHERE f.flock_no=22) AS transfer_rows,
+  (SELECT count(*) FROM public.flock_transfers ft JOIN public.flocks f ON f.id=ft.flock_id WHERE f.flock_no=22 AND ft.transfer_date='2026-06-30') AS transfers_on_jun30,
+  (SELECT count(*) FROM public.daily_records dr JOIN public.flocks f ON f.id=dr.flock_id WHERE f.flock_no=22 AND dr.record_date='2026-06-30') AS daily_rows_jun30,
+  (SELECT count(*) FROM public.daily_records dr JOIN public.flocks f ON f.id=dr.flock_id WHERE f.flock_no=22 AND dr.record_date='2026-07-01') AS daily_rows_jul1;
