@@ -141,6 +141,23 @@ export const DailyEntry: React.FC = () => {
     queryFn: async () => { const{data}=await supabase.from('medicines_master').select('id,name,unit,rate').eq('is_active',true).order('name'); return data??[] }
   })
 
+  // Real weighted-average purchase cost from GRN, keyed by medicine_id — prefer
+  // this over medicines_master.rate (a manually-set price that drifts from
+  // actual purchase cost and is often left blank/stale), so medicine/vaccine
+  // amounts recorded here match what P&L reports actually expect.
+  const { data: medicineStockRates } = useQuery({
+    queryKey: ['v_medicine_stock_rates'],
+    queryFn: async () => {
+      const { data } = await supabase.from('v_medicine_stock').select('medicine_id,purchased_qty,purchase_value')
+      const m: Record<string, number> = {}
+      for (const r of (data ?? [])) {
+        const qty = Number(r.purchased_qty) || 0
+        if (r.medicine_id && qty > 0) m[r.medicine_id] = Number(r.purchase_value) / qty
+      }
+      return m
+    }
+  })
+
   const { data: existingMedUsage } = useQuery({
     queryKey: ['daily_med_usage', selectedFlock, date],
     queryFn: async () => {
@@ -782,7 +799,9 @@ export const DailyEntry: React.FC = () => {
                           value={row.medicine_id}
                           onChange={(v) => {
                             const med = (medicines??[]).find((m: any) => m.id === v)
-                            setMedRows(rows => rows.map((r, j) => j===i ? { ...r, medicine_id: v, unit: med?.unit??r.unit, rate: med?.rate?.toString()??r.rate } : r))
+                            const realRate = medicineStockRates?.[v]
+                            const rate = realRate != null ? realRate.toFixed(2) : (med?.rate?.toString() ?? row.rate)
+                            setMedRows(rows => rows.map((r, j) => j===i ? { ...r, medicine_id: v, unit: med?.unit??r.unit, rate } : r))
                           }}
                           options={(medicines??[]).map((m: any) => ({ value: m.id, label: m.name }))}
                           placeholder="Search medicine…" />
