@@ -84,7 +84,7 @@ export const SalaryRegisterPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('salary_monthly')
-        .select(`*, employees(emp_id,name,designation,emp_category,zone_area,gender,farms(name))`)
+        .select(`*, employees!employee_id(emp_id,name,designation,emp_category,zone_area,gender,farms(name))`)
         .eq('month', month + '-01')
       if (error) { toast.error(error.message); throw error }
       let result = data ?? []

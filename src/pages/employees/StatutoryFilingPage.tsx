@@ -160,7 +160,7 @@ export const StatutoryFilingPage: React.FC = () => {
     enabled: !!month,
     queryFn: async () => {
       const { data, error } = await supabase.from('salary_monthly')
-        .select('basic_salary,gross_salary,pf_employee,employer_eps,employer_epf_diff,admin_charges,edli_charge,esi_employee,esi_employer,pt,days_worked,month_days,absent_days,employees!inner(name,emp_id,uan_no,pf_no,esi_no,restrict_pf,pf_applicable,esi_applicable,pt_applicable)')
+        .select('basic_salary,gross_salary,pf_employee,employer_eps,employer_epf_diff,admin_charges,edli_charge,esi_employee,esi_employer,pt,days_worked,month_days,absent_days,employees!employee_id!inner(name,emp_id,uan_no,pf_no,esi_no,restrict_pf,pf_applicable,esi_applicable,pt_applicable)')
         .eq('month', month + '-01')
       if (error) throw error
       return (data ?? []).map((r: any) => {

@@ -200,7 +200,7 @@ export const EmployeeList: React.FC = () => {
 
   const mergeMut = useMutation({
     mutationFn: async ({ keepId, dropIds }: { keepId: string; dropIds: string[] }) => {
-      // Every table that references employees(id) — remap before deleting the old row
+      // Every table that references employees!employee_id(id) — remap before deleting the old row
       const linkedTables = [
         'salary_monthly', 'salary_abstract', 'salary_allocation',
         'bonus', 'attendance_daily', 'employee_deductions', 'employee_advances',
@@ -581,7 +581,7 @@ export const SalaryAbstractPage: React.FC = () => {
     queryFn: async () => {
       let q = supabase
         .from('salary_monthly')
-        .select('month, earned_salary, advance, tds, other_deduction, net_salary, employees!inner(farm_id, farms(name,code))')
+        .select('month, earned_salary, advance, tds, other_deduction, net_salary, employees!employee_id!inner(farm_id, farms(name,code))')
         .order('month', { ascending: false })
       if (filterMonth) q = q.eq('month', filterMonth + '-01')
       const { data, error } = await q
@@ -975,7 +975,7 @@ export const SalaryEntryPage: React.FC = () => {
     queryFn:async()=>{
       const [startM, endM] = [months[0], months[months.length-1]]
       let q=supabase.from('salary_monthly')
-        .select('month,net_salary,earned_salary,advance,employees!inner(farm_id)')
+        .select('month,net_salary,earned_salary,advance,employees!employee_id!inner(farm_id)')
         .gte('month',startM).lte('month',endM)
       if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
       const{data}=await q
@@ -997,7 +997,7 @@ export const SalaryEntryPage: React.FC = () => {
     enabled:!!selectedMonth,
     queryFn:async()=>{
       let q=supabase.from('salary_monthly')
-        .select('*, employees(name,emp_id,base_salary,designation,esi_applicable,pf_applicable,farms(name,code))')
+        .select('*, employees!employee_id(name,emp_id,base_salary,designation,esi_applicable,pf_applicable,farms(name,code))')
         .eq('month',selectedMonth).order('net_salary',{ascending:false})
       if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
       const{data}=await q;return data??[]
@@ -1625,7 +1625,7 @@ export const BonusPage: React.FC = () => {
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
   const {data:employees}=useQuery({queryKey:['employees',filterFarm],queryFn:async()=>{let q=supabase.from('employees').select('id,name,emp_id,farms(name,code)').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false });if(filterFarm)q=q.eq('farm_id',filterFarm);const{data}=await q;return data??[]}})
-  const {data:bonuses,isLoading}=useQuery({queryKey:['bonuses'],queryFn:async()=>{const{data}=await supabase.from('bonus').select('*, employees(name,emp_id,farms(name,code))').order('paid_date',{ascending:false});return data??[]}})
+  const {data:bonuses,isLoading}=useQuery({queryKey:['bonuses'],queryFn:async()=>{const{data}=await supabase.from('bonus').select('*, employees!employee_id(name,emp_id,farms(name,code))').order('paid_date',{ascending:false});return data??[]}})
 
   const mut=useMutation({
     mutationFn:async()=>{
@@ -1794,7 +1794,7 @@ export const ESIPFReportPage: React.FC = () => {
     enabled:!!filterMonth,
     queryFn:async()=>{
       let q=supabase.from('salary_monthly')
-        .select('*, employees!inner(name,emp_id,esi_applicable,pf_applicable,pt_applicable,farm_id,farms(name,code))')
+        .select('*, employees!employee_id!inner(name,emp_id,esi_applicable,pf_applicable,pt_applicable,farm_id,farms(name,code))')
         .eq('month',filterMonth+'-01')
       if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
       const{data,error}=await q
@@ -1987,7 +1987,7 @@ export const PayrollSummaryPage: React.FC = () => {
     queryKey:['payroll_summary',selectedFY],
     queryFn:async()=>{
       const{data,error}=await supabase.from('salary_monthly')
-        .select('month,gross_salary,net_salary,advance,esi_employee,esi_employer,pf_employee,pf_employer,employer_eps,employer_epf_diff,admin_charges,edli_charge,pt,employees!inner(farm_id,farms(name,code))')
+        .select('month,gross_salary,net_salary,advance,esi_employee,esi_employer,pf_employee,pf_employer,employer_eps,employer_epf_diff,admin_charges,edli_charge,pt,employees!employee_id!inner(farm_id,farms(name,code))')
         .gte('month',startM).lte('month',endM)
       if(error)throw error
       return data??[]
@@ -2155,7 +2155,7 @@ export const AttendanceRegisterPage: React.FC = () => {
     queryFn:async()=>{
       const [startM, endM] = [months[0], months[months.length-1]]
       let q = supabase.from('salary_monthly')
-        .select('id,employee_id,month,days_worked,employees!inner(name,emp_id,farm_id,farms(name,code))')
+        .select('id,employee_id,month,days_worked,employees!employee_id!inner(name,emp_id,farm_id,farms(name,code))')
         .gte('month',startM).lte('month',endM)
       if (filterFarm) q = q.eq('employees.farm_id', filterFarm)
       const {data} = await q
@@ -3112,7 +3112,7 @@ export const BulkSalaryPage: React.FC = () => {
     queryKey: ['bulk_salary', monthDate, filterFarm],
     queryFn: async () => {
       let q = supabase.from('salary_monthly')
-        .select('*, override_account_emp_id, employees!inner(id,name,emp_id,farm_id,designation,esi_applicable,pf_applicable,pt_applicable,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name))')
+        .select('*, override_account_emp_id, employees!employee_id!inner(id,name,emp_id,farm_id,designation,esi_applicable,pf_applicable,pt_applicable,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name))')
         .eq('month', monthDate)
       if (filterFarm) q = q.eq('employees.farm_id', filterFarm)
       const { data } = await q; return data ?? []
