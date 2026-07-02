@@ -33,6 +33,7 @@ export const SalaryRegisterPage: React.FC = () => {
   const today = new Date()
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
   const [filterFarm, setFilterFarm] = useState('')
+  const [filterGender, setFilterGender] = useState('')
   const navigate = useNavigate()
   const [voucherEmp, setVoucherEmp] = useState<{ id: string; name: string } | null>(null)
   const [dedEmp, setDedEmp] = useState<{ id: string; name: string } | null>(null)
@@ -69,18 +70,19 @@ export const SalaryRegisterPage: React.FC = () => {
   })
 
   const { data: rows, isLoading } = useQuery({
-    queryKey: ['salary_register', month, filterFarm],
+    queryKey: ['salary_register', month, filterFarm, filterGender],
     enabled: !!month,
     queryFn: async () => {
       let q = supabase
         .from('salary_monthly')
-        .select(`*, employees(emp_id,name,designation,emp_category,zone_area,farms(name))`)
+        .select(`*, employees(emp_id,name,designation,emp_category,zone_area,gender,farms(name))`)
         .eq('month', month + '-01')
         .order('emp_id', { referencedTable: 'employees', ascending: true, nullsFirst: false })
       const { data, error } = await q
       if (error) throw error
       let result = data ?? []
       if (filterFarm) result = result.filter((r: any) => r.employees?.farms?.name === filterFarm)
+      if (filterGender) result = result.filter((r: any) => r.employees?.gender === filterGender)
       // Sort by Employee ID (1 → last, site-wise) — PostgREST referencedTable order
       // only sorts the embedded object, not the rows, so sort here.
       const empNo = (r: any) => {
@@ -170,6 +172,11 @@ export const SalaryRegisterPage: React.FC = () => {
           <label className="block text-xs text-gray-500 mb-1">Farm</label>
           <Select value={filterFarm} onChange={e => setFilterFarm(e.target.value)}
             options={[{ value: '', label: 'All Farms' }, ...(farmNames as string[]).map(n => ({ value: n, label: n }))]} />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Gender</label>
+          <Select value={filterGender} onChange={e => setFilterGender(e.target.value)}
+            options={[{ value: '', label: 'All Genders' }, { value: 'Male', label: 'Male' }, { value: 'Female', label: 'Female' }]} />
         </div>
       </Card>
 
