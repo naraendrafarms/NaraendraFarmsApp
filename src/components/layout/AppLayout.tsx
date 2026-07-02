@@ -57,6 +57,8 @@ const NAV: NavItem[] = [
       { label: 'Analysis',    to: '/electricity/analysis' },
     ]
   },
+  { label: 'Generators', icon: <Zap size={18}/>, to: '/generators' },
+  { label: 'Empty Bags', icon: <Database size={18}/>, to: '/bags' },
   {
     // Accounts dept + admin only for salary entry; site_manager can view employees
     label: 'Employees', icon: <Users size={18}/>,
