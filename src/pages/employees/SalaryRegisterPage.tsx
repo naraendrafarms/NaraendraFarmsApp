@@ -82,13 +82,11 @@ export const SalaryRegisterPage: React.FC = () => {
     queryKey: ['salary_register', month, filterFarm, filterGender, filterDesignation],
     enabled: !!month,
     queryFn: async () => {
-      let q = supabase
+      const { data, error } = await supabase
         .from('salary_monthly')
         .select(`*, employees(emp_id,name,designation,emp_category,zone_area,gender,farms(name))`)
         .eq('month', month + '-01')
-        .order('emp_id', { referencedTable: 'employees', ascending: true, nullsFirst: false })
-      const { data, error } = await q
-      if (error) throw error
+      if (error) { toast.error(error.message); throw error }
       let result = data ?? []
       if (filterFarm) result = result.filter((r: any) => r.employees?.farms?.name === filterFarm)
       if (filterGender) result = result.filter((r: any) => r.employees?.gender === filterGender)
