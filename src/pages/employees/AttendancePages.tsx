@@ -29,7 +29,7 @@ const STATUS_COLORS: Record<string, string> = {
   OT: 'bg-blue-100 text-blue-800 border-blue-300',
 }
 const STATUS_OPTIONS = ['P','A','H','WO','OT']
-const STATUS_LABELS: Record<string, string> = { P:'Present', A:'Absent', H:'Half Day', WO:'Week Off', OT:'Full OT Day' }
+const STATUS_LABELS: Record<string, string> = { '': 'Not marked', P:'Present', A:'Absent', H:'Half Day', WO:'Week Off', OT:'Full OT Day' }
 
 function daysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate()
@@ -93,17 +93,15 @@ export const DailyAttendancePage: React.FC = () => {
     enabled: empIds.length > 0
   })
 
-  // Merge DB records into localStatus when data loads
+  // Merge DB records into localStatus when data loads. Plain/blank by design —
+  // an employee with no record stays unmarked (not silently defaulted to
+  // Present) until you explicitly click a status or use "Mark all".
   React.useEffect(() => {
     const map: Record<string, string> = {}
     const otMap: Record<string, number> = {}
     for (const r of (existing ?? [])) {
       map[r.employee_id] = r.status
       if (r.ot_hours) otMap[r.employee_id] = r.ot_hours
-    }
-    // Default to 'P' for any employee without a record
-    for (const e of (employees ?? [])) {
-      if (!map[e.id]) map[e.id] = 'P'
     }
     setLocalStatus(map)
     setLocalOT(otMap)
@@ -122,7 +120,7 @@ export const DailyAttendancePage: React.FC = () => {
       ['emp_id','name','designation','gender','status','ot_hours'],
       visibleEmployees.map((e:any)=>[
         e.emp_id, e.name, e.designation, e.gender,
-        STATUS_LABELS[localStatus[e.id] ?? 'P'] ?? (localStatus[e.id] ?? 'P'),
+        localStatus[e.id] ? (STATUS_LABELS[localStatus[e.id]] ?? localStatus[e.id]) : 'Not marked',
         localOT[e.id] ?? 0,
       ])
     )
@@ -131,18 +129,22 @@ export const DailyAttendancePage: React.FC = () => {
   const saveAll = async () => {
     if (!employees?.length) return
     if (date > todayStr()) { toast.error("Can't save attendance for a future date"); return }
+    // Plain by design — only employees you explicitly marked get written.
+    // Anyone left blank is skipped entirely, not silently saved as Present.
+    const marked = employees.filter((e: any) => !!localStatus[e.id])
+    if (!marked.length) { toast.error('Mark at least one employee before saving'); return }
     setSaving(true)
     try {
-      const rows = employees.map((e: any) => ({
+      const rows = marked.map((e: any) => ({
         employee_id: e.id,
         farm_id: farmId || e.farm_id,
         attendance_date: date,
-        status: localStatus[e.id] ?? 'P',
+        status: localStatus[e.id],
         ot_hours: localOT[e.id] ?? 0,
       }))
       const { error } = await supabase.from('attendance_daily').upsert(rows, { onConflict: 'employee_id,attendance_date' })
       if (error) throw error
-      toast.success(`Attendance saved for ${rows.length} employees`)
+      toast.success(`Attendance saved for ${rows.length} of ${employees.length} employees`)
       qc.invalidateQueries({ queryKey: ['attendance_day'] })
       qc.invalidateQueries({ queryKey: ['attendance_month'] })
       qc.invalidateQueries({ queryKey: ['monthly_att_grid'] })
@@ -219,6 +221,9 @@ export const DailyAttendancePage: React.FC = () => {
                 {STATUS_LABELS[s]}: {counts[s as keyof typeof counts]}
               </span>
             ))}
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-yellow-50 text-yellow-700 border-yellow-200">
+              Not marked: {employees.length - Object.keys(localStatus).length}
+            </span>
           </div>
 
           {/* Bulk mark buttons */}
@@ -256,10 +261,10 @@ export const DailyAttendancePage: React.FC = () => {
               </thead>
               <tbody>
                 {visibleEmployees.map((e: any) => {
-                  const cur = localStatus[e.id] ?? 'P'
+                  const cur = localStatus[e.id] ?? ''
                   const otVal = localOT[e.id] ?? 0
                   return (
-                    <tr key={e.id} className={`hover:bg-gray-50 ${sel.has(e.id) ? 'bg-blue-50' : cur === 'A' ? 'bg-red-50' : cur === 'H' ? 'bg-amber-50' : ''}`}>
+                    <tr key={e.id} className={`hover:bg-gray-50 ${sel.has(e.id) ? 'bg-blue-50' : cur === 'A' ? 'bg-red-50' : cur === 'H' ? 'bg-amber-50' : !cur ? 'bg-yellow-50/40' : ''}`}>
                       <Td><CB checked={sel.has(e.id)} onChange={() => toggle(e.id)} /></Td>
                       <Td className="font-medium">{e.name}</Td>
                       <Td className="text-gray-500 text-xs">{e.emp_id ?? '—'}</Td>
@@ -791,9 +796,12 @@ export const EmployeeAdvancesPage: React.FC = () => {
 // One page, all employees as rows, all days as columns. Mark P/A/H/WO/OT per cell.
 // OT cells show an hours input. Save → writes attendance_daily + updates salary_monthly.
 
-const STATUS_CYCLE: Record<string, string> = { P:'A', A:'H', H:'WO', WO:'OT', OT:'P' }
-const STATUS_SHORT: Record<string, string>  = { P:'P', A:'A', H:'H', WO:'WO', OT:'OT' }
+// Cycle starts and ends on '' (unmarked) — plain by design, nothing defaults
+// to Present. Click through: unmarked -> P -> A -> H -> WO -> OT -> unmarked.
+const STATUS_CYCLE: Record<string, string> = { '': 'P', P:'A', A:'H', H:'WO', WO:'OT', OT:'' }
+const STATUS_SHORT: Record<string, string>  = { '': '—', P:'P', A:'A', H:'H', WO:'WO', OT:'OT' }
 const CELL_COLORS: Record<string, string> = {
+  '': 'bg-white text-gray-300 border border-dashed border-gray-200',
   P:  'bg-green-100 text-green-800',
   A:  'bg-red-100 text-red-700',
   H:  'bg-amber-100 text-amber-700',
@@ -808,7 +816,7 @@ type CellKey = string  // `${empId}_${day}`
 function computeAbsentDays(empId: string, days: number, grid: Record<CellKey, string>): number {
   let absent = 0
   for (let d = 1; d <= days; d++) {
-    const s = grid[`${empId}_${d}`] ?? 'P'
+    const s = grid[`${empId}_${d}`] ?? ''
     if (s === 'A') absent += 1
     else if (s === 'H') absent += 0.5
   }
@@ -903,7 +911,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
   const toggleCell = (empId: string, day: number) => {
     if (isFutureDay(day)) return
     const key = `${empId}_${day}`
-    const cur = grid[key] ?? 'P'
+    const cur = grid[key] ?? ''
     const next = STATUS_CYCLE[cur] ?? 'P'
     setGrid(g => ({ ...g, [key]: next }))
     if (next !== 'OT') setOtHours(h => { const n = { ...h }; delete n[key]; return n })
@@ -917,13 +925,16 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     if (!(employees as any[]).length) { toast.error('No employees loaded'); return }
     setSaving(true)
     try {
-      // Build upsert rows for attendance_daily
+      // Build upsert rows for attendance_daily — plain by design: only cells
+      // you actually clicked get written. Blank/unmarked cells are skipped
+      // entirely, never fabricated as Present.
       const rows: any[] = []
       for (const emp of employees as any[]) {
         for (const d of days) {
           if (isFutureDay(d)) continue  // never fabricate attendance for days that haven't happened
           const key = `${emp.id}_${d}`
-          const status = grid[key] ?? 'P'
+          const status = grid[key]
+          if (!status) continue  // unmarked — skip, don't default to Present
           const dateStr = `${month}-${String(d).padStart(2,'0')}`
           rows.push({
             employee_id: emp.id,
@@ -934,6 +945,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
           })
         }
       }
+      if (!rows.length) { toast.error('Mark at least one day before saving'); setSaving(false); return }
 
       // Upsert in batches of 500
       for (let i = 0; i < rows.length; i += 500) {
@@ -947,12 +959,12 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       const salaryRows = (employees as any[]).map(emp => {
         const absentDays = computeAbsentDays(emp.id, totalDays, grid)
         const presentDays = pastDays.filter(d => {
-          const s = grid[`${emp.id}_${d}`] ?? 'P'
+          const s = grid[`${emp.id}_${d}`] ?? ''
           return s === 'P' || s === 'OT'
         }).length
-        const halfDays = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'H').length
-        const woDays   = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'WO').length
-        const otDays   = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'OT').length
+        const halfDays = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? '') === 'H').length
+        const woDays   = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? '') === 'WO').length
+        const otDays   = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? '') === 'OT').length
         const totalOtHrs = pastDays.reduce((s, d) => s + (parseFloat(otHours[`${emp.id}_${d}`] ?? '0') || 0), 0)
         return {
           employee_id: emp.id,
@@ -992,11 +1004,11 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
   const summary = React.useMemo(() => {
     const out: Record<string, Record<string, number>> = {}
     for (const emp of employees as any[]) {
-      const counts: Record<string, number> = { P: 0, A: 0, H: 0, WO: 0, OT: 0, ot_hrs: 0 }
+      const counts: Record<string, number> = { P: 0, A: 0, H: 0, WO: 0, OT: 0, '': 0, ot_hrs: 0 }
       for (const d of days) {
         if (isFutureDay(d)) continue
         const key = `${emp.id}_${d}`
-        const s = grid[key] ?? 'P'
+        const s = grid[key] ?? ''
         counts[s] = (counts[s] ?? 0) + 1
         if (s === 'OT') counts.ot_hrs += parseFloat(otHours[key] ?? '0') || 0
       }
@@ -1013,9 +1025,25 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
         title="Monthly Attendance"
         subtitle={`Mark attendance for all employees — saves to daily records and updates salary`}
         action={
-          <Button onClick={handleSave} loading={saving} disabled={!(employees as any[]).length}>
-            <Save size={15} className="mr-1"/> Save Attendance
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => {
+              const g = { ...grid }
+              for (const emp of employees as any[]) {
+                for (const d of days) {
+                  if (isFutureDay(d)) continue
+                  const key = `${emp.id}_${d}`
+                  if (!g[key]) g[key] = 'P'
+                }
+              }
+              setGrid(g)
+              toast.success('Filled all unmarked days with Present — review exceptions, then Save')
+            }} disabled={!(employees as any[]).length}>
+              Fill unmarked as Present
+            </Button>
+            <Button onClick={handleSave} loading={saving} disabled={!(employees as any[]).length}>
+              <Save size={15} className="mr-1"/> Save Attendance
+            </Button>
+          </div>
         }
       />
 
@@ -1064,6 +1092,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
                 <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-amber-50 text-amber-600 w-8">H</th>
                 <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-gray-50 text-gray-500 w-9">WO</th>
                 <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-blue-50 text-blue-600 w-8">OT</th>
+                <th className="border-b border-r border-gray-200 px-1 py-1 text-center bg-yellow-50 text-yellow-700 w-9">—</th>
                 <th className="border-b border-gray-200 px-1 py-1 text-center bg-blue-50 text-blue-500 w-12">OT Hrs</th>
               </tr>
             </thead>
@@ -1080,7 +1109,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
                     {dayLabels.map(({ d, isSun }) => {
                       const key = `${emp.id}_${d}`
                       const future = isFutureDay(d)
-                      const status = future ? '' : (grid[key] ?? 'P')
+                      const status = future ? '' : (grid[key] ?? '')
                       const isOT = status === 'OT'
                       return (
                         <td key={d} className={`border-b border-r border-gray-100 p-0 text-center ${isSun ? 'bg-red-50/30' : ''}`}>
@@ -1111,6 +1140,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
                     <td className="border-b border-r border-gray-100 text-center font-bold text-amber-600 bg-amber-50/40">{s.H ?? 0}</td>
                     <td className="border-b border-r border-gray-100 text-center text-gray-500 bg-gray-50/60">{s.WO ?? 0}</td>
                     <td className="border-b border-r border-gray-100 text-center font-bold text-blue-600 bg-blue-50/40">{s.OT ?? 0}</td>
+                    <td className="border-b border-r border-gray-100 text-center font-semibold text-yellow-700 bg-yellow-50/50">{s[''] ?? 0}</td>
                     <td className="border-b border-gray-100 text-center text-blue-500 bg-blue-50/40">{s.ot_hrs > 0 ? s.ot_hrs.toFixed(1) : '—'}</td>
                   </tr>
                 )
@@ -1121,7 +1151,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       )}
 
       <p className="text-xs text-gray-400">
-        Saving updates <strong>attendance_daily</strong> (one record per employee per day) and auto-calculates absent days in <strong>salary_monthly</strong> for {monthLabel}.
+        Plain by design — click a cell to mark it (unmarked → P → A → H → WO → OT → unmarked). Only cells you mark are saved to <strong>attendance_daily</strong>; unmarked days are skipped, never saved as Present automatically. Saving also updates absent/present days in <strong>salary_monthly</strong> for {monthLabel}.
       </p>
     </div>
   )
