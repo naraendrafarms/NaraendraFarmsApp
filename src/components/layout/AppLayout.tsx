@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useAuth, can, type Role } from '@/lib/auth'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ChatPanel } from '@/components/chat/ChatPanel'
 
 interface NavChild { label: string; to: string }
 interface NavItem {
@@ -497,6 +498,7 @@ export const AppLayout: React.FC = () => {
           </button>
           <GlobalSearch nav={visibleNav} />
           <div className="flex-1" />
+          <ChatPanel />
           <span className="text-xs text-gray-400 hidden sm:block">
             {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday:'long', day:'2-digit', month:'long', year:'numeric' })}
           </span>
