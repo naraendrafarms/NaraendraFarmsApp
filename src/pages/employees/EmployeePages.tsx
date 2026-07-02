@@ -3112,7 +3112,7 @@ export const BulkSalaryPage: React.FC = () => {
     queryKey: ['bulk_salary', monthDate, filterFarm],
     queryFn: async () => {
       let q = supabase.from('salary_monthly')
-        .select('*, employees!inner(name,emp_id,farm_id,designation,esi_applicable,pf_applicable,pt_applicable,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name))')
+        .select('*, override_account_emp_id, employees!inner(id,name,emp_id,farm_id,designation,esi_applicable,pf_applicable,pt_applicable,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name))')
         .eq('month', monthDate)
       if (filterFarm) q = q.eq('employees.farm_id', filterFarm)
       const { data } = await q; return data ?? []
@@ -3136,6 +3136,17 @@ export const BulkSalaryPage: React.FC = () => {
       for (const r of (data ?? [])) agg[r.employee_id] = (agg[r.employee_id]??0) + (r.amount??0)
       return agg
     }
+  })
+
+  // Per-month "pay into someone else's account" override — set here instead
+  // of editing the employee's permanent Salary Payment Mode every cycle.
+  const setPaymentOverrideMut = useMutation({
+    mutationFn: async ({ salaryId, overrideEmpId }: { salaryId: string; overrideEmpId: string | null }) => {
+      const { error } = await supabase.from('salary_monthly').update({ override_account_emp_id: overrideEmpId }).eq('id', salaryId)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bulk_salary', monthDate, filterFarm] }); toast.success('Payment account updated for this month') },
+    onError: (e: any) => toast.error(e.message),
   })
 
   // Daily attendance for the month → to auto-calculate absent days
@@ -3270,7 +3281,11 @@ export const BulkSalaryPage: React.FC = () => {
       let acct = emp.account_no ?? ''
       let ifsc  = emp.ifsc ?? ''
       let beneName = emp.name ?? ''
-      if (pm === 'shared_account' && emp.shared_with_emp_id) {
+      const overrideId = r.override_account_emp_id
+      if (overrideId) {
+        const holder = (employees as any[])?.find((e:any) => e.id === overrideId)
+        if (holder) { acct = holder.account_no??''; ifsc = holder.ifsc??''; beneName = holder.name??'' }
+      } else if (pm === 'shared_account' && emp.shared_with_emp_id) {
         const holder = (employees as any[])?.find((e:any) => e.id === emp.shared_with_emp_id)
         if (holder) { acct = holder.account_no??''; ifsc = holder.ifsc??''; beneName = holder.name??'' }
       }
@@ -3279,7 +3294,7 @@ export const BulkSalaryPage: React.FC = () => {
       payMap[acct].amount += net
       payMap[acct].empCodes.push(emp.emp_id ?? emp.name ?? '')
     }
-    const cashList = (salaries as any[]).filter(r => (r.employees?.payment_mode??'own_account')==='cash' && (r.net_salary??0)>0)
+    const cashList = (salaries as any[]).filter(r => (r.employees?.payment_mode??'own_account')==='cash' && !r.override_account_emp_id && (r.net_salary??0)>0)
 
     // Kotak CIB salary upload format
     const cmsHeaders = ['Record Type','TXN Amount','Beneficiary Account Number','IFSC Code','Payment Mode','Beneficiary Name','Debit Narration','Credit Narration','Reference No','Contact No','Email ID']
@@ -3305,10 +3320,12 @@ export const BulkSalaryPage: React.FC = () => {
       const emp=r.employees??{}
       const pm=emp.payment_mode??'own_account'
       const isShared=pm==='shared_account'
-      const holder=isShared?(employees as any[])?.find((e:any)=>e.id===emp.shared_with_emp_id):null
-      return [emp.emp_id??'',emp.name??'',pm==='cash'?'Cash':isShared?'Shared Account':'Own Account',
-        isShared?(holder?.account_no??''):(emp.account_no??''),r.net_salary??0,
-        isShared?`→ ${holder?.name??'?'}`:'']
+      const overrideHolder=r.override_account_emp_id?(employees as any[])?.find((e:any)=>e.id===r.override_account_emp_id):null
+      const holder=overrideHolder??(isShared?(employees as any[])?.find((e:any)=>e.id===emp.shared_with_emp_id):null)
+      const label=pm==='cash'&&!overrideHolder?'Cash':holder?'Shared Account':'Own Account'
+      return [emp.emp_id??'',emp.name??'',label,
+        holder?(holder.account_no??''):(emp.account_no??''),r.net_salary??0,
+        holder?`→ ${holder.name??'?'}${overrideHolder?' (this month only)':''}`:'']
     })
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([sumHdr,...sumRows]), 'Payment Summary')
 
@@ -3496,26 +3513,35 @@ export const BulkSalaryPage: React.FC = () => {
               <Table>
                 <thead><tr>
                   <Th>Code</Th><Th>Name</Th><Th>Payment Mode</Th>
-                  <Th>Account No</Th><Th>IFSC</Th><Th right>Net Payable</Th><Th>Notes</Th>
+                  <Th>Account No</Th><Th>IFSC</Th><Th right>Net Payable</Th>
+                  <Th>This Month — Deposit Into</Th>
                 </tr></thead>
                 <tbody>
-                  {(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')!=='cash'&&(r.net_salary??0)>0).map((r:any)=>{
+                  {(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0).map((r:any)=>{
                     const emp=r.employees??{}
                     const isShared=(emp.payment_mode??'own_account')==='shared_account'
-                    const holder=isShared?(employees as any[]??[]).find((e:any)=>e.id===emp.shared_with_emp_id):null
+                    const overrideHolder=r.override_account_emp_id?(employees as any[]??[]).find((e:any)=>e.id===r.override_account_emp_id):null
+                    const holder=overrideHolder??(isShared?(employees as any[]??[]).find((e:any)=>e.id===emp.shared_with_emp_id):null)
                     return (
                       <tr key={r.id} className="hover:bg-gray-50">
                         <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
                         <Td className="font-medium">{emp.name}</Td>
-                        <Td><Badge color={isShared?'yellow':'green'}>{isShared?'Shared':'Own Account'}</Badge></Td>
-                        <Td className="text-xs font-mono">{isShared?(holder?.account_no??'—'):(emp.account_no??'—')}</Td>
-                        <Td className="text-xs">{isShared?(holder?.ifsc??'—'):(emp.ifsc??'—')}</Td>
+                        <Td><Badge color={holder?'yellow':'green'}>{holder?'Shared':'Own Account'}</Badge></Td>
+                        <Td className="text-xs font-mono">{holder?(holder.account_no??'—'):(emp.account_no??'—')}</Td>
+                        <Td className="text-xs">{holder?(holder.ifsc??'—'):(emp.ifsc??'—')}</Td>
                         <Td right className="font-semibold text-green-700">{inr(r.net_salary??0)}</Td>
-                        <Td className="text-xs text-gray-400">{isShared?`→ ${holder?.name??'?'}`:'—'}</Td>
+                        <Td>
+                          <Select value={r.override_account_emp_id ?? ''}
+                            onChange={e => setPaymentOverrideMut.mutate({ salaryId: r.id, overrideEmpId: e.target.value || null })}
+                            options={[
+                              { value: '', label: isShared ? `Default (→ ${(employees as any[]??[]).find((e:any)=>e.id===emp.shared_with_emp_id)?.name ?? 'shared'})` : 'Default (own account)' },
+                              ...(employees as any[]??[]).filter((e:any)=>e.id!==emp.id).map((e:any)=>({ value: e.id, label: `${e.name} (${e.emp_id??'—'})` })),
+                            ]} />
+                        </Td>
                       </tr>
                     )
                   })}
-                  {!(salaries as any[]??[]).some((r:any)=>(r.employees?.payment_mode??'own_account')!=='cash')&&
+                  {!(salaries as any[]??[]).some((r:any)=>(r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&
                     <tr><Td colSpan={7} className="text-center text-gray-400 py-4">No bank transfer employees</Td></tr>}
                 </tbody>
               </Table>
