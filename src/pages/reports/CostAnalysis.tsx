@@ -175,7 +175,7 @@ export const SalaryCostPage: React.FC = () => {
       while (true) {
         const { data } = await supabase
           .from('salary_monthly')
-          .select('month, earned_salary, net_salary, advance, tds, days_worked, employees(farm_id, farms(code, name))')
+          .select('month, earned_salary, net_salary, advance, tds, days_worked, employees!employee_id(farm_id, farms(code, name))')
           .gte('month', startDate)
           .lte('month', endDate)
           .order('month')
