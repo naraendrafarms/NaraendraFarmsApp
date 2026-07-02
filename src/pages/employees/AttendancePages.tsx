@@ -943,7 +943,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
           employee_id: emp.id,
           month: monthDate,
           absent_days: absentDays,
-          days_in_month: totalDays,
+          month_days: totalDays,
           present_days: presentDays,
           half_days: halfDays,
           wo_days: woDays,
