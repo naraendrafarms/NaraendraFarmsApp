@@ -442,11 +442,19 @@ export const PendingPaymentsPage: React.FC = () => {
   const { data: parties } = useQuery({
     queryKey: ['parties_supp'],
     queryFn: async () => {
-      const { data } = await supabase.from('parties').select('id,name').in('type', ['supplier', 'both']).order('name')
+      const { data } = await supabase.from('parties').select('id,name,tds_pct_default').in('type', ['supplier', 'both']).order('name')
       return data ?? []
     }
   })
   const partyOptions = (parties ?? []).map((p: any) => ({ value: p.id, label: p.name }))
+  const TDS_PCT_OPTIONS = [
+    { value: '0', label: '0% (None)' },
+    { value: '0.1', label: '0.1% (Goods)' },
+    { value: '1', label: '1% (Contractor)' },
+    { value: '2', label: '2% (Contractor)' },
+    { value: '5', label: '5% (Rent/Commission)' },
+    { value: '10', label: '10% (Professional)' },
+  ]
 
   const todayStr = today()
 
@@ -958,7 +966,12 @@ export const PendingPaymentsPage: React.FC = () => {
                 <Select label="" placeholder="Select Supplier — add new ones in Purchase > Suppliers" options={partyOptions}
                   value={editForm.party_id} onChange={e => {
                     const p = (parties ?? []).find((x: any) => x.id === e.target.value)
-                    setEditForm(f => ({ ...f, party_id: e.target.value, vendor_name: p?.name ?? f.vendor_name }))
+                    setEditForm(f => ({
+                      ...f, party_id: e.target.value, vendor_name: p?.name ?? f.vendor_name,
+                      // Auto-fill the vendor's default TDS rate on a new bill only — never
+                      // overwrite a rate already set on an existing bill.
+                      tds_pct: (editModal === 'new' && p?.tds_pct_default != null) ? String(p.tds_pct_default) : f.tds_pct,
+                    }))
                   }} />
                 {!editForm.party_id && (
                   <input value={editForm.vendor_name} onChange={e => setEditForm(f => ({ ...f, vendor_name: e.target.value }))}
@@ -998,8 +1011,16 @@ export const PendingPaymentsPage: React.FC = () => {
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">TDS %</label>
-                  <input type="number" value={editForm.tds_pct} onChange={e => setEditForm(f => ({ ...f, tds_pct: e.target.value }))}
-                    placeholder="e.g. 2" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                  <select value={TDS_PCT_OPTIONS.some(o => o.value === editForm.tds_pct) ? editForm.tds_pct : 'custom'}
+                    onChange={e => setEditForm(f => ({ ...f, tds_pct: e.target.value === 'custom' ? '' : e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    {TDS_PCT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    <option value="custom">Custom %…</option>
+                  </select>
+                  {!TDS_PCT_OPTIONS.some(o => o.value === editForm.tds_pct) && (
+                    <input type="number" value={editForm.tds_pct} onChange={e => setEditForm(f => ({ ...f, tds_pct: e.target.value }))}
+                      placeholder="e.g. 3.75" className="w-full mt-1.5 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">

@@ -64,7 +64,7 @@ const NAV: NavItem[] = [
       { label: 'Employee List',   to: '/employees' },
       { label: 'Bulk Salary',      to: '/employees/bulk-salary' },
       { label: 'Salary Register',  to: '/employees/salary-register' },
-      { label: 'Statutory Filing (PF/ESI/PT)', to: '/employees/statutory' },
+      { label: 'Statutory Compliance (TDS/GST/PF/ESI/PT)', to: '/employees/statutory' },
       { label: 'Salary History',   to: '/employees/salary-history' },
       { label: 'Partner Remuneration', to: '/employees/partner-remuneration' },
       { label: 'Salary Entry',    to: '/employees/salary' },
