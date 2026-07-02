@@ -115,9 +115,22 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const blank = { generator_id: '', log_date: today(), hours_run: '', diesel_consumed_ltr: '', opening_reading: '', closing_reading: '', remarks: '' }
+  const blank = { generator_id: '', log_date: today(), from_time: '', to_time: '', hours_run: '', diesel_consumed_ltr: '', opening_reading: '', closing_reading: '', remarks: '' }
   const [form, setForm] = useState(blank)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  // Hours Run auto-computed from From/To time (handles crossing midnight);
+  // Diesel (Ltr) stays manual entry.
+  const setTime = (k: 'from_time' | 'to_time', v: string) => setForm(f => {
+    const next = { ...f, [k]: v }
+    if (next.from_time && next.to_time) {
+      const [fh, fm] = next.from_time.split(':').map(Number)
+      const [th, tm] = next.to_time.split(':').map(Number)
+      let mins = (th * 60 + tm) - (fh * 60 + fm)
+      if (mins < 0) mins += 24 * 60 // crossed midnight
+      next.hours_run = (mins / 60).toFixed(2)
+    }
+    return next
+  })
 
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ['generator_usage_log'],
@@ -128,6 +141,7 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
     mutationFn: async () => {
       const payload = {
         generator_id: form.generator_id, log_date: form.log_date,
+        from_time: form.from_time || null, to_time: form.to_time || null,
         hours_run: parseFloat(form.hours_run) || null,
         diesel_consumed_ltr: parseFloat(form.diesel_consumed_ltr) || null,
         opening_reading: parseFloat(form.opening_reading) || null,
@@ -147,8 +161,8 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
   })
 
   const exportRows = () => exportCSV(`generator_usage_${today()}.csv`,
-    ['Date', 'Generator', 'Farm', 'Hours Run', 'Diesel (Ltr)', 'Ltr/Hr', 'Opening', 'Closing', 'Remarks'],
-    logs.map((l: any) => [l.log_date, l.generators?.name, l.generators?.farms?.name, l.hours_run, l.diesel_consumed_ltr,
+    ['Date', 'Generator', 'Farm', 'From Time', 'To Time', 'Hours Run', 'Diesel (Ltr)', 'Ltr/Hr', 'Opening', 'Closing', 'Remarks'],
+    logs.map((l: any) => [l.log_date, l.generators?.name, l.generators?.farms?.name, l.from_time, l.to_time, l.hours_run, l.diesel_consumed_ltr,
       l.hours_run > 0 ? (l.diesel_consumed_ltr / l.hours_run).toFixed(2) : '', l.opening_reading, l.closing_reading, l.remarks]))
 
   return (
@@ -160,25 +174,26 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
-            <thead><tr><Th>Date</Th><Th>Generator</Th><Th>Farm</Th><Th right>Hours</Th><Th right>Diesel (Ltr)</Th><Th right>Ltr/Hr</Th><Th right>Actions</Th></tr></thead>
+            <thead><tr><Th>Date</Th><Th>Generator</Th><Th>Farm</Th><Th>From - To</Th><Th right>Hours</Th><Th right>Diesel (Ltr)</Th><Th right>Ltr/Hr</Th><Th right>Actions</Th></tr></thead>
             <tbody>
               {logs.map((l: any) => (
                 <tr key={l.id} className="hover:bg-gray-50">
                   <Td>{l.log_date}</Td>
                   <Td className="font-medium">{l.generators?.name}</Td>
                   <Td>{l.generators?.farms?.name ?? '—'}</Td>
+                  <Td>{l.from_time && l.to_time ? `${l.from_time.slice(0,5)} - ${l.to_time.slice(0,5)}` : '—'}</Td>
                   <Td right>{l.hours_run ?? '—'}</Td>
                   <Td right>{l.diesel_consumed_ltr ?? '—'}</Td>
                   <Td right>{l.hours_run > 0 ? (l.diesel_consumed_ltr / l.hours_run).toFixed(2) : '—'}</Td>
                   <Td right>
                     <div className="flex gap-2 justify-end">
-                      <button onClick={() => { setEditing(l); setForm({ generator_id: l.generator_id, log_date: l.log_date, hours_run: l.hours_run?.toString() ?? '', diesel_consumed_ltr: l.diesel_consumed_ltr?.toString() ?? '', opening_reading: l.opening_reading?.toString() ?? '', closing_reading: l.closing_reading?.toString() ?? '', remarks: l.remarks ?? '' }); setShowForm(true) }}><Pencil size={14} className="text-gray-400 hover:text-brand-600" /></button>
+                      <button onClick={() => { setEditing(l); setForm({ generator_id: l.generator_id, log_date: l.log_date, from_time: l.from_time?.slice(0,5) ?? '', to_time: l.to_time?.slice(0,5) ?? '', hours_run: l.hours_run?.toString() ?? '', diesel_consumed_ltr: l.diesel_consumed_ltr?.toString() ?? '', opening_reading: l.opening_reading?.toString() ?? '', closing_reading: l.closing_reading?.toString() ?? '', remarks: l.remarks ?? '' }); setShowForm(true) }}><Pencil size={14} className="text-gray-400 hover:text-brand-600" /></button>
                       <button onClick={() => confirm('Delete this entry?') && delMut.mutate(l.id)}><Trash2 size={14} className="text-gray-400 hover:text-red-600" /></button>
                     </div>
                   </Td>
                 </tr>
               ))}
-              {logs.length === 0 && <tr><Td colSpan={7}><EmptyState title="No usage entries yet" /></Td></tr>}
+              {logs.length === 0 && <tr><Td colSpan={8}><EmptyState title="No usage entries yet" /></Td></tr>}
             </tbody>
           </Table>
         </Card>
@@ -192,7 +207,12 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
             <DateInput label="Date *" value={form.log_date} onChange={e => s('log_date', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Input label="Hours Run" type="number" step="0.1" value={form.hours_run} onChange={e => s('hours_run', e.target.value)} />
+            <Input label="From Time" type="time" value={form.from_time} onChange={e => setTime('from_time', e.target.value)} />
+            <Input label="To Time" type="time" value={form.to_time} onChange={e => setTime('to_time', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Input label="Hours Run" type="number" step="0.01" value={form.hours_run} onChange={e => s('hours_run', e.target.value)}
+              hint={form.from_time && form.to_time ? 'Auto from From/To time — you can still adjust it' : 'Set From/To time to auto-fill, or enter directly'} />
             <Input label="Diesel Consumed (Ltr)" type="number" step="0.1" value={form.diesel_consumed_ltr} onChange={e => s('diesel_consumed_ltr', e.target.value)} />
           </FormRow>
           <FormRow>
