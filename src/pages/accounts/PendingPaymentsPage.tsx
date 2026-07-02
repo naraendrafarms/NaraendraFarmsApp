@@ -63,6 +63,7 @@ type PayRecord = {
   paid_amount: number | null
   discount_amount: number | null
   pay_before_date: string | null
+  credit_limit: number | null
   payment_status: string
   category: string | null
   account_type: string | null
@@ -421,7 +422,7 @@ export const PendingPaymentsPage: React.FC = () => {
   const [editModal, setEditModal] = useState<PayRecord | 'new' | null>(null)
   const blankEditForm = () => ({
     vendor_name: '', party_id: '', invoice_no: '', po_no: '', grn_no: '', invoice_date: today(), grn_date: '',
-    invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '',
+    invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '', credit_limit: '',
     payment_status: 'Pending', account_type: 'NEFT', utr_no: '', cheque_no: '', category: '', remarks: '',
   })
   const [editForm, setEditForm] = useState(blankEditForm())
@@ -435,7 +436,7 @@ export const PendingPaymentsPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,payment_status,category,account_type,utr_no,cheque_no,remarks')
+        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks')
         .order('grn_date', { ascending: false })
       if (error) throw error
       return (data ?? []) as PayRecord[]
@@ -579,6 +580,7 @@ export const PendingPaymentsPage: React.FC = () => {
       tds_amount: r.tds_amount != null ? String(r.tds_amount) : '',
       discount_amount: r.discount_amount != null ? String(r.discount_amount) : '',
       pay_before_date: r.pay_before_date ?? '',
+      credit_limit: r.credit_limit != null ? String(r.credit_limit) : '',
       payment_status: r.payment_status ?? 'Pending',
       account_type: r.account_type ?? 'NEFT',
       utr_no: r.utr_no ?? '',
@@ -620,6 +622,7 @@ export const PendingPaymentsPage: React.FC = () => {
         net_payable: netPayable,
         discount_amount: editForm.discount_amount === '' ? null : parseFloat(editForm.discount_amount) || 0,
         pay_before_date: editForm.pay_before_date || null,
+        credit_limit: editForm.credit_limit === '' ? null : parseInt(editForm.credit_limit) || null,
         payment_status: editForm.payment_status,
         account_type: editForm.account_type || null,
         utr_no: editForm.utr_no || null,
@@ -1061,10 +1064,28 @@ export const PendingPaymentsPage: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Credit Days</label>
+                  <input type="number" value={editForm.credit_limit}
+                    placeholder="From PO if linked, else set manually"
+                    onChange={e => {
+                      const days = e.target.value
+                      const baseDate = editForm.grn_date || editForm.invoice_date
+                      let pay = editForm.pay_before_date
+                      if (days !== '' && baseDate) {
+                        const d = new Date(baseDate); d.setDate(d.getDate() + (parseInt(days) || 0))
+                        pay = d.toISOString().slice(0, 10)
+                      }
+                      setEditForm(f => ({ ...f, credit_limit: days, pay_before_date: pay }))
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Pay Before Date</label>
                   <input type="date" value={editForm.pay_before_date} onChange={e => setEditForm(f => ({ ...f, pay_before_date: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Status</label>
                   <select value={editForm.payment_status} onChange={e => setEditForm(f => ({ ...f, payment_status: e.target.value }))}

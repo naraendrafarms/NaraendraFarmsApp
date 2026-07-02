@@ -341,7 +341,7 @@ const POTab: React.FC = () => {
 
         await supabase.from('grn').insert({
           grn_no, grn_date: receiptForm.receipt_date,
-          farm_id, party_id, category: grnCat,
+          farm_id, party_id, category: grnCat, po_id: receiptPO.id,
           ingredient_id, medicine_id,
           item_name: receiptPO.item_name,
           invoice_no: receiptForm.invoice_no || null,
