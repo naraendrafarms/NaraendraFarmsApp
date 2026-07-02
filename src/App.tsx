@@ -69,7 +69,6 @@ import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
 import { HelpGuidePage } from '@/pages/help/HelpGuide'
 import { ItemsMasterPage } from '@/pages/purchase/ItemsMaster'
 import { GRNPage } from '@/pages/purchase/GRNPage'
-import { PaymentsPage } from '@/pages/purchase/PaymentsPage'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -148,7 +147,7 @@ export const App: React.FC = () => {
             <Route path="purchase/items" element={<ItemsMasterPage />} />
             <Route path="purchase/orders" element={<PurchaseOrdersPage />} />
             <Route path="purchase/grn" element={<GRNPage />} />
-            <Route path="purchase/payments" element={<PaymentsPage />} />
+            <Route path="purchase/payments" element={<Navigate to="/pending-payments" replace />} />
 
             {/* Inventory */}
             <Route path="inventory" element={<InventoryPage />} />

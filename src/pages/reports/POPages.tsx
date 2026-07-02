@@ -138,9 +138,6 @@ export const PurchaseOrdersPage: React.FC = () => {
   )
 }
 
-// keep old export working
-export const PendingPaymentsPage = PurchaseOrdersPage
-
 // ══════════════════════════════════════════════════════════════════
 // PO TAB
 // ══════════════════════════════════════════════════════════════════

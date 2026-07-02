@@ -134,7 +134,7 @@ const NAV: NavItem[] = [
       { label: 'Suppliers',       to: '/masters/parties' },
       { label: 'Purchase Orders', to: '/purchase/orders' },
       { label: 'GRN',             to: '/purchase/grn' },
-      { label: 'Payments',        to: '/purchase/payments' },
+      { label: 'Payments',        to: '/pending-payments' },
       { label: 'Farm Expenses',   to: '/expenses' },
     ]
   },

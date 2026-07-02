@@ -5,18 +5,52 @@ import { today } from '@/lib/utils'
 import {
   Card, SectionHeader, Spinner, Badge, Select
 } from '@/components/ui'
-import { AlertCircle, Search, Link2, X, CheckCircle2, Trash2, Pencil } from 'lucide-react'
+import { AlertCircle, Search, Link2, X, CheckCircle2, Trash2, Pencil, Plus } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { Download } from 'lucide-react'
 
 const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtDate = (d: string) => d ? d.split('-').reverse().join('/') : '—'
 
+// ── Single shared ledger sync — every page/action that marks a vendor bill
+// Paid/Unpaid goes through these two functions, so Cash Book always reflects
+// what happened here regardless of which action (Pay / Edit / Bank Link) did it.
+// cash_book.payment_mode only allows 'cash' | 'upi' | 'cheque' — bank transfer
+// modes (NEFT/RTGS/IMPS) are recorded as 'cheque' (bank-mediated).
+const toCbMode = (mode: string) => {
+  const m = (mode || '').toLowerCase()
+  return m === 'cash' ? 'cash' : m === 'upi' ? 'upi' : 'cheque'
+}
+const postLedgerEntry = async (opts: {
+  paymentId: string; vendorName: string; invoiceNo?: string | null; grnNo?: string | null
+  amount: number; mode: string; date: string; ref?: string | null; remarks?: string | null
+}) => {
+  if (opts.amount <= 0) return
+  await supabase.from('cash_book').insert({
+    txn_date: opts.date,
+    txn_type: 'payment',
+    category: 'purchase_payment',
+    description: `Payment to ${opts.vendorName}${opts.invoiceNo ? ' — Inv ' + opts.invoiceNo : ''}${opts.grnNo ? ' / GRN ' + opts.grnNo : ''}`,
+    party_name: opts.vendorName,
+    reference_no: opts.ref || null,
+    amount_in: 0,
+    amount_out: opts.amount,
+    payment_mode: toCbMode(opts.mode),
+    pending_payment_id: opts.paymentId,
+    remarks: opts.remarks || null,
+  })
+}
+const clearLedgerEntries = async (paymentId: string) => {
+  await supabase.from('cash_book').delete().eq('pending_payment_id', paymentId)
+}
+
 type PayRecord = {
   id: string
   vendor_name: string
   party_id: string | null
   invoice_no: string | null
+  po_no: string | null
+  invoice_date: string | null
   grn_no: string | null
   grn_date: string | null
   invoice_amount: number
@@ -29,6 +63,8 @@ type PayRecord = {
   payment_status: string
   category: string | null
   account_type: string | null
+  utr_no: string | null
+  cheque_no: string | null
   remarks: string | null
 }
 
@@ -124,6 +160,14 @@ const WaitingToLink: React.FC = () => {
           payment_status: 'Paid',
           transaction_ref: tag,
         }).eq('id', id)
+        // Reconciled bank debit = a real payment — post it to Cash Book too, so
+        // this ledger stays the single source of truth regardless of which
+        // action (Pay / Edit / Bank Link) settled the bill.
+        await postLedgerEntry({
+          paymentId: id, vendorName: payment.vendor_name, invoiceNo: payment.invoice_no, grnNo: payment.grn_no,
+          amount: balance, mode: 'NEFT', date: linkModal.txn_date, ref: linkModal.reference_no,
+          remarks: `Bank-reconciled: ${linkModal.description ?? ''}`,
+        })
       }
       // Link the bank transaction (linked_payment_id = first bill; tag holds the full set)
       await supabase.from('bank_transactions').update({
@@ -137,6 +181,7 @@ const WaitingToLink: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
       setLinkModal(null)
       setSelectedPaymentIds(new Set())
       setBillSearch('')
@@ -164,16 +209,23 @@ const WaitingToLink: React.FC = () => {
 
   const handleUnlink = async (t: any) => {
     try {
-      // Revert ALL bills tagged to this bank transaction (covers multi-bill links)…
+      // Find every bill this bank transaction settled — tagged set (multi-bill
+      // link) plus the single linked_payment_id (auto-matched / legacy) — so
+      // their Cash Book entries can be removed together with the payment revert.
+      const { data: tagged } = await supabase.from('pending_payments')
+        .select('id').eq('transaction_ref', `BANKTXN:${t.id}`)
+      const idsToRevert = new Set((tagged ?? []).map((r: any) => r.id))
+      if (t.linked_payment_id) idsToRevert.add(t.linked_payment_id)
+
       await supabase.from('pending_payments').update({
         payment_status: 'Pending', paid_amount: 0, paid_date: null, transaction_ref: null,
       }).eq('transaction_ref', `BANKTXN:${t.id}`)
-      // …and the single linked bill (covers auto-matched / legacy single links)
       if (t.linked_payment_id) {
         await supabase.from('pending_payments').update({
           payment_status: 'Pending', paid_amount: 0, paid_date: null, transaction_ref: null,
         }).eq('id', t.linked_payment_id)
       }
+      for (const id of idsToRevert) await clearLedgerEntries(id)
       // Send the bank transaction back to "waiting" so it can be re-linked or ignored
       await supabase.from('bank_transactions').update({
         match_status: 'waiting', linked_payment_id: null,
@@ -184,6 +236,7 @@ const WaitingToLink: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
       toast.success('Unlinked — bill set back to Pending')
     } catch (e: any) { toast.error(e.message) }
   }
@@ -362,8 +415,13 @@ export const PendingPaymentsPage: React.FC = () => {
   const [modal, setModal] = useState<PayModal | null>(null)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
-  const [editModal, setEditModal] = useState<PayRecord | null>(null)
-  const [editForm, setEditForm] = useState({ vendor_name: '', invoice_no: '', grn_no: '', invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '', category: '', remarks: '' })
+  const [editModal, setEditModal] = useState<PayRecord | 'new' | null>(null)
+  const blankEditForm = () => ({
+    vendor_name: '', party_id: '', invoice_no: '', po_no: '', grn_no: '', invoice_date: today(),
+    invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '',
+    payment_status: 'Pending', account_type: 'NEFT', utr_no: '', cheque_no: '', category: '', remarks: '',
+  })
+  const [editForm, setEditForm] = useState(blankEditForm())
   const [editSaving, setEditSaving] = useState(false)
   const [editErr, setEditErr] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -374,12 +432,21 @@ export const PendingPaymentsPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,party_id,invoice_no,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,payment_status,category,account_type,remarks')
+        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,payment_status,category,account_type,utr_no,cheque_no,remarks')
         .order('grn_date', { ascending: false })
       if (error) throw error
       return (data ?? []) as PayRecord[]
     }
   })
+
+  const { data: parties } = useQuery({
+    queryKey: ['parties_supp'],
+    queryFn: async () => {
+      const { data } = await supabase.from('parties').select('id,name').in('type', ['supplier', 'both']).order('name')
+      return data ?? []
+    }
+  })
+  const partyOptions = (parties ?? []).map((p: any) => ({ value: p.id, label: p.name }))
 
   const todayStr = today()
 
@@ -461,10 +528,17 @@ export const PendingPaymentsPage: React.FC = () => {
         payment_status: newStatus,
       }).eq('id', modal.record.id)
       if (error) throw error
+      // Every rupee paid here — partial or final — lands in Cash Book immediately.
+      await postLedgerEntry({
+        paymentId: modal.record.id, vendorName: modal.record.vendor_name,
+        invoiceNo: modal.record.invoice_no, grnNo: modal.record.grn_no,
+        amount: amt, mode: modal.mode, date: modal.paidDate, ref: modal.ref, remarks: modal.remarks,
+      })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
       setModal(null)
     } catch (e: any) {
       setErr(e.message)
@@ -473,17 +547,30 @@ export const PendingPaymentsPage: React.FC = () => {
     }
   }
 
+  const openAddNew = () => {
+    setEditModal('new')
+    setEditForm(blankEditForm())
+    setEditErr('')
+  }
+
   const openEdit = (r: PayRecord) => {
     setEditModal(r)
     setEditForm({
       vendor_name: r.vendor_name ?? '',
+      party_id: r.party_id ?? '',
       invoice_no: r.invoice_no ?? '',
+      po_no: r.po_no ?? '',
       grn_no: r.grn_no ?? '',
+      invoice_date: r.invoice_date ?? today(),
       invoice_amount: r.invoice_amount != null ? String(r.invoice_amount) : '',
       tds_pct: r.tds_pct != null ? String(r.tds_pct) : '',
       tds_amount: r.tds_amount != null ? String(r.tds_amount) : '',
       discount_amount: r.discount_amount != null ? String(r.discount_amount) : '',
       pay_before_date: r.pay_before_date ?? '',
+      payment_status: r.payment_status ?? 'Pending',
+      account_type: r.account_type ?? 'NEFT',
+      utr_no: r.utr_no ?? '',
+      cheque_no: r.cheque_no ?? '',
       category: r.category ?? '',
       remarks: r.remarks ?? '',
     })
@@ -495,6 +582,7 @@ export const PendingPaymentsPage: React.FC = () => {
     if (!editForm.vendor_name.trim()) { setEditErr('Vendor name is required'); return }
     setEditSaving(true); setEditErr('')
     try {
+      const isNew = editModal === 'new'
       const invAmt = parseFloat(editForm.invoice_amount) || 0
       // TDS % and TDS amount stay in sync so every report (TDS Payable, Purchase
       // Payments) that filters/groups by rate still finds bills entered here.
@@ -505,20 +593,52 @@ export const PendingPaymentsPage: React.FC = () => {
       if (pctEntered && !amtEntered) tds = +(invAmt * (tdsPct ?? 0) / 100).toFixed(2)
       else if (amtEntered && !pctEntered && invAmt > 0) tdsPct = +((tds ?? 0) / invAmt * 100).toFixed(2)
       else if (pctEntered && amtEntered) tds = +(invAmt * (tdsPct ?? 0) / 100).toFixed(2) // % wins if both given
-      const { error } = await supabase.from('pending_payments').update({
+      const netPayable = invAmt - (tds ?? 0)
+      const payload = {
         vendor_name: editForm.vendor_name.trim(),
+        party_id: editForm.party_id || null,
         invoice_no: editForm.invoice_no || null,
+        po_no: editForm.po_no || null,
         grn_no: editForm.grn_no || null,
+        invoice_date: editForm.invoice_date || null,
         invoice_amount: invAmt,
         tds_pct: tdsPct,
         tds_amount: tds,
-        net_payable: invAmt - (tds ?? 0),
+        net_payable: netPayable,
         discount_amount: editForm.discount_amount === '' ? null : parseFloat(editForm.discount_amount) || 0,
         pay_before_date: editForm.pay_before_date || null,
+        payment_status: editForm.payment_status,
+        account_type: editForm.account_type || null,
+        utr_no: editForm.utr_no || null,
+        cheque_no: editForm.cheque_no || null,
         category: editForm.category || null,
         remarks: editForm.remarks || null,
-      }).eq('id', editModal.id)
-      if (error) throw error
+      }
+      let savedId: string
+      if (isNew) {
+        const { data, error } = await supabase.from('pending_payments').insert(payload).select('id').single()
+        if (error) throw error
+        savedId = data.id
+      } else {
+        const { error } = await supabase.from('pending_payments').update(payload).eq('id', editModal.id)
+        if (error) throw error
+        savedId = editModal.id
+      }
+      // Keep Cash Book in sync with the status change made here — this is the
+      // ONLY other place (besides the Pay button) that can flip a bill to Paid,
+      // so it must post/reverse the same ledger entry.
+      const oldStatus = isNew ? null : editModal.payment_status
+      const newStatus = editForm.payment_status
+      if (oldStatus !== 'Paid' && newStatus === 'Paid') {
+        const amount = isNew ? netPayable : Math.max(0, getBalance(editModal))
+        await postLedgerEntry({
+          paymentId: savedId, vendorName: payload.vendor_name, invoiceNo: payload.invoice_no, grnNo: payload.grn_no,
+          amount, mode: payload.account_type ?? 'NEFT', date: editForm.pay_before_date || todayStr,
+          ref: payload.utr_no || payload.cheque_no, remarks: payload.remarks,
+        })
+      } else if (oldStatus === 'Paid' && newStatus !== 'Paid') {
+        await clearLedgerEntries(savedId)
+      }
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
@@ -590,9 +710,14 @@ export const PendingPaymentsPage: React.FC = () => {
         subtitle="Vendor bills received (GRN done) — outstanding amounts to pay"
         action={
           tab === 'outstanding' ? (
-            <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700">
-              <Download size={14} /> Export Excel
-            </button>
+            <div className="flex gap-2">
+              <button onClick={openAddNew} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <Plus size={14} /> Add Bill
+              </button>
+              <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700">
+                <Download size={14} /> Export Excel
+              </button>
+            </div>
           ) : null
         }
       />
@@ -826,17 +951,34 @@ export const PendingPaymentsPage: React.FC = () => {
       {editModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-            <h3 className="font-bold text-gray-900 text-lg">Edit Bill</h3>
+            <h3 className="font-bold text-gray-900 text-lg">{editModal === 'new' ? 'Add Bill' : 'Edit Bill'}</h3>
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Vendor</label>
                 <input value={editForm.vendor_name} onChange={e => setEditForm(f => ({ ...f, vendor_name: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Link to Party (optional — for Party Ledger)</label>
+                <Select label="" placeholder="— No party link —" options={partyOptions}
+                  value={editForm.party_id} onChange={e => setEditForm(f => ({ ...f, party_id: e.target.value }))} />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Invoice No</label>
                   <input value={editForm.invoice_no} onChange={e => setEditForm(f => ({ ...f, invoice_no: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Invoice Date</label>
+                  <input type="date" value={editForm.invoice_date} onChange={e => setEditForm(f => ({ ...f, invoice_date: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">PO No</label>
+                  <input value={editForm.po_no} onChange={e => setEditForm(f => ({ ...f, po_no: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
@@ -875,7 +1017,33 @@ export const PendingPaymentsPage: React.FC = () => {
                   <input type="date" value={editForm.pay_before_date} onChange={e => setEditForm(f => ({ ...f, pay_before_date: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Status</label>
+                  <select value={editForm.payment_status} onChange={e => setEditForm(f => ({ ...f, payment_status: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    {['Pending', 'Paid', 'HOLD'].map(v => <option key={v}>{v}</option>)}
+                  </select>
+                </div>
               </div>
+              {editForm.payment_status === 'Paid' && (
+                <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 space-y-3">
+                  <p className="text-xs text-blue-700 font-medium">Marking Paid here posts straight to Cash Book — fill in how it was paid.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 block mb-1">Payment Mode</label>
+                      <select value={editForm.account_type} onChange={e => setEditForm(f => ({ ...f, account_type: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                        {['NEFT', 'RTGS', 'IMPS', 'Cheque', 'Cash', 'UPI'].map(v => <option key={v}>{v}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 block mb-1">UTR / Cheque No</label>
+                      <input value={editForm.utr_no || editForm.cheque_no} onChange={e => setEditForm(f => ({ ...f, utr_no: e.target.value, cheque_no: '' }))}
+                        placeholder="Optional" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Category</label>
                 <input value={editForm.category} onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}
