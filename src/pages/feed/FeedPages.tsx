@@ -119,7 +119,7 @@ export const GRNEntry: React.FC = () => {
   const grns = (allGrns ?? []).filter((g: any) => {
     if (fFarm && g.farm_id !== fFarm) return false
     if (fParties.length > 0 && !fParties.includes(g.party_id)) return false
-    if (fCat && (g.category ?? 'Feed') !== fCat) return false
+    if (fCat && (g.category ?? 'Feed Ingredient') !== fCat) return false
     if (fItem) {
       const name = (g.feed_ingredients?.name ?? g.item_name ?? '').toLowerCase()
       if (!name.includes(fItem.toLowerCase())) return false
@@ -140,7 +140,7 @@ export const GRNEntry: React.FC = () => {
 
   const [form, setForm] = useState({
     grn_no: '', grn_date: today(), farm_id: '', party_id: '', invoice_no: '',
-    invoice_date: today(), category: 'Feed', ingredient_id: '', medicine_id: '',
+    invoice_date: today(), category: 'Feed Ingredient', ingredient_id: '', medicine_id: '',
     flock_id: '',
     item_name: '', qty: '', unit: 'kg',
     bags: '', price_per_unit: '', basic_amount: '', gst_pct: '0', total_amount: '',
@@ -152,7 +152,7 @@ export const GRNEntry: React.FC = () => {
   const gstAmt = basic * (parseFloat(form.gst_pct)||0) / 100
   const total  = basic + gstAmt
 
-  const isFeed = form.category === 'Feed'
+  const isFeed = form.category === 'Feed Ingredient'
   const isMedOrVax = form.category === 'Medicine' || form.category === 'Vaccine'
   const isChick = form.category === 'Chicks'
 
@@ -197,7 +197,7 @@ export const GRNEntry: React.FC = () => {
     setEditing(null)
     setOpenPOs([])
     setForm({ grn_no:'', grn_date:today(), farm_id:'', party_id:'', invoice_no:'',
-      invoice_date:today(), category:'Feed', ingredient_id:'', medicine_id:'',
+      invoice_date:today(), category:'Feed Ingredient', ingredient_id:'', medicine_id:'',
       flock_id:'',
       item_name:'', qty:'', unit:'kg',
       bags:'', price_per_unit:'', basic_amount:'', gst_pct:'0', total_amount:'',
@@ -212,7 +212,7 @@ export const GRNEntry: React.FC = () => {
       grn_no: g.grn_no ?? '', grn_date: g.grn_date ?? today(),
       farm_id: g.farm_id ?? '', party_id: g.party_id ?? '',
       invoice_no: g.invoice_no ?? '', invoice_date: g.invoice_date ?? today(),
-      category: g.category ?? 'Feed',
+      category: g.category ?? 'Feed Ingredient',
       ingredient_id: g.ingredient_id ?? '', medicine_id: g.medicine_id ?? '',
       flock_id: g.flock_id ?? '',
       item_name: g.item_name ?? '',
@@ -292,7 +292,7 @@ export const GRNEntry: React.FC = () => {
   const ingrOptions = ingredients?.map((i: any) => ({ value: i.id, label: i.code ? `${i.code} — ${i.name}` : i.name })) ?? []
   const medOptions  = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.type})` })) ?? []
   const categoryOptions = useConfigOptions('grn_category', [
-    { value: 'Feed',      label: 'Feed / Raw Material' },
+    { value: 'Feed Ingredient', label: 'Feed / Raw Material' },
     { value: 'Chicks',    label: 'Chicks (Day-Old Birds)' },
     { value: 'Medicine',  label: 'Medicine / Oral' },
     { value: 'Vaccine',   label: 'Vaccine' },
@@ -501,7 +501,7 @@ export const GRNEntry: React.FC = () => {
                       g.category === 'Packaging' ? 'bg-orange-100 text-orange-700' :
                       g.category === 'Other' ? 'bg-gray-100 text-gray-600' :
                       'bg-green-100 text-green-700'
-                    }`}>{g.category ?? 'Feed'}</span>
+                    }`}>{g.category ?? 'Feed Ingredient'}</span>
                   </Td>
                   <Td className="text-xs max-w-[120px] truncate">{g.parties?.name ?? '—'}</Td>
                   <Td className="text-xs max-w-[120px] truncate">{g.feed_ingredients?.name ?? g.item_name ?? '—'}</Td>
@@ -937,13 +937,13 @@ export const FeedTransfer: React.FC = () => {
 
 // ── FEED DASHBOARD ────────────────────────────────────────────────
 export const FeedDashboard: React.FC = () => {
-  const { data: grns } = useQuery({ queryKey: ['grns'], queryFn: async () => { const { data } = await supabase.from('grn').select('qty,total_amount,grn_date,feed_ingredients(code)').eq('category','Feed').order('grn_date',{ascending:false}).limit(100); return data ?? [] } })
+  const { data: grns } = useQuery({ queryKey: ['grns'], queryFn: async () => { const { data } = await supabase.from('grn').select('qty,total_amount,grn_date,feed_ingredients(code)').eq('category','Feed Ingredient').order('grn_date',{ascending:false}).limit(100); return data ?? [] } })
   const { data: prods } = useQuery({ queryKey: ['feed_production'], queryFn: async () => { const { data } = await supabase.from('feed_production').select('quantity_kg,production_date,feed_types(code)').order('production_date',{ascending:false}).limit(100); return data ?? [] } })
   const { data: transfers } = useQuery({ queryKey: ['feed_transfers'], queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('quantity_kg,transfer_date').order('transfer_date',{ascending:false}).limit(100); return data ?? [] } })
 
   // Stock alerts: replicate StockPage logic
   const { data: allIngredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit').eq('is_active',true).order('code'); return data ?? [] } })
-  const { data: allGrnQty } = useQuery({ queryKey: ['grn_stock'], queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty').eq('category','Feed'); return data ?? [] } })
+  const { data: allGrnQty } = useQuery({ queryKey: ['grn_stock'], queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty').eq('category','Feed Ingredient'); return data ?? [] } })
   const { data: allProdUsage } = useQuery({ queryKey: ['prod_usage_stock'], queryFn: async () => { const { data } = await supabase.from('feed_production_ingredients').select('ingredient_id,qty_used_kg'); return data ?? [] } })
 
   const LOW_STOCK_THRESHOLD = 500 // kg

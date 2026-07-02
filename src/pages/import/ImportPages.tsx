@@ -842,7 +842,7 @@ export const ImportGRN: React.FC = () => {
         rows.push({
           grn_date: d ?? String(rawDate??'').trim(),
           grn_no: rawGrnNo ? String(rawGrnNo).trim() : `GRN-${d}`,
-          category: (() => { const c = String(get(row,'category',-1)??'').trim(); return ['Feed','Medicine','Vaccine','Packaging','Other'].includes(c) ? c : 'Feed' })(),
+          category: (() => { const c = String(get(row,'category',-1)??'').trim(); return ['Feed Ingredient','Medicine','Vaccine','Packaging','Other'].includes(c) ? c : 'Feed Ingredient' })(),
           farm_name: get(row, 'farm_name', 2) ? String(get(row,'farm_name',2)).trim() : null,
           party_name: get(row, 'party_name', 3) ? String(get(row,'party_name',3)).trim() : null,
           item_name: get(row, 'item_name', 4) ? String(get(row,'item_name',4)).trim() : null,

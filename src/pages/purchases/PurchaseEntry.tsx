@@ -142,6 +142,7 @@ export const PurchaseEntry: React.FC = () => {
         const { error } = await supabase.from('grn').insert({
           grn_no: feedGrnNo,
           grn_date: form.purchase_date,
+          category: 'Feed Ingredient',
           farm_id: form.farm_id || null,
           party_id: form.supplier_id || null,
           ingredient_id: form.item_id || null,

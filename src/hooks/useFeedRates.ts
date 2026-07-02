@@ -26,7 +26,7 @@ export function useFeedRates(): FeedRates {
       const { data: grn } = await supabase
         .from('grn')
         .select('item_name,price_per_unit,qty,other_charges,grn_date,feed_ingredients(name)')
-        .eq('category', 'Feed')
+        .eq('category', 'Feed Ingredient')
         .order('grn_date', { ascending: false })
       const rateByIng: Record<string, number> = {}
       for (const g of (grn ?? [])) {

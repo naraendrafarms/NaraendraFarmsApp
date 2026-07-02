@@ -306,7 +306,7 @@ const POTab: React.FC = () => {
       // Auto-create GRN from PO receipt (eliminates double entry)
       if (receiptPO.item_name && receiptForm.qty_received) {
         const catMap: Record<string,string> = {
-          'Feed Raw Material': 'Feed', 'Medicine': 'Medicine',
+          'Feed Raw Material': 'Feed Ingredient', 'Medicine': 'Medicine',
           'Oral Medicine': 'Medicine', 'Feed Medicine': 'Medicine',
           'Vaccine': 'Vaccine', 'Larvender': 'Other',
           'Feedmill Transport': 'Other', 'Other': 'Other',
@@ -320,7 +320,7 @@ const POTab: React.FC = () => {
 
         // Look up ingredient_id or medicine_id
         let ingredient_id = null, medicine_id = null
-        if (grnCat === 'Feed') {
+        if (grnCat === 'Feed Ingredient') {
           const { data: ir } = await supabase.from('feed_ingredients')
             .select('id').ilike('name', receiptPO.item_name.trim()).limit(1)
           ingredient_id = ir?.[0]?.id ?? null
