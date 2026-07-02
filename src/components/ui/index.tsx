@@ -371,18 +371,50 @@ interface ModalProps {
 const modalSizes = { sm:'max-w-sm', md:'max-w-md', lg:'max-w-lg', xl:'max-w-xl', '2xl':'max-w-2xl' }
 
 export const Modal: React.FC<ModalProps> = ({ open, onClose, title, children, size='md', footer }) => {
+  const bodyRef = React.useRef<HTMLDivElement>(null)
   if (!open) return null
+
+  // Print ONLY this modal's content, in an isolated hidden iframe — printing
+  // the live page directly (window.print()) bled the page behind the modal
+  // into the output once the modal's own fixed positioning was relaxed for
+  // print. This never touches the main document, so nothing else can leak in.
+  const printModal = () => {
+    const content = bodyRef.current
+    if (!content) return
+    const iframe = document.createElement('iframe')
+    Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0' })
+    document.body.appendChild(iframe)
+    const doc = iframe.contentDocument
+    if (!doc) { document.body.removeChild(iframe); return }
+    const styles = Array.from(document.styleSheets).map(ss => {
+      try { return `<style>${Array.from(ss.cssRules).map(r => r.cssText).join('\n')}</style>` }
+      catch { return ss.href ? `<link rel="stylesheet" href="${ss.href}">` : '' }
+    }).join('\n')
+    doc.open()
+    doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8">${styles}<style>
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      body { padding: 16px; font-family: inherit; }
+      h1 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+    </style></head><body><h1>${title ?? ''}</h1>${content.innerHTML}</body></html>`)
+    doc.close()
+    iframe.onload = () => {
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+      setTimeout(() => document.body.removeChild(iframe), 1000)
+    }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:static print:block print:p-0" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm no-print" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
       <div
-        className={`relative bg-white rounded-2xl shadow-2xl w-full ${modalSizes[size]} max-h-[90vh] flex flex-col print:static print:max-h-none print:w-full print:max-w-none print:shadow-none print:rounded-none`}
+        className={`relative bg-white rounded-2xl shadow-2xl w-full ${modalSizes[size]} max-h-[90vh] flex flex-col`}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-          <div className="flex items-center gap-1 no-print">
-            <button onClick={() => window.print()} title="Print / Save as PDF" className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+          <div className="flex items-center gap-1">
+            <button onClick={printModal} title="Print / Save as PDF" className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
               <Printer size={16} className="text-gray-400" />
             </button>
             <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
@@ -390,9 +422,9 @@ export const Modal: React.FC<ModalProps> = ({ open, onClose, title, children, si
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-6 py-4 print:overflow-visible">{children}</div>
+        <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
         {footer && (
-          <div className="px-6 py-4 border-t border-gray-100 flex gap-2 justify-end no-print">{footer}</div>
+          <div className="px-6 py-4 border-t border-gray-100 flex gap-2 justify-end">{footer}</div>
         )}
       </div>
     </div>
