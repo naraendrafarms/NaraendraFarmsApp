@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast'
 import { useAuth, can } from '@/lib/auth'
 import type { Role } from '@/lib/auth'
 import { AppLayout } from '@/components/layout/AppLayout'
+import { ChatPage } from '@/pages/chat/ChatPage'
 import { Login }  from '@/pages/auth/Login'
 import { Dashboard } from '@/pages/dashboard/Dashboard'
 import { FlockList } from '@/pages/flocks/FlockList'
@@ -232,6 +233,7 @@ export const App: React.FC = () => {
             <Route path="import/grn" element={<ImportGRN />} />
             <Route path="import/mapper" element={<ExcelMapperPage />} />
             <Route path="help" element={<HelpGuidePage />} />
+            <Route path="chat" element={<ChatPage />} />
             <Route path="admin/users" element={<RequireRole check={can.manageUsers}><UserManagement /></RequireRole>} />
             <Route path="admin/audit" element={<RequireRole check={can.manageUsers}><AuditLogPage /></RequireRole>} />
             <Route path="admin" element={<RequireRole check={can.manageUsers}><AdminCentre /></RequireRole>} />

@@ -3,7 +3,7 @@ import { Link, useLocation, Outlet, Navigate, useSearchParams, useNavigate } fro
 import {
   LayoutDashboard, Bird, Factory, Zap, Users, Settings,
   ChevronDown, ChevronRight, LogOut, Menu, X,
-  BarChart2, Database, Shield, ShoppingCart, BookOpen, Search
+  BarChart2, Database, Shield, ShoppingCart, BookOpen, Search, MessageCircle
 } from 'lucide-react'
 import { useAuth, can, type Role } from '@/lib/auth'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -156,6 +156,10 @@ const NAV: NavItem[] = [
       { label: 'Import GRN',           to: '/import/grn' },
       { label: '✦ Excel Converter',    to: '/import/mapper' },
     ]
+  },
+  {
+    label: 'Discussions', icon: <MessageCircle size={18}/>,
+    to: '/chat',
   },
   {
     label: 'Help & Guide', icon: <BookOpen size={18}/>,
