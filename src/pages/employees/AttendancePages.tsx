@@ -130,6 +130,7 @@ export const DailyAttendancePage: React.FC = () => {
 
   const saveAll = async () => {
     if (!employees?.length) return
+    if (date > todayStr()) { toast.error("Can't save attendance for a future date"); return }
     setSaving(true)
     try {
       const rows = employees.map((e: any) => ({
@@ -144,6 +145,8 @@ export const DailyAttendancePage: React.FC = () => {
       toast.success(`Attendance saved for ${rows.length} employees`)
       qc.invalidateQueries({ queryKey: ['attendance_day'] })
       qc.invalidateQueries({ queryKey: ['attendance_month'] })
+      qc.invalidateQueries({ queryKey: ['monthly_att_grid'] })
+      qc.invalidateQueries({ queryKey: ['bulk_daily_att'] })
     } catch (e: any) {
       toast.error(e.message)
     }
@@ -164,6 +167,8 @@ export const DailyAttendancePage: React.FC = () => {
       setSel(new Set()); setBulkConfirm(false)
       qc.invalidateQueries({ queryKey: ['attendance_day'] })
       qc.invalidateQueries({ queryKey: ['attendance_month'] })
+      qc.invalidateQueries({ queryKey: ['monthly_att_grid'] })
+      qc.invalidateQueries({ queryKey: ['bulk_daily_att'] })
     },
     onError: (e: any) => toast.error(e.message)
   })
@@ -395,6 +400,8 @@ export const MonthAttendancePage: React.FC = () => {
       setSel(new Set()); setBulkConfirm(false)
       qc.invalidateQueries({ queryKey: ['attendance_month'] })
       qc.invalidateQueries({ queryKey: ['attendance_day'] })
+      qc.invalidateQueries({ queryKey: ['monthly_att_grid'] })
+      qc.invalidateQueries({ queryKey: ['bulk_daily_att'] })
     },
     onError: (e: any) => toast.error(e.message)
   })
@@ -822,6 +829,11 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
   const totalDays = new Date(yr, mn, 0).getDate()
   const monthDate = `${month}-01`
   const days = Array.from({ length: totalDays }, (_, i) => i + 1)
+  // Future days (later than today) must never default to Present — that made
+  // an unstarted month look "fully marked P" and would write fabricated
+  // attendance for days that haven't happened yet.
+  const todayDateStr = todayStr()
+  const isFutureDay = (d: number) => `${month}-${String(d).padStart(2, '0')}` > todayDateStr
 
   // Day-of-week labels for header
   const dayLabels = days.map(d => {
@@ -889,6 +901,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
   React.useEffect(() => { setLoaded('') }, [month, farmId])
 
   const toggleCell = (empId: string, day: number) => {
+    if (isFutureDay(day)) return
     const key = `${empId}_${day}`
     const cur = grid[key] ?? 'P'
     const next = STATUS_CYCLE[cur] ?? 'P'
@@ -908,6 +921,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       const rows: any[] = []
       for (const emp of employees as any[]) {
         for (const d of days) {
+          if (isFutureDay(d)) continue  // never fabricate attendance for days that haven't happened
           const key = `${emp.id}_${d}`
           const status = grid[key] ?? 'P'
           const dateStr = `${month}-${String(d).padStart(2,'0')}`
@@ -929,16 +943,17 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       }
 
       // Auto-update salary_monthly absent days for each employee
+      const pastDays = days.filter(d => !isFutureDay(d))
       const salaryRows = (employees as any[]).map(emp => {
         const absentDays = computeAbsentDays(emp.id, totalDays, grid)
-        const presentDays = days.filter(d => {
+        const presentDays = pastDays.filter(d => {
           const s = grid[`${emp.id}_${d}`] ?? 'P'
           return s === 'P' || s === 'OT'
         }).length
-        const halfDays = days.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'H').length
-        const woDays   = days.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'WO').length
-        const otDays   = days.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'OT').length
-        const totalOtHrs = days.reduce((s, d) => s + (parseFloat(otHours[`${emp.id}_${d}`] ?? '0') || 0), 0)
+        const halfDays = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'H').length
+        const woDays   = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'WO').length
+        const otDays   = pastDays.filter(d => (grid[`${emp.id}_${d}`] ?? 'P') === 'OT').length
+        const totalOtHrs = pastDays.reduce((s, d) => s + (parseFloat(otHours[`${emp.id}_${d}`] ?? '0') || 0), 0)
         return {
           employee_id: emp.id,
           month: monthDate,
@@ -979,6 +994,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     for (const emp of employees as any[]) {
       const counts: Record<string, number> = { P: 0, A: 0, H: 0, WO: 0, OT: 0, ot_hrs: 0 }
       for (const d of days) {
+        if (isFutureDay(d)) continue
         const key = `${emp.id}_${d}`
         const s = grid[key] ?? 'P'
         counts[s] = (counts[s] ?? 0) + 1
@@ -987,7 +1003,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       out[emp.id] = counts
     }
     return out
-  }, [grid, otHours, employees, days])
+  }, [grid, otHours, employees, days, todayDateStr])
 
   const monthLabel = `${MONTH_NAMES_FULL[mn - 1]} ${yr}`
 
@@ -1063,16 +1079,18 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
                     </td>
                     {dayLabels.map(({ d, isSun }) => {
                       const key = `${emp.id}_${d}`
-                      const status = grid[key] ?? 'P'
+                      const future = isFutureDay(d)
+                      const status = future ? '' : (grid[key] ?? 'P')
                       const isOT = status === 'OT'
                       return (
                         <td key={d} className={`border-b border-r border-gray-100 p-0 text-center ${isSun ? 'bg-red-50/30' : ''}`}>
                           <button
                             onClick={() => toggleCell(emp.id, d)}
-                            className={`w-full h-full min-h-[36px] flex flex-col items-center justify-center gap-0.5 font-bold transition-colors ${CELL_COLORS[status]}`}
-                            title={STATUS_LABELS[status]}
+                            disabled={future}
+                            title={future ? 'Future date — not yet marked' : STATUS_LABELS[status]}
+                            className={`w-full h-full min-h-[36px] flex flex-col items-center justify-center gap-0.5 font-bold transition-colors ${future ? 'bg-gray-50 text-gray-300 cursor-not-allowed' : CELL_COLORS[status]}`}
                           >
-                            <span>{STATUS_SHORT[status]}</span>
+                            <span>{future ? '—' : STATUS_SHORT[status]}</span>
                           </button>
                           {isOT && (
                             <input

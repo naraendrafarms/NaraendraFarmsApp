@@ -3001,6 +3001,17 @@ export const PayslipGeneratorPage: React.FC = () => {
       {/* ── SAVED PAYSLIPS TAB ── */}
       {tab === 'saved' && (
         <div className="space-y-3">
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
+              'saved_payslips.csv',
+              ['Employee','Emp ID','Designation','Month','Gross','Deductions','Net Salary','Generated On'],
+              (savedPayslips??[]).map((r:any) => [
+                r.emp_name || '', r.emp_id_manual || '', r.emp_designation || '', monthLabel(r.month),
+                r.gross_earnings ?? 0, r.total_deductions ?? 0, r.net_salary ?? 0,
+                r.generated_at ? fmtDate(r.generated_at) : '',
+              ])
+            )}>Export Excel</Button>
+          </div>
           {selIds.size > 0 && (
             <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
               <span className="text-sm font-medium text-red-700">{selIds.size} selected</span>

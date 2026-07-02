@@ -80,9 +80,21 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
 
   return (
     <Card padding={false} className="lg:col-span-3">
-      <div className="px-4 py-3 border-b border-gray-100">
-        <p className="font-semibold text-gray-800">Remittance Tracker — {month}</p>
-        <p className="text-xs text-gray-400">Amount due is computed live from the source data below. Mark each as remitted once you've actually deposited it with the government — this is separate from whether the underlying vendor bill / customer sale / salary itself has been paid.</p>
+      <div className="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-gray-800">Remittance Tracker — {month}</p>
+          <p className="text-xs text-gray-400">Amount due is computed live from the source data below. Mark each as remitted once you've actually deposited it with the government — this is separate from whether the underlying vendor bill / customer sale / salary itself has been paid.</p>
+        </div>
+        <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={() => downloadFile(
+          `statutory_liabilities_${month}.csv`,
+          csv([
+            ['Liability', 'Amount Due', 'Due', 'Status', 'Challan/Ref No.', 'Remitted On'],
+            ...(Object.keys(LIABILITY_LABELS) as LiabilityType[]).map(t => {
+              const meta = LIABILITY_LABELS[t]; const rec = byType(t); const amt = amounts[t] ?? 0
+              return [meta.label, amt, meta.dueDay, amt <= 0 ? 'Nil' : (rec?.status === 'Paid' ? 'Remitted' : 'Pending'), rec?.challan_no ?? '', rec?.paid_date ?? '']
+            }),
+          ]), 'text/csv'
+        )}>Export CSV</Button>
       </div>
       <Table>
         <thead><tr><Th>Liability</Th><Th right>Amount Due</Th><Th>Due</Th><Th>Status</Th><Th>Challan / Ref No.</Th><Th>Remitted On</Th><Th></Th></tr></thead>

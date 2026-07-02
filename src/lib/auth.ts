@@ -85,6 +85,17 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ loading: false })
 
     supabase.auth.onAuthStateChange(async (event, session) => {
+      // Supabase silently refreshes the JWT whenever the tab regains focus
+      // (e.g. Alt+Tab back to the browser) — that fires TOKEN_REFRESHED, not a
+      // real sign-in. Treating it like a full login re-fetched the profile and
+      // replaced global state on every focus, cascading into a full re-render
+      // of every page (looked like the app was "auto refreshing"). Only do the
+      // full reload on an actual sign-in/out; just keep the session current
+      // otherwise.
+      if (event === 'TOKEN_REFRESHED') {
+        set({ session })
+        return
+      }
       set({ user: session?.user ?? null, session })
       if (session?.user) await get().loadProfile(session.user.id)
       else set({ profile: null })
