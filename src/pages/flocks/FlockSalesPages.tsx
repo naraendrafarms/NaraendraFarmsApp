@@ -359,12 +359,28 @@ export const HEDispatch: React.FC = () => {
     }
   })
 
+  // Weekly Association rate register — auto-suggests the line rate from the
+  // production date's Sun-Sat week, if the line's rate hasn't been typed yet.
+  const { data: rateRegister = [] } = useQuery({
+    queryKey: ['he_rate_register_lookup'],
+    queryFn: async () => { const { data } = await supabase.from('he_rate_register').select('week_start,week_end,rate'); return data ?? [] }
+  })
+  const suggestedRate = (date: string) => rateRegister.find((r: any) => date >= r.week_start && date <= r.week_end)?.rate ?? null
+
   // Dispatch lines: one row per production date with grade split
   type DispLine = { prod_date: string; grade_a: string; grade_b: string; grade_c: string; rate: string }
   const emptyLine = (): DispLine => ({ prod_date: today(), grade_a: '', grade_b: '', grade_c: '', rate: '' })
   const [lines, setLines] = useState<DispLine[]>([emptyLine()])
   const setLine = (i: number, k: keyof DispLine, v: string) =>
-    setLines(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l))
+    setLines(ls => ls.map((l, idx) => {
+      if (idx !== i) return l
+      const next = { ...l, [k]: v }
+      if (k === 'prod_date' && !l.rate) {
+        const sugg = suggestedRate(v)
+        if (sugg != null) next.rate = String(sugg)
+      }
+      return next
+    }))
   const addLine = () => setLines(ls => [...ls, emptyLine()])
   const removeLine = (i: number) => setLines(ls => ls.filter((_, idx) => idx !== i))
 

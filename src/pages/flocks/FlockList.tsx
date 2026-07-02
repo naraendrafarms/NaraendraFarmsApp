@@ -31,7 +31,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
     placement_date: '', paid_female: '', paid_male: '',
     free_female: '0', free_male: '0', chick_rate: '',
     laying_start_date: '', supplier: 'Venkateshwara Hatcheries', remarks: '',
-    chick_invoice_no: '', chick_invoice_date: '',
+    chick_invoice_no: '', chick_invoice_date: '', laying_season: '',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -64,6 +64,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
         free_male:        parseInt(form.free_male) || 0,
         chick_rate:       parseFloat(form.chick_rate) || 320,
         laying_start_date: form.laying_start_date || null,
+        laying_season:    form.laying_season || null,
         supplier:         form.supplier,
         remarks:          form.remarks,
         chick_invoice_no:   form.chick_invoice_no || null,
@@ -166,6 +167,11 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
         <Input label="Supplier / Hatchery"
           value={form.supplier} onChange={e => set('supplier', e.target.value)} />
       </FormRow>
+      <FormRow>
+        <Select label="Laying Season" placeholder="— Not set —"
+          value={(form as any).laying_season ?? ''} onChange={e => set('laying_season' as any, e.target.value)}
+          options={[{ value: 'Summer', label: 'Summer Laying' }, { value: 'Winter', label: 'Winter Laying' }]} />
+      </FormRow>
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button loading={mut.isPending} onClick={() => mut.mutate()}>Save Flock</Button>
@@ -192,7 +198,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
   const [form, setForm] = useState({
     flock_no: '', breed: 'VENCO-430', rearing_farm_id: '', laying_farm_id: '',
     status: 'rearing', placement_date: '', laying_start_date: '',
-    chick_rate: '320', supplier: '', remarks: '',
+    chick_rate: '320', supplier: '', remarks: '', laying_season: '',
   })
 
   // populate form once flock loads
@@ -208,6 +214,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
       chick_rate: flock.chick_rate?.toString() ?? '',
       supplier: flock.supplier ?? '',
       remarks: flock.remarks ?? '',
+      laying_season: flock.laying_season ?? '',
     })
   }, [flock])
   const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
@@ -226,6 +233,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
         chick_rate: parseFloat(form.chick_rate) || null,
         supplier: form.supplier || null,
         remarks: form.remarks || null,
+        laying_season: form.laying_season || null,
       }).eq('id', flockId)
       if (error) throw error
     },
@@ -262,6 +270,10 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
       </FormRow>
       <FormRow>
         <Input label="Supplier" value={form.supplier} onChange={e=>s('supplier',e.target.value)}/>
+        <Select label="Laying Season" placeholder="— Not set —" value={form.laying_season} onChange={e=>s('laying_season',e.target.value)}
+          options={[{ value: 'Summer', label: 'Summer Laying' }, { value: 'Winter', label: 'Winter Laying' }]} />
+      </FormRow>
+      <FormRow>
         <Input label="Remarks" value={form.remarks} onChange={e=>s('remarks',e.target.value)}/>
       </FormRow>
       <div className="flex justify-end gap-2 pt-2">

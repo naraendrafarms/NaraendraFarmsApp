@@ -7,6 +7,7 @@ import type { Role } from '@/lib/auth'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { ChatPage } from '@/pages/chat/ChatPage'
 import { GeneratorsPage } from '@/pages/generators/GeneratorPages'
+import { HERateRegisterPage } from '@/pages/flocks/HERateRegisterPage'
 import { BagsPage } from '@/pages/inventory/BagsPage'
 import { Login }  from '@/pages/auth/Login'
 import { Dashboard } from '@/pages/dashboard/Dashboard'
@@ -237,6 +238,7 @@ export const App: React.FC = () => {
             <Route path="help" element={<HelpGuidePage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="generators" element={<GeneratorsPage />} />
+            <Route path="flocks/he-rate-register" element={<HERateRegisterPage />} />
             <Route path="bags" element={<BagsPage />} />
             <Route path="admin/users" element={<RequireRole check={can.manageUsers}><UserManagement /></RequireRole>} />
             <Route path="admin/audit" element={<RequireRole check={can.manageUsers}><AuditLogPage /></RequireRole>} />

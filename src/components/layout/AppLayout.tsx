@@ -37,6 +37,7 @@ const NAV: NavItem[] = [
       { label: 'Medicine Entry',     to: '/flocks/medicine' },
       { label: 'Egg Opening Stock',  to: '/flocks/opening-stock' },
       { label: 'Vaccination',        to: '/flocks/vaccination' },
+      { label: 'HE Rate Register',   to: '/flocks/he-rate-register' },
     ]
   },
   {
