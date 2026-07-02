@@ -11,9 +11,10 @@ import { Download } from 'lucide-react'
 
 const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtDate = (d: string) => d ? d.split('-').reverse().join('/') : '—'
-// .toFixed(2) rounds half-to-even / has float precision quirks (e.g. 2.005
-// can come out as 2.00) — round half-up (>=.5 rounds up) explicitly instead.
-const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+// TDS amount rounds to the nearest whole rupee, >=.5 rounds up (not 2
+// decimals — .toFixed(2) also has float precision quirks, e.g. 2.005 can
+// come out as 2.00, so round explicitly rather than relying on it).
+const roundTds = (n: number) => Math.round(n + Number.EPSILON)
 
 // ── Single shared ledger sync — every page/action that marks a vendor bill
 // Paid/Unpaid goes through these two functions, so Cash Book always reflects
@@ -604,9 +605,9 @@ export const PendingPaymentsPage: React.FC = () => {
       const amtEntered = editForm.tds_amount !== ''
       let tdsPct: number | null = pctEntered ? parseFloat(editForm.tds_pct) || 0 : null
       let tds: number | null = amtEntered ? parseFloat(editForm.tds_amount) || 0 : null
-      if (pctEntered && !amtEntered) tds = round2(invAmt * (tdsPct ?? 0) / 100)
-      else if (amtEntered && !pctEntered && invAmt > 0) tdsPct = round2((tds ?? 0) / invAmt * 100)
-      else if (pctEntered && amtEntered) tds = round2(invAmt * (tdsPct ?? 0) / 100) // % wins if both given
+      if (pctEntered && !amtEntered) tds = roundTds(invAmt * (tdsPct ?? 0) / 100)
+      else if (amtEntered && !pctEntered && invAmt > 0) tdsPct = Math.round((tds ?? 0) / invAmt * 10000) / 100
+      else if (pctEntered && amtEntered) tds = roundTds(invAmt * (tdsPct ?? 0) / 100) // % wins if both given
       const netPayable = invAmt - (tds ?? 0)
       const payload = {
         vendor_name: editForm.vendor_name.trim(),
@@ -1031,7 +1032,7 @@ export const PendingPaymentsPage: React.FC = () => {
                     onChange={e => {
                       const pct = e.target.value === 'custom' ? '' : e.target.value
                       const invAmt = parseFloat(editForm.invoice_amount) || 0
-                      const autoAmt = pct !== '' ? String(round2(invAmt * (parseFloat(pct) || 0) / 100)) : ''
+                      const autoAmt = pct !== '' ? String(roundTds(invAmt * (parseFloat(pct) || 0) / 100)) : ''
                       setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: autoAmt }))
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
@@ -1043,7 +1044,7 @@ export const PendingPaymentsPage: React.FC = () => {
                       onChange={e => {
                         const pct = e.target.value
                         const invAmt = parseFloat(editForm.invoice_amount) || 0
-                        const autoAmt = pct !== '' ? String(round2(invAmt * (parseFloat(pct) || 0) / 100)) : ''
+                        const autoAmt = pct !== '' ? String(roundTds(invAmt * (parseFloat(pct) || 0) / 100)) : ''
                         setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: autoAmt }))
                       }}
                       placeholder="e.g. 3.75" className="w-full mt-1.5 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
