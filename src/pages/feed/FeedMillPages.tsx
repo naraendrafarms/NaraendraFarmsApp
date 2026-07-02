@@ -901,7 +901,7 @@ const ProductionTab: React.FC = () => {
                   </tbody>
                 </Table>
               </div>
-              <p className="text-xs text-gray-400">Rates are the GRN purchase price prevailing on the production date ({fmtDate(detail.production_date)}) — the latest purchase on or before that date. Cost/kg of this batch = total cost ÷ total kg.</p>
+              <p className="text-xs text-gray-400 no-print">Rates are the GRN purchase price prevailing on the production date ({fmtDate(detail.production_date)}) — the latest purchase on or before that date. Cost/kg of this batch = total cost ÷ total kg.</p>
             </div>
           )
         })()}
