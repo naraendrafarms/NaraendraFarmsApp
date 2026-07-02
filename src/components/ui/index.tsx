@@ -1,5 +1,5 @@
 import React from 'react'
-import { Loader2, X, ChevronDown } from 'lucide-react'
+import { Loader2, X, ChevronDown, Printer } from 'lucide-react'
 
 // ── BUTTON ──────────────────────────────────────────────────
 type BtnVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'outline'
@@ -373,21 +373,26 @@ const modalSizes = { sm:'max-w-sm', md:'max-w-md', lg:'max-w-lg', xl:'max-w-xl',
 export const Modal: React.FC<ModalProps> = ({ open, onClose, title, children, size='md', footer }) => {
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:static print:block print:p-0" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm no-print" />
       <div
-        className={`relative bg-white rounded-2xl shadow-2xl w-full ${modalSizes[size]} max-h-[90vh] flex flex-col`}
+        className={`relative bg-white rounded-2xl shadow-2xl w-full ${modalSizes[size]} max-h-[90vh] flex flex-col print:static print:max-h-none print:w-full print:max-w-none print:shadow-none print:rounded-none`}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
-            <X size={16} className="text-gray-400" />
-          </button>
+          <div className="flex items-center gap-1 no-print">
+            <button onClick={() => window.print()} title="Print / Save as PDF" className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+              <Printer size={16} className="text-gray-400" />
+            </button>
+            <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+              <X size={16} className="text-gray-400" />
+            </button>
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-6 py-4 print:overflow-visible">{children}</div>
         {footer && (
-          <div className="px-6 py-4 border-t border-gray-100 flex gap-2 justify-end">{footer}</div>
+          <div className="px-6 py-4 border-t border-gray-100 flex gap-2 justify-end no-print">{footer}</div>
         )}
       </div>
     </div>
