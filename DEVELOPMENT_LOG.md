@@ -295,6 +295,47 @@ apply.
 
 ---
 
+## 2026-07-03 — GRN saves crashed with "violates foreign key constraint grn_ingredient_id_fkey"
+
+**Symptom:** Saving a GRN (via GRN Page, or Purchase Entry's Feed category)
+threw `insert or update on table "grn" violates foreign key constraint
+"grn_ingredient_id_fkey"`.
+
+**Root cause:** `grn.ingredient_id` is a legacy column/FK to
+`feed_ingredients(id)`, left over from before migration 151 unified
+`feed_ingredients` + `medicines_master` + `general_items` into one `items`
+table with `grn.item_id` as the correct, current reference. Migration 151
+preserved UUIDs for items that existed at the time, so old feed ingredients
+still satisfy the legacy FK — but **any item added via Masters after that
+migration only exists in `items`, never in `feed_ingredients`**, so writing
+`ingredient_id` for it always violates the FK. `GRNPage.tsx` and its Excel
+import path were still writing `ingredient_id: form.item_id`
+(and `PurchaseEntry.tsx`'s Feed-category insert was writing
+`ingredient_id` but never `item_id` at all — a second, silent bug, since
+that column is nullable there was no crash, just a blank item_id).
+
+**Fix:** Removed the `ingredient_id` writes from `GRNPage.tsx` (both the
+manual save and the Excel import mapper) — `item_id` already carries the
+reference and is the one every other part of the app should read.
+`PurchaseEntry.tsx` now writes `item_id` instead of the legacy
+`ingredient_id`. Also fixed `FeedMillPages.tsx`'s Stock tab, which joined
+`grn.ingredient_id → feed_ingredients(name,code)` and silently showed
+"Unknown" for any item not in `feed_ingredients` — switched to
+`item_id → items(name,code)` with `item_name` as a further fallback.
+
+**Lesson:** When a table gets "unified" into a new master (migration 151),
+**grep for every write site of the OLD column across the whole frontend**
+and either migrate them to the new column or drop the old column/FK
+entirely — leaving a legacy FK column that only some rows can satisfy is
+a landmine that silently works for old data and crashes for anything new.
+A `NOT NULL`-safe join (like `feed_ingredients(name,code)`) degrades
+quietly to "Unknown"; an actual `INSERT`/`UPDATE` against a FK'd column
+does not — the same stale-column mistake shows up as a silent display bug
+in one place and a hard crash in another, depending on whether it's read
+or written.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
