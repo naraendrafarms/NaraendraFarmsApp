@@ -517,10 +517,49 @@ export const PartiesMaster: React.FC = () => {
 
   const mergeMut = useMutation({
     mutationFn: async ({ keepId, dropIds }: { keepId: string; dropIds: string[] }) => {
+      const { data: keepParty } = await supabase.from('parties').select('name').eq('id', keepId).single()
+      const keepName = keepParty?.name
       for (const oldId of dropIds) {
+        const { data: oldParty } = await supabase.from('parties').select('name').eq('id', oldId).single()
+        const oldName = oldParty?.name
+
         await supabase.from('grn').update({ party_id: keepId }).eq('party_id', oldId)
         await supabase.from('he_dispatch').update({ party_id: keepId }).eq('party_id', oldId)
         await supabase.from('nhe_sales').update({ party_id: keepId }).eq('party_id', oldId)
+
+        // pending_payments.vendor_name is a denormalized TEXT column, not
+        // FK-driven — the grn.party_id update above re-triggers
+        // fn_grn_to_payment, which upserts under keepName, but any row still
+        // holding oldName is left as an orphaned duplicate for the same
+        // grn_no (this caused "duplicate key value violates unique
+        // constraint pending_payments_unique" when later hand-edited).
+        // Reconcile explicitly: for each stale oldName row, either merge it
+        // into the matching keepName row (same grn_no) or rename it in place.
+        if (keepName && oldName && keepName !== oldName) {
+          const { data: staleRows } = await supabase.from('pending_payments')
+            .select('*').eq('vendor_name', oldName)
+          for (const row of (staleRows ?? [])) {
+            const { data: existing } = await supabase.from('pending_payments')
+              .select('*').eq('vendor_name', keepName).eq('grn_no', row.grn_no).maybeSingle()
+            if (existing) {
+              // A row already exists under the merged name for this GRN
+              // (created by the trigger). Carry over payment history if the
+              // stale row was already paid and the kept row isn't, then
+              // drop the stale duplicate.
+              if (row.payment_status === 'Paid' && existing.payment_status !== 'Paid') {
+                await supabase.from('pending_payments').update({
+                  payment_status: 'Paid', paid_date: row.paid_date, account_type: row.account_type,
+                  utr_no: row.utr_no, cheque_no: row.cheque_no, transaction_ref: row.transaction_ref,
+                }).eq('id', existing.id)
+              }
+              await supabase.from('pending_payments').delete().eq('id', row.id)
+            } else {
+              // No conflicting row — just rename this one in place.
+              await supabase.from('pending_payments').update({ vendor_name: keepName, party_id: keepId }).eq('id', row.id)
+            }
+          }
+        }
+
         const { error } = await supabase.from('parties').delete().eq('id', oldId)
         if (error) throw error
       }
@@ -528,6 +567,7 @@ export const PartiesMaster: React.FC = () => {
     onSuccess: () => {
       toast.success('Merged successfully — all linked records updated')
       qc.invalidateQueries({ queryKey: ['parties'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
       setSel(new Set()); setMergeOpen(false)
     },
     onError: (e: any) => toast.error(e.message)
