@@ -443,6 +443,47 @@ same migration — never assume the column already accepts it.
 
 ---
 
+## 2026-07-03 — NHE/HE sale receipts: NEFT/RTGS/Advance blocked from saving, bank entries duplicated on re-save
+
+**Found via:** a proactive whole-app code review (Fable 5 model) hunting
+for the same "dropdown vs database" mismatch pattern just fixed for Cash
+Book — not a user bug report this time, caught before it was hit.
+
+**Symptom (would have been):** picking NEFT, RTGS, or Advance as the
+payment mode in the Receive Payment modal (Flock Sales / HE Dispatch)
+would fail to save; separately, re-editing a sale/dispatch that had
+already received an online payment would create a second bank ledger
+credit for the same money every time it was saved again.
+
+**Root cause (two issues):**
+1. `nhe_sales`/`he_dispatch` had a CHECK constraint from migration 076
+   only allowing `Cash/Bank Transfer/Cheque/UPI` — but the Receive
+   Payment modal's dropdown also offers NEFT/RTGS/Advance. Confirmed via
+   diagnostic (migration 337) that the constraint is genuinely live, and
+   existing data only ever has Cash/Bank Transfer/null — proving nobody
+   has ever successfully saved NEFT/RTGS/Advance.
+2. `bank_transactions` never got `nhe_sale_id`/`he_dispatch_id` link
+   columns (only `cash_book` did, migration 082) — so there was no way
+   to find and delete a sale's previous bank credit before re-inserting
+   on edit, unlike the cash_book branch right next to it in the same
+   function, which already did this correctly.
+
+**Fix:** Migration 338 widened both CHECK constraints to
+`Cash/NEFT/RTGS/Bank Transfer/UPI/Cheque/Advance`, and added the missing
+`nhe_sale_id`/`he_dispatch_id` columns to `bank_transactions`. Updated
+`FlockSalesPages.tsx` (both the quick Receive Payment modal and the main
+NHE sale edit flow) to delete-by-source-id before inserting into
+`bank_transactions`, mirroring the cash_book pattern already present in
+the same functions.
+
+**Lesson:** When one payment-mode bug is found and fixed in one place
+(cash_book), check every OTHER table that stores a payment mode the same
+way — this exact bug existed in a second, unrelated pair of tables the
+whole time. A proactive pattern-based review (even a lightweight one)
+catches these before a user does.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
