@@ -58,7 +58,7 @@ const NHE_LABEL: Record<string, string> = {
 export const FlockDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'|'transfers'|'placements'>('overview')
+  const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'|'transfers'|'placements'|'std'>('overview')
   const [placementForm, setPlacementForm] = useState({ allocated_date: '', shed_id: '', female_count: '', male_count: '', notes: '' })
   const [editPlacementId, setEditPlacementId] = useState<string|null>(null)
   const [showPlacementForm, setShowPlacementForm] = useState(false)
@@ -124,6 +124,16 @@ export const FlockDetail: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase.from('nhe_sales')
         .select('*, nhe_sale_lines(sale_type,amount)').eq('flock_id', id!).order('sale_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  const { data: stdCurve } = useQuery({
+    queryKey: ['std_curve', flock?.laying_season],
+    enabled: !!flock?.laying_season,
+    queryFn: async () => {
+      const { data } = await supabase.from('std_production_curve')
+        .select('*').eq('season', flock!.laying_season).order('week_of_age')
       return data ?? []
     }
   })
@@ -712,11 +722,11 @@ export const FlockDetail: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {(['overview','placements','daily','monthly','financial','transfers'] as const).map(t => (
+        {(['overview','placements','daily','monthly','financial','transfers','std'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors -mb-px
               ${tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {t}
+            {t === 'std' ? 'vs Standard' : t}
           </button>
         ))}
       </div>
@@ -1504,6 +1514,98 @@ export const FlockDetail: React.FC = () => {
               </Table>
             </div>
           </Card>
+        </div>
+      )}
+
+      {tab === 'std' && (
+        <div className="space-y-5">
+          {!flock.laying_season ? (
+            <Card>
+              <div className="p-6 text-sm text-gray-500 text-center">
+                This flock has no Laying Season set (Summer/Winter), so it can't be compared against the Venco standard curve.
+                Set it on the flock's Overview/Edit form to enable this view.
+              </div>
+            </Card>
+          ) : !stdCurve || stdCurve.length === 0 ? (
+            <Card>
+              <div className="p-6 text-sm text-gray-500 text-center">
+                No standard curve data found for "{flock.laying_season} Laying". Import the Venco Excel from the HE Rate Register &rarr; STD Curve tab.
+              </div>
+            </Card>
+          ) : (() => {
+            // Weekly-average actuals from daily_records, keyed by week-of-age
+            const weekly: Record<number, { hdSum: number; hdN: number; heSum: number; heN: number }> = {}
+            for (const d of (daily ?? [])) {
+              if (!d.record_date) continue
+              const wk = flockAgeWeeks(flock.placement_date, d.record_date)
+              if (wk < 0) continue
+              const row = weekly[wk] ??= { hdSum: 0, hdN: 0, heSum: 0, heN: 0 }
+              if (d.hd_pct != null) { row.hdSum += d.hd_pct; row.hdN++ }
+              if (d.he_pct != null) { row.heSum += d.he_pct; row.heN++ }
+            }
+            // Weekly-average actual hatch % from he_dispatch, keyed by week-of-age
+            const hatchWeekly: Record<number, { sum: number; n: number }> = {}
+            for (const h of (heDispatch ?? [])) {
+              if (!h.dispatch_date || h.hatch_pct == null) continue
+              const wk = flockAgeWeeks(flock.placement_date, h.dispatch_date)
+              if (wk < 0) continue
+              const row = hatchWeekly[wk] ??= { sum: 0, n: 0 }
+              row.sum += h.hatch_pct; row.n++
+            }
+            const variance = (actual: number | null, std: number | null) =>
+              actual == null || std == null ? null : actual - std
+
+            return (
+              <Card>
+                <CardHeader title={`Actual vs Venco ${flock.laying_season} Laying Standard`} />
+                <div className="overflow-x-auto">
+                  <Table>
+                    <thead>
+                      <tr>
+                        <Th>Week</Th>
+                        <Th right>Std Hen Week %</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
+                        <Th right>Std HE %</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
+                        <Th right>Std Hatch %</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stdCurve.map((s: any) => {
+                        const w = weekly[s.week_of_age]
+                        const actualHd = w && w.hdN > 0 ? (w.hdSum / w.hdN) * 100 : null
+                        const actualHe = w && w.heN > 0 ? (w.heSum / w.heN) * 100 : null
+                        const hw = hatchWeekly[s.week_of_age]
+                        const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
+                        const vHd = variance(actualHd, s.hen_week_pct)
+                        const vHe = variance(actualHe, s.he_pct)
+                        const vHatch = variance(actualHatch, s.hatch_pct)
+                        const varClass = (v: number | null) => v == null ? '' : v >= 0 ? 'text-green-600' : 'text-red-500'
+                        return (
+                          <tr key={s.week_of_age} className="border-b border-gray-50">
+                            <Td>{s.week_of_age}</Td>
+                            <Td right>{s.hen_week_pct != null ? s.hen_week_pct.toFixed(1) : '—'}</Td>
+                            <Td right>{actualHd != null ? actualHd.toFixed(1) : '—'}</Td>
+                            <Td right className={varClass(vHd)}>{vHd != null ? vHd.toFixed(1) : '—'}</Td>
+                            <Td right>{s.he_pct != null ? s.he_pct.toFixed(1) : '—'}</Td>
+                            <Td right>{actualHe != null ? actualHe.toFixed(1) : '—'}</Td>
+                            <Td right className={varClass(vHe)}>{vHe != null ? vHe.toFixed(1) : '—'}</Td>
+                            <Td right>{s.hatch_pct != null ? s.hatch_pct.toFixed(1) : '—'}</Td>
+                            <Td right>{actualHatch != null ? actualHatch.toFixed(1) : '—'}</Td>
+                            <Td right className={varClass(vHatch)}>{vHatch != null ? vHatch.toFixed(1) : '—'}</Td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </Table>
+                </div>
+              </Card>
+            )
+          })()}
         </div>
       )}
     </div>
