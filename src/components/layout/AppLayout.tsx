@@ -337,6 +337,11 @@ export const AppLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { profile, signOut } = useAuth()
+  // Used below to remount the ErrorBoundary on route change. Without this,
+  // `location` in this component resolved to the bare global window.location
+  // (not reactive to client-side navigation), so the boundary's key never
+  // actually changed and it couldn't self-heal after an error on route change.
+  const location = useLocation()
 
   const role = profile?.role ?? 'viewer'
   const visibleNav = filterNav(NAV, role)

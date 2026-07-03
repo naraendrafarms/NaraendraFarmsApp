@@ -73,10 +73,18 @@ export const ChatBody: React.FC<{ onClose?: () => void; active: boolean }> = ({ 
     if (!activeGroup) return
     const ch = supabase.channel(`chat_${activeGroup.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `group_id=eq.${activeGroup.id}` },
-        () => qc.invalidateQueries({ queryKey: ['chat_messages', activeGroup.id] }))
+        () => {
+          qc.invalidateQueries({ queryKey: ['chat_messages', activeGroup.id] })
+          // Thread is open and the new message is rendered immediately — mark
+          // it read now too, or it re-appears as unread once you go back to
+          // the conversation list (last_read_at was otherwise only set once,
+          // at the moment the thread was first opened).
+          if (myId) supabase.from('chat_group_members').update({ last_read_at: new Date().toISOString() })
+            .eq('group_id', activeGroup.id).eq('user_id', myId).then(() => qc.invalidateQueries({ queryKey: ['chat_groups', myId] }))
+        })
       .subscribe()
     return () => { supabase.removeChannel(ch) }
-  }, [activeGroup, qc])
+  }, [activeGroup, qc, myId])
 
   useEffect(() => {
     if (activeGroup && myId) {

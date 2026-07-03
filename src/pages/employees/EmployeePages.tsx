@@ -210,6 +210,11 @@ export const EmployeeList: React.FC = () => {
           const { error } = await supabase.from(tbl).update({ employee_id: keepId }).eq('employee_id', oldId)
           if (error) throw new Error(`${tbl}: ${error.message}`)
         }
+        // Two more FK columns point at employees(id) that aren't keyed by
+        // employee_id — remap these too, or they're left dangling at
+        // whichever employee just got deleted below.
+        { const { error } = await supabase.from('employees').update({ shared_with_emp_id: keepId }).eq('shared_with_emp_id', oldId); if (error) throw new Error(`shared_with_emp_id: ${error.message}`) }
+        { const { error } = await supabase.from('salary_monthly').update({ override_account_emp_id: keepId }).eq('override_account_emp_id', oldId); if (error) throw new Error(`override_account_emp_id: ${error.message}`) }
         const { error } = await supabase.from('employees').delete().eq('id', oldId)
         if (error) throw error
       }

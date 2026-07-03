@@ -46,6 +46,11 @@ export const PurchaseEntry: React.FC = () => {
   })
   const [form, setForm] = useState(empty())
   const [editId, setEditId] = useState<string | null>(null)
+  // This is the only other screen (besides Pending Payments' own Pay button)
+  // that can flip a bill Pending<->Paid, so it must post/reverse the same
+  // Cash Book entry Pending Payments does — otherwise a bill marked Paid
+  // here never shows as an actual cash outflow anywhere.
+  const [editOrigStatus, setEditOrigStatus] = useState<string | null>(null)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const { data: items } = useQuery({
@@ -107,6 +112,7 @@ export const PurchaseEntry: React.FC = () => {
 
       // EDIT mode — update the existing pending_payments row directly.
       if (editId) {
+        const netPayableFinal = tdsAmt > 0 ? netPayable : (total || 0)
         const { error } = await supabase.from('pending_payments').update({
           vendor_name: supplierName || undefined,
           party_id: form.supplier_id || null,
@@ -121,7 +127,7 @@ export const PurchaseEntry: React.FC = () => {
           category: form.category,
           tds_pct: tdsPct || null,
           tds_amount: tdsAmt > 0 ? tdsAmt : null,
-          net_payable: tdsAmt > 0 ? netPayable : (total || null),
+          net_payable: netPayableFinal || null,
           payment_status: form.payment_status,
           paid_date: form.payment_status === 'Paid' ? form.purchase_date : null,
           credit_limit: form.credit_limit ? Number(form.credit_limit) : null,
@@ -129,6 +135,19 @@ export const PurchaseEntry: React.FC = () => {
           account_type: form.account_type || null,
         }).eq('id', editId)
         if (error) throw error
+
+        if (editOrigStatus !== 'Paid' && form.payment_status === 'Paid') {
+          const { error: cbErr } = await supabase.from('cash_book').insert({
+            txn_date: form.purchase_date, txn_type: 'payment', category: 'purchase_payment',
+            description: `Payment to ${supplierName}${form.invoice_no ? ' — Inv ' + form.invoice_no : ''}${form.grn_no ? ' / GRN ' + form.grn_no : ''}`,
+            party_name: supplierName || null, amount_in: 0, amount_out: netPayableFinal || 0,
+            payment_mode: (form.account_type || '').toLowerCase() === 'cash' ? 'cash' : 'cheque',
+            pending_payment_id: editId, remarks: form.remarks || null,
+          })
+          if (cbErr) throw new Error('Bill saved, but Cash Book entry failed: ' + cbErr.message)
+        } else if (editOrigStatus === 'Paid' && form.payment_status !== 'Paid') {
+          await supabase.from('cash_book').delete().eq('pending_payment_id', editId)
+        }
         return
       }
 
@@ -251,7 +270,8 @@ export const PurchaseEntry: React.FC = () => {
     },
     onSuccess: () => {
       toast.success(editId ? 'Purchase updated' : 'Purchase saved & routed')
-      if (editId) { setForm(empty()); setEditId(null) }
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      if (editId) { setForm(empty()); setEditId(null); setEditOrigStatus(null) }
       else setForm(f => ({ ...empty(), category: f.category, supplier_id: f.supplier_id, farm_id: f.farm_id, purchase_date: f.purchase_date }))
       qc.invalidateQueries({ queryKey: ['recent_purchases'] })
       qc.invalidateQueries({ queryKey: ['grn'] })
@@ -301,6 +321,7 @@ export const PurchaseEntry: React.FC = () => {
 
   const openEdit = (r: any) => {
     setEditId(r.id)
+    setEditOrigStatus(r.payment_status ?? 'Pending')
     const qtyV = r.qty ?? (r.basic_amount && r.price_per_unit ? Number(r.basic_amount) / Number(r.price_per_unit) : '')
     setForm({
       ...empty(),
@@ -325,7 +346,7 @@ export const PurchaseEntry: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const cancelEdit = () => { setEditId(null); setForm(empty()) }
+  const cancelEdit = () => { setEditId(null); setEditOrigStatus(null); setForm(empty()) }
 
   return (
     <div className="space-y-5">
