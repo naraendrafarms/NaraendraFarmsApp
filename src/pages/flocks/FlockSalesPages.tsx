@@ -282,6 +282,93 @@ const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCanc
   </div>
 )
 
+// ── TEMPERATURE LOG (attachment + summary + compliance, not every raw
+// per-minute logger reading — see the vehicle's own PDF export for that) ──
+const TempLogModal: React.FC<{ dispatch: any; onClose: () => void; onSaved: () => void }> = ({ dispatch, onClose, onSaved }) => {
+  const [vehicleNo, setVehicleNo] = useState('')
+  const [tempMin, setTempMin] = useState('')
+  const [tempMax, setTempMax] = useState('')
+  const [tempAvg, setTempAvg] = useState('')
+  const [safeMax, setSafeMax] = useState('25')
+  const [remarks, setRemarks] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (dispatch) {
+      setVehicleNo(dispatch.lorry_no ?? dispatch.vehicle_no ?? '')
+      setTempMin(dispatch.temp_min?.toString() ?? '')
+      setTempMax(dispatch.temp_max?.toString() ?? '')
+      setTempAvg(dispatch.temp_avg?.toString() ?? '')
+      setSafeMax(dispatch.temp_safe_max?.toString() ?? '25')
+      setRemarks(dispatch.temp_remarks ?? '')
+      setFile(null)
+    }
+  }, [dispatch])
+
+  if (!dispatch) return null
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      let temp_log_url = dispatch.temp_log_url ?? null
+      let temp_log_name = dispatch.temp_log_name ?? null
+      if (file) {
+        const path = `${dispatch.id}/${Date.now()}_${file.name}`
+        const { error: upErr } = await supabase.storage.from('dispatch-attachments').upload(path, file)
+        if (upErr) throw upErr
+        temp_log_url = supabase.storage.from('dispatch-attachments').getPublicUrl(path).data.publicUrl
+        temp_log_name = file.name
+      }
+      const max = parseFloat(tempMax)
+      const safe = parseFloat(safeMax)
+      const temp_compliant = !isNaN(max) && !isNaN(safe) ? max <= safe : null
+      const { error } = await supabase.from('he_dispatch').update({
+        vehicle_no: vehicleNo || null,
+        temp_log_url, temp_log_name,
+        temp_min: tempMin ? parseFloat(tempMin) : null,
+        temp_max: tempMax ? parseFloat(tempMax) : null,
+        temp_avg: tempAvg ? parseFloat(tempAvg) : null,
+        temp_safe_max: safe || 25,
+        temp_compliant,
+        temp_remarks: remarks || null,
+      }).eq('id', dispatch.id)
+      if (error) throw error
+      toast.success('Temperature log saved')
+      onSaved()
+    } catch (e: any) { toast.error(e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal open={!!dispatch} onClose={onClose} title={`Temperature Log — ${dispatch.invoice_no ?? dispatch.dc_no ?? ''}`}
+      footer={<Button loading={saving} onClick={save}>Save</Button>}>
+      <div className="space-y-3">
+        <p className="text-xs text-gray-500">Upload the logger's PDF/report for this shipment and record a quick summary — not every reading, just what matters for compliance.</p>
+        <FormRow>
+          <Input label="Vehicle No" value={vehicleNo} onChange={e => setVehicleNo(e.target.value)} />
+          <Input label="Safe Max Temp (°C)" type="number" step="0.1" value={safeMax} onChange={e => setSafeMax(e.target.value)} />
+        </FormRow>
+        <FormRow cols={3}>
+          <Input label="Min Temp (°C)" type="number" step="0.1" value={tempMin} onChange={e => setTempMin(e.target.value)} />
+          <Input label="Max Temp (°C)" type="number" step="0.1" value={tempMax} onChange={e => setTempMax(e.target.value)} />
+          <Input label="Avg Temp (°C)" type="number" step="0.1" value={tempAvg} onChange={e => setTempAvg(e.target.value)} />
+        </FormRow>
+        <div>
+          <label className="text-xs font-medium text-gray-600 block mb-1">Logger Report (PDF)</label>
+          <input type="file" accept=".pdf,.csv,.xlsx" onChange={e => setFile(e.target.files?.[0] ?? null)} className="text-sm" />
+          {dispatch.temp_log_url && !file && (
+            <a href={dispatch.temp_log_url} target="_blank" rel="noreferrer" className="block mt-1 text-xs text-blue-600 underline">
+              📎 {dispatch.temp_log_name ?? 'View current file'}
+            </a>
+          )}
+        </div>
+        <Input label="Remarks" value={remarks} onChange={e => setRemarks(e.target.value)} />
+      </div>
+    </Modal>
+  )
+}
+
 // ── HE DISPATCH ──────────────────────────────────────────────────
 export const HEDispatch: React.FC = () => {
   const qc = useQueryClient()
@@ -302,6 +389,7 @@ export const HEDispatch: React.FC = () => {
   const [expandedDispatch, setExpandedDispatch] = useState<string|null>(null)
   const [expandedLines, setExpandedLines] = useState<any[]>([])
   const [printTarget, setPrintTarget] = useState<any>(null)
+  const [tempLogTarget, setTempLogTarget] = useState<any>(null)
   const [printOpts, setPrintOpts] = useState({
     companyAddr: true, buyerDetails: true, bankDetails: true, supplyDetails: true,
     lorry: true, driver: false, outTime: true, boxes: true
@@ -910,7 +998,7 @@ export const HEDispatch: React.FC = () => {
               <Th>Flock</Th><Th>Dispatch Date</Th><Th>Prod Date</Th>
               <Th right>DC No</Th><Th>Invoice No</Th><Th>Party</Th>
               <Th right>Dispatched</Th><Th right>Free</Th><Th right>Invoice Qty</Th>
-              <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Vehicle</Th><Th>Lorry</Th><Th>Out Time</Th><Th>Payment</Th><Th></Th>
+              <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Vehicle</Th><Th>Lorry</Th><Th>Out Time</Th><Th>Payment</Th><Th>Temp</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((d: any) => (<>
@@ -947,6 +1035,13 @@ export const HEDispatch: React.FC = () => {
                         ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium hover:bg-yellow-200">◑ Partial</button>
                         : d.amount ? <button onClick={() => setReceiptSale({...d, _table:'he_dispatch'})} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200 text-xs hover:bg-orange-100">⊕ Receive</button> : null}
                   </Td>
+                  <Td className="text-xs">
+                    <button onClick={() => setTempLogTarget(d)} title={d.temp_log_url ? 'View/update temperature log' : 'Upload temperature log'}>
+                      {d.temp_log_url
+                        ? <Badge color={d.temp_compliant === false ? 'red' : 'green'}>{d.temp_compliant === false ? '⚠ Breach' : '✓ OK'}</Badge>
+                        : <span className="text-gray-400 underline underline-offset-2 hover:text-gray-600">Upload</span>}
+                    </button>
+                  </Td>
                   <Td>
                     <div className="flex gap-1">
                       <button onClick={() => openForm(d)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit dispatch"><Edit2 size={13}/></button>
@@ -956,7 +1051,7 @@ export const HEDispatch: React.FC = () => {
                 </tr>
                 {expandedDispatch === d.id && (
                   <tr key={`lines-${d.id}`} className="bg-blue-50">
-                    <Td colSpan={16}>
+                    <Td colSpan={17}>
                       <div className="py-2 px-2">
                         <p className="text-xs font-semibold text-blue-700 mb-2">Production Date Breakdown — {d.invoice_no}</p>
                         {expandedLines.length === 0
@@ -1183,6 +1278,9 @@ export const HEDispatch: React.FC = () => {
           ))}
         </div>
       </Modal>
+
+      <TempLogModal dispatch={tempLogTarget} onClose={() => setTempLogTarget(null)}
+        onSaved={() => { setTempLogTarget(null); qc.invalidateQueries({ queryKey: ['he_dispatch'] }) }} />
 
       <Modal open={showForm} onClose={() => setShowForm(false)}
         title={editing ? 'Edit HE Dispatch' : 'New HE Dispatch'} size="xl"
