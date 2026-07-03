@@ -1533,15 +1533,20 @@ export const FlockDetail: React.FC = () => {
               </div>
             </Card>
           ) : (() => {
-            // Weekly-average actuals from daily_records, keyed by week-of-age
-            const weekly: Record<number, { hdSum: number; hdN: number; heSum: number; heN: number }> = {}
+            const HH = flock.total_placed_f ?? 0
+            // Per-week totals from daily_records, keyed by week-of-age
+            type WeekAgg = { hdSum: number; hdN: number; heSum: number; heN: number; totalEggs: number; heEggs: number; depletion: number }
+            const weekly: Record<number, WeekAgg> = {}
             for (const d of (daily ?? [])) {
               if (!d.record_date) continue
               const wk = flockAgeWeeks(flock.placement_date, d.record_date)
               if (wk < 0) continue
-              const row = weekly[wk] ??= { hdSum: 0, hdN: 0, heSum: 0, heN: 0 }
+              const row = weekly[wk] ??= { hdSum: 0, hdN: 0, heSum: 0, heN: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
               if (d.hd_pct != null) { row.hdSum += d.hd_pct; row.hdN++ }
               if (d.he_pct != null) { row.heSum += d.he_pct; row.heN++ }
+              row.totalEggs += d.total_eggs ?? 0
+              row.heEggs += d.he_eggs ?? 0
+              row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
             }
             // Weekly-average actual hatch % from he_dispatch, keyed by week-of-age
             const hatchWeekly: Record<number, { sum: number; n: number }> = {}
@@ -1554,6 +1559,30 @@ export const FlockDetail: React.FC = () => {
             }
             const variance = (actual: number | null, std: number | null) =>
               actual == null || std == null ? null : actual - std
+            const varClass = (v: number | null) => v == null ? '' : v >= 0 ? 'text-green-600' : 'text-red-500'
+            const fmt = (v: number | null, d = 1) => v != null ? v.toFixed(d) : '—'
+
+            let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0
+
+            const rows = stdCurve.map((s: any) => {
+              const w = weekly[s.week_of_age]
+              const actualHd = w && w.hdN > 0 ? (w.hdSum / w.hdN) * 100 : null
+              const actualHe = w && w.heN > 0 ? (w.heSum / w.heN) * 100 : null
+              const hw = hatchWeekly[s.week_of_age]
+              const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
+              const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
+              const weeklyHeHh = w && HH > 0 ? w.heEggs / HH : null
+              const weeklyDepletionPct = w && HH > 0 ? (w.depletion / HH) * 100 : null
+              if (w) {
+                cumDepletion += weeklyDepletionPct ?? 0
+                cumTeHh += weeklyTeHh ?? 0
+                cumHeHh += weeklyHeHh ?? 0
+              }
+              return {
+                s, actualHd, actualHe, actualHatch, weeklyTeHh, weeklyHeHh, weeklyDepletionPct,
+                cumDepletion: w ? cumDepletion : null, cumTeHh: w ? cumTeHh : null, cumHeHh: w ? cumHeHh : null,
+              }
+            })
 
             return (
               <Card>
@@ -1562,46 +1591,83 @@ export const FlockDetail: React.FC = () => {
                   <Table>
                     <thead>
                       <tr>
-                        <Th>Week</Th>
+                        <Th>Age (wk)</Th>
+                        <Th right>Std Cum Depletion %</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
                         <Th right>Std Hen Week %</Th>
                         <Th right>Actual</Th>
                         <Th right>Var</Th>
                         <Th right>Std HE %</Th>
                         <Th right>Actual</Th>
                         <Th right>Var</Th>
+                        <Th right>Std Weekly TE/HH</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
+                        <Th right>Std Cum TE/HH</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
+                        <Th right>Std Weekly HE/HH</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
+                        <Th right>Std Cum HE/HH</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
                         <Th right>Std Hatch %</Th>
                         <Th right>Actual</Th>
                         <Th right>Var</Th>
+                        <Th right>Std Weekly Chicks/HH</Th>
+                        <Th right>Std Cum Chicks/HH</Th>
                       </tr>
                     </thead>
                     <tbody>
-                      {stdCurve.map((s: any) => {
-                        const w = weekly[s.week_of_age]
-                        const actualHd = w && w.hdN > 0 ? (w.hdSum / w.hdN) * 100 : null
-                        const actualHe = w && w.heN > 0 ? (w.heSum / w.heN) * 100 : null
-                        const hw = hatchWeekly[s.week_of_age]
-                        const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
-                        const vHd = variance(actualHd, s.hen_week_pct)
-                        const vHe = variance(actualHe, s.he_pct)
-                        const vHatch = variance(actualHatch, s.hatch_pct)
-                        const varClass = (v: number | null) => v == null ? '' : v >= 0 ? 'text-green-600' : 'text-red-500'
+                      {rows.map(r => {
+                        const s = r.s
+                        const vDepletion = variance(r.cumDepletion, s.cum_depletion_pct)
+                        const vHd = variance(r.actualHd, s.hen_week_pct)
+                        const vHe = variance(r.actualHe, s.he_pct)
+                        const vTeHh = variance(r.weeklyTeHh, s.weekly_te_hh)
+                        const vCumTeHh = variance(r.cumTeHh, s.cum_te_hh)
+                        const vHeHh = variance(r.weeklyHeHh, s.weekly_he_hh)
+                        const vCumHeHh = variance(r.cumHeHh, s.cum_he_hh)
+                        const vHatch = variance(r.actualHatch, s.hatch_pct)
                         return (
                           <tr key={s.week_of_age} className="border-b border-gray-50">
                             <Td>{s.week_of_age}</Td>
-                            <Td right>{s.hen_week_pct != null ? s.hen_week_pct.toFixed(1) : '—'}</Td>
-                            <Td right>{actualHd != null ? actualHd.toFixed(1) : '—'}</Td>
-                            <Td right className={varClass(vHd)}>{vHd != null ? vHd.toFixed(1) : '—'}</Td>
-                            <Td right>{s.he_pct != null ? s.he_pct.toFixed(1) : '—'}</Td>
-                            <Td right>{actualHe != null ? actualHe.toFixed(1) : '—'}</Td>
-                            <Td right className={varClass(vHe)}>{vHe != null ? vHe.toFixed(1) : '—'}</Td>
-                            <Td right>{s.hatch_pct != null ? s.hatch_pct.toFixed(1) : '—'}</Td>
-                            <Td right>{actualHatch != null ? actualHatch.toFixed(1) : '—'}</Td>
-                            <Td right className={varClass(vHatch)}>{vHatch != null ? vHatch.toFixed(1) : '—'}</Td>
+                            <Td right>{fmt(s.cum_depletion_pct)}</Td>
+                            <Td right>{fmt(r.cumDepletion)}</Td>
+                            <Td right className={varClass(vDepletion != null ? -vDepletion : null)}>{fmt(vDepletion)}</Td>
+                            <Td right>{fmt(s.hen_week_pct)}</Td>
+                            <Td right>{fmt(r.actualHd)}</Td>
+                            <Td right className={varClass(vHd)}>{fmt(vHd)}</Td>
+                            <Td right>{fmt(s.he_pct)}</Td>
+                            <Td right>{fmt(r.actualHe)}</Td>
+                            <Td right className={varClass(vHe)}>{fmt(vHe)}</Td>
+                            <Td right>{fmt(s.weekly_te_hh)}</Td>
+                            <Td right>{fmt(r.weeklyTeHh)}</Td>
+                            <Td right className={varClass(vTeHh)}>{fmt(vTeHh)}</Td>
+                            <Td right>{fmt(s.cum_te_hh)}</Td>
+                            <Td right>{fmt(r.cumTeHh)}</Td>
+                            <Td right className={varClass(vCumTeHh)}>{fmt(vCumTeHh)}</Td>
+                            <Td right>{fmt(s.weekly_he_hh)}</Td>
+                            <Td right>{fmt(r.weeklyHeHh)}</Td>
+                            <Td right className={varClass(vHeHh)}>{fmt(vHeHh)}</Td>
+                            <Td right>{fmt(s.cum_he_hh)}</Td>
+                            <Td right>{fmt(r.cumHeHh)}</Td>
+                            <Td right className={varClass(vCumHeHh)}>{fmt(vCumHeHh)}</Td>
+                            <Td right>{fmt(s.hatch_pct)}</Td>
+                            <Td right>{fmt(r.actualHatch)}</Td>
+                            <Td right className={varClass(vHatch)}>{fmt(vHatch)}</Td>
+                            <Td right>{fmt(s.weekly_chicks_hh)}</Td>
+                            <Td right>{fmt(s.cum_chicks_hh)}</Td>
                           </tr>
                         )
                       })}
                     </tbody>
                   </Table>
+                </div>
+                <div className="px-4 py-3 text-xs text-gray-400 border-t border-gray-100">
+                  Weekly/Cum Chicks per HH has no Actual column — the app doesn't record hatched chick counts (that's the hatchery's data). Depletion Var is shown negative when actual mortality/cull exceeds standard.
                 </div>
               </Card>
             )
