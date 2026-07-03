@@ -45,7 +45,9 @@ async function extractTempReadings(file: File): Promise<number[]> {
 }
 
 // ── Receive Payment Modal ─────────────────────────────────────────
-const ReceivePaymentModal: React.FC<{
+// Exported so Party Outstanding (Debtors tab) can reuse the exact same
+// receipt logic instead of duplicating Cash Book / Bank Ledger posting.
+export const ReceivePaymentModal: React.FC<{
   open: boolean; sale: any; bankAccounts: any[]; farms: any[]; table: string;
   onClose: () => void; onSaved: () => void
 }> = ({ open, sale, bankAccounts, farms, table, onClose, onSaved }) => {

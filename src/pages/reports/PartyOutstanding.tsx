@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
 import {
   Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge
 , DateInput } from '@/components/ui'
-import { Download, ChevronDown, ChevronRight } from 'lucide-react'
+import { Download, ChevronDown, ChevronRight, IndianRupee } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { ReceivePaymentModal } from '@/pages/flocks/FlockSalesPages'
 
 // ── FY helper ─────────────────────────────────────────────────────
 function fyRange(fy: string): [string, string] {
@@ -33,22 +34,34 @@ function daysOverdue(dueDate: string | null): number | null {
 
 // ── DEBTORS TAB ───────────────────────────────────────────────────
 const DebtorsTab: React.FC = () => {
+  const qc = useQueryClient()
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [partyFilter, setPartyFilter] = useState('')
   const [flockFilter, setFlockFilter] = useState('')
   const [expandedParty, setExpandedParty] = useState<string | null>(null)
+  const [hideSettled, setHideSettled] = useState(true)
+  const [receiptSale, setReceiptSale] = useState<any>(null)
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all_out'],
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').order('flock_no'); return data ?? [] }
   })
 
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts'],
+    queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name'); return data ?? [] }
+  })
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
+  })
+
   const { data: heData, isLoading: heLoading } = useQuery({
     queryKey: ['he_dispatch_all', dateFrom, dateTo, flockFilter],
     queryFn: async () => {
       let q = supabase.from('he_dispatch')
-        .select('id,dispatch_date,invoice_no,amount,total_dispatched,free_eggs,party_id,flock_id,parties(name),flocks(flock_no)')
+        .select('id,dispatch_date,invoice_no,dc_no,amount,total_dispatched,free_eggs,party_id,flock_id,parties(name),flocks(flock_no),amount_received,payment_status,payment_mode,bank_account_id,received_date,utr_ref')
         .gt('amount', 0)
         .order('dispatch_date', { ascending: false })
       if (dateFrom) q = q.gte('dispatch_date', dateFrom)
@@ -63,7 +76,7 @@ const DebtorsTab: React.FC = () => {
     queryKey: ['nhe_sales_all', dateFrom, dateTo, flockFilter],
     queryFn: async () => {
       let q = supabase.from('nhe_sales')
-        .select('id,sale_date,sale_type,amount,qty,party_id,flock_id,parties(name),flocks(flock_no)')
+        .select('id,sale_date,sale_type,amount,qty,party_id,flock_id,parties(name),flocks(flock_no),amount_received,payment_status,payment_mode,bank_account_id,received_date,utr_ref')
         .gt('amount', 0)
         .in('sale_type', ['je','te','be'])
         .order('sale_date', { ascending: false })
@@ -75,34 +88,50 @@ const DebtorsTab: React.FC = () => {
     }
   })
 
-  // Group by party
+  const refetchAll = () => {
+    qc.invalidateQueries({ queryKey: ['he_dispatch_all'] })
+    qc.invalidateQueries({ queryKey: ['nhe_sales_all'] })
+    qc.invalidateQueries({ queryKey: ['cash_book'] })
+    qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+  }
+
+  // Group by party — outstanding balance = amount - amount_received (the
+  // same fields FlockSalesPages' Receive Payment modal already writes to;
+  // this report previously ignored them entirely and always showed the
+  // full original amount even for fully/partially collected sales).
+  const balanceOf = (r: any) => Math.max(0, (r.amount ?? 0) - (r.amount_received ?? 0))
+
   const grouped = useMemo(() => {
     const map: Record<string, { partyId: string; partyName: string; totalAmt: number; invoices: number; latestDate: string; rows: any[] }> = {}
 
     for (const r of (heData ?? [])) {
+      const bal = balanceOf(r)
+      if (hideSettled && bal <= 0.01) continue
       const pid = r.party_id ?? 'unknown'
       const pname = (r.parties as any)?.name ?? 'Unknown'
       if (!map[pid]) map[pid] = { partyId: pid, partyName: pname, totalAmt: 0, invoices: 0, latestDate: '', rows: [] }
-      map[pid].totalAmt += r.amount ?? 0
+      map[pid].totalAmt += bal
       map[pid].invoices++
       if (!map[pid].latestDate || r.dispatch_date > map[pid].latestDate) map[pid].latestDate = r.dispatch_date
-      map[pid].rows.push({ ...r, _type: 'HE', _date: r.dispatch_date, _ref: r.invoice_no ?? '—', _flock: `Flock ${(r.flocks as any)?.flock_no ?? '?'}` })
+      map[pid].rows.push({ ...r, _type: 'HE', _date: r.dispatch_date, _ref: r.invoice_no ?? r.dc_no ?? '—', _flock: `Flock ${(r.flocks as any)?.flock_no ?? '?'}`, _balance: bal, _table: 'he_dispatch' })
     }
 
     for (const r of (nheData ?? [])) {
+      const bal = balanceOf(r)
+      if (hideSettled && bal <= 0.01) continue
       const pid = r.party_id ?? 'unknown'
       const pname = (r.parties as any)?.name ?? 'Unknown'
       if (!map[pid]) map[pid] = { partyId: pid, partyName: pname, totalAmt: 0, invoices: 0, latestDate: '', rows: [] }
-      map[pid].totalAmt += r.amount ?? 0
+      map[pid].totalAmt += bal
       map[pid].invoices++
       if (!map[pid].latestDate || r.sale_date > map[pid].latestDate) map[pid].latestDate = r.sale_date
-      map[pid].rows.push({ ...r, _type: r.sale_type?.toUpperCase() ?? 'NHE', _date: r.sale_date, _ref: '—', _flock: `Flock ${(r.flocks as any)?.flock_no ?? '?'}` })
+      map[pid].rows.push({ ...r, _type: r.sale_type?.toUpperCase() ?? 'NHE', _date: r.sale_date, _ref: '—', _flock: `Flock ${(r.flocks as any)?.flock_no ?? '?'}`, _balance: bal, _table: 'nhe_sales' })
     }
 
     return Object.values(map)
       .filter(p => !partyFilter || p.partyName.toLowerCase().includes(partyFilter.toLowerCase()))
       .sort((a, b) => b.totalAmt - a.totalAmt)
-  }, [heData, nheData, partyFilter])
+  }, [heData, nheData, partyFilter, hideSettled])
 
   const grandTotal = grouped.reduce((s, p) => s + p.totalAmt, 0)
 
@@ -110,7 +139,7 @@ const DebtorsTab: React.FC = () => {
     const rows: any[] = []
     for (const p of grouped) {
       for (const r of p.rows) {
-        rows.push({ Party: p.partyName, Type: r._type, Date: r._date, Ref: r._ref, Flock: r._flock, Amount: r.amount ?? 0 })
+        rows.push({ Party: p.partyName, Type: r._type, Date: r._date, Ref: r._ref, Flock: r._flock, Amount: r.amount ?? 0, Received: r.amount_received ?? 0, Balance: r._balance })
       }
     }
     const ws = XLSX.utils.json_to_sheet(rows)
@@ -130,6 +159,10 @@ const DebtorsTab: React.FC = () => {
         <DateInput label="To" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40"/>
         <Select label="Flock" placeholder="All Flocks" options={flockOptions} value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-40"/>
         <Input label="Party search" placeholder="Search party..." value={partyFilter} onChange={e => setPartyFilter(e.target.value)} className="w-48"/>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 pb-2">
+          <input type="checkbox" checked={hideSettled} onChange={e => setHideSettled(e.target.checked)} />
+          Hide fully received
+        </label>
         {(dateFrom || dateTo || flockFilter || partyFilter) && (
           <Button variant="ghost" size="sm" onClick={() => { setDateFrom(''); setDateTo(''); setFlockFilter(''); setPartyFilter('') }}>Clear</Button>
         )}
@@ -141,7 +174,7 @@ const DebtorsTab: React.FC = () => {
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
         <Card className="text-center py-3">
-          <p className="text-xs text-gray-400">Total Receivable</p>
+          <p className="text-xs text-gray-400">Outstanding Balance</p>
           <p className="text-xl font-bold text-green-700">{inr(grandTotal)}</p>
         </Card>
         <Card className="text-center py-3">
@@ -164,7 +197,7 @@ const DebtorsTab: React.FC = () => {
               <Th></Th>
               <Th>Party</Th>
               <Th right>Invoices</Th>
-              <Th right>Total Amount</Th>
+              <Th right>Balance Due</Th>
               <Th>Latest Date</Th>
             </tr>
           </thead>
@@ -192,6 +225,10 @@ const DebtorsTab: React.FC = () => {
                               <Th>Ref / Invoice</Th>
                               <Th>Flock</Th>
                               <Th right>Amount</Th>
+                              <Th right>Received</Th>
+                              <Th right>Balance</Th>
+                              <Th>Status</Th>
+                              <Th></Th>
                             </tr>
                           </thead>
                           <tbody>
@@ -201,7 +238,22 @@ const DebtorsTab: React.FC = () => {
                                 <Td className="text-sm">{r._date ? fmtDate(r._date) : '—'}</Td>
                                 <Td className="font-mono text-xs">{r._ref}</Td>
                                 <Td className="text-xs text-gray-500">{r._flock}</Td>
-                                <Td right className="text-green-700">{inr(r.amount ?? 0)}</Td>
+                                <Td right className="text-gray-700">{inr(r.amount ?? 0)}</Td>
+                                <Td right className="text-blue-600">{r.amount_received ? inr(r.amount_received) : '—'}</Td>
+                                <Td right className="font-semibold text-green-700">{inr(r._balance)}</Td>
+                                <Td>
+                                  <Badge color={r.payment_status === 'Received' ? 'green' : r.payment_status === 'Partial' ? 'yellow' : 'gray'}>
+                                    {r.payment_status ?? 'Pending'}
+                                  </Badge>
+                                </Td>
+                                <Td>
+                                  {r._balance > 0.01 && (
+                                    <button onClick={() => setReceiptSale(r)}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded bg-green-100 text-green-700 text-xs font-medium hover:bg-green-200">
+                                      <IndianRupee size={12}/> Receive
+                                    </button>
+                                  )}
+                                </Td>
                               </tr>
                             ))}
                           </tbody>
@@ -229,6 +281,16 @@ const DebtorsTab: React.FC = () => {
           <p className="text-center text-gray-400 text-sm py-8">No debtors found with the current filters</p>
         )}
       </Card>
+
+      <ReceivePaymentModal
+        open={!!receiptSale}
+        sale={receiptSale}
+        bankAccounts={bankAccounts ?? []}
+        farms={farms ?? []}
+        table={receiptSale?._table ?? 'he_dispatch'}
+        onClose={() => setReceiptSale(null)}
+        onSaved={() => { setReceiptSale(null); refetchAll() }}
+      />
     </div>
   )
 }
