@@ -41,7 +41,7 @@ export const PurchaseEntry: React.FC = () => {
     qty: '', rate: '', gst_pct: '0',
     nature: 'purchase', is_rcm: false,
     tds_pct: '0',
-    payment_status: 'Pending', credit_limit: '', account_type: 'Online',
+    payment_status: 'Pending', credit_limit: '', account_type: 'Online', bank_account_id: '',
     remarks: '',
   })
   const [form, setForm] = useState(empty())
@@ -64,6 +64,10 @@ export const PurchaseEntry: React.FC = () => {
   const { data: farms } = useQuery({
     queryKey: ['farms_all'],
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name').order('name'); return data ?? [] },
+  })
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts_list'],
+    queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,account_name,bank_name').order('account_name'); return data ?? [] },
   })
   const { data: recent, isLoading } = useQuery({
     queryKey: ['recent_purchases'],
@@ -110,6 +114,10 @@ export const PurchaseEntry: React.FC = () => {
       const item = (items ?? []).find((i: any) => i.id === form.item_id)
       const itemName = item?.name ?? form.item_name
 
+      if (form.payment_status === 'Paid' && (form.account_type || '').toLowerCase() !== 'cash' && !form.bank_account_id) {
+        throw new Error('Select which bank account this is paid from')
+      }
+
       // EDIT mode — update the existing pending_payments row directly.
       if (editId) {
         const netPayableFinal = tdsAmt > 0 ? netPayable : (total || 0)
@@ -133,6 +141,7 @@ export const PurchaseEntry: React.FC = () => {
           credit_limit: form.credit_limit ? Number(form.credit_limit) : null,
           pay_before_date: payBefore,
           account_type: form.account_type || null,
+          bank_account_id: (form.account_type || '').toLowerCase() !== 'cash' ? (form.bank_account_id || null) : null,
         }).eq('id', editId)
         if (error) throw error
 
@@ -145,8 +154,21 @@ export const PurchaseEntry: React.FC = () => {
             pending_payment_id: editId, remarks: form.remarks || null,
           })
           if (cbErr) throw new Error('Bill saved, but Cash Book entry failed: ' + cbErr.message)
+          // Non-cash also posts to the specific bank account's ledger, same
+          // pattern as Pending Payments — Cash Book stays the combined
+          // master ledger, Bank Ledger reflects which account it left from.
+          if ((form.account_type || '').toLowerCase() !== 'cash' && form.bank_account_id) {
+            await supabase.from('bank_transactions').insert({
+              bank_account_id: form.bank_account_id,
+              txn_date: form.purchase_date, txn_type: 'Debit', category: 'Vendor Payment',
+              reference_no: form.invoice_no || form.grn_no || null,
+              description: `Payment to ${supplierName}${form.invoice_no ? ' — Inv ' + form.invoice_no : ''}${form.grn_no ? ' / GRN ' + form.grn_no : ''}`,
+              amount: netPayableFinal || 0, linked_payment_id: editId,
+            })
+          }
         } else if (editOrigStatus === 'Paid' && form.payment_status !== 'Paid') {
           await supabase.from('cash_book').delete().eq('pending_payment_id', editId)
+          await supabase.from('bank_transactions').delete().eq('linked_payment_id', editId)
         }
         return
       }
@@ -156,6 +178,7 @@ export const PurchaseEntry: React.FC = () => {
       if (!form.supplier_id) throw new Error('Supplier required')
 
       // 1. Route to the category-specific table
+      let paidPendingPaymentId: string | null = null
       if (form.category === 'Feed') {
         const feedGrnNo = form.grn_no || `GRN-${form.purchase_date}-${Date.now() % 100000}`
         const { error } = await supabase.from('grn').insert({
@@ -194,9 +217,14 @@ export const PurchaseEntry: React.FC = () => {
             net_payable: netPayable,
           }).eq('grn_no', feedGrnNo)
         }
+        if (form.payment_status === 'Paid') {
+          const { data: pp } = await supabase.from('pending_payments').select('id').eq('grn_no', feedGrnNo).maybeSingle()
+          paidPendingPaymentId = pp?.id ?? null
+        }
       } else if (form.category === 'Medicine') {
+        const medGrnNo = form.grn_no || `MED-${form.purchase_date.replace(/-/g,'')}-${Date.now()%100000}`
         const { error } = await supabase.from('grn').insert({
-          grn_no: form.grn_no || `MED-${form.purchase_date.replace(/-/g,'')}-${Date.now()%100000}`,
+          grn_no: medGrnNo,
           grn_date: form.purchase_date,
           category: 'Medicine',
           medicine_id: form.item_id || null,
@@ -221,6 +249,10 @@ export const PurchaseEntry: React.FC = () => {
           remarks: form.remarks || null,
         })
         if (error) throw error
+        if (form.payment_status === 'Paid') {
+          const { data: pp } = await supabase.from('pending_payments').select('id').eq('grn_no', medGrnNo).maybeSingle()
+          paidPendingPaymentId = pp?.id ?? null
+        }
       }
       // Equipment / Other: no stock table — tracked via Pending Payments below.
 
@@ -228,7 +260,7 @@ export const PurchaseEntry: React.FC = () => {
       //    Feed and Medicine go through the grn -> pending_payments DB trigger,
       //    so only raise the bill manually for Equipment / Other.
       if (form.category !== 'Feed' && form.category !== 'Medicine') {
-        const { error: payErr } = await supabase.from('pending_payments').insert({
+        const { data: newPp, error: payErr } = await supabase.from('pending_payments').insert({
           vendor_name: supplierName,
           party_id: form.supplier_id || null,
           grn_no: form.grn_no || `${form.category.toUpperCase()}-${form.invoice_no || Date.now()}`,
@@ -248,12 +280,16 @@ export const PurchaseEntry: React.FC = () => {
           credit_limit: form.credit_limit ? Number(form.credit_limit) : null,
           pay_before_date: payBefore,
           account_type: form.account_type || null,
-        })
+          bank_account_id: (form.account_type || '').toLowerCase() !== 'cash' ? (form.bank_account_id || null) : null,
+        }).select('id').single()
         if (payErr) throw payErr
+        paidPendingPaymentId = newPp?.id ?? null
       }
 
-      // 3. If paid in cash, mirror to Cash Book
-      if (form.payment_status === 'Paid' && form.account_type === 'Cash' && total > 0) {
+      // 3. If paid, mirror to Cash Book — and to the specific bank account's
+      // ledger too when paid non-cash (same pattern as Pending Payments).
+      if (form.payment_status === 'Paid' && total > 0) {
+        const isCash = (form.account_type || '').toLowerCase() === 'cash'
         await supabase.from('cash_book').insert({
           txn_date: form.purchase_date,
           txn_type: 'payment',
@@ -263,14 +299,25 @@ export const PurchaseEntry: React.FC = () => {
           party_name: supplierName,
           reference_no: form.invoice_no || form.grn_no || null,
           amount_out: total,
-          payment_mode: 'cash',
+          payment_mode: isCash ? 'cash' : 'cheque',
+          pending_payment_id: paidPendingPaymentId,
           remarks: form.remarks || null,
         })
+        if (!isCash && form.bank_account_id) {
+          await supabase.from('bank_transactions').insert({
+            bank_account_id: form.bank_account_id,
+            txn_date: form.purchase_date, txn_type: 'Debit', category: 'Vendor Payment',
+            reference_no: form.invoice_no || form.grn_no || null,
+            description: `${form.category} purchase — ${itemName}`,
+            amount: total, linked_payment_id: paidPendingPaymentId,
+          })
+        }
       }
     },
     onSuccess: () => {
       toast.success(editId ? 'Purchase updated' : 'Purchase saved & routed')
       qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
       if (editId) { setForm(empty()); setEditId(null); setEditOrigStatus(null) }
       else setForm(f => ({ ...empty(), category: f.category, supplier_id: f.supplier_id, farm_id: f.farm_id, purchase_date: f.purchase_date }))
       qc.invalidateQueries({ queryKey: ['recent_purchases'] })
@@ -341,6 +388,7 @@ export const PurchaseEntry: React.FC = () => {
       payment_status: r.payment_status ?? 'Pending',
       credit_limit: r.credit_limit != null ? String(r.credit_limit) : '',
       account_type: r.account_type ?? 'Online',
+      bank_account_id: r.bank_account_id ?? '',
       remarks: r.remarks ?? '',
     })
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -431,6 +479,12 @@ export const PurchaseEntry: React.FC = () => {
             <Input label="Credit Days" type="number" value={form.credit_limit} onChange={e => s('credit_limit', e.target.value)} />
             <Input label="Pay Before" value={payBefore ? fmtDate(payBefore) : '—'} disabled />
           </FormRow>
+          {form.payment_status === 'Paid' && form.account_type !== 'Cash' && (
+            <FormRow cols={4}>
+              <Select label="Paid From Bank Account" value={form.bank_account_id} onChange={e => s('bank_account_id', e.target.value)}
+                options={[{ value: '', label: '— Select account —' }, ...(bankAccounts ?? []).map((b: any) => ({ value: b.id, label: `${b.account_name ? b.account_name + ' — ' : ''}${b.bank_name}` }))]} />
+            </FormRow>
+          )}
           <FormRow cols={4}>
             <Select label="TDS %" value={form.tds_pct} onChange={e => s('tds_pct', e.target.value)}
               options={[
@@ -454,6 +508,7 @@ export const PurchaseEntry: React.FC = () => {
               {form.category === 'Medicine' && 'Files into GRN (Medicine) — Pending Payment auto-created by DB trigger'}
               {(form.category === 'Equipment' || form.category === 'Other') && 'Files into Pending Payments'}
               {form.payment_status === 'Paid' && form.account_type === 'Cash' && ' + Cash Book'}
+              {form.payment_status === 'Paid' && form.account_type !== 'Cash' && ' + Cash Book + Bank Ledger'}
             </span>
           </div>
         </div>
