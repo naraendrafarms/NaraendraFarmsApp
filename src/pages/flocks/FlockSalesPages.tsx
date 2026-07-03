@@ -174,6 +174,9 @@ export const ReceivePaymentModal: React.FC<{
         })
         if (cbErr) throw new Error('Payment saved but Cash Book entry failed: ' + cbErr.message)
       } else if (mode !== 'Cash' && bankId && amt > 0) {
+        // Delete any existing bank_transactions entry for this sale first (prevents duplicate on re-save)
+        const linkCol = table === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id'
+        await supabase.from('bank_transactions').delete().eq(linkCol, sale.id)
         // Create bank_transactions credit entry
         await supabase.from('bank_transactions').insert({
           bank_account_id: bankId,
@@ -183,6 +186,7 @@ export const ReceivePaymentModal: React.FC<{
           reference_no: utr || sale.dc_no || sale.invoice_no || null,
           description,
           amount: amt,
+          [linkCol]: sale.id,
         })
       }
       toast.success('Payment recorded')
@@ -1968,6 +1972,10 @@ export const NHESales: React.FC = () => {
         if (cbErr) throw new Error('Sale saved, but Cash Book entry failed: ' + cbErr.message)
       }
       // Record bank/NEFT payment to bank_transactions
+      // On edit: always delete the old entry first (by nhe_sale_id), same as cash_book above.
+      if (editing) {
+        await supabase.from('bank_transactions').delete().eq('nhe_sale_id', editing.id)
+      }
       if (onlineAmt > 0 && form.bank_account_id && savedId) {
         const party = parties?.find((p: any) => p.id === form.party_id)
         const flockNo = flocks?.find((f: any) => f.id === form.flock_id)?.flock_no
@@ -1979,6 +1987,7 @@ export const NHESales: React.FC = () => {
           reference_no: form.dc_no || form.invoice_no || null,
           description: [`NHE Sale`, flockNo ? `F-${flockNo}` : '', party?.name ?? ''].filter(Boolean).join(' — '),
           amount: onlineAmt,
+          nhe_sale_id: savedId,
         })
       }
 
