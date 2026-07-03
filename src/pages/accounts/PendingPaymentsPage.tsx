@@ -749,16 +749,17 @@ export const PendingPaymentsPage: React.FC = () => {
   const handleExport = () => {
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.aoa_to_sheet([
-      ['Vendor', 'Category', 'Invoice No', 'GRN No', 'GRN Date', 'Invoice Amt', 'TDS', 'Net Payable', 'Paid', 'Discount', 'Balance', 'Due Date', 'Status'],
+      ['Vendor', 'Category', 'Invoice No', 'GRN No', 'GRN Date', 'Invoice Amt', 'TDS', 'Net Payable', 'Paid', 'Discount', 'Balance', 'Due Date', 'Paid Date', 'Status'],
       ...filtered.map(r => [
         r.vendor_name, r.category ?? '', r.invoice_no ?? '', r.grn_no ?? '',
         r.grn_date ? fmtDate(r.grn_date) : '',
         r.invoice_amount, r.tds_amount ?? 0, r.net_payable ?? r.invoice_amount,
         r.paid_amount ?? 0, r.discount_amount ?? 0, getBalance(r),
-        r.pay_before_date ? fmtDate(r.pay_before_date) : '', r.payment_status,
+        r.pay_before_date ? fmtDate(r.pay_before_date) : '',
+        r.paid_date ? fmtDate(r.paid_date) : '', r.payment_status,
       ])
     ])
-    ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 10 }]
+    ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }]
     XLSX.utils.book_append_sheet(wb, ws, 'Pending Payments')
     XLSX.writeFile(wb, `pending_payments_${todayStr}.xlsx`)
   }
@@ -888,6 +889,7 @@ export const PendingPaymentsPage: React.FC = () => {
                 <th className="px-2 py-2 text-right">Paid</th>
                 <th className="px-2 py-2 text-right font-semibold">Balance</th>
                 <th className="px-2 py-2">Due Date</th>
+                <th className="px-2 py-2">Paid Date</th>
                 <th className="px-2 py-2">Status</th>
                 <th className="px-2 py-2"></th>
               </tr>
@@ -919,6 +921,7 @@ export const PendingPaymentsPage: React.FC = () => {
                       {bal > 0 ? fmt(bal) : '✓'}
                     </td>
                     <td className="px-2 py-2 text-gray-600">{r.pay_before_date ? fmtDate(r.pay_before_date) : '—'}</td>
+                    <td className="px-2 py-2 text-gray-600">{r.paid_date ? fmtDate(r.paid_date) : '—'}</td>
                     <td className="px-2 py-2">{getDueBadge(r)}</td>
                     <td className="px-2 py-2">
                       <div className="flex items-center gap-1.5">
