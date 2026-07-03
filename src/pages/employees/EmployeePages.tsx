@@ -1267,7 +1267,11 @@ export const SalaryEntryPage: React.FC = () => {
       // pattern as Pending Payments / Purchase Entry.
       const emp=(employees??[]).find((e:any)=>e.id===form.employee_id)
       const netAmt = n('net_salary')
-      if(!origIsPaid && payload.is_paid && upserted?.id && netAmt>0){
+      if(payload.is_paid && upserted?.id && netAmt>0){
+        if(origIsPaid){
+          await supabase.from('cash_book').delete().eq('salary_monthly_id',upserted.id)
+          await supabase.from('bank_transactions').delete().eq('salary_monthly_id',upserted.id)
+        }
         const isCash=(payload.payment_mode||'Cash').toLowerCase()==='cash'
         await supabase.from('cash_book').insert({
           txn_date: new Date().toISOString().slice(0,10), txn_type:'payment', category:'salary',
@@ -1893,7 +1897,11 @@ export const ESIPFReportPage: React.FC = () => {
       }).eq('id', editRec.id)
       if (error) throw error
       // Keep Cash Book / Bank Ledger in sync, same as the main Salary Entry form.
-      if(!editOrigIsPaid && isPaidNow && netAmt>0){
+      if(isPaidNow && netAmt>0){
+        if(editOrigIsPaid){
+          await supabase.from('cash_book').delete().eq('salary_monthly_id',editRec.id)
+          await supabase.from('bank_transactions').delete().eq('salary_monthly_id',editRec.id)
+        }
         const isCash=(editForm.payment_mode||'Cash').toLowerCase()==='cash'
         const empName = editRec.employees?.name ?? ''
         await supabase.from('cash_book').insert({

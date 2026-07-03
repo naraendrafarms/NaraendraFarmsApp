@@ -145,7 +145,11 @@ export const PurchaseEntry: React.FC = () => {
         }).eq('id', editId)
         if (error) throw error
 
-        if (editOrigStatus !== 'Paid' && form.payment_status === 'Paid') {
+        if (form.payment_status === 'Paid') {
+          if (editOrigStatus === 'Paid') {
+            await supabase.from('cash_book').delete().eq('pending_payment_id', editId)
+            await supabase.from('bank_transactions').delete().eq('linked_payment_id', editId)
+          }
           const { error: cbErr } = await supabase.from('cash_book').insert({
             txn_date: form.purchase_date, txn_type: 'payment', category: 'purchase_payment',
             description: `Payment to ${supplierName}${form.invoice_no ? ' — Inv ' + form.invoice_no : ''}${form.grn_no ? ' / GRN ' + form.grn_no : ''}`,

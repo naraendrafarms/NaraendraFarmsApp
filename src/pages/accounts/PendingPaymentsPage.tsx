@@ -678,13 +678,18 @@ export const PendingPaymentsPage: React.FC = () => {
         if (error) throw error
         savedId = editModal.id
       }
-      // Keep Cash Book in sync with the status change made here — this is the
+      // Keep Cash Book / Bank Ledger in sync with this save — this is the
       // ONLY other place (besides the Pay button) that can flip a bill to Paid,
-      // so it must post/reverse the same ledger entry.
+      // so it must post/reverse the same ledger entry. Re-sync (clear + repost)
+      // whenever the bill IS Paid after this save, not just on a fresh
+      // Pending→Paid transition — otherwise editing payment mode/bank
+      // account/UTR on an already-Paid bill silently leaves the ledger stale
+      // (e.g. bank details filled in after the bill was first marked Paid).
       const oldStatus = isNew ? null : editModal.payment_status
       const newStatus = editForm.payment_status
-      if (oldStatus !== 'Paid' && newStatus === 'Paid') {
-        const amount = isNew ? netPayable : Math.max(0, getBalance(editModal))
+      if (newStatus === 'Paid') {
+        if (oldStatus === 'Paid') await clearLedgerEntries(savedId)
+        const amount = isNew || oldStatus === 'Paid' ? netPayable : Math.max(0, getBalance(editModal))
         await postLedgerEntry({
           paymentId: savedId, vendorName: payload.vendor_name, invoiceNo: payload.invoice_no, grnNo: payload.grn_no,
           amount, mode: payload.account_type ?? 'NEFT', date: editForm.pay_before_date || todayStr,
