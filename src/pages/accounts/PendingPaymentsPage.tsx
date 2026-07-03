@@ -28,6 +28,7 @@ const toCbMode = (mode: string) => {
 const postLedgerEntry = async (opts: {
   paymentId: string; vendorName: string; invoiceNo?: string | null; grnNo?: string | null
   amount: number; mode: string; date: string; ref?: string | null; remarks?: string | null
+  bankAccountId?: string | null
 }) => {
   if (opts.amount <= 0) return
   await supabase.from('cash_book').insert({
@@ -43,9 +44,26 @@ const postLedgerEntry = async (opts: {
     pending_payment_id: opts.paymentId,
     remarks: opts.remarks || null,
   })
+  // Non-cash payments also post to the specific bank account's ledger (in
+  // addition to Cash Book, which stays the combined master ledger as
+  // before) — otherwise that account's Bank Ledger never reflects vendor
+  // payments made from it.
+  if (opts.mode.toLowerCase() !== 'cash' && opts.bankAccountId) {
+    await supabase.from('bank_transactions').insert({
+      bank_account_id: opts.bankAccountId,
+      txn_date: opts.date,
+      txn_type: 'Debit',
+      category: 'Vendor Payment',
+      reference_no: opts.ref || null,
+      description: `Payment to ${opts.vendorName}${opts.invoiceNo ? ' — Inv ' + opts.invoiceNo : ''}${opts.grnNo ? ' / GRN ' + opts.grnNo : ''}`,
+      amount: opts.amount,
+      linked_payment_id: opts.paymentId,
+    })
+  }
 }
 const clearLedgerEntries = async (paymentId: string) => {
   await supabase.from('cash_book').delete().eq('pending_payment_id', paymentId)
+  await supabase.from('bank_transactions').delete().eq('linked_payment_id', paymentId)
 }
 
 type PayRecord = {
@@ -71,6 +89,7 @@ type PayRecord = {
   utr_no: string | null
   cheque_no: string | null
   remarks: string | null
+  bank_account_id: string | null
 }
 
 type PayModal = {
@@ -80,6 +99,7 @@ type PayModal = {
   mode: string
   ref: string
   remarks: string
+  bankAccountId: string
 }
 
 // ── Waiting to Link ──────────────────────────────────────────────────────────
@@ -424,7 +444,7 @@ export const PendingPaymentsPage: React.FC = () => {
   const blankEditForm = () => ({
     vendor_name: '', party_id: '', invoice_no: '', po_no: '', grn_no: '', invoice_date: today(), grn_date: '',
     invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '', credit_limit: '',
-    payment_status: 'Pending', account_type: 'NEFT', utr_no: '', cheque_no: '', category: '', remarks: '',
+    payment_status: 'Pending', account_type: 'NEFT', utr_no: '', cheque_no: '', category: '', remarks: '', bank_account_id: '',
   })
   const [editForm, setEditForm] = useState(blankEditForm())
   const [editSaving, setEditSaving] = useState(false)
@@ -437,10 +457,18 @@ export const PendingPaymentsPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks')
+        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id')
         .order('grn_date', { ascending: false })
       if (error) throw error
       return (data ?? []) as PayRecord[]
+    }
+  })
+
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts_list'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_accounts').select('id,account_name,bank_name').order('account_name')
+      return data ?? []
     }
   })
 
@@ -519,7 +547,7 @@ export const PendingPaymentsPage: React.FC = () => {
   }
 
   const openPayModal = (r: PayRecord) => {
-    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '' })
+    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '' })
     setErr('')
   }
 
@@ -527,6 +555,7 @@ export const PendingPaymentsPage: React.FC = () => {
     if (!modal) return
     const amt = parseFloat(modal.paidAmt)
     if (!amt || amt <= 0) { setErr('Enter valid amount'); return }
+    if (modal.mode.toLowerCase() !== 'cash' && !modal.bankAccountId) { setErr('Select which bank account this is paid from'); return }
     setSaving(true); setErr('')
     try {
       const newPaid = (modal.record.paid_amount ?? 0) + amt
@@ -539,6 +568,7 @@ export const PendingPaymentsPage: React.FC = () => {
         transaction_ref: modal.ref || null,
         remarks: modal.remarks || modal.record.remarks || null,
         payment_status: newStatus,
+        bank_account_id: modal.mode.toLowerCase() !== 'cash' ? modal.bankAccountId : null,
       }).eq('id', modal.record.id)
       if (error) throw error
       // Every rupee paid here — partial or final — lands in Cash Book immediately.
@@ -546,12 +576,14 @@ export const PendingPaymentsPage: React.FC = () => {
         paymentId: modal.record.id, vendorName: modal.record.vendor_name,
         invoiceNo: modal.record.invoice_no, grnNo: modal.record.grn_no,
         amount: amt, mode: modal.mode, date: modal.paidDate, ref: modal.ref, remarks: modal.remarks,
+        bankAccountId: modal.bankAccountId,
       })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
       setModal(null)
     } catch (e: any) {
       setErr(e.message)
@@ -588,6 +620,7 @@ export const PendingPaymentsPage: React.FC = () => {
       cheque_no: r.cheque_no ?? '',
       category: r.category ?? '',
       remarks: r.remarks ?? '',
+      bank_account_id: r.bank_account_id ?? '',
     })
     setEditErr('')
   }
@@ -595,6 +628,9 @@ export const PendingPaymentsPage: React.FC = () => {
   const handleEditSave = async () => {
     if (!editModal) return
     if (!editForm.vendor_name.trim()) { setEditErr('Vendor name is required'); return }
+    if (editForm.payment_status === 'Paid' && editForm.account_type.toLowerCase() !== 'cash' && !editForm.bank_account_id) {
+      setEditErr('Select which bank account this is paid from'); return
+    }
     setEditSaving(true); setEditErr('')
     try {
       const isNew = editModal === 'new'
@@ -630,6 +666,7 @@ export const PendingPaymentsPage: React.FC = () => {
         cheque_no: editForm.cheque_no || null,
         category: editForm.category || null,
         remarks: editForm.remarks || null,
+        bank_account_id: (editForm.account_type || '').toLowerCase() !== 'cash' ? (editForm.bank_account_id || null) : null,
       }
       let savedId: string
       if (isNew) {
@@ -651,7 +688,7 @@ export const PendingPaymentsPage: React.FC = () => {
         await postLedgerEntry({
           paymentId: savedId, vendorName: payload.vendor_name, invoiceNo: payload.invoice_no, grnNo: payload.grn_no,
           amount, mode: payload.account_type ?? 'NEFT', date: editForm.pay_before_date || todayStr,
-          ref: payload.utr_no || payload.cheque_no, remarks: payload.remarks,
+          ref: payload.utr_no || payload.cheque_no, remarks: payload.remarks, bankAccountId: payload.bank_account_id,
         })
       } else if (oldStatus === 'Paid' && newStatus !== 'Paid') {
         await clearLedgerEntries(savedId)
@@ -942,6 +979,18 @@ export const PendingPaymentsPage: React.FC = () => {
                   {['NEFT', 'RTGS', 'IMPS', 'Cheque', 'Cash', 'UPI'].map(v => <option key={v}>{v}</option>)}
                 </select>
               </div>
+              {modal.mode.toLowerCase() !== 'cash' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Paid From Bank Account</label>
+                  <select value={modal.bankAccountId} onChange={e => setModal(m => m ? { ...m, bankAccountId: e.target.value } : m)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">— Select account —</option>
+                    {(bankAccounts ?? []).map((b: any) => (
+                      <option key={b.id} value={b.id}>{b.account_name ? `${b.account_name} — ` : ''}{b.bank_name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Reference / UTR / Cheque No</label>
                 <input value={modal.ref} onChange={e => setModal(m => m ? { ...m, ref: e.target.value } : m)}
@@ -1111,6 +1160,18 @@ export const PendingPaymentsPage: React.FC = () => {
                       <input value={editForm.utr_no || editForm.cheque_no} onChange={e => setEditForm(f => ({ ...f, utr_no: e.target.value, cheque_no: '' }))}
                         placeholder="Optional" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
+                    {editForm.account_type.toLowerCase() !== 'cash' && (
+                      <div className="col-span-2">
+                        <label className="text-xs font-medium text-gray-600 block mb-1">Paid From Bank Account</label>
+                        <select value={editForm.bank_account_id} onChange={e => setEditForm(f => ({ ...f, bank_account_id: e.target.value }))}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                          <option value="">— Select account —</option>
+                          {(bankAccounts ?? []).map((b: any) => (
+                            <option key={b.id} value={b.id}>{b.account_name ? `${b.account_name} — ` : ''}{b.bank_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
