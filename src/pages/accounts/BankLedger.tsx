@@ -14,6 +14,7 @@ const EMPTY_FORM = {
   description: '',
   amount: '',
   bank_account_id: '',
+  party_id: '',
 }
 
 const EMPTY_ACCOUNT_FORM = {
@@ -187,6 +188,16 @@ export const BankLedgerPage: React.FC = () => {
     }
   }, [accounts])
 
+  // Parties master, for tagging manually-entered transactions to a specific
+  // vendor/buyer so they're traceable like auto-linked ones are.
+  const { data: parties } = useQuery({
+    queryKey: ['parties_list_for_bank_ledger'],
+    queryFn: async () => {
+      const { data } = await supabase.from('parties').select('id,name,type').eq('is_active', true).order('name')
+      return data ?? []
+    }
+  })
+
   // Every account (active + inactive) for the Manage Accounts modal — the
   // dropdown above only ever shows active ones.
   const { data: allAccounts, isLoading: allAccountsLoading } = useQuery({
@@ -290,7 +301,7 @@ export const BankLedgerPage: React.FC = () => {
       if (!selectedAccount) return []
       const { data } = await supabase
         .from('bank_transactions')
-        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at')
+        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type)')
         .eq('bank_account_id', selectedAccount)
         .order('txn_date', { ascending: true })
         .order('created_at', { ascending: true })
@@ -431,6 +442,7 @@ export const BankLedgerPage: React.FC = () => {
       description: t.description ?? '',
       amount: t.amount != null ? String(t.amount) : '',
       bank_account_id: t.bank_account_id ?? selectedAccount,
+      party_id: t.party_id ?? '',
     })
     setShowModal(true)
   }
@@ -454,6 +466,7 @@ export const BankLedgerPage: React.FC = () => {
       reference_no: form.reference_no || null,
       description: form.description || null,
       amount: parseFloat(form.amount) || 0,
+      party_id: form.party_id || null,
     }
     const { error } = editId
       ? await supabase.from('bank_transactions').update(payload).eq('id', editId)
@@ -845,6 +858,7 @@ export const BankLedgerPage: React.FC = () => {
                       <th className="px-3 py-2 text-left">Date</th>
                       <th className="px-3 py-2 text-left">Type</th>
                       <th className="px-3 py-2 text-left">Category</th>
+                      <th className="px-3 py-2 text-left">Party</th>
                       <th className="px-3 py-2 text-left">Description</th>
                       <th className="px-3 py-2 text-left">Reference</th>
                       <th className="px-3 py-2 text-right">Debit</th>
@@ -870,6 +884,7 @@ export const BankLedgerPage: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-3 py-2 text-gray-600">{t.category ?? '—'}</td>
+                        <td className="px-3 py-2 text-gray-700">{(t.parties as any)?.name ?? '—'}</td>
                         <td className="px-3 py-2 text-gray-700">{t.description ?? '—'}</td>
                         <td className="px-3 py-2 text-gray-500 text-xs">{t.reference_no ?? '—'}</td>
                         <td className="px-3 py-2 text-right text-red-600">
@@ -1044,6 +1059,16 @@ export const BankLedgerPage: React.FC = () => {
             value={form.category}
             onChange={e => setForm(f => ({ ...f, category: (e.target as HTMLSelectElement).value }))}
             options={CATEGORIES.map(c => ({ value: c, label: c || '— Select —' }))}
+          />
+          <Select
+            label="Vendor / Party (optional — links this to your Parties master)"
+            value={form.party_id}
+            onChange={e => {
+              const id = (e.target as HTMLSelectElement).value
+              const p = (parties ?? []).find((x: any) => x.id === id)
+              setForm(f => ({ ...f, party_id: id, description: !f.description && p ? p.name : f.description }))
+            }}
+            options={[{ value: '', label: '— None —' }, ...(parties ?? []).map((p: any) => ({ value: p.id, label: `${p.name} (${p.type})` }))]}
           />
           <Input
             label="Reference No"

@@ -957,7 +957,7 @@ export const SalaryEntryPage: React.FC = () => {
     advance_opening:'0', further_advance:'0', advance:'0', advance_closing:'0',
     other_reimbursement:'0', additional:'0', monthly_ctc:'',
     hold:'0', arrears:'0',
-    remarks:'', payment_mode:'Cash', payment_ref:'', is_paid:'false', bank_account_id:'',
+    remarks:'', payment_mode:'Cash', payment_ref:'', is_paid:'false', bank_account_id:'', paid_date:'',
   })
   const [form, setForm] = useState(blankForm())
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
@@ -1202,6 +1202,7 @@ export const SalaryEntryPage: React.FC = () => {
       payment_ref:    rec.payment_ref ?? '',
       is_paid:        rec.is_paid ? 'true' : 'false',
       bank_account_id: rec.bank_account_id ?? '',
+      paid_date:      rec.paid_date ?? (rec.is_paid ? today() : ''),
     })
     setOrigIsPaid(!!rec.is_paid)
     setShowForm(true)
@@ -1260,6 +1261,7 @@ export const SalaryEntryPage: React.FC = () => {
         is_paid:        form.is_paid==='true',
         remarks:        form.remarks||null,
         bank_account_id: (form.payment_mode||'Cash').toLowerCase()!=='cash' ? (form.bank_account_id||null) : null,
+        paid_date:      form.is_paid==='true' ? (form.paid_date || today()) : null,
       }
       const{data:upserted,error}=await supabase.from('salary_monthly').upsert(payload,{onConflict:'employee_id,month'}).select('id').single()
       if(error)throw error
@@ -1273,8 +1275,9 @@ export const SalaryEntryPage: React.FC = () => {
           await supabase.from('bank_transactions').delete().eq('salary_monthly_id',upserted.id)
         }
         const isCash=(payload.payment_mode||'Cash').toLowerCase()==='cash'
+        const txnDate = payload.paid_date || today()
         await supabase.from('cash_book').insert({
-          txn_date: new Date().toISOString().slice(0,10), txn_type:'payment', category:'salary',
+          txn_date: txnDate, txn_type:'payment', category:'salary',
           description:`Salary — ${emp?.name??''} (${form.month})`,
           party_name: emp?.name??null, amount_in:0, amount_out:netAmt,
           payment_mode: isCash?'cash':'cheque', salary_monthly_id: upserted.id,
@@ -1283,7 +1286,7 @@ export const SalaryEntryPage: React.FC = () => {
         if(!isCash && payload.bank_account_id){
           await supabase.from('bank_transactions').insert({
             bank_account_id: payload.bank_account_id,
-            txn_date: new Date().toISOString().slice(0,10), txn_type:'Debit', category:'Salary Payment',
+            txn_date: txnDate, txn_type:'Debit', category:'Salary Payment',
             reference_no: payload.payment_ref, description:`Salary — ${emp?.name??''} (${form.month})`,
             amount: netAmt, salary_monthly_id: upserted.id,
           })
@@ -1647,6 +1650,11 @@ export const SalaryEntryPage: React.FC = () => {
               <Input label="UTR / Cheque No" value={form.payment_ref} onChange={e=>s('payment_ref',e.target.value)}/>
               <Select label="Status" options={[{value:'false',label:'Pending'},{value:'true',label:'Paid'}]} value={form.is_paid} onChange={e=>s('is_paid',e.target.value)}/>
             </FormRow>
+            {form.is_paid==='true' && (
+              <FormRow>
+                <DateInput label="Payment Date (when it actually left the account)" value={form.paid_date} onChange={e=>s('paid_date',e.target.value)}/>
+              </FormRow>
+            )}
             {form.is_paid==='true' && form.payment_mode.toLowerCase()!=='cash' && (
               <FormRow>
                 <Select label="Paid From Bank Account" value={form.bank_account_id} onChange={e=>s('bank_account_id',e.target.value)}
@@ -1870,6 +1878,7 @@ export const ESIPFReportPage: React.FC = () => {
       payment_ref: r.payment_ref??'',
       remarks: r.remarks??'',
       bank_account_id: r.bank_account_id??'',
+      paid_date: r.paid_date ?? (r.is_paid ? today() : ''),
     })
     setEditOrigIsPaid(!!r.is_paid)
   }
@@ -1894,6 +1903,7 @@ export const ESIPFReportPage: React.FC = () => {
         payment_ref: editForm.payment_ref||null,
         remarks: editForm.remarks||null,
         bank_account_id: bankAccountId,
+        paid_date: isPaidNow ? (editForm.paid_date || today()) : null,
       }).eq('id', editRec.id)
       if (error) throw error
       // Keep Cash Book / Bank Ledger in sync, same as the main Salary Entry form.
@@ -1904,8 +1914,9 @@ export const ESIPFReportPage: React.FC = () => {
         }
         const isCash=(editForm.payment_mode||'Cash').toLowerCase()==='cash'
         const empName = editRec.employees?.name ?? ''
+        const txnDate = editForm.paid_date || today()
         await supabase.from('cash_book').insert({
-          txn_date: new Date().toISOString().slice(0,10), txn_type:'payment', category:'salary',
+          txn_date: txnDate, txn_type:'payment', category:'salary',
           description:`Salary — ${empName} (${filterMonth})`,
           party_name: empName||null, amount_in:0, amount_out:netAmt,
           payment_mode: isCash?'cash':'cheque', salary_monthly_id: editRec.id,
@@ -1914,7 +1925,7 @@ export const ESIPFReportPage: React.FC = () => {
         if(!isCash && bankAccountId){
           await supabase.from('bank_transactions').insert({
             bank_account_id: bankAccountId,
-            txn_date: new Date().toISOString().slice(0,10), txn_type:'Debit', category:'Salary Payment',
+            txn_date: txnDate, txn_type:'Debit', category:'Salary Payment',
             reference_no: editForm.payment_ref||null, description:`Salary — ${empName} (${filterMonth})`,
             amount: netAmt, salary_monthly_id: editRec.id,
           })
@@ -2056,6 +2067,11 @@ export const ESIPFReportPage: React.FC = () => {
               <Input label="UTR / Cheque No" value={editForm.payment_ref} onChange={ef('payment_ref')}/>
               <Select label="Paid?" options={[{value:'false',label:'Pending'},{value:'true',label:'Paid'}]} value={editForm.is_paid} onChange={ef('is_paid')}/>
             </FormRow>
+            {editForm.is_paid==='true' && (
+              <FormRow>
+                <DateInput label="Payment Date" value={editForm.paid_date} onChange={ef('paid_date')}/>
+              </FormRow>
+            )}
             {editForm.is_paid==='true' && (editForm.payment_mode||'Cash').toLowerCase()!=='cash' && (
               <FormRow>
                 <Select label="Paid From Bank Account" value={editForm.bank_account_id||''} onChange={ef('bank_account_id')}
