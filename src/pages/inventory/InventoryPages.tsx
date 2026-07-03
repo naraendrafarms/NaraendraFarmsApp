@@ -129,7 +129,7 @@ export const InventoryPage: React.FC = () => {
 // ════════════════════════════════════════════════════════════════════
 // SHARED: compute per-item stock as-on a date from stock_ledger
 // ════════════════════════════════════════════════════════════════════
-const OUT_TYPES = new Set(['production_out','medicine_out','adjustment_out','transfer_out'])
+const OUT_TYPES = new Set(['production_out','medicine_out','adjustment_out','transfer_out','dispatch_out'])
 
 function useStockRows(asOf: string) {
   // Item master is the source of truth for names, category, unit, reorder_level
@@ -662,8 +662,9 @@ const TXN_LABEL: Record<string, string> = {
   transfer_in:    'Transfer In',
   transfer_out:   'Transfer Out',
   opening:        'Opening Stock',
+  dispatch_out:   'Dispatch Used',
 }
-const TXN_IS_OUT = new Set(['production_out','medicine_out','adjustment_out','transfer_out'])
+const TXN_IS_OUT = new Set(['production_out','medicine_out','adjustment_out','transfer_out','dispatch_out'])
 
 const LedgerTab: React.FC = () => {
   const [search, setSearch] = useState('')
