@@ -254,11 +254,29 @@ const VendorRatesTab: React.FC = () => {
 
 const SEASONS = ['Summer', 'Winter'] as const
 
+// Column order matches the Venco "Production Performance" sheet exactly, so
+// an import can map header -> field with no manual re-entry.
+const STD_COLS: { key: string; label: string }[] = [
+  { key: 'week_of_age',        label: 'Age (weeks)' },
+  { key: 'cum_depletion_pct',  label: 'Cum Depletion %' },
+  { key: 'hen_week_pct',       label: 'Hen Week %' },
+  { key: 'he_pct',             label: 'HE %' },
+  { key: 'weekly_te_hh',       label: 'Weekly TE/HH' },
+  { key: 'cum_te_hh',          label: 'Cum. TE/HH' },
+  { key: 'weekly_he_hh',       label: 'Weekly HE/HH' },
+  { key: 'cum_he_hh',          label: 'Cum. HE/HH' },
+  { key: 'hatch_pct',          label: 'Hatch %' },
+  { key: 'weekly_chicks_hh',   label: 'Weekly Chicks/HH' },
+  { key: 'cum_chicks_hh',      label: 'Cum. Chicks/HH' },
+]
+
 const StdCurveTab: React.FC = () => {
   const qc = useQueryClient()
   const [season, setSeason] = useState<typeof SEASONS[number]>('Summer')
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ week_of_age: '', std_production_pct: '' })
+  const [importing, setImporting] = useState(false)
+  const blankForm = () => Object.fromEntries(STD_COLS.map(c => [c.key, '']))
+  const [form, setForm] = useState<Record<string, string>>(blankForm())
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const { data: curve = [], isLoading } = useQuery({
@@ -268,12 +286,14 @@ const StdCurveTab: React.FC = () => {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      const week = parseInt(form.week_of_age), pct = parseFloat(form.std_production_pct)
-      if (!week || isNaN(pct)) throw new Error('Enter week of age and standard %')
-      const { error } = await supabase.from('std_production_curve').upsert({ season, week_of_age: week, std_production_pct: pct }, { onConflict: 'season,week_of_age' })
+      const week = parseInt(form.week_of_age)
+      if (!week) throw new Error('Enter week of age')
+      const row: any = { season, week_of_age: week }
+      for (const c of STD_COLS) if (c.key !== 'week_of_age') row[c.key] = form[c.key] !== '' ? parseFloat(form[c.key]) : null
+      const { error } = await supabase.from('std_production_curve').upsert(row, { onConflict: 'season,week_of_age' })
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['std_production_curve', season] }); setShowForm(false); setForm({ week_of_age: '', std_production_pct: '' }); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['std_production_curve', season] }); setShowForm(false); setForm(blankForm()); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
@@ -281,34 +301,86 @@ const StdCurveTab: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['std_production_curve', season] }); toast.success('Deleted') },
   })
 
+  // Import the exact Venco "Production Performance" Excel — one sheet per
+  // season, title row names the season (SUMMER/WINTER), header row 2, data
+  // from row 3. '---' cells (breed not yet laying at that age) are skipped.
+  const handleImport = async (file: File) => {
+    setImporting(true)
+    try {
+      const XLSX = await import('xlsx')
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf)
+      let totalRows = 0
+      for (const sheetName of wb.SheetNames) {
+        const ws = wb.Sheets[sheetName]
+        const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' })
+        const titleRow = (raw[0] ?? []).join(' ').toUpperCase()
+        const sheetSeason: 'Summer' | 'Winter' | null =
+          titleRow.includes('SUMMER') ? 'Summer' : titleRow.includes('WINTER') ? 'Winter' : null
+        if (!sheetSeason) continue
+        const rows = raw.slice(2).filter(r => r[0] !== '' && r[0] != null)
+        const upserts = rows.map(r => {
+          const row: any = { season: sheetSeason, week_of_age: Number(r[0]) }
+          const num = (v: any) => (v === '---' || v === '' || v == null ? null : Number(v))
+          row.cum_depletion_pct = num(r[1]); row.hen_week_pct = num(r[2]); row.he_pct = num(r[3])
+          row.weekly_te_hh = num(r[4]); row.cum_te_hh = num(r[5]); row.weekly_he_hh = num(r[6]); row.cum_he_hh = num(r[7])
+          row.hatch_pct = num(r[8]); row.weekly_chicks_hh = num(r[9]); row.cum_chicks_hh = num(r[10])
+          return row
+        }).filter(r => !isNaN(r.week_of_age))
+        if (upserts.length) {
+          const { error } = await supabase.from('std_production_curve').upsert(upserts, { onConflict: 'season,week_of_age' })
+          if (error) throw error
+          totalRows += upserts.length
+        }
+      }
+      if (totalRows === 0) throw new Error("Couldn't find a SUMMER or WINTER sheet in this file")
+      toast.success(`Imported ${totalRows} weeks`)
+      qc.invalidateQueries({ queryKey: ['std_production_curve'] })
+    } catch (e: any) { toast.error(e.message) }
+    finally { setImporting(false) }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-2">
         <Select value={season} onChange={e => setSeason(e.target.value as any)} options={SEASONS.map(s => ({ value: s, label: `${s} Laying` }))} />
-        <Button icon={<Plus size={14} />} onClick={() => { setForm({ week_of_age: '', std_production_pct: '' }); setShowForm(true) }}>Add Week</Button>
+        <div className="flex gap-2">
+          <label className={`text-sm font-medium px-3 py-2 rounded-lg border cursor-pointer ${importing ? 'opacity-50 pointer-events-none' : 'hover:bg-gray-50'}`}>
+            {importing ? 'Importing…' : 'Import Venco Excel'}
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = '' }} />
+          </label>
+          <Button icon={<Plus size={14} />} onClick={() => { setForm(blankForm()); setShowForm(true) }}>Add Week</Button>
+        </div>
       </div>
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
-          <Table>
-            <thead><tr><Th>Week of Age</Th><Th right>Std Production %</Th><Th right>Actions</Th></tr></thead>
-            <tbody>
-              {curve.map((r: any) => (
-                <tr key={r.week_of_age} className="hover:bg-gray-50">
-                  <Td className="font-medium">Week {r.week_of_age}</Td>
-                  <Td right>{r.std_production_pct}%</Td>
-                  <Td right><button onClick={() => confirm('Delete?') && delMut.mutate(r.week_of_age)}><Trash2 size={14} className="text-gray-400 hover:text-red-600" /></button></Td>
-                </tr>
-              ))}
-              {curve.length === 0 && <tr><Td colSpan={3}><EmptyState title={`No ${season} Laying curve entries yet`} /></Td></tr>}
-            </tbody>
-          </Table>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr>{STD_COLS.map(c => <Th key={c.key} right={c.key !== 'week_of_age'}>{c.label}</Th>)}<Th right>Actions</Th></tr></thead>
+              <tbody>
+                {curve.map((r: any) => (
+                  <tr key={r.week_of_age} className="hover:bg-gray-50">
+                    {STD_COLS.map(c => (
+                      <Td key={c.key} right={c.key !== 'week_of_age'} className={c.key === 'week_of_age' ? 'font-medium' : 'text-xs'}>
+                        {r[c.key] != null ? r[c.key] : '—'}
+                      </Td>
+                    ))}
+                    <Td right><button onClick={() => confirm('Delete?') && delMut.mutate(r.week_of_age)}><Trash2 size={14} className="text-gray-400 hover:text-red-600" /></button></Td>
+                  </tr>
+                ))}
+                {curve.length === 0 && <tr><Td colSpan={STD_COLS.length + 1}><EmptyState title={`No ${season} Laying curve entries yet`} /></Td></tr>}
+              </tbody>
+            </Table>
+          </div>
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title={`Add ${season} Laying Week`}
         footer={<Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button>}>
         <div className="space-y-3">
-          <Input label="Week of Age *" type="number" value={form.week_of_age} onChange={e => s('week_of_age', e.target.value)} />
-          <Input label="Standard Production % *" type="number" step="0.01" value={form.std_production_pct} onChange={e => s('std_production_pct', e.target.value)} />
+          {STD_COLS.map(c => (
+            <Input key={c.key} label={c.key === 'week_of_age' ? 'Week of Age *' : c.label} type="number" step="0.01"
+              value={form[c.key]} onChange={e => s(c.key, e.target.value)} />
+          ))}
         </div>
       </Modal>
     </div>
