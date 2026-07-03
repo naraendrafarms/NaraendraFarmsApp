@@ -408,6 +408,41 @@ protect against accidentally reverting a settled bill back to Pending.
 
 ---
 
+## 2026-07-03 — NEFT payments showed as "Cheque" in Cash Book
+
+**Symptom:** Selecting NEFT as the payment mode in Pending Payments (or
+Purchase Entry, or Salary) still showed the Cash Book entry's mode as
+"Cheque".
+
+**Root cause:** `cash_book.payment_mode` had a CHECK constraint only
+allowing `('cash','upi','cheque')` (migration 053). Every place that posts
+to Cash Book mapped its actual mode down to satisfy this: anything that
+wasn't literally "cash" or "upi" got relabeled `'cheque'` — including
+NEFT, RTGS, IMPS. Worse: Cash Book's own manual-entry Payment Mode
+dropdown is driven by `config_options('payment_method')`, which has
+offered `neft`/`rtgs`/`imps`/`bank`/`online` as real options since
+migration 158 — meaning picking any of those directly in Cash Book must
+have been hitting this same constraint and failing outright on save
+(not silently — the mutation does throw/toast on error, but the fix
+should have gone in the constraint, not around it).
+
+**Fix:** Widened the constraint (migration 336) to
+`cash/upi/cheque/neft/rtgs/imps/online/bank/bank_transfer` — checked
+existing data first (only `cash`/`cheque` rows existed, nothing stray) —
+and updated the `toCbMode()` helper duplicated in
+`PendingPaymentsPage.tsx`, `PurchaseEntry.tsx`, and `EmployeePages.tsx` to
+pass the real mode straight through instead of collapsing everything
+non-cash/non-upi into `'cheque'`.
+
+**Lesson:** A CHECK constraint that's narrower than the actual dropdown
+options the UI offers is a trap — the UI *looks* like it supports NEFT/
+RTGS/etc., but every write silently (or not-so-silently) gets coerced or
+rejected. When adding a new option to any dropdown that maps to a
+DB column with a CHECK constraint, always widen the constraint in the
+same migration — never assume the column already accepts it.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
