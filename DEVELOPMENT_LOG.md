@@ -484,6 +484,52 @@ catches these before a user does.
 
 ---
 
+## 2026-07-03 — Buyer Advances, Invoice Register, Partner Remuneration: same ledger-sync gaps found across 4 more screens
+
+**Found via:** the same Fable-5-assisted review pass, items #4-7.
+
+**#4 — Buyer Advances:** `cash_book`/`bank_transactions` had no
+`party_advance_id` link column, so editing an advance (amount/date/mode)
+never re-synced its ledger entry, and deleting an advance left the entry
+orphaned. Fixed via migration 339 (added the link column to both tables)
+plus code: `editMut` now deletes-then-reinserts the ledger entry,
+`delMut`/`bulkDelMut` now delete the linked ledger rows first.
+
+**#5 — Advance adjustment double-deduction:** re-saving an
+advance-adjusted NHE/HE sale (or switching to a different advance, or
+switching away from Advance mode) compounded/never-reversed
+`party_advances.amount_used`. Fixed by always reversing the sale's
+previous adjustment before applying the new one, and clearing
+`advance_adjusted`/`party_advance_id` when switching to cash/bank.
+
+**#6 — Invoice Register "Mark Paid":** flipped
+`pending_payments.payment_status` to `'Paid'` directly with **zero**
+Cash Book/Bank Ledger posting, and hardcoded `paid_date` to `today()`
+with no way to pick payment mode or bank account. Added a proper payment
+modal (Date/Mode/Bank Account) and full ledger posting, same pattern as
+Pending Payments.
+
+**#7 — Partner Remuneration "Mark Paid":** identical gap — no ledger
+entry at all, hardcoded date, and "Undo" never cleared anything (because
+nothing was ever created). Same fix: payment modal + full ledger sync on
+Paid, ledger cleanup on Undo.
+
+**Lesson:** This closes the full Fable-5-review punch list (#1-7), all
+proactively found rather than reported by the user. The recurring root
+cause across every single one was the exact same pattern first found and
+fixed for Pending Payments/Purchase Entry/Salary earlier the same day:
+a "settle/pay" action that updates a status flag without fully,
+idempotently syncing the ledger tables that are supposed to mirror it.
+Any NEW "mark as paid/received/settled" feature added to this app should
+be checked against this checklist before shipping: (1) does it post to
+Cash Book AND Bank Ledger when non-cash, (2) does re-saving delete the
+old entry first (by a real link column) before inserting a new one,
+(3) does un-marking it clean up the entry it created, (4) does the
+column storing payment mode actually accept every value the dropdown can
+send.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
