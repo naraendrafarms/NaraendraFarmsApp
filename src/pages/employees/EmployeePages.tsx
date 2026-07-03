@@ -1112,14 +1112,17 @@ export const SalaryEntryPage: React.FC = () => {
     const tds      = parseFloat(f.tds) || 0
     const otherDed = parseFloat(f.other_deduction) || 0
 
-    const netPayable = totalEarning - pfEmp - vpf - esiEmp - pt - lwf - tds - otherDed
-
     const advOpening  = parseFloat(f.advance_opening) || 0
     const furtherAdv  = parseFloat(f.further_advance) || 0
     const advAdjusted = parseFloat(f.advance) || 0
     const advClosing  = advOpening + furtherAdv - advAdjusted
     const otherReimb  = parseFloat(f.other_reimbursement) || 0
     const monthlyCTC  = totalEarning + eps + epfDiff + adminCh + edli + esiEr
+
+    // Same formula as the Bulk Salary path — net payable must subtract the
+    // advance being adjusted this month, or the employee is effectively paid
+    // that amount twice (once as cash advance earlier, once left in salary).
+    const netPayable = Math.max(0, totalEarning - pfEmp - vpf - esiEmp - pt - lwf - tds - otherDed - advAdjusted)
 
     setForm(prev => ({
       ...prev, ...overrides,

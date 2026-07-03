@@ -118,9 +118,13 @@ export const ChatBody: React.FC<{ onClose?: () => void; active: boolean }> = ({ 
 
   const startDM = async (otherId: string) => {
     if (!myId) return
-    const { data: mine } = await supabase.from('chat_group_members').select('group_id').eq('user_id', myId)
+    // Only reuse an EXISTING 1:1 DM — matching on any shared group_id would
+    // also match a regular group chat both users happen to be in, silently
+    // reusing it as if it were a private DM (privacy leak: messages typed
+    // there go to the whole group, not just the intended person).
+    const { data: mine } = await supabase.from('chat_group_members').select('group_id, chat_groups!inner(is_dm)').eq('user_id', myId).eq('chat_groups.is_dm', true)
     const { data: theirs } = await supabase.from('chat_group_members').select('group_id').eq('user_id', otherId)
-    const mineIds = new Set((mine ?? []).map(m => m.group_id))
+    const mineIds = new Set((mine ?? []).map((m: any) => m.group_id))
     const existing = (theirs ?? []).find(t => mineIds.has(t.group_id))
     let groupId = existing?.group_id
     if (!groupId) {

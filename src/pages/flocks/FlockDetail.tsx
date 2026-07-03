@@ -222,6 +222,45 @@ export const FlockDetail: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  // Shared by single-entry (addTransferMut) and bulk CSV import — deducts the
+  // transferred birds from the SOURCE shed's daily record for that date.
+  // Without this, imported transfers credit the destination shed but never
+  // reduce the source shed's count (the exact corruption class fixed for
+  // Flock 22 earlier — that fix only covered the single-entry form).
+  const deductFromSourceShed = async (opts: {
+    flockId: string; date: string; farmId: string | null; shedId: string | null; trF: number; trM: number
+  }) => {
+    if (opts.trF <= 0 && opts.trM <= 0) return
+    let drQuery = supabase.from('daily_records')
+      .select('id,transfer_female,transfer_male,opening_female,opening_male,cull_female,cull_male,mortality_female,mortality_male')
+      .eq('flock_id', opts.flockId).eq('record_date', opts.date)
+    drQuery = opts.shedId ? drQuery.eq('shed_id', opts.shedId) : drQuery.is('shed_id', null)
+    drQuery = opts.farmId ? drQuery.eq('farm_id', opts.farmId) : drQuery.is('farm_id', null)
+    const { data: dr } = await drQuery.maybeSingle()
+    const newTrF = (dr?.transfer_female ?? 0) + opts.trF
+    const newTrM = (dr?.transfer_male ?? 0) + opts.trM
+    const closingF = Math.max(0, (dr?.opening_female ?? 0) - newTrF - (dr?.cull_female ?? 0) - (dr?.mortality_female ?? 0))
+    const closingM = Math.max(0, (dr?.opening_male ?? 0) - newTrM - (dr?.cull_male ?? 0) - (dr?.mortality_male ?? 0))
+    const trcullF = newTrF + (dr?.cull_female ?? 0)
+    const trcullM = newTrM + (dr?.cull_male ?? 0)
+    if (dr) {
+      await supabase.from('daily_records').update({
+        transfer_female: newTrF, transfer_male: newTrM,
+        trcull_female: trcullF, trcull_male: trcullM,
+        ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+      }).eq('id', dr.id)
+    } else {
+      await supabase.from('daily_records').insert({
+        flock_id: opts.flockId, record_date: opts.date,
+        farm_id: opts.farmId, shed_id: opts.shedId,
+        transfer_female: opts.trF, transfer_male: opts.trM,
+        trcull_female: opts.trF, trcull_male: opts.trM,
+        cull_female: 0, cull_male: 0,
+        mortality_female: 0, mortality_male: 0,
+      })
+    }
+  }
+
   const addTransferMut = useMutation({
     mutationFn: async () => {
       if (!transferForm.to_farm_id) throw new Error('To Farm is required')
@@ -252,36 +291,11 @@ export const FlockDetail: React.FC = () => {
       // alone can grab the DESTINATION shed's row instead (its transfer_in
       // credit gets wiped out by an equal-and-opposite "transfer out" written
       // onto the same row). unique key is (flock_id, record_date, farm_id, shed_id).
-      if (trF > 0 || trM > 0) {
-        let drQuery = supabase.from('daily_records')
-          .select('id,transfer_female,transfer_male,opening_female,opening_male,cull_female,cull_male,mortality_female,mortality_male')
-          .eq('flock_id', id!).eq('record_date', transferForm.transfer_date)
-        drQuery = transferForm.from_shed_id ? drQuery.eq('shed_id', transferForm.from_shed_id) : drQuery.is('shed_id', null)
-        drQuery = transferForm.from_farm_id ? drQuery.eq('farm_id', transferForm.from_farm_id) : drQuery.is('farm_id', null)
-        const { data: dr } = await drQuery.maybeSingle()
-        const newTrF = (dr?.transfer_female ?? 0) + trF
-        const newTrM = (dr?.transfer_male ?? 0) + trM
-        const closingF = Math.max(0, (dr?.opening_female ?? 0) - newTrF - (dr?.cull_female ?? 0) - (dr?.mortality_female ?? 0))
-        const closingM = Math.max(0, (dr?.opening_male ?? 0) - newTrM - (dr?.cull_male ?? 0) - (dr?.mortality_male ?? 0))
-        const trcullF = newTrF + (dr?.cull_female ?? 0)
-        const trcullM = newTrM + (dr?.cull_male ?? 0)
-        if (dr) {
-          await supabase.from('daily_records').update({
-            transfer_female: newTrF, transfer_male: newTrM,
-            trcull_female: trcullF, trcull_male: trcullM,
-            ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
-          }).eq('id', dr.id)
-        } else {
-          await supabase.from('daily_records').insert({
-            flock_id: id!, record_date: transferForm.transfer_date,
-            farm_id: transferForm.from_farm_id || null, shed_id: transferForm.from_shed_id || null,
-            transfer_female: trF, transfer_male: trM,
-            trcull_female: trF, trcull_male: trM,
-            cull_female: 0, cull_male: 0,
-            mortality_female: 0, mortality_male: 0,
-          })
-        }
-      }
+      await deductFromSourceShed({
+        flockId: id!, date: transferForm.transfer_date,
+        farmId: transferForm.from_farm_id || null, shedId: transferForm.from_shed_id || null,
+        trF, trM,
+      })
 
       // If marked as final transfer, update flock status to laying
       if (transferForm.is_final_transfer) {
@@ -345,14 +359,27 @@ export const FlockDetail: React.FC = () => {
       const trF = t.female_count || 0, trM = t.male_count || 0
       if (trF || trM) {
         let drQuery = supabase.from('daily_records')
-          .select('id,transfer_female,transfer_male').eq('flock_id', id!).eq('record_date', t.transfer_date)
+          .select('id,transfer_female,transfer_male,trcull_female,trcull_male,opening_female,opening_male,cull_female,cull_male,mortality_female,mortality_male')
+          .eq('flock_id', id!).eq('record_date', t.transfer_date)
         drQuery = t.from_shed_id ? drQuery.eq('shed_id', t.from_shed_id) : drQuery.is('shed_id', null)
         drQuery = t.from_farm_id ? drQuery.eq('farm_id', t.from_farm_id) : drQuery.is('farm_id', null)
         const { data: dr } = await drQuery.maybeSingle()
-        if (dr) await supabase.from('daily_records').update({
-          transfer_female: Math.max(0, (dr.transfer_female ?? 0) - trF),
-          transfer_male: Math.max(0, (dr.transfer_male ?? 0) - trM),
-        }).eq('id', dr.id)
+        if (dr) {
+          const newTrF = Math.max(0, (dr.transfer_female ?? 0) - trF)
+          const newTrM = Math.max(0, (dr.transfer_male ?? 0) - trM)
+          // trcull was incremented alongside transfer when the transfer was
+          // added (trcull = transfer + cull) — must be reversed by the same
+          // amount, or it stays permanently overstated after the delete.
+          const newTrcullF = Math.max(0, (dr.trcull_female ?? 0) - trF)
+          const newTrcullM = Math.max(0, (dr.trcull_male ?? 0) - trM)
+          const closingF = Math.max(0, (dr.opening_female ?? 0) - newTrF - (dr.cull_female ?? 0) - (dr.mortality_female ?? 0))
+          const closingM = Math.max(0, (dr.opening_male ?? 0) - newTrM - (dr.cull_male ?? 0) - (dr.mortality_male ?? 0))
+          await supabase.from('daily_records').update({
+            transfer_female: newTrF, transfer_male: newTrM,
+            trcull_female: newTrcullF, trcull_male: newTrcullM,
+            ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+          }).eq('id', dr.id)
+        }
       }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_transfers', id] }); qc.invalidateQueries({ queryKey: ['daily_records'] }); toast.success('Transfer deleted') },
@@ -369,29 +396,51 @@ export const FlockDetail: React.FC = () => {
     const { data: allFarmsData } = await supabase.from('farms').select('id,name,code')
     const farmMap: Record<string,string> = {}
     for (const f of allFarmsData??[]) { farmMap[f.name.toLowerCase()] = f.id; farmMap[f.code?.toLowerCase()] = f.id }
+    const { data: allSheds } = await supabase.from('sheds').select('id,shed_no,farm_id')
+    const shedKey = (farmId: string, shedNo: string) => `${farmId}|${shedNo}`.toLowerCase()
+    const shedMap: Record<string,string> = {}
+    for (const sh of allSheds??[]) shedMap[shedKey(sh.farm_id, String(sh.shed_no))] = sh.id
     let saved = 0
     for (const line of lines.slice(1)) {
       const vals = line.split(',').map(v => v.replace(/"/g,'').trim())
       const fromFarm = farmMap[vals[col('from_farm')]?.toLowerCase()]
       const toFarm = farmMap[vals[col('to_farm')]?.toLowerCase()]
       if (!vals[col('transfer_date')] || !toFarm) continue
+      const fromShedNo = vals[col('from_shed')]
+      const toShedNo = vals[col('to_shed')]
+      const fromShed = fromFarm && fromShedNo ? shedMap[shedKey(fromFarm, fromShedNo)] : undefined
+      const toShed = toShedNo ? shedMap[shedKey(toFarm, toShedNo)] : undefined
+      const trF = parseInt(vals[col('female_count')])||0
+      const trM = parseInt(vals[col('male_count')])||0
       await supabase.from('flock_transfers').insert({
         flock_id: id,
         transfer_date: vals[col('transfer_date')],
         from_farm_id: fromFarm || null,
         to_farm_id: toFarm,
-        female_count: parseInt(vals[col('female_count')])||0,
-        male_count: parseInt(vals[col('male_count')])||0,
+        from_shed_id: fromShed || null,
+        to_shed_id: toShed || null,
+        female_count: trF,
+        male_count: trM,
         sex_error_female: parseInt(vals[col('sex_error_female')])||0,
         sex_error_male: parseInt(vals[col('sex_error_male')])||0,
         sold_female: parseInt(vals[col('sold_female')])||0,
         sold_male: parseInt(vals[col('sold_male')])||0,
         notes: vals[col('notes')]||null,
       })
+      // Same source-shed deduction the single-entry form applies — without
+      // this, imported transfers credited the destination but never reduced
+      // the source shed's bird count (the Flock 22 corruption class).
+      await deductFromSourceShed({
+        flockId: id!, date: vals[col('transfer_date')],
+        farmId: fromFarm || null, shedId: fromShed || null,
+        trF, trM,
+      })
       saved++
     }
     toast.success(`Imported ${saved} transfer records`)
     qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
+    qc.invalidateQueries({ queryKey: ['flock_daily', id] })
+    qc.invalidateQueries({ queryKey: ['flock', id] })
     if (e.target) e.target.value = ''
   }
 
@@ -1095,8 +1144,8 @@ export const FlockDetail: React.FC = () => {
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => {
-                const hdrs = ['transfer_date','from_farm','to_farm','female_count','male_count','sex_error_female','sex_error_male','sold_female','sold_male','notes']
-                const ex = [new Date().toISOString().slice(0,10),'Kethereddypally','Agraharam','8000','800','50','0','0','0','Batch 1']
+                const hdrs = ['transfer_date','from_farm','to_farm','from_shed','to_shed','female_count','male_count','sex_error_female','sex_error_male','sold_female','sold_male','notes']
+                const ex = [new Date().toISOString().slice(0,10),'Kethereddypally','Agraharam','10','1','8000','800','50','0','0','0','Batch 1']
                 const csv = [hdrs, ex].map(r => r.map(v=>`"${v}"`).join(',')).join('\n')
                 const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'transfer_template.csv'; a.click()
               }}>Template</Button>
