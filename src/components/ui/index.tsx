@@ -57,7 +57,11 @@ interface DateInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
 }
 
 function isoToDisplay(iso: string): string {
-  if (!iso) return ''
+  // Defensive: a caller passing the raw onChange event instead of
+  // extracting e.target.value (an easy mistake — DateInput's onChange
+  // fires with a synthetic {target:{value}} object, not the string
+  // directly) used to crash the whole page here. Fail quietly instead.
+  if (!iso || typeof iso !== 'string') return ''
   const [y, m, d] = iso.split('-')
   if (!y || !m || !d) return ''
   return `${d}/${m}/${y}`

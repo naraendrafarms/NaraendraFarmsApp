@@ -192,11 +192,11 @@ const FeedConsumptionTab: React.FC = () => {
             <>
               <div>
                 <label className="text-xs text-gray-500 block mb-1">From</label>
-                <DateInput value={fromDate} onChange={setFromDate} />
+                <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)} />
               </div>
               <div>
                 <label className="text-xs text-gray-500 block mb-1">To</label>
-                <DateInput value={toDate} onChange={setToDate} />
+                <DateInput value={toDate} onChange={e => setToDate(e.target.value)} />
               </div>
             </>
           )}
