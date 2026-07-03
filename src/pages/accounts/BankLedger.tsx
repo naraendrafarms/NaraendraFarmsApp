@@ -13,6 +13,7 @@ const EMPTY_FORM = {
   reference_no: '',
   description: '',
   amount: '',
+  bank_account_id: '',
 }
 
 const EMPTY_ACCOUNT_FORM = {
@@ -416,7 +417,7 @@ export const BankLedgerPage: React.FC = () => {
 
   const openAdd = () => {
     setEditId(null)
-    setForm({ ...EMPTY_FORM })
+    setForm({ ...EMPTY_FORM, bank_account_id: selectedAccount })
     setShowModal(true)
   }
 
@@ -429,6 +430,7 @@ export const BankLedgerPage: React.FC = () => {
       reference_no: t.reference_no ?? '',
       description: t.description ?? '',
       amount: t.amount != null ? String(t.amount) : '',
+      bank_account_id: t.bank_account_id ?? selectedAccount,
     })
     setShowModal(true)
   }
@@ -439,9 +441,13 @@ export const BankLedgerPage: React.FC = () => {
       toast.error('Date and amount are required')
       return
     }
+    if (!form.bank_account_id) {
+      toast.error('Select which bank account this belongs to')
+      return
+    }
     setSaving(true)
     const payload = {
-      bank_account_id: selectedAccount,
+      bank_account_id: form.bank_account_id,
       txn_date: form.txn_date,
       txn_type: form.txn_type,
       category: form.category || null,
@@ -461,6 +467,11 @@ export const BankLedgerPage: React.FC = () => {
       setForm({ ...EMPTY_FORM })
       setEditId(null)
       qc.invalidateQueries({ queryKey: ['bank_transactions', selectedAccount] })
+      // Moving a transaction to a different account (via the Bank Account
+      // field above) means that account's own cache is stale too.
+      if (payload.bank_account_id !== selectedAccount) {
+        qc.invalidateQueries({ queryKey: ['bank_transactions', payload.bank_account_id] })
+      }
     }
   }
 
@@ -1005,6 +1016,14 @@ export const BankLedgerPage: React.FC = () => {
       {/* Add Transaction Modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Bank Transaction' : 'Add Bank Transaction'}>
         <div className="space-y-4">
+          {editId && (
+            <Select
+              label="Bank Account (ledger this belongs to)"
+              value={form.bank_account_id}
+              onChange={e => setForm(f => ({ ...f, bank_account_id: (e.target as HTMLSelectElement).value }))}
+              options={accountOptions}
+            />
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
