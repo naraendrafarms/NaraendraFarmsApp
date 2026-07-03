@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
 import {
-  Card, SectionHeader, Spinner, Badge, Select
+  Card, SectionHeader, Spinner, Badge, Select, DateInput
 } from '@/components/ui'
 import { AlertCircle, Search, Link2, X, CheckCircle2, Trash2, Pencil, Plus } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -82,6 +82,7 @@ type PayRecord = {
   paid_amount: number | null
   discount_amount: number | null
   pay_before_date: string | null
+  paid_date: string | null
   credit_limit: number | null
   payment_status: string
   category: string | null
@@ -443,7 +444,7 @@ export const PendingPaymentsPage: React.FC = () => {
   const [editModal, setEditModal] = useState<PayRecord | 'new' | null>(null)
   const blankEditForm = () => ({
     vendor_name: '', party_id: '', invoice_no: '', po_no: '', grn_no: '', invoice_date: today(), grn_date: '',
-    invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '', credit_limit: '',
+    invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '', paid_date: '', credit_limit: '',
     payment_status: 'Pending', account_type: 'NEFT', utr_no: '', cheque_no: '', category: '', remarks: '', bank_account_id: '',
   })
   const [editForm, setEditForm] = useState(blankEditForm())
@@ -457,7 +458,7 @@ export const PendingPaymentsPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id')
+        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id')
         .order('grn_date', { ascending: false })
       if (error) throw error
       return (data ?? []) as PayRecord[]
@@ -613,6 +614,7 @@ export const PendingPaymentsPage: React.FC = () => {
       tds_amount: r.tds_amount != null ? String(r.tds_amount) : '',
       discount_amount: r.discount_amount != null ? String(r.discount_amount) : '',
       pay_before_date: r.pay_before_date ?? '',
+      paid_date: r.paid_date ?? (r.payment_status === 'Paid' ? today() : ''),
       credit_limit: r.credit_limit != null ? String(r.credit_limit) : '',
       payment_status: r.payment_status ?? 'Pending',
       account_type: r.account_type ?? 'NEFT',
@@ -659,6 +661,7 @@ export const PendingPaymentsPage: React.FC = () => {
         net_payable: netPayable,
         discount_amount: editForm.discount_amount === '' ? null : parseFloat(editForm.discount_amount) || 0,
         pay_before_date: editForm.pay_before_date || null,
+        paid_date: editForm.payment_status === 'Paid' ? (editForm.paid_date || todayStr) : null,
         credit_limit: editForm.credit_limit === '' ? null : parseInt(editForm.credit_limit) || null,
         payment_status: editForm.payment_status,
         account_type: editForm.account_type || null,
@@ -692,7 +695,7 @@ export const PendingPaymentsPage: React.FC = () => {
         const amount = isNew || oldStatus === 'Paid' ? netPayable : Math.max(0, getBalance(editModal))
         await postLedgerEntry({
           paymentId: savedId, vendorName: payload.vendor_name, invoiceNo: payload.invoice_no, grnNo: payload.grn_no,
-          amount, mode: payload.account_type ?? 'NEFT', date: editForm.pay_before_date || todayStr,
+          amount, mode: payload.account_type ?? 'NEFT', date: payload.paid_date || todayStr,
           ref: payload.utr_no || payload.cheque_no, remarks: payload.remarks, bankAccountId: payload.bank_account_id,
         })
       } else if (oldStatus === 'Paid' && newStatus !== 'Paid') {
@@ -1153,6 +1156,10 @@ export const PendingPaymentsPage: React.FC = () => {
                 <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 space-y-3">
                   <p className="text-xs text-blue-700 font-medium">Marking Paid here posts straight to Cash Book — fill in how it was paid.</p>
                   <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 block mb-1">Payment Date (when it actually left the account)</label>
+                      <DateInput value={editForm.paid_date} onChange={e => setEditForm(f => ({ ...f, paid_date: e.target.value }))} />
+                    </div>
                     <div>
                       <label className="text-xs font-medium text-gray-600 block mb-1">Payment Mode</label>
                       <select value={editForm.account_type} onChange={e => setEditForm(f => ({ ...f, account_type: e.target.value }))}

@@ -1039,11 +1039,11 @@ export const BankLedgerPage: React.FC = () => {
               ]}
             />
           </div>
-          <Input
-            label="Category"
+          <Select
+            label="Ledger / Category (which head this posts to)"
             value={form.category}
-            onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-            placeholder="e.g. Feed payment, Salary..."
+            onChange={e => setForm(f => ({ ...f, category: (e.target as HTMLSelectElement).value }))}
+            options={CATEGORIES.map(c => ({ value: c, label: c || '— Select —' }))}
           />
           <Input
             label="Reference No"
