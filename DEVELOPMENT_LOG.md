@@ -336,6 +336,46 @@ or written.
 
 ---
 
+## 2026-07-03 — No UI to manage bank_accounts + a duplicate blank Kotak account silently ate a payment
+
+**Symptom:** User couldn't find where to add/edit/delete bank accounts
+anywhere in the app. Separately, a payment (Om Prakash Singh, ₹71,100)
+that the user selected "Kotak Mahindra Bank" for when marking it Paid
+still didn't show up under the real Kotak account in Bank Ledger.
+
+**Root cause (two compounding issues):**
+1. **No management UI ever existed** for `bank_accounts` — every file that
+   references the table (`BankLedger.tsx`, `PendingPaymentsPage.tsx`,
+   `PurchaseEntry.tsx`, `EmployeePages.tsx`, etc.) only ever `SELECT`s it
+   to populate a dropdown. Accounts could only ever have been created
+   directly in the database.
+2. **A duplicate account existed**: "Kotak Mahindra Bank" (no account
+   number) alongside the real "Kotak Mahindra Bank Ltd — 0045360473"
+   (267 real transactions). When the user picked "Kotak Mahindra Bank"
+   from the dropdown, it silently pointed at the wrong, blank duplicate
+   record instead of the real one — Bank Ledger defaults to the
+   alphabetically-first *active* account, so the user was looking at the
+   correct account while the payment sat under the duplicate.
+
+**Fix:**
+- Added a **Manage Bank Accounts** modal to `BankLedger.tsx` (button next
+  to the account dropdown) with full add/edit/deactivate/delete. Delete is
+  blocked with a clear message if any `bank_transactions` /
+  `pending_payments` / `salary_monthly` row still references that account
+  — no more silent orphaning or accidental cascade deletes.
+- Migration 331: moved the 1 `pending_payments` row and 1
+  `bank_transactions` row off the duplicate account onto the real one,
+  then deleted the empty duplicate.
+
+**Lesson:** A dropdown-only reference table (no CRUD anywhere) is an
+invitation for duplicates to get created directly in the DB during setup
+and never cleaned up — and once two rows exist for "the same" real-world
+account, every downstream selector silently accepts either one with no
+way to tell they're different. **Any table a picker/dropdown reads from
+needs a real management screen from day one**, not just a `SELECT`.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
