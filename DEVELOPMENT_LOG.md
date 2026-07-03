@@ -243,6 +243,58 @@ prop shape.
 
 ---
 
+## 2026-07-03 — Ledger sync only fired on Pending→Paid transition, not on re-edit of an already-Paid bill
+
+**Symptom:** User marked "Om Prakash Singh" (Professional Charges, ₹79,000,
+TDS ₹7,900, Net Payable ₹71,100) Paid via NEFT with UTR and a specific bank
+account selected — but Bank Ledger for that account never showed the
+payment, directly contradicting an earlier assurance that the bank-account
+ledger fix (see the entry above) was fully working.
+
+**Root cause:** In `PendingPaymentsPage.tsx`'s `handleEditSave` (and the
+identical pattern in `PurchaseEntry.tsx`'s edit path and both
+`EmployeePages.tsx` salary edit flows), the cash_book/bank_transactions
+sync was gated on `oldStatus !== 'Paid' && newStatus === 'Paid'` — a pure
+*transition* check. If a bill was already `Paid` before this specific edit
+and stayed `Paid` (e.g. bank details were filled in retroactively, after
+the bill was first marked Paid through some other path), neither branch of
+the if/else fired — no ledger entry was created OR updated, despite the
+form saving successfully with complete, correct bank details.
+
+**Fix:** Changed the condition in all 4 places to fire whenever the saved
+record **IS** Paid (not just on a fresh transition): if it was already
+Paid, clear the old ledger entries first, then always (re-)post fresh
+ones from the current form data. Only clears-without-reposting when
+transitioning away from Paid.
+
+**Backfill:** Found 127 Paid `pending_payments` bills with no `cash_book`
+entry at all. Broken down before touching anything: only 4 had
+`bank_account_id` already set (the genuine bug signature — user recorded
+which account paid it, but the sync bug ate the entry). The other 123 are
+non-cash bills that never had ANY bank account selected — they predate the
+bank-account-selector feature entirely, a separate, older gap. Backfilled
+only the 4 (migrations 325/326) using the same insert shape as
+`postLedgerEntry()`; left the 123 untouched pending the user's decision
+(only they know which account each was actually paid from). The 4:
+Om Prakash Singh, Sunways Bio Science LLP, Ventri Biologicals, HEALERS
+ASSOCIATES.
+
+**Lesson (migration 325→326 hiccup):** the first backfill attempt's
+`cash_book` INSERT succeeded (4 rows) but its `bank_transactions` INSERT
+failed **entirely** — one of the 4 rows had a NULL `net_payable`, which
+violated `bank_transactions.amount`'s NOT NULL constraint and aborted the
+*whole* statement (Postgres statements are all-or-nothing). This was
+correctly reported as `Errors: 1`, not silently swallowed — but it still
+meant Om Prakash Singh's bank_transactions row didn't exist yet even
+though "the migration ran". Retried with `COALESCE(net_payable,
+invoice_amount, 0)`. **Always use COALESCE fallbacks for NOT NULL columns
+in bulk backfills touching more than one row, and always verify with an
+explicit row-count/JOIN SELECT afterward** — don't trust "Done" as proof
+every intended row landed, especially when the statement could partially
+apply.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
