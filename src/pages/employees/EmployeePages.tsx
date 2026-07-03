@@ -849,6 +849,7 @@ export const SalaryEntryPage: React.FC = () => {
   const extraDaysConfig = useExtraDaysConfig()
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string|null>(null)
+  const [origIsPaid, setOrigIsPaid] = useState(false)
   const [filterFarm, setFilterFarm] = useState('')
   const [selectedFY, setSelectedFY] = useState(currentFY)
   const [selectedMonth, setSelectedMonth] = useState('')
@@ -956,7 +957,7 @@ export const SalaryEntryPage: React.FC = () => {
     advance_opening:'0', further_advance:'0', advance:'0', advance_closing:'0',
     other_reimbursement:'0', additional:'0', monthly_ctc:'',
     hold:'0', arrears:'0',
-    remarks:'', payment_mode:'Cash', payment_ref:'', is_paid:'false',
+    remarks:'', payment_mode:'Cash', payment_ref:'', is_paid:'false', bank_account_id:'',
   })
   const [form, setForm] = useState(blankForm())
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
@@ -964,6 +965,7 @@ export const SalaryEntryPage: React.FC = () => {
   const months = fyMonths(selectedFY)
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
+  const {data:bankAccounts}=useQuery({queryKey:['bank_accounts_list'],queryFn:async()=>{const{data}=await supabase.from('bank_accounts').select('id,account_name,bank_name').order('account_name');return data??[]}})
   const {data:employees}=useQuery({
     queryKey:['employees_sal',filterFarm],
     queryFn:async()=>{
@@ -1199,13 +1201,17 @@ export const SalaryEntryPage: React.FC = () => {
       payment_mode:   rec.payment_mode ?? 'Cash',
       payment_ref:    rec.payment_ref ?? '',
       is_paid:        rec.is_paid ? 'true' : 'false',
+      bank_account_id: rec.bank_account_id ?? '',
     })
+    setOrigIsPaid(!!rec.is_paid)
     setShowForm(true)
   }
 
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.employee_id||!form.month)throw new Error('Employee and month required')
+      if(form.is_paid==='true' && (form.payment_mode||'Cash').toLowerCase()!=='cash' && !form.bank_account_id)
+        throw new Error('Select which bank account this is paid from')
       const n = (k: string) => parseFloat((form as any)[k]) || 0
       const totalEarning = n('total_earning') || n('gross_salary')
       const payload = {
@@ -1253,9 +1259,35 @@ export const SalaryEntryPage: React.FC = () => {
         payment_ref:    form.payment_ref||null,
         is_paid:        form.is_paid==='true',
         remarks:        form.remarks||null,
+        bank_account_id: (form.payment_mode||'Cash').toLowerCase()!=='cash' ? (form.bank_account_id||null) : null,
       }
       const{data:upserted,error}=await supabase.from('salary_monthly').upsert(payload,{onConflict:'employee_id,month'}).select('id').single()
       if(error)throw error
+      // Keep Cash Book / Bank Ledger in sync with the Paid flag, same
+      // pattern as Pending Payments / Purchase Entry.
+      const emp=(employees??[]).find((e:any)=>e.id===form.employee_id)
+      const netAmt = n('net_salary')
+      if(!origIsPaid && payload.is_paid && upserted?.id && netAmt>0){
+        const isCash=(payload.payment_mode||'Cash').toLowerCase()==='cash'
+        await supabase.from('cash_book').insert({
+          txn_date: new Date().toISOString().slice(0,10), txn_type:'payment', category:'salary',
+          description:`Salary — ${emp?.name??''} (${form.month})`,
+          party_name: emp?.name??null, amount_in:0, amount_out:netAmt,
+          payment_mode: isCash?'cash':'cheque', salary_monthly_id: upserted.id,
+          reference_no: payload.payment_ref, remarks: payload.remarks,
+        })
+        if(!isCash && payload.bank_account_id){
+          await supabase.from('bank_transactions').insert({
+            bank_account_id: payload.bank_account_id,
+            txn_date: new Date().toISOString().slice(0,10), txn_type:'Debit', category:'Salary Payment',
+            reference_no: payload.payment_ref, description:`Salary — ${emp?.name??''} (${form.month})`,
+            amount: netAmt, salary_monthly_id: upserted.id,
+          })
+        }
+      } else if(origIsPaid && !payload.is_paid && upserted?.id){
+        await supabase.from('cash_book').delete().eq('salary_monthly_id',upserted.id)
+        await supabase.from('bank_transactions').delete().eq('salary_monthly_id',upserted.id)
+      }
       // When marking as paid: auto-deduct pending employee_deductions for this employee+month
       if(payload.is_paid && upserted?.id){
         await supabase.from('employee_deductions')
@@ -1264,7 +1296,7 @@ export const SalaryEntryPage: React.FC = () => {
         qc.invalidateQueries({queryKey:['employee_deductions_pending']})
       }
     },
-    onSuccess:()=>{toast.success('Salary saved!');qc.invalidateQueries({queryKey:['salary_monthly_detail','salary_fy_summary']});setShowForm(false);setEditingId(null)},
+    onSuccess:()=>{toast.success('Salary saved!');qc.invalidateQueries({queryKey:['salary_monthly_detail','salary_fy_summary']});qc.invalidateQueries({queryKey:['cash_book']});qc.invalidateQueries({queryKey:['bank_transactions']});setShowForm(false);setEditingId(null)},
     onError:(e:any)=>toast.error(e.message)
   })
 
@@ -1343,7 +1375,7 @@ export const SalaryEntryPage: React.FC = () => {
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={()=>exportCSV('salary_import_template.csv',['emp_id','month','days_worked','basic_salary','hra','advance','arrears','ot_bonus','tds','esi_employee','pf_employee','pt','remarks'],[['BPS4001','2025-06','26','8000','2000','0','0','0','0','','','','']]) }>Template</Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
             <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportCSV}/>
-            <Button icon={<Plus size={16}/>} onClick={()=>{setForm(blankForm());setEditingId(null);setShowForm(true)}}>Add Entry</Button>
+            <Button icon={<Plus size={16}/>} onClick={()=>{setForm(blankForm());setEditingId(null);setOrigIsPaid(false);setShowForm(true)}}>Add Entry</Button>
           </div>
         }
       />
@@ -1611,6 +1643,12 @@ export const SalaryEntryPage: React.FC = () => {
               <Input label="UTR / Cheque No" value={form.payment_ref} onChange={e=>s('payment_ref',e.target.value)}/>
               <Select label="Status" options={[{value:'false',label:'Pending'},{value:'true',label:'Paid'}]} value={form.is_paid} onChange={e=>s('is_paid',e.target.value)}/>
             </FormRow>
+            {form.is_paid==='true' && form.payment_mode.toLowerCase()!=='cash' && (
+              <FormRow>
+                <Select label="Paid From Bank Account" value={form.bank_account_id} onChange={e=>s('bank_account_id',e.target.value)}
+                  options={[{value:'',label:'— Select account —'},...(bankAccounts??[]).map((b:any)=>({value:b.id,label:`${b.account_name?b.account_name+' — ':''}${b.bank_name}`}))]}/>
+              </FormRow>
+            )}
             <Input label="Remarks" value={form.remarks} onChange={e=>s('remarks',e.target.value)}/>
           </div>
           )
@@ -1793,7 +1831,9 @@ export const ESIPFReportPage: React.FC = () => {
   const [filterFarm, setFilterFarm] = useState('')
   const [editRec, setEditRec] = useState<any>(null)
   const [editForm, setEditForm] = useState<any>({})
+  const [editOrigIsPaid, setEditOrigIsPaid] = useState(false)
   const ef = (k:string) => (e:any) => setEditForm((p:any)=>({...p,[k]:e.target.value}))
+  const {data:bankAccounts}=useQuery({queryKey:['bank_accounts_list'],queryFn:async()=>{const{data}=await supabase.from('bank_accounts').select('id,account_name,bank_name').order('account_name');return data??[]}})
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
 
@@ -1825,11 +1865,18 @@ export const ESIPFReportPage: React.FC = () => {
       payment_mode: r.payment_mode??'Cash',
       payment_ref: r.payment_ref??'',
       remarks: r.remarks??'',
+      bank_account_id: r.bank_account_id??'',
     })
+    setEditOrigIsPaid(!!r.is_paid)
   }
 
   const saveMut = useMutation({
     mutationFn: async () => {
+      if(editForm.is_paid==='true' && (editForm.payment_mode||'Cash').toLowerCase()!=='cash' && !editForm.bank_account_id)
+        throw new Error('Select which bank account this is paid from')
+      const isPaidNow = editForm.is_paid==='true'
+      const netAmt = parseFloat(editForm.net_salary)||0
+      const bankAccountId = (editForm.payment_mode||'Cash').toLowerCase()!=='cash' ? (editForm.bank_account_id||null) : null
       const { error } = await supabase.from('salary_monthly').update({
         gross_salary: parseFloat(editForm.gross_salary)||null,
         esi_employee: parseFloat(editForm.esi_employee)||0,
@@ -1837,15 +1884,39 @@ export const ESIPFReportPage: React.FC = () => {
         pf_employee: parseFloat(editForm.pf_employee)||0,
         pf_employer: parseFloat(editForm.pf_employer)||0,
         pt: parseFloat(editForm.pt)||0,
-        net_salary: parseFloat(editForm.net_salary)||0,
-        is_paid: editForm.is_paid==='true',
+        net_salary: netAmt||null,
+        is_paid: isPaidNow,
         payment_mode: editForm.payment_mode||'Cash',
         payment_ref: editForm.payment_ref||null,
         remarks: editForm.remarks||null,
+        bank_account_id: bankAccountId,
       }).eq('id', editRec.id)
       if (error) throw error
+      // Keep Cash Book / Bank Ledger in sync, same as the main Salary Entry form.
+      if(!editOrigIsPaid && isPaidNow && netAmt>0){
+        const isCash=(editForm.payment_mode||'Cash').toLowerCase()==='cash'
+        const empName = editRec.employees?.name ?? ''
+        await supabase.from('cash_book').insert({
+          txn_date: new Date().toISOString().slice(0,10), txn_type:'payment', category:'salary',
+          description:`Salary — ${empName} (${filterMonth})`,
+          party_name: empName||null, amount_in:0, amount_out:netAmt,
+          payment_mode: isCash?'cash':'cheque', salary_monthly_id: editRec.id,
+          reference_no: editForm.payment_ref||null, remarks: editForm.remarks||null,
+        })
+        if(!isCash && bankAccountId){
+          await supabase.from('bank_transactions').insert({
+            bank_account_id: bankAccountId,
+            txn_date: new Date().toISOString().slice(0,10), txn_type:'Debit', category:'Salary Payment',
+            reference_no: editForm.payment_ref||null, description:`Salary — ${empName} (${filterMonth})`,
+            amount: netAmt, salary_monthly_id: editRec.id,
+          })
+        }
+      } else if(editOrigIsPaid && !isPaidNow){
+        await supabase.from('cash_book').delete().eq('salary_monthly_id',editRec.id)
+        await supabase.from('bank_transactions').delete().eq('salary_monthly_id',editRec.id)
+      }
     },
-    onSuccess: () => { toast.success('Saved'); qc.invalidateQueries({queryKey:['esipf_report']}); setEditRec(null) },
+    onSuccess: () => { toast.success('Saved'); qc.invalidateQueries({queryKey:['esipf_report']}); qc.invalidateQueries({queryKey:['cash_book']}); qc.invalidateQueries({queryKey:['bank_transactions']}); setEditRec(null) },
     onError: (e:any) => toast.error(e.message),
   })
 
@@ -1977,6 +2048,12 @@ export const ESIPFReportPage: React.FC = () => {
               <Input label="UTR / Cheque No" value={editForm.payment_ref} onChange={ef('payment_ref')}/>
               <Select label="Paid?" options={[{value:'false',label:'Pending'},{value:'true',label:'Paid'}]} value={editForm.is_paid} onChange={ef('is_paid')}/>
             </FormRow>
+            {editForm.is_paid==='true' && (editForm.payment_mode||'Cash').toLowerCase()!=='cash' && (
+              <FormRow>
+                <Select label="Paid From Bank Account" value={editForm.bank_account_id||''} onChange={ef('bank_account_id')}
+                  options={[{value:'',label:'— Select account —'},...(bankAccounts??[]).map((b:any)=>({value:b.id,label:`${b.account_name?b.account_name+' — ':''}${b.bank_name}`}))]}/>
+              </FormRow>
+            )}
             <Input label="Remarks" value={editForm.remarks} onChange={ef('remarks')}/>
           </div>
         )}
