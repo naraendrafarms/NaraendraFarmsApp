@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { FeedTransfer } from '@/pages/feed/FeedPages'
 import { StockPage } from '@/pages/feed/StockPage'
+import { ConsumptionReportTab } from '@/pages/inventory/InventoryPages'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
@@ -46,7 +47,7 @@ const Sel: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { placeholde
   </select>
 )
 
-type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock Dispatch' | 'Formulas' | 'Flock Allocation' | 'Reconciliation'
+type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock Dispatch' | 'Formulas' | 'Flock Allocation' | 'Reconciliation' | 'Consumption'
 
 // ══════════════════════════════════════════════════════════════════
 // FINISHED FEED STOCK TAB
@@ -137,6 +138,102 @@ const FinishedFeedStockTab: React.FC = () => {
 // ══════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ══════════════════════════════════════════════════════════════════
+// ── Consumption: day/month per-ingredient (shared with Inventory) plus
+// per-formula breakdown, since a formula's ingredient mix isn't visible
+// from stock_ledger alone (that only has qty per item, not per formula).
+const FeedConsumptionTab: React.FC = () => {
+  const [view, setView] = useState<'ingredient' | 'formula'>('ingredient')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState(today())
+
+  const { data: byFormula, isLoading } = useQuery({
+    queryKey: ['feed_cons_by_formula', fromDate, toDate],
+    enabled: view === 'formula',
+    queryFn: async () => {
+      let q = supabase.from('feed_production_log')
+        .select('production_date, quantity_kg, feed_formulas(formula_name, formula_code), feed_production_ingredients(ingredient_name, quantity_kg)')
+        .order('production_date', { ascending: false })
+      if (fromDate) q = q.gte('production_date', fromDate)
+      if (toDate) q = q.lte('production_date', toDate)
+      const { data } = await q
+      return data ?? []
+    },
+  })
+
+  const formulaRows = React.useMemo(() => {
+    const m: Record<string, { formula: string; batches: number; producedKg: number; ingredients: Record<string, number> }> = {}
+    for (const log of byFormula ?? []) {
+      const f = (log as any).feed_formulas
+      const label = f ? `${f.formula_code} — ${f.formula_name}` : '(no formula)'
+      if (!m[label]) m[label] = { formula: label, batches: 0, producedKg: 0, ingredients: {} }
+      m[label].batches += 1
+      m[label].producedKg += Number((log as any).quantity_kg ?? 0)
+      for (const ing of (log as any).feed_production_ingredients ?? []) {
+        const name = ing.ingredient_name ?? '(unnamed)'
+        m[label].ingredients[name] = (m[label].ingredients[name] ?? 0) + Number(ing.quantity_kg ?? 0)
+      }
+    }
+    return Object.values(m).sort((a, b) => b.producedKg - a.producedKg)
+  }, [byFormula])
+
+  return (
+    <div className="space-y-5">
+      <Card>
+        <div className="p-4 flex flex-wrap gap-3 items-end">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">View</label>
+            <select value={view} onChange={e => setView(e.target.value as any)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <option value="ingredient">By Ingredient (day/month)</option>
+              <option value="formula">By Formula</option>
+            </select>
+          </div>
+          {view === 'formula' && (
+            <>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">From</label>
+                <DateInput value={fromDate} onChange={setFromDate} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">To</label>
+                <DateInput value={toDate} onChange={setToDate} />
+              </div>
+            </>
+          )}
+        </div>
+      </Card>
+
+      {view === 'ingredient' ? (
+        <ConsumptionReportTab lockedCategory="Feed Ingredient" />
+      ) : isLoading ? <Spinner /> : (
+        <div className="space-y-4">
+          {formulaRows.map(f => (
+            <Card key={f.formula}>
+              <SectionHeader title={f.formula} subtitle={`${f.batches} batch(es) — ${f.producedKg.toLocaleString('en-IN')} kg produced`} />
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr><Th>Ingredient</Th><Th right>Total Used (kg)</Th></tr></thead>
+                  <tbody>
+                    {Object.entries(f.ingredients).sort((a, b) => b[1] - a[1]).map(([name, kg]) => (
+                      <tr key={name} className="text-sm hover:bg-gray-50">
+                        <Td className="font-medium">{name}</Td>
+                        <Td right className="text-orange-600">{kg.toLocaleString('en-IN', { maximumFractionDigits: 1 })}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
+            </Card>
+          ))}
+          {formulaRows.length === 0 && (
+            <Card><div className="p-6 text-center text-gray-400">No production batches in this range</div></Card>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export const FeedMillPage: React.FC = () => {
   const [searchParams] = useSearchParams()
   const urlTab = searchParams.get('tab')
@@ -147,7 +244,7 @@ export const FeedMillPage: React.FC = () => {
     urlTab === 'formulas'   ? 'Formulas' : 'Raw Materials Stock'
   const [tab, setTab] = useState<Tab>(initialTab)
 
-  const mainTabs: Tab[] = ['Raw Materials Stock', 'Production', 'Finished Feed Stock', 'Stock Dispatch']
+  const mainTabs: Tab[] = ['Raw Materials Stock', 'Production', 'Finished Feed Stock', 'Stock Dispatch', 'Consumption']
   const moreTabs: Tab[] = ['Formulas', 'Flock Allocation', 'Reconciliation']
 
   return (
@@ -172,6 +269,7 @@ export const FeedMillPage: React.FC = () => {
       {tab === 'Production'          && <ProductionTab />}
       {tab === 'Finished Feed Stock' && <FinishedFeedStockTab />}
       {tab === 'Stock Dispatch'      && <FeedTransfer />}
+      {tab === 'Consumption'         && <FeedConsumptionTab />}
       {tab === 'Formulas'            && <FormulasTab />}
       {tab === 'Flock Allocation'    && <FlockAllocationTab />}
       {tab === 'Reconciliation'      && <ReconciliationTab />}

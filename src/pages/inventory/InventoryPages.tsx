@@ -39,7 +39,7 @@ const cleanNum = (v: any): number | null => {
   return isNaN(n) ? null : n
 }
 
-type Tab = 'Stock Balance' | 'Adjustments' | 'Stock Ledger' | 'Closing Stock Report'
+type Tab = 'Stock Balance' | 'Adjustments' | 'Stock Ledger' | 'Closing Stock Report' | 'Consumption Report'
 
 // ════════════════════════════════════════════════════════════════════
 // SHARED DATA HOOKS
@@ -105,6 +105,7 @@ export const InventoryPage: React.FC = () => {
     { id: 'Adjustments',          icon: <SlidersHorizontal size={14}/> },
     { id: 'Stock Ledger',         icon: <ListTree size={14}/> },
     { id: 'Closing Stock Report', icon: <BarChart3 size={14}/> },
+    { id: 'Consumption Report',   icon: <BarChart3 size={14}/> },
   ]
   return (
     <div className="space-y-5">
@@ -122,6 +123,7 @@ export const InventoryPage: React.FC = () => {
       {tab === 'Adjustments'          && <AdjustmentsTab />}
       {tab === 'Stock Ledger'         && <LedgerTab />}
       {tab === 'Closing Stock Report' && <ClosingStockReportTab />}
+      {tab === 'Consumption Report'   && <ConsumptionReportTab />}
     </div>
   )
 }
@@ -919,6 +921,162 @@ const ClosingStockReportTab: React.FC = () => {
                   <Td right className="text-blue-800 text-base">{inr(totalClosingValue)}</Td>
                 </tr>
               </tfoot>
+            </Table>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TAB 6: CONSUMPTION REPORT (day-wise / month-wise usage per item)
+// ════════════════════════════════════════════════════════════════════
+// Exported so the Feed Mill page can embed the same report pre-locked to
+// category='Feed Ingredient' instead of duplicating the logic.
+export const ConsumptionReportTab: React.FC<{ lockedCategory?: string }> = ({ lockedCategory }) => {
+  const CATEGORIES = useCategoryList()
+  const [groupBy, setGroupBy] = useState<'day' | 'month'>('month')
+  const [category, setCategory] = useState(lockedCategory ?? '')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState(today())
+  const [q, setQ] = useState('')
+
+  const { data: itemsMaster } = useQuery({
+    queryKey: ['items_master_cons'],
+    queryFn: async () => {
+      const { data } = await supabase.from('items').select('id,name,category,unit').order('name')
+      return data ?? []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: slData, isLoading } = useQuery({
+    queryKey: ['sl_consumption', fromDate, toDate],
+    queryFn: async () => {
+      let all: any[] = [], from = 0
+      while (true) {
+        let query = supabase.from('stock_ledger')
+          .select('item_id,item_name,txn_type,qty,txn_date')
+          .in('txn_type', ['production_out','medicine_out','adjustment_out','transfer_out','dispatch_out'])
+          .order('txn_date').range(from, from + 999)
+        if (fromDate) query = query.gte('txn_date', fromDate)
+        if (toDate) query = query.lte('txn_date', toDate)
+        const { data } = await query
+        if (!data || !data.length) break
+        all = all.concat(data); if (data.length < 1000) break; from += 1000
+      }
+      return all
+    },
+  })
+
+  const itemMap = useMemo(() => {
+    const m: Record<string, any> = {}
+    for (const it of itemsMaster ?? []) m[it.id] = it
+    return m
+  }, [itemsMaster])
+
+  const rows = useMemo(() => {
+    const m: Record<string, any> = {}
+    for (const r of slData ?? []) {
+      const master = r.item_id ? itemMap[r.item_id] : null
+      const itemName = master?.name ?? r.item_name ?? '(unlinked)'
+      const itemCategory = master?.category ?? ''
+      if (category && itemCategory !== category) continue
+      const period = groupBy === 'month' ? (r.txn_date ?? '').slice(0, 7) : r.txn_date
+      const key = `${itemName}__${period}`
+      if (!m[key]) m[key] = { itemName, category: itemCategory, unit: master?.unit ?? '', period, qty: 0 }
+      m[key].qty += Number(r.qty ?? 0)
+    }
+    return Object.values(m).sort((a: any, b: any) =>
+      b.period.localeCompare(a.period) || a.itemName.localeCompare(b.itemName))
+  }, [slData, itemMap, category, groupBy])
+
+  const filtered = useMemo(() => {
+    if (!q) return rows
+    const s = q.toLowerCase()
+    return rows.filter((r: any) => r.itemName.toLowerCase().includes(s))
+  }, [rows, q])
+
+  const totalsByItem = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const r of filtered as any[]) m[r.itemName] = (m[r.itemName] ?? 0) + r.qty
+    return Object.entries(m).sort((a, b) => b[1] - a[1])
+  }, [filtered])
+
+  return (
+    <div className="space-y-5">
+      <Card>
+        <div className="p-4 flex flex-wrap gap-3 items-end">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Group By</label>
+            <Select value={groupBy} onChange={e => setGroupBy(e.target.value as any)}
+              options={[{ value: 'day', label: 'Day-wise' }, { value: 'month', label: 'Month-wise' }]} />
+          </div>
+          {!lockedCategory && (
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Category</label>
+              <Select value={category} onChange={e => setCategory(e.target.value)}
+                options={[{ value: '', label: 'All Categories' }, ...CATEGORIES.map(c => ({ value: c, label: c }))]} />
+            </div>
+          )}
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">From</label>
+            <DateInput value={fromDate} onChange={setFromDate} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">To</label>
+            <DateInput value={toDate} onChange={setToDate} />
+          </div>
+          <div className="flex-1 min-w-[160px]">
+            <label className="text-xs text-gray-500 block mb-1">Search item</label>
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Item name..." />
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <SectionHeader title={`Item Totals (${fromDate || 'start'} to ${toDate})`} />
+        <div className="overflow-x-auto">
+          <Table>
+            <thead><tr><Th>Item</Th><Th right>Total Consumed</Th></tr></thead>
+            <tbody>
+              {totalsByItem.map(([name, qty]) => (
+                <tr key={name} className="text-sm hover:bg-gray-50">
+                  <Td className="font-medium">{name}</Td>
+                  <Td right className="text-orange-600 font-semibold">{qty.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Td>
+                </tr>
+              ))}
+              {totalsByItem.length === 0 && !isLoading && (
+                <tr><Td colSpan={2} className="text-center text-gray-400 py-6">No consumption in this range</Td></tr>
+              )}
+            </tbody>
+          </Table>
+        </div>
+      </Card>
+
+      <Card>
+        <SectionHeader title={groupBy === 'month' ? 'Month-wise Breakdown' : 'Day-wise Breakdown'} />
+        {isLoading ? <Spinner /> : (
+          <div className="overflow-x-auto">
+            <Table>
+              <thead>
+                <tr><Th>{groupBy === 'month' ? 'Month' : 'Date'}</Th><Th>Item</Th><Th>Category</Th><Th>Unit</Th><Th right>Qty Used</Th></tr>
+              </thead>
+              <tbody>
+                {(filtered as any[]).map((r, i) => (
+                  <tr key={i} className="text-sm hover:bg-gray-50">
+                    <Td className="text-xs">{groupBy === 'month' ? r.period : fmtDate(r.period)}</Td>
+                    <Td className="font-medium">{r.itemName}</Td>
+                    <Td className="text-xs">{r.category ? <Badge color="blue">{r.category}</Badge> : '—'}</Td>
+                    <Td className="text-xs">{r.unit}</Td>
+                    <Td right className="text-orange-600">{r.qty.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr><Td colSpan={5} className="text-center text-gray-400 py-6">No consumption in this range</Td></tr>
+                )}
+              </tbody>
             </Table>
           </div>
         )}
