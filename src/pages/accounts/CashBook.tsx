@@ -124,6 +124,8 @@ export const CashBookPage: React.FC = () => {
   const [filterLocation, setFilterLocation] = useState('')
   // Flock filter (DB-level via flock_id on cash_book)
   const [filterFlock, setFilterFlock] = useState('')
+  // Mode filter: '' = all, 'cash' = payment_mode is cash, 'bank' = anything else (upi/cheque/transfer/etc.)
+  const [filterMode, setFilterMode] = useState('')
   // Party name search (client-side text search)
   const [filterParty, setFilterParty] = useState('')
 
@@ -216,14 +218,16 @@ export const CashBookPage: React.FC = () => {
 
   // Display in reverse order (newest first), with optional party name search
   const displayRows = useMemo(() => {
-    const reversed = [...rowsWithBalance].reverse()
+    let reversed = [...rowsWithBalance].reverse()
+    if (filterMode === 'cash') reversed = reversed.filter((t: any) => (t.payment_mode ?? 'cash').toLowerCase() === 'cash')
+    else if (filterMode === 'bank') reversed = reversed.filter((t: any) => (t.payment_mode ?? 'cash').toLowerCase() !== 'cash')
     if (!filterParty.trim()) return reversed
     const q = filterParty.trim().toLowerCase()
     return reversed.filter((t: any) =>
       (t.party_name ?? '').toLowerCase().includes(q) ||
       (t.description ?? '').toLowerCase().includes(q)
     )
-  }, [rowsWithBalance, filterParty])
+  }, [rowsWithBalance, filterParty, filterMode])
 
   // Totals reflect the currently filtered/visible rows (Excel-style subtotal).
   // displayRows already accounts for location, flock and party/description filters.
@@ -233,7 +237,7 @@ export const CashBookPage: React.FC = () => {
     displayRows.reduce((s: number, t: any) => s + (t.amount_out ?? 0), 0), [displayRows])
   // Net of the filtered rows. Opening balance is only meaningful for the full
   // (unfiltered-by-party) ledger, so only add it when no party search is active.
-  const isFiltered = !!filterParty.trim()
+  const isFiltered = !!filterParty.trim() || !!filterMode
   const closingBalance = isFiltered
     ? totalReceipts - totalPayments
     : openingBalance + totalReceipts - totalPayments
@@ -557,6 +561,10 @@ export const CashBookPage: React.FC = () => {
               onChange={e => setFilterParty(e.target.value)}
             />
           </div>
+          <Select label="Cash / Bank"
+            options={[{ value: '', label: 'All' }, { value: 'cash', label: 'Cash only' }, { value: 'bank', label: 'Bank only' }]}
+            value={filterMode}
+            onChange={e => setFilterMode(e.target.value)} />
           <div className="flex gap-3 items-end pb-0.5">
             <button className="text-xs text-brand-600 hover:underline"
               onClick={() => { const r = currentMonthRange(); setFilterFrom(r.from); setFilterTo(r.to) }}>
@@ -566,9 +574,9 @@ export const CashBookPage: React.FC = () => {
               onClick={() => { setFilterFrom(''); setFilterTo('') }}>
               All Time
             </button>
-            {(filterLocation || filterFlock || filterParty) && (
+            {(filterLocation || filterFlock || filterParty || filterMode) && (
               <button className="text-xs text-red-500 hover:underline"
-                onClick={() => { setFilterLocation(''); setFilterFlock(''); setFilterParty('') }}>
+                onClick={() => { setFilterLocation(''); setFilterFlock(''); setFilterParty(''); setFilterMode('') }}>
                 Clear Filters
               </button>
             )}
