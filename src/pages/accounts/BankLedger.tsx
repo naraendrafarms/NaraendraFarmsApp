@@ -15,6 +15,16 @@ const EMPTY_FORM = {
   amount: '',
 }
 
+const EMPTY_ACCOUNT_FORM = {
+  bank_name: '',
+  account_name: '',
+  account_no: '',
+  ifsc: '',
+  branch: '',
+  opening_balance: '',
+  is_active: true,
+}
+
 // ── Kotak CSV parser ─────────────────────────────────────────────────────────
 
 type ParsedRow = {
@@ -143,6 +153,11 @@ export const BankLedgerPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
+  // Manage Accounts modal state
+  const [showManageAccounts, setShowManageAccounts] = useState(false)
+  const [acctEditId, setAcctEditId] = useState<string | null>(null)
+  const [acctForm, setAcctForm] = useState({ ...EMPTY_ACCOUNT_FORM })
+
   // Import state
   const fileRef = useRef<HTMLInputElement>(null)
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([])
@@ -170,6 +185,102 @@ export const BankLedgerPage: React.FC = () => {
       setSelectedAccount((accounts[0] as any).id)
     }
   }, [accounts])
+
+  // Every account (active + inactive) for the Manage Accounts modal — the
+  // dropdown above only ever shows active ones.
+  const { data: allAccounts, isLoading: allAccountsLoading } = useQuery({
+    queryKey: ['bank_accounts_all'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('bank_accounts')
+        .select('id,bank_name,account_name,account_no,ifsc,branch,opening_balance,is_active')
+        .order('bank_name')
+      return data ?? []
+    },
+    enabled: showManageAccounts,
+  })
+
+  const openAddAccount = () => { setAcctEditId(null); setAcctForm({ ...EMPTY_ACCOUNT_FORM }) }
+
+  const openEditAccount = (a: any) => {
+    setAcctEditId(a.id)
+    setAcctForm({
+      bank_name: a.bank_name ?? '',
+      account_name: a.account_name ?? '',
+      account_no: a.account_no ?? '',
+      ifsc: a.ifsc ?? '',
+      branch: a.branch ?? '',
+      opening_balance: a.opening_balance != null ? String(a.opening_balance) : '',
+      is_active: a.is_active ?? true,
+    })
+  }
+
+  const saveAccountMut = useMutation({
+    mutationFn: async () => {
+      if (!acctForm.bank_name.trim()) throw new Error('Bank name is required')
+      const payload = {
+        bank_name: acctForm.bank_name.trim(),
+        account_name: acctForm.account_name.trim() || null,
+        account_no: acctForm.account_no.trim() || null,
+        ifsc: acctForm.ifsc.trim() || null,
+        branch: acctForm.branch.trim() || null,
+        opening_balance: parseFloat(acctForm.opening_balance) || 0,
+        is_active: acctForm.is_active,
+      }
+      if (acctEditId) {
+        const { error } = await supabase.from('bank_accounts').update(payload).eq('id', acctEditId)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('bank_accounts').insert(payload)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      toast.success(acctEditId ? 'Account updated' : 'Account added')
+      qc.invalidateQueries({ queryKey: ['bank_accounts_all'] })
+      qc.invalidateQueries({ queryKey: ['bank_accounts'] })
+      setAcctEditId(null)
+      setAcctForm({ ...EMPTY_ACCOUNT_FORM })
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const toggleAccountActiveMut = useMutation({
+    mutationFn: async (a: any) => {
+      const { error } = await supabase.from('bank_accounts').update({ is_active: !a.is_active }).eq('id', a.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bank_accounts_all'] })
+      qc.invalidateQueries({ queryKey: ['bank_accounts'] })
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const deleteAccountMut = useMutation({
+    mutationFn: async (a: any) => {
+      const [{ count: txnCount }, { count: ppCount }, { count: salCount }] = await Promise.all([
+        supabase.from('bank_transactions').select('id', { count: 'exact', head: true }).eq('bank_account_id', a.id),
+        supabase.from('pending_payments').select('id', { count: 'exact', head: true }).eq('bank_account_id', a.id),
+        supabase.from('salary_monthly').select('id', { count: 'exact', head: true }).eq('bank_account_id', a.id),
+      ])
+      const total = (txnCount ?? 0) + (ppCount ?? 0) + (salCount ?? 0)
+      if (total > 0) {
+        throw new Error(
+          `Can't delete — ${txnCount ?? 0} bank transaction(s), ${ppCount ?? 0} pending payment(s) and ${salCount ?? 0} salary record(s) reference this account. ` +
+          `Deactivate it instead, or move those records to another account first.`
+        )
+      }
+      const { error } = await supabase.from('bank_accounts').delete().eq('id', a.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Account deleted')
+      qc.invalidateQueries({ queryKey: ['bank_accounts_all'] })
+      qc.invalidateQueries({ queryKey: ['bank_accounts'] })
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
 
   // Load transactions for selected account
   const { data: transactions, isLoading: txLoading } = useQuery({
@@ -509,14 +620,89 @@ export const BankLedgerPage: React.FC = () => {
       />
 
       {/* Account selector */}
-      <div className="w-72">
-        <Select
-          label="Bank Account"
-          value={selectedAccount}
-          onChange={e => setSelectedAccount((e.target as HTMLSelectElement).value)}
-          options={[{ value: '', label: '— Select Account —' }, ...accountOptions]}
-        />
+      <div className="flex items-end gap-3">
+        <div className="w-72">
+          <Select
+            label="Bank Account"
+            value={selectedAccount}
+            onChange={e => setSelectedAccount((e.target as HTMLSelectElement).value)}
+            options={[{ value: '', label: '— Select Account —' }, ...accountOptions]}
+          />
+        </div>
+        <Button variant="outline" size="sm" onClick={() => { openAddAccount(); setShowManageAccounts(true) }}>
+          Manage Accounts
+        </Button>
       </div>
+
+      {showManageAccounts && (
+        <Modal open={showManageAccounts} title="Manage Bank Accounts" onClose={() => setShowManageAccounts(false)}>
+          <div className="space-y-4">
+            {allAccountsLoading ? (
+              <div className="flex justify-center py-8"><Spinner size={24} /></div>
+            ) : (
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {(allAccounts ?? []).map((a: any) => (
+                  <div key={a.id} className={`border rounded-lg p-3 ${a.is_active ? 'border-gray-200' : 'border-gray-100 bg-gray-50 opacity-60'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-medium text-sm">{a.bank_name}{a.account_name ? ` — ${a.account_name}` : ''}</div>
+                        <div className="text-xs text-gray-500">
+                          A/C {a.account_no ?? '—'} {a.ifsc ? `· IFSC ${a.ifsc}` : ''} {a.branch ? `· ${a.branch}` : ''}
+                          {!a.is_active && ' · Inactive'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button type="button" className="p-1.5 text-gray-500 hover:text-blue-600" title="Edit" onClick={() => openEditAccount(a)}>
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="p-1.5 text-gray-500 hover:text-amber-600 text-xs"
+                          title={a.is_active ? 'Deactivate' : 'Activate'}
+                          onClick={() => toggleAccountActiveMut.mutate(a)}
+                        >
+                          {a.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                        <button
+                          type="button"
+                          className="p-1.5 text-gray-500 hover:text-red-600"
+                          title="Delete"
+                          onClick={() => { if (confirm(`Delete "${a.bank_name}"? This only works if nothing references it.`)) deleteAccountMut.mutate(a) }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {(allAccounts ?? []).length === 0 && (
+                  <div className="text-sm text-gray-500 text-center py-4">No bank accounts yet</div>
+                )}
+              </div>
+            )}
+
+            <div className="border-t pt-4">
+              <div className="font-medium text-sm mb-2">{acctEditId ? 'Edit Account' : '+ Add Account'}</div>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Bank Name" value={acctForm.bank_name} onChange={e => setAcctForm(f => ({ ...f, bank_name: e.target.value }))} />
+                <Input label="Account Name (label)" value={acctForm.account_name} onChange={e => setAcctForm(f => ({ ...f, account_name: e.target.value }))} />
+                <Input label="Account No" value={acctForm.account_no} onChange={e => setAcctForm(f => ({ ...f, account_no: e.target.value }))} />
+                <Input label="IFSC" value={acctForm.ifsc} onChange={e => setAcctForm(f => ({ ...f, ifsc: e.target.value }))} />
+                <Input label="Branch" value={acctForm.branch} onChange={e => setAcctForm(f => ({ ...f, branch: e.target.value }))} />
+                <Input label="Opening Balance" type="number" value={acctForm.opening_balance} onChange={e => setAcctForm(f => ({ ...f, opening_balance: e.target.value }))} />
+              </div>
+              <div className="flex items-center justify-between mt-3">
+                {acctEditId && (
+                  <Button variant="outline" size="sm" onClick={openAddAccount}>Cancel Edit</Button>
+                )}
+                <Button size="sm" loading={saveAccountMut.isPending} onClick={() => saveAccountMut.mutate()}>
+                  {acctEditId ? 'Save Changes' : 'Add Account'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200">
