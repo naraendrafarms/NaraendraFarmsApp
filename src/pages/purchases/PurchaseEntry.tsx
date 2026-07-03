@@ -18,6 +18,13 @@ import { supplyType, splitTax, PURCHASE_NATURE_OPTIONS, GST_RATE_OPTIONS, OUR_ST
 // remember which screen to use.
 
 const CATEGORIES = ['Feed', 'Medicine', 'Equipment', 'Other'] as const
+
+// cash_book.payment_mode allows 'cash' | 'upi' | 'cheque' | 'neft' | 'rtgs' | 'imps' | 'bank_transfer'.
+const toCbMode = (mode: string) => {
+  const m = (mode || '').toLowerCase()
+  if (m === 'bank transfer') return 'bank_transfer'
+  return ['cash', 'upi', 'neft', 'rtgs', 'imps'].includes(m) ? m : 'cheque'
+}
 type Cat = typeof CATEGORIES[number]
 
 // Which existing master a new item of this category should be created in
@@ -154,7 +161,7 @@ export const PurchaseEntry: React.FC = () => {
             txn_date: form.purchase_date, txn_type: 'payment', category: 'purchase_payment',
             description: `Payment to ${supplierName}${form.invoice_no ? ' — Inv ' + form.invoice_no : ''}${form.grn_no ? ' / GRN ' + form.grn_no : ''}`,
             party_name: supplierName || null, amount_in: 0, amount_out: netPayableFinal || 0,
-            payment_mode: (form.account_type || '').toLowerCase() === 'cash' ? 'cash' : 'cheque',
+            payment_mode: toCbMode(form.account_type),
             pending_payment_id: editId, remarks: form.remarks || null,
           })
           if (cbErr) throw new Error('Bill saved, but Cash Book entry failed: ' + cbErr.message)
@@ -303,7 +310,7 @@ export const PurchaseEntry: React.FC = () => {
           party_name: supplierName,
           reference_no: form.invoice_no || form.grn_no || null,
           amount_out: total,
-          payment_mode: isCash ? 'cash' : 'cheque',
+          payment_mode: toCbMode(form.account_type),
           pending_payment_id: paidPendingPaymentId,
           remarks: form.remarks || null,
         })

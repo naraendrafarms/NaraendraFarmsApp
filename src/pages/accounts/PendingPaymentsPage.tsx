@@ -19,11 +19,11 @@ const roundTds = (n: number) => Math.round(n + Number.EPSILON)
 // ── Single shared ledger sync — every page/action that marks a vendor bill
 // Paid/Unpaid goes through these two functions, so Cash Book always reflects
 // what happened here regardless of which action (Pay / Edit / Bank Link) did it.
-// cash_book.payment_mode only allows 'cash' | 'upi' | 'cheque' — bank transfer
-// modes (NEFT/RTGS/IMPS) are recorded as 'cheque' (bank-mediated).
+// cash_book.payment_mode allows 'cash' | 'upi' | 'cheque' | 'neft' | 'rtgs' | 'imps' | 'bank_transfer'.
 const toCbMode = (mode: string) => {
   const m = (mode || '').toLowerCase()
-  return m === 'cash' ? 'cash' : m === 'upi' ? 'upi' : 'cheque'
+  if (m === 'bank transfer') return 'bank_transfer'
+  return ['cash', 'upi', 'neft', 'rtgs', 'imps'].includes(m) ? m : 'cheque'
 }
 const postLedgerEntry = async (opts: {
   paymentId: string; vendorName: string; invoiceNo?: string | null; grnNo?: string | null

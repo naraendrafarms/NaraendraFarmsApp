@@ -2,6 +2,13 @@ import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, currentFY, today } from '@/lib/utils'
+
+// cash_book.payment_mode allows 'cash' | 'upi' | 'cheque' | 'neft' | 'rtgs' | 'imps' | 'bank_transfer'.
+const toCbMode = (mode: string) => {
+  const m = (mode || '').toLowerCase()
+  if (m === 'bank transfer') return 'bank_transfer'
+  return ['cash', 'upi', 'neft', 'rtgs', 'imps'].includes(m) ? m : 'cheque'
+}
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
@@ -1280,7 +1287,7 @@ export const SalaryEntryPage: React.FC = () => {
           txn_date: txnDate, txn_type:'payment', category:'salary',
           description:`Salary — ${emp?.name??''} (${form.month})`,
           party_name: emp?.name??null, amount_in:0, amount_out:netAmt,
-          payment_mode: isCash?'cash':'cheque', salary_monthly_id: upserted.id,
+          payment_mode: toCbMode(payload.payment_mode), salary_monthly_id: upserted.id,
           reference_no: payload.payment_ref, remarks: payload.remarks,
         })
         if(!isCash && payload.bank_account_id){
@@ -1919,7 +1926,7 @@ export const ESIPFReportPage: React.FC = () => {
           txn_date: txnDate, txn_type:'payment', category:'salary',
           description:`Salary — ${empName} (${filterMonth})`,
           party_name: empName||null, amount_in:0, amount_out:netAmt,
-          payment_mode: isCash?'cash':'cheque', salary_monthly_id: editRec.id,
+          payment_mode: toCbMode(editForm.payment_mode), salary_monthly_id: editRec.id,
           reference_no: editForm.payment_ref||null, remarks: editForm.remarks||null,
         })
         if(!isCash && bankAccountId){

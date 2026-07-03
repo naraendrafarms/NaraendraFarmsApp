@@ -457,7 +457,7 @@ export const CashBookPage: React.FC = () => {
         reference_no: r.reference_no || null,
         amount_in:    parseFloat(r.amount_in)  || 0,
         amount_out:   parseFloat(r.amount_out) || 0,
-        payment_mode: (['cash','upi','cheque'].includes(r.payment_mode) ? r.payment_mode : 'cash'),
+        payment_mode: (['cash','upi','cheque','neft','rtgs','imps','bank_transfer'].includes(r.payment_mode) ? r.payment_mode : 'cash'),
         remarks:      r.remarks || null,
       }))
 
