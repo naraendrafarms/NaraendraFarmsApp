@@ -75,6 +75,7 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
         const { error: btErr } = await supabase.from('bank_transactions').insert({
           bank_account_id: form.bank_account_id, txn_date: form.sale_date, txn_type: 'Credit',
           category: 'Bag Sale', reference_no: null, description, amount: amt,
+          bag_sale_id: sale.id,
         })
         if (btErr) throw new Error('Sale saved, but Bank Ledger entry failed: ' + btErr.message)
       }
@@ -84,7 +85,7 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
   })
   const delMut = useMutation({
     mutationFn: async (id: string) => { const { error } = await supabase.from('bag_sales').delete().eq('id', id); if (error) throw error },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bag_sales'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); toast.success('Deleted') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bag_sales'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); toast.success('Deleted') },
   })
 
   const totalQty = sales.reduce((s: number, r: any) => s + (r.qty || 0), 0)

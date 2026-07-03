@@ -277,6 +277,7 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
         const { error: btErr } = await supabase.from('bank_transactions').insert({
           bank_account_id: form.bank_account_id, txn_date: form.purchase_date, txn_type: 'Debit',
           category: 'Diesel Purchase', reference_no: null, description, amount: amt,
+          diesel_purchase_id: purchase.id,
         })
         if (btErr) throw new Error('Purchase saved, but Bank Ledger entry failed: ' + btErr.message)
       }
@@ -286,7 +287,7 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
   })
   const delMut = useMutation({
     mutationFn: async (id: string) => { const { error } = await supabase.from('generator_diesel_purchases').delete().eq('id', id); if (error) throw error },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_diesel_purchases'] }); toast.success('Deleted') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_diesel_purchases'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); toast.success('Deleted') },
   })
 
   return (

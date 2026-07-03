@@ -507,7 +507,16 @@ export const DailyEntry: React.FC = () => {
         age_weeks:        parseFloat(r[col('age_weeks')]      || r[col('ageweeks')]        || '') || null,
         remarks:          r[col('remarks')] || null,
       }
-      const { error } = await supabase.from('daily_records').upsert(payload, { onConflict: 'flock_id,record_date' })
+      // daily_records has no plain (flock_id,record_date) unique constraint —
+      // only partial indexes including farm_id (+shed_id when set), so a
+      // naive upsert onConflict here throws "no unique or exclusion
+      // constraint matching" at runtime. Select-then-insert/update instead,
+      // same pattern the manual save path already uses.
+      const { data: existingRow } = await supabase.from('daily_records')
+        .select('id').eq('flock_id', selectedFlock).eq('record_date', dateVal).eq('farm_id', farmId).is('shed_id', null).maybeSingle()
+      const { error } = existingRow
+        ? await supabase.from('daily_records').update(payload).eq('id', existingRow.id)
+        : await supabase.from('daily_records').insert(payload)
       if (error) { skipped++; console.error(error) } else { saved++ }
     }
     qc.invalidateQueries({ queryKey: ['daily_record'] })

@@ -369,12 +369,19 @@ const FormulasTab: React.FC = () => {
       if (!fId || !ingName) continue
       const pct = Number(vals[col('percentage')]) || 0
       // kg_per_1000 derived from percentage (pct of 1000 kg = pct × 10)
-      await supabase.from('feed_formula_ingredients').upsert({
+      // No unique constraint exists on (formula_id,ingredient_name), so a
+      // naive upsert onConflict here throws "no unique or exclusion
+      // constraint matching" at runtime — select-then-insert/update instead.
+      const rowPayload = {
         formula_id: fId, ingredient_code: vals[col('ingredient_code')] || null,
         ingredient_name: ingName, percentage: pct,
         kg_per_1000: pct ? +(pct * 10).toFixed(3) : null,
         sort_order: vals[col('sort_order')] ? Number(vals[col('sort_order')]) : 0,
-      }, { onConflict: 'formula_id,ingredient_name', ignoreDuplicates: false })
+      }
+      const { data: existingIng } = await supabase.from('feed_formula_ingredients')
+        .select('id').eq('formula_id', fId).eq('ingredient_name', ingName).maybeSingle()
+      if (existingIng) await supabase.from('feed_formula_ingredients').update(rowPayload).eq('id', existingIng.id)
+      else await supabase.from('feed_formula_ingredients').insert(rowPayload)
       imported++
     }
     qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']})
