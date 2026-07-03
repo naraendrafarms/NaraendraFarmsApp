@@ -14,6 +14,35 @@ import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 import { supplyType, splitTax, GST_RATE_OPTIONS } from '@/lib/gst'
 import { printHEDispatch, printNHESale } from '@/lib/invoicePrint'
+import * as pdfjsLib from 'pdfjs-dist'
+if (typeof window !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs`
+
+// Extract temperature readings from a logger report so Min/Max/Avg are
+// computed by the app, not typed by hand. PDF: these trackers print each
+// reading's temperature as a decimal with exactly one digit after the point
+// (e.g. "31.2"), while every other number in the report (dates, speed) never
+// matches that shape — a reliable heuristic without needing to parse the
+// table structure itself. CSV/Excel: look for a column literally named
+// "temperature" (or containing that word) and read its numeric values.
+async function extractTempReadings(file: File): Promise<number[]> {
+  const name = file.name.toLowerCase()
+  if (name.endsWith('.pdf')) {
+    const buf = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise
+    let fullText = ''
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p)
+      const tc = await page.getTextContent()
+      fullText += tc.items.map((it: any) => it.str).join(' ') + '\n'
+    }
+    const matches = fullText.match(/\b\d{1,2}\.\d\b/g) ?? []
+    return matches.map(Number).filter(n => n > -20 && n < 60)
+  }
+  const { headers, rows } = await parseFile(file)
+  const tempCol = headers.findIndex(h => h.includes('temperature') || h.includes('temp'))
+  if (tempCol < 0) return []
+  return rows.map(r => parseFloat(r[tempCol])).filter(n => !isNaN(n))
+}
 
 // ── Receive Payment Modal ─────────────────────────────────────────
 const ReceivePaymentModal: React.FC<{
@@ -293,6 +322,29 @@ const TempLogModal: React.FC<{ dispatch: any; onClose: () => void; onSaved: () =
   const [remarks, setRemarks] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const [parsing, setParsing] = useState(false)
+  const [readingCount, setReadingCount] = useState<number | null>(null)
+
+  const onFileChange = async (f: File | null) => {
+    setFile(f)
+    setReadingCount(null)
+    if (!f) return
+    setParsing(true)
+    try {
+      const readings = await extractTempReadings(f)
+      if (readings.length > 0) {
+        const min = Math.min(...readings), max = Math.max(...readings)
+        const avg = readings.reduce((s, n) => s + n, 0) / readings.length
+        setTempMin(min.toFixed(1)); setTempMax(max.toFixed(1)); setTempAvg(avg.toFixed(1))
+        setReadingCount(readings.length)
+        toast.success(`Auto-calculated from ${readings.length} readings — adjust below if needed`)
+      } else {
+        toast.error("Couldn't auto-read temperatures from this file — enter Min/Max/Avg manually")
+      }
+    } catch (e: any) {
+      toast.error('Could not parse file: ' + e.message)
+    } finally { setParsing(false) }
+  }
 
   useEffect(() => {
     if (dispatch) {
@@ -344,25 +396,27 @@ const TempLogModal: React.FC<{ dispatch: any; onClose: () => void; onSaved: () =
     <Modal open={!!dispatch} onClose={onClose} title={`Temperature Log — ${dispatch.invoice_no ?? dispatch.dc_no ?? ''}`}
       footer={<Button loading={saving} onClick={save}>Save</Button>}>
       <div className="space-y-3">
-        <p className="text-xs text-gray-500">Upload the logger's PDF/report for this shipment and record a quick summary — not every reading, just what matters for compliance.</p>
-        <FormRow>
-          <Input label="Vehicle No" value={vehicleNo} onChange={e => setVehicleNo(e.target.value)} />
-          <Input label="Safe Max Temp (°C)" type="number" step="0.1" value={safeMax} onChange={e => setSafeMax(e.target.value)} />
-        </FormRow>
-        <FormRow cols={3}>
-          <Input label="Min Temp (°C)" type="number" step="0.1" value={tempMin} onChange={e => setTempMin(e.target.value)} />
-          <Input label="Max Temp (°C)" type="number" step="0.1" value={tempMax} onChange={e => setTempMax(e.target.value)} />
-          <Input label="Avg Temp (°C)" type="number" step="0.1" value={tempAvg} onChange={e => setTempAvg(e.target.value)} />
-        </FormRow>
+        <p className="text-xs text-gray-500">Upload the logger's report (PDF/CSV/Excel) — Min/Max/Avg are read from it automatically, not typed by hand.</p>
         <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Logger Report (PDF)</label>
-          <input type="file" accept=".pdf,.csv,.xlsx" onChange={e => setFile(e.target.files?.[0] ?? null)} className="text-sm" />
+          <label className="text-xs font-medium text-gray-600 block mb-1">Logger Report (PDF/CSV/Excel)</label>
+          <input type="file" accept=".pdf,.csv,.xlsx" onChange={e => onFileChange(e.target.files?.[0] ?? null)} className="text-sm" disabled={parsing} />
+          {parsing && <p className="text-xs text-blue-600 mt-1">Reading temperatures from file…</p>}
+          {readingCount != null && !parsing && <p className="text-xs text-green-600 mt-1">✓ Auto-calculated from {readingCount} readings</p>}
           {dispatch.temp_log_url && !file && (
             <a href={dispatch.temp_log_url} target="_blank" rel="noreferrer" className="block mt-1 text-xs text-blue-600 underline">
               📎 {dispatch.temp_log_name ?? 'View current file'}
             </a>
           )}
         </div>
+        <FormRow>
+          <Input label="Vehicle No" value={vehicleNo} onChange={e => setVehicleNo(e.target.value)} />
+          <Input label="Safe Max Temp (°C)" type="number" step="0.1" value={safeMax} onChange={e => setSafeMax(e.target.value)} />
+        </FormRow>
+        <FormRow cols={3}>
+          <Input label="Min Temp (°C)" type="number" step="0.1" value={tempMin} onChange={e => setTempMin(e.target.value)} hint="Auto-filled from file, editable" />
+          <Input label="Max Temp (°C)" type="number" step="0.1" value={tempMax} onChange={e => setTempMax(e.target.value)} hint="Auto-filled from file, editable" />
+          <Input label="Avg Temp (°C)" type="number" step="0.1" value={tempAvg} onChange={e => setTempAvg(e.target.value)} hint="Auto-filled from file, editable" />
+        </FormRow>
         <Input label="Remarks" value={remarks} onChange={e => setRemarks(e.target.value)} />
       </div>
     </Modal>
