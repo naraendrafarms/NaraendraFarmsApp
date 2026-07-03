@@ -191,7 +191,7 @@ export const PurchaseEntry: React.FC = () => {
           category: 'Feed Ingredient',
           farm_id: form.farm_id || null,
           party_id: form.supplier_id || null,
-          ingredient_id: form.item_id || null,
+          item_id: form.item_id || null,
           item_name: itemName,
           invoice_no: form.invoice_no || null,
           invoice_date: form.invoice_date || null,

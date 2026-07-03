@@ -1181,7 +1181,7 @@ const StockTab: React.FC = () => {
   const { data: grnData = [], isLoading: grnLoading } = useQuery({
     queryKey: ['stock_grn', fFarm, fFrom, fTo],
     queryFn: async () => {
-      let q = supabase.from('grn').select('ingredient_id,item_name,feed_ingredients(name,code), qty, grn_date, farm_id').eq('category', 'Feed Ingredient')
+      let q = supabase.from('grn').select('item_id,item_name,items(name,code), qty, grn_date, farm_id').eq('category', 'Feed Ingredient')
       if (fFarm) q = q.eq('farm_id', fFarm)
       if (fFrom) q = q.gte('grn_date', fFrom)
       if (fTo)   q = q.lte('grn_date', fTo)
@@ -1241,8 +1241,8 @@ const StockTab: React.FC = () => {
   const stockMap: Record<string, { code?:string; received: number; adjusted: number; consumed: number }> = {}
 
   grnData.forEach((g: any) => {
-    const name = (g.feed_ingredients as any)?.name ?? 'Unknown'
-    const code = (g.feed_ingredients as any)?.code
+    const name = (g.items as any)?.name ?? g.item_name ?? 'Unknown'
+    const code = (g.items as any)?.code
     if (!stockMap[name]) stockMap[name] = { code, received: 0, adjusted: 0, consumed: 0 }
     stockMap[name].received += Number(g.qty ?? 0)
   })
@@ -1271,7 +1271,7 @@ const StockTab: React.FC = () => {
 
   // All ingredient names for merge dropdown
   const allIngNames = Array.from(new Set([
-    ...grnData.map((g:any) => (g.feed_ingredients as any)?.name).filter(Boolean),
+    ...grnData.map((g:any) => (g.items as any)?.name ?? g.item_name).filter(Boolean),
     ...adjData.map((a:any) => a.ingredient_name).filter(Boolean),
     ...prodData.flatMap((p:any) => (p.feed_production_ingredients??[]).map((i:any) => i.ingredient_name)).filter(Boolean),
   ])).sort()
