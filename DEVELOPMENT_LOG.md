@@ -376,6 +376,38 @@ needs a real management screen from day one**, not just a `SELECT`.
 
 ---
 
+## 2026-07-03 — A bill can be fully paid (balance ✓) yet stuck showing "Pending"
+
+**Symptom:** "Dendi Srinath Reddy Rent" (invoice 003, ₹42,000) showed
+Balance = ✓ (fully settled) and no Pay button — but Status still said
+"Due 1d", not "Paid", and nothing showed in Cash Book or Bank Ledger.
+
+**Root cause:** `paid_amount` was already equal to `net_payable` (paid via
+the Pay button on a date 3 days after the bill was created — confirmed via
+`paid_date` vs `created_at`), and the bank account was already correctly
+set. Paying in full is supposed to flip `payment_status` to `'Paid'`
+automatically (`handlePay` sets `newStatus = bal <= 0.01 ? 'Paid' : ...`).
+It didn't. Most likely explanation: the bill was reopened via **Edit**
+afterward for some unrelated change, and the Edit form's Status dropdown
+either showed a stale value or got toggled back to "Pending" by mistake —
+Edit always writes whatever `payment_status` the form currently holds,
+with no guard against downgrading an already-settled bill.
+
+**Effect of the dead-end state:** the Pay button only shows when
+`payment_status !== 'Paid' && balance > 0` — once balance hits zero there
+is no way to "retry" marking it Paid from the list view, only via Edit.
+
+**Fix:** One-off data correction (migration 334) — set `payment_status =
+'Paid'` and posted the missing `cash_book`/`bank_transactions` entries for
+this specific bill.
+
+**Lesson:** Balance = ✓ but Status ≠ Paid is an inconsistent state that
+should never silently persist. When editing ANY bill that's already fully
+paid, double check the Status dropdown before saving — Edit does not
+protect against accidentally reverting a settled bill back to Pending.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
