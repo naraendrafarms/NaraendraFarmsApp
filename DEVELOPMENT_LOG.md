@@ -169,6 +169,80 @@ paid" button).
 
 ---
 
+## 2026-07-03 — Extended the bank-account fix to Purchase Entry, Salary, and Receivables
+
+Following on from the Pending Payments bank-account fix above, applied the
+same pattern in two more places (with explicit user sign-off first, since
+these touch live money-movement code):
+
+- **Purchase Entry**: same "Paid From Bank Account" selector added. Also
+  fixed a second, worse bug found while doing this — a NEW purchase marked
+  "Paid" with Account Type "Online" at creation time posted to **no ledger
+  at all** (the old code only mirrored to Cash Book when Account Type was
+  literally "Cash"). Now Cash Book always gets the entry, and Bank Ledger
+  gets it too when non-cash.
+- **Salary Payment**: salary previously posted to **no ledger whatsoever**
+  — confirmed by grepping the whole EmployeePages.tsx file for
+  `cash_book`/`bank_transactions` (zero matches). Salary relied purely on
+  an `is_paid` flag, with bulk bank transfers going out via a separate CMS
+  batch-file export. User confirmed they DO want salary posting to Cash
+  Book/Bank Ledger like the others. Found TWO independent places that can
+  flip `is_paid` (the main Salary Entry form, AND the ESI/PF Report's
+  inline edit modal) — both needed the fix, or one would silently bypass
+  the other's ledger logic.
+- **Party Outstanding (receivables)**: turned out the "gap" wasn't missing
+  infrastructure at all — `he_dispatch`/`nhe_sales` already had
+  `amount_received`/`payment_status`/`bank_account_id` columns (migration
+  076) and a fully-working `ReceivePaymentModal` already existed in
+  `FlockSalesPages.tsx`. The Debtors report just never used any of it —
+  it summed the full `amount` forever, ignoring receipts already recorded
+  elsewhere. Fixed by (a) subtracting `amount_received` from the balance
+  shown, and (b) exporting and reusing the *exact same* modal component
+  instead of writing new receipt-posting logic from scratch.
+
+**Lesson (reinforced):** before building a new feature to close a
+"gap", grep hard for existing infrastructure first — twice in one session
+(packaging items, and now receivables) the real fix was "wire up what
+already exists" rather than "build something new." Assuming a gap is
+empty because a REPORT doesn't show something is not the same as
+confirming the underlying data/logic doesn't exist.
+
+---
+
+## 2026-07-03 — DateInput onChange misuse crashed the whole page
+
+**Symptom:** User hit a full-page crash: `"a.split is not a function or
+its return value is not iterable"`, right after using the new Feed Mill
+Consumption date-range pickers.
+
+**Root cause:** Wrote `<DateInput value={fromDate} onChange={setFromDate} />`
+instead of `onChange={e => setFromDate(e.target.value)}`. `DateInput`'s
+`onChange` fires with a synthetic `{ target: { value } }` object (matching
+native `<input>` event shape), NOT the raw string — so `setFromDate`
+received the whole event object. On the next render, `DateInput` tried to
+call `isoToDisplay(fromDate)`, which does `iso.split('-')` — and `iso` was
+now an object, not a string, producing exactly that V8 error message
+(that specific "...or its return value is not iterable" phrasing is V8's
+generic wording for a failed destructuring assignment on a method-call
+result, e.g. `const [y,m,d] = iso.split('-')`).
+
+**Fix:** corrected both call sites (`InventoryPages.tsx` Consumption
+Report, `FeedMillPages.tsx` Feed Consumption tab). Also hardened
+`isoToDisplay()` itself in `components/ui/index.tsx` to check
+`typeof iso !== 'string'` and fail quietly, so the same mistake anywhere
+else in the app degrades to a blank date field instead of crashing the
+whole page.
+
+**Lesson:** `DateInput`'s `onChange` is NOT a plain `(value: string) => void`
+setter — it always needs `e => setX(e.target.value)`, same as any native
+input. Grepped the whole codebase afterward for
+`DateInput value={x} onChange={setX}` (the exact broken pattern) to
+confirm no other instances existed. When adding any new date-range filter,
+copy an existing working `DateInput` call site instead of assuming the
+prop shape.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
