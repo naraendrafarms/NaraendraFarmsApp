@@ -112,6 +112,7 @@ export const BuyerAdvancesPage: React.FC = () => {
           amount_out: 0,
           payment_mode: 'cash',
           reference_no: row.reference_no || null,
+          party_advance_id: adv.id,
         })
         if (cbErr) throw new Error('Advance saved but Cash Book entry failed: ' + cbErr.message)
       } else if (row.bank_account_id) {
@@ -123,6 +124,7 @@ export const BuyerAdvancesPage: React.FC = () => {
           reference_no: row.reference_no || null,
           description: narration,
           amount: amt,
+          party_advance_id: adv.id,
         })
         if (bErr) throw new Error('Advance saved but Bank entry failed: ' + bErr.message)
       }
@@ -149,6 +151,30 @@ export const BuyerAdvancesPage: React.FC = () => {
         remarks: row.remarks || null,
       }).eq('id', row.id)
       if (error) throw error
+
+      // Re-sync the ledger entry (delete old, re-insert fresh) so edits to
+      // amount/date/mode/bank-account don't leave a stale Cash Book/Bank
+      // Ledger row behind — same pattern as Pending Payments/Purchase Entry.
+      await supabase.from('cash_book').delete().eq('party_advance_id', row.id)
+      await supabase.from('bank_transactions').delete().eq('party_advance_id', row.id)
+      const partyName = (parties as any[]).find((p: any) => p.id === row.party_id)?.name ?? ''
+      const narration = `Advance from ${partyName}${row.reference_no ? ` (${row.reference_no})` : ''}`
+      const isCash = ['cash'].includes(row.payment_mode)
+      if (isCash) {
+        const { error: cbErr } = await supabase.from('cash_book').insert({
+          txn_date: row.advance_date, txn_type: 'receipt', category: 'sales_collection',
+          description: narration, party_name: partyName, amount_in: amt, amount_out: 0,
+          payment_mode: 'cash', reference_no: row.reference_no || null, party_advance_id: row.id,
+        })
+        if (cbErr) throw new Error('Advance updated but Cash Book entry failed: ' + cbErr.message)
+      } else if (row.bank_account_id) {
+        const { error: bErr } = await supabase.from('bank_transactions').insert({
+          bank_account_id: row.bank_account_id, txn_date: row.advance_date, txn_type: 'Credit',
+          category: 'Sale Receipt', reference_no: row.reference_no || null, description: narration,
+          amount: amt, party_advance_id: row.id,
+        })
+        if (bErr) throw new Error('Advance updated but Bank entry failed: ' + bErr.message)
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['party_advances'] })
@@ -162,6 +188,8 @@ export const BuyerAdvancesPage: React.FC = () => {
 
   const delMut = useMutation({
     mutationFn: async (id: string) => {
+      await supabase.from('cash_book').delete().eq('party_advance_id', id)
+      await supabase.from('bank_transactions').delete().eq('party_advance_id', id)
       const { error } = await supabase.from('party_advances').delete().eq('id', id)
       if (error) throw error
     },
@@ -174,6 +202,8 @@ export const BuyerAdvancesPage: React.FC = () => {
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
+      await supabase.from('cash_book').delete().in('party_advance_id', ids)
+      await supabase.from('bank_transactions').delete().in('party_advance_id', ids)
       const { error } = await supabase.from('party_advances').delete().in('id', ids)
       if (error) throw error
     },

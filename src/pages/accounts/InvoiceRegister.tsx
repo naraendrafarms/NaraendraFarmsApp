@@ -19,6 +19,13 @@ const SOURCE_TYPES = [
   { value: 'other',       label: 'Other' },
 ]
 
+// cash_book.payment_mode allows 'cash' | 'upi' | 'cheque' | 'neft' | 'rtgs' | 'imps' | 'bank_transfer'.
+const toCbMode = (mode: string) => {
+  const m = (mode || '').toLowerCase()
+  if (m === 'bank transfer') return 'bank_transfer'
+  return ['cash', 'upi', 'neft', 'rtgs', 'imps'].includes(m) ? m : 'cheque'
+}
+
 const STATUS_COLOR: Record<string, string> = {
   unpaid:  'red',
   partial: 'yellow',
@@ -58,6 +65,9 @@ export const InvoiceRegister: React.FC = () => {
   const [filterFy, setFilterFy] = useState('')
   const [markPayId, setMarkPayId] = useState<string|null>(null)
   const [payAmt, setPayAmt] = useState('')
+  const [payMode, setPayMode] = useState('Cash')
+  const [payDate, setPayDate] = useState(today())
+  const [payBankId, setPayBankId] = useState('')
   const [delId, setDelId] = useState<string|null>(null)
 
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
@@ -82,6 +92,14 @@ export const InvoiceRegister: React.FC = () => {
     queryKey: ['parties_list'],
     queryFn: async () => {
       const { data } = await supabase.from('parties').select('id,name,type').order('name')
+      return data ?? []
+    }
+  })
+
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts_list'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_accounts').select('id,account_name,bank_name').eq('is_active', true).order('bank_name')
       return data ?? []
     }
   })
@@ -178,28 +196,60 @@ export const InvoiceRegister: React.FC = () => {
   })
 
   const markPaidMut = useMutation({
-    mutationFn: async ({ id, amount, total }: { id: string; amount: number; total: number }) => {
+    mutationFn: async ({ id, amount, total, mode, date, bankAccountId }: { id: string; amount: number; total: number; mode: string; date: string; bankAccountId: string }) => {
+      if (mode.toLowerCase() !== 'cash' && amount > 0 && !bankAccountId) {
+        throw new Error('Select which bank account this is paid from, or it won\'t be recorded in any ledger')
+      }
       const inv = (invoices ?? []).find((i: any) => i.id === id)
       const status = amount >= total ? 'paid' : amount > 0 ? 'partial' : 'unpaid'
       const { error } = await supabase.from('supplier_invoices')
         .update({ paid_amount: amount, payment_status: status }).eq('id', id)
       if (error) throw error
-      // Mirror to pending_payments
+      // Mirror to pending_payments AND actually post to Cash Book/Bank
+      // Ledger — this used to only flip pending_payments.payment_status to
+      // 'Paid' with no ledger entry at all, which also meant the bill could
+      // never be paid again from PendingPaymentsPage (it already looked Paid).
       if (inv?.invoice_no) {
         const vendorName = inv.party?.name ?? inv.supplier_name ?? ''
         if (vendorName) {
-          await supabase.from('pending_payments').update({
-            paid_amount: amount,
-            payment_status: status === 'paid' ? 'Paid' : 'Pending',
-            paid_date: status === 'paid' ? today() : null,
-          }).eq('vendor_name', vendorName).eq('invoice_no', inv.invoice_no)
+          const { data: pp } = await supabase.from('pending_payments')
+            .update({
+              paid_amount: amount,
+              payment_status: status === 'paid' ? 'Paid' : 'Pending',
+              paid_date: status === 'paid' ? date : null,
+              account_type: status === 'paid' ? mode : null,
+              bank_account_id: status === 'paid' && mode.toLowerCase() !== 'cash' ? bankAccountId : null,
+            })
+            .eq('vendor_name', vendorName).eq('invoice_no', inv.invoice_no)
+            .select('id').maybeSingle()
+          if (status === 'paid' && pp?.id) {
+            await supabase.from('cash_book').delete().eq('pending_payment_id', pp.id)
+            await supabase.from('bank_transactions').delete().eq('linked_payment_id', pp.id)
+            const isCash = mode.toLowerCase() === 'cash'
+            await supabase.from('cash_book').insert({
+              txn_date: date, txn_type: 'payment', category: 'purchase_payment',
+              description: `Payment to ${vendorName} — Inv ${inv.invoice_no}`,
+              party_name: vendorName, amount_in: 0, amount_out: amount,
+              payment_mode: toCbMode(mode),
+              pending_payment_id: pp.id,
+            })
+            if (!isCash && bankAccountId) {
+              await supabase.from('bank_transactions').insert({
+                bank_account_id: bankAccountId, txn_date: date, txn_type: 'Debit', category: 'Vendor Payment',
+                description: `Payment to ${vendorName} — Inv ${inv.invoice_no}`,
+                amount, linked_payment_id: pp.id,
+              })
+            }
+          }
         }
       }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
-      setMarkPayId(null); setPayAmt('')
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      setMarkPayId(null); setPayAmt(''); setPayMode('Cash'); setPayDate(today()); setPayBankId('')
       toast.success('Payment updated')
     },
     onError: (e: any) => toast.error(e.message)
@@ -584,7 +634,7 @@ export const InvoiceRegister: React.FC = () => {
                         <div className="flex gap-2 items-center justify-end">
                           {inv.payment_status !== 'paid' && (
                             <button
-                              onClick={() => { setMarkPayId(inv.id); setPayAmt(inv.total_amount?.toString() ?? '') }}
+                              onClick={() => { setMarkPayId(inv.id); setPayAmt(inv.total_amount?.toString() ?? ''); setPayMode('Cash'); setPayDate(today()); setPayBankId('') }}
                               className="text-xs text-green-600 hover:underline whitespace-nowrap"
                               title="Mark payment"
                             >
@@ -625,10 +675,23 @@ export const InvoiceRegister: React.FC = () => {
               <p className="text-sm text-gray-500 mb-4">Total: <strong>{inr(inv.total_amount)}</strong></p>
               <Input label="Amount Paid" type="number" step="0.01"
                 value={payAmt} onChange={e => setPayAmt(e.target.value)} />
+              <div className="mt-3">
+                <DateInput label="Payment Date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+              </div>
+              <div className="mt-3">
+                <Select label="Payment Mode" value={payMode} onChange={e => setPayMode(e.target.value)}
+                  options={['Cash','NEFT','RTGS','Bank Transfer','UPI','Cheque'].map(m => ({ value: m, label: m }))} />
+              </div>
+              {payMode.toLowerCase() !== 'cash' && (
+                <div className="mt-3">
+                  <Select label="Paid From Bank Account" value={payBankId} onChange={e => setPayBankId(e.target.value)}
+                    options={[{ value: '', label: '— Select account —' }, ...(bankAccounts ?? []).map((b: any) => ({ value: b.id, label: `${b.account_name ? b.account_name + ' — ' : ''}${b.bank_name}` }))]} />
+                </div>
+              )}
               <div className="flex gap-3 justify-end mt-4">
                 <Button variant="outline" size="sm" onClick={() => setMarkPayId(null)}>Cancel</Button>
                 <Button size="sm" loading={markPaidMut.isPending}
-                  onClick={() => markPaidMut.mutate({ id: markPayId, amount: parseFloat(payAmt)||0, total: inv.total_amount })}>
+                  onClick={() => markPaidMut.mutate({ id: markPayId, amount: parseFloat(payAmt)||0, total: inv.total_amount, mode: payMode, date: payDate, bankAccountId: payBankId })}>
                   Save Payment
                 </Button>
               </div>

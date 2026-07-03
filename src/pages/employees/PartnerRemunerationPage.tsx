@@ -1,8 +1,15 @@
 import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr } from '@/lib/utils'
-import { Card, CardHeader, Button, Input, Table, Th, Td, Spinner, EmptyState, Badge } from '@/components/ui'
+import { inr, today } from '@/lib/utils'
+
+// cash_book.payment_mode allows 'cash' | 'upi' | 'cheque' | 'neft' | 'rtgs' | 'imps' | 'bank_transfer'.
+const toCbMode = (mode: string) => {
+  const m = (mode || '').toLowerCase()
+  if (m === 'bank transfer') return 'bank_transfer'
+  return ['cash', 'upi', 'neft', 'rtgs', 'imps'].includes(m) ? m : 'cheque'
+}
+import { Card, CardHeader, Button, Input, Select, DateInput, Table, Th, Td, Spinner, EmptyState, Badge } from '@/components/ui'
 import { Plus, Edit2, Trash2, Users, Save, Download, Upload, FileSpreadsheet, IndianRupee } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
@@ -374,6 +381,10 @@ const EnterRemuneration: React.FC = () => {
 const PaidStatus: React.FC = () => {
   const qc = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<'all'|'pending'|'paid'>('all')
+  const [payRow, setPayRow] = useState<any>(null)
+  const [payDate, setPayDate] = useState(today())
+  const [payMode, setPayMode] = useState('Cash')
+  const [payBankId, setPayBankId] = useState('')
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['partner_remun_history'],
@@ -386,14 +397,50 @@ const PaidStatus: React.FC = () => {
     }
   })
 
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts_list'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_accounts').select('id,account_name,bank_name').eq('is_active', true).order('bank_name')
+      return data ?? []
+    }
+  })
+
   const markPaid = useMutation({
-    mutationFn: async (r: any) => {
+    mutationFn: async ({ r, mode, date, bankAccountId }: { r: any; mode: string; date: string; bankAccountId: string }) => {
+      if (mode.toLowerCase() !== 'cash' && !bankAccountId) {
+        throw new Error('Select which bank account this is paid from, or it won\'t be recorded in any ledger')
+      }
+      const amount = r.net_payable ?? r.invoice_amount ?? 0
       const { error } = await supabase.from('pending_payments').update({
-        payment_status: 'Paid', paid_amount: r.net_payable ?? r.invoice_amount ?? 0, paid_date: new Date().toISOString().slice(0,10),
+        payment_status: 'Paid', paid_amount: amount, paid_date: date,
+        account_type: mode, bank_account_id: mode.toLowerCase() !== 'cash' ? bankAccountId : null,
       }).eq('id', r.id)
       if (error) throw error
+      // Post to Cash Book / Bank Ledger — this used to only flip the status
+      // flag with no ledger entry at all.
+      await supabase.from('cash_book').delete().eq('pending_payment_id', r.id)
+      await supabase.from('bank_transactions').delete().eq('linked_payment_id', r.id)
+      const isCash = mode.toLowerCase() === 'cash'
+      await supabase.from('cash_book').insert({
+        txn_date: date, txn_type: 'payment', category: 'partner_remuneration',
+        description: `Partner Remuneration — ${r.vendor_name}`,
+        party_name: r.vendor_name, amount_in: 0, amount_out: amount,
+        payment_mode: toCbMode(mode), pending_payment_id: r.id,
+      })
+      if (!isCash && bankAccountId) {
+        await supabase.from('bank_transactions').insert({
+          bank_account_id: bankAccountId, txn_date: date, txn_type: 'Debit', category: 'Partner Remuneration',
+          description: `Partner Remuneration — ${r.vendor_name}`,
+          amount, linked_payment_id: r.id,
+        })
+      }
     },
-    onSuccess: () => { toast.success('Marked paid'); qc.invalidateQueries({ queryKey: ['partner_remun_history'] }); qc.invalidateQueries({ queryKey: ['partner_remun'] }) },
+    onSuccess: () => {
+      toast.success('Marked paid')
+      qc.invalidateQueries({ queryKey: ['partner_remun_history'] }); qc.invalidateQueries({ queryKey: ['partner_remun'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      setPayRow(null)
+    },
     onError: (e: any) => toast.error(e.message)
   })
   const markPending = useMutation({
@@ -402,8 +449,16 @@ const PaidStatus: React.FC = () => {
         payment_status: 'Pending', paid_amount: 0, paid_date: null,
       }).eq('id', id)
       if (error) throw error
+      // Clear whatever ledger entry markPaid created, so undoing "Paid"
+      // doesn't leave a stale Cash Book/Bank Ledger row behind.
+      await supabase.from('cash_book').delete().eq('pending_payment_id', id)
+      await supabase.from('bank_transactions').delete().eq('linked_payment_id', id)
     },
-    onSuccess: () => { toast.success('Marked pending'); qc.invalidateQueries({ queryKey: ['partner_remun_history'] }); qc.invalidateQueries({ queryKey: ['partner_remun'] }) },
+    onSuccess: () => {
+      toast.success('Marked pending')
+      qc.invalidateQueries({ queryKey: ['partner_remun_history'] }); qc.invalidateQueries({ queryKey: ['partner_remun'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+    },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -468,7 +523,7 @@ const PaidStatus: React.FC = () => {
                     <Td>
                       {isPaid(r)
                         ? <Button size="sm" variant="ghost" onClick={() => markPending.mutate(r.id)}>Undo</Button>
-                        : <Button size="sm" variant="outline" onClick={() => markPaid.mutate(r)}>Mark Paid</Button>}
+                        : <Button size="sm" variant="outline" onClick={() => { setPayRow(r); setPayDate(today()); setPayMode('Cash'); setPayBankId('') }}>Mark Paid</Button>}
                     </Td>
                   </tr>
                 ))}
@@ -477,6 +532,33 @@ const PaidStatus: React.FC = () => {
           </Card>
         )
       })}
+
+      {payRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-96">
+            <p className="font-semibold text-gray-900 mb-1">Record Payment</p>
+            <p className="text-sm text-gray-500 mb-4">
+              {payRow.vendor_name} — <strong>{inr(payRow.net_payable ?? payRow.invoice_amount ?? 0)}</strong>
+            </p>
+            <div className="space-y-3">
+              <DateInput label="Payment Date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+              <Select label="Payment Mode" value={payMode} onChange={e => setPayMode(e.target.value)}
+                options={['Cash','NEFT','RTGS','Bank Transfer','UPI','Cheque'].map(m => ({ value: m, label: m }))} />
+              {payMode.toLowerCase() !== 'cash' && (
+                <Select label="Paid From Bank Account" value={payBankId} onChange={e => setPayBankId(e.target.value)}
+                  options={[{ value: '', label: '— Select account —' }, ...(bankAccounts ?? []).map((b: any) => ({ value: b.id, label: `${b.account_name ? b.account_name + ' — ' : ''}${b.bank_name}` }))]} />
+              )}
+            </div>
+            <div className="flex gap-3 justify-end mt-4">
+              <Button variant="outline" size="sm" onClick={() => setPayRow(null)}>Cancel</Button>
+              <Button size="sm" loading={markPaid.isPending}
+                onClick={() => markPaid.mutate({ r: payRow, mode: payMode, date: payDate, bankAccountId: payBankId })}>
+                Save Payment
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

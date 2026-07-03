@@ -102,11 +102,33 @@ export const ReceivePaymentModal: React.FC<{
         throw new Error('Select a Bank Account for this payment mode, or it won\'t be recorded in any ledger')
       }
 
+      // Reverse any previous advance adjustment on THIS sale first — whether
+      // we're re-saving the same advance with a different amount, switching
+      // to a different advance, or switching away from Advance entirely.
+      // Without this, re-saving compounds amount_used every time, and
+      // switching modes leaves the old advance permanently "used" for
+      // nothing.
+      const prevAdvanceId = sale.party_advance_id
+      const prevAdjusted = sale.advance_adjusted || 0
+      if (prevAdvanceId && prevAdjusted > 0) {
+        const { data: prevAdv } = await supabase.from('party_advances').select('amount_used').eq('id', prevAdvanceId).single()
+        if (prevAdv) {
+          await supabase.from('party_advances')
+            .update({ amount_used: Math.max(0, prevAdv.amount_used - prevAdjusted) })
+            .eq('id', prevAdvanceId)
+        }
+      }
+
       if (isAdvance) {
         if (!selectedAdvanceId) throw new Error('Select which advance to use')
         const adv = (partyAdvances as any[]).find(a => a.id === selectedAdvanceId)
         if (!adv) throw new Error('Advance not found')
-        const available = adv.amount - adv.amount_used
+        // adv.amount_used already reflects the reversal above if this is the
+        // same advance as before; if it's a different advance, it's unaffected.
+        const currentUsed = selectedAdvanceId === prevAdvanceId
+          ? Math.max(0, adv.amount_used - prevAdjusted)
+          : adv.amount_used
+        const available = adv.amount - currentUsed
         if (amt > available) throw new Error(`Only ${inr(available)} available in this advance`)
         // update sale with advance adjustment
         const advUpdate: any = {
@@ -124,7 +146,7 @@ export const ReceivePaymentModal: React.FC<{
         // deduct from party_advances.amount_used
         const { error: aErr } = await supabase
           .from('party_advances')
-          .update({ amount_used: adv.amount_used + amt })
+          .update({ amount_used: currentUsed + amt })
           .eq('id', selectedAdvanceId)
         if (aErr) throw aErr
         toast.success('Advance adjusted successfully')
@@ -140,6 +162,11 @@ export const ReceivePaymentModal: React.FC<{
         amount_received: amt || null,
         bank_account_id: (mode !== 'Cash' && bankId) ? bankId : null,
         utr_ref: utr || null,
+        // Clear any prior advance link now that this receipt is cash/bank,
+        // not an advance adjustment (the reversal above already restored
+        // the advance's balance).
+        advance_adjusted: 0,
+        party_advance_id: null,
       }
       const { error } = await supabase.from(table).update(update).eq('id', sale.id)
       if (error) throw error
