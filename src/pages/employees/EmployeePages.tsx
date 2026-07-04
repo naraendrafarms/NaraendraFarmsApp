@@ -1719,11 +1719,17 @@ export const BonusPage: React.FC = () => {
         }).eq('id',editingId)
         if(error)throw error
       } else {
-        const{error}=await supabase.from('bonus').upsert({
+        // Was a plain upsert on (employee_id,bonus_year) — adding a second
+        // bonus for the same employee/year (e.g. annual after festival)
+        // silently replaced the existing one with no warning. Block it and
+        // point the user at Edit instead.
+        const dup = (bonuses ?? []).find((b: any) => b.employee_id === form.employee_id && b.bonus_year === parseInt(form.bonus_year))
+        if (dup) throw new Error(`This employee already has a ${dup.bonus_type} bonus recorded for ${form.bonus_year} — edit that entry instead of adding a new one.`)
+        const{error}=await supabase.from('bonus').insert({
           employee_id:form.employee_id, bonus_year:parseInt(form.bonus_year),
           amount:parseFloat(form.amount), bonus_type:form.bonus_type,
           paid_date:form.paid_date||null, remarks:form.remarks||null,
-        },{onConflict:'employee_id,bonus_year'})
+        })
         if(error)throw error
       }
     },
