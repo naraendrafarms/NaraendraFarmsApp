@@ -660,7 +660,7 @@ export const HEDispatch: React.FC = () => {
               rate: l.rate?.toString() ?? ''
             })))
           else
-            setLines([{ prod_date: row.prod_date ?? today(), grade_a: row.grade_a?.toString() ?? '', grade_b: row.grade_b?.toString() ?? '', grade_c: '0', rate: row.rate?.toString() ?? '' }])
+            setLines([{ prod_date: row.prod_date ?? today(), grade_a: row.grade_a?.toString() ?? '', grade_b: row.grade_b?.toString() ?? '', grade_c: row.grade_c?.toString() ?? '0', rate: row.rate?.toString() ?? '' }])
         })
     } else {
       setEditing(null)
@@ -942,7 +942,10 @@ export const HEDispatch: React.FC = () => {
           free_eggs: freeEggs,
           invoice_eggs: totalDispatched - freeEggs,
           rate: rate,
-          amount: rate != null ? totalDispatched * rate : null,
+          // Billed on invoice_eggs (total minus free), matching the manual
+          // entry form — previously billed on total_dispatched, overcharging
+          // the buyer for any free eggs included in the dispatch.
+          amount: rate != null ? (totalDispatched - freeEggs) * rate : null,
           party_id: partyMatch?.id ?? null,
           remarks: r.remarks || null,
         }
@@ -953,7 +956,7 @@ export const HEDispatch: React.FC = () => {
         return
       }
 
-      const { error } = await supabase.from('he_dispatch').insert(rows)
+      const { data: inserted, error } = await supabase.from('he_dispatch').insert(rows).select('id, grade_a, grade_b, dispatch_date')
       if (error) {
         if (error.message.includes('duplicate') || error.message.includes('unique')) {
           toast.error('Some records already exist (duplicate dispatch dates). Please check your data.')
@@ -961,6 +964,23 @@ export const HEDispatch: React.FC = () => {
           throw error
         }
         return
+      }
+      // Imported dispatches previously only wrote the he_dispatch header row
+      // — the Daily Stock Register reads he_dispatch_lines, so imported
+      // dispatches never reduced egg stock. Mirror one line per dispatch.
+      const rowsByIdx = rows.map((r: any, i: number) => ({ ...r, _idx: i }))
+      const linePayload = (inserted ?? []).map((ins: any, i: number) => ({
+        dispatch_id: ins.id,
+        flock_id: rowsByIdx[i]?.flock_id,
+        prod_date: rowsByIdx[i]?.prod_date || ins.dispatch_date,
+        grade_a: ins.grade_a ?? 0,
+        grade_b: ins.grade_b ?? 0,
+        grade_c: 0,
+        rate: rowsByIdx[i]?.rate ?? null,
+      }))
+      if (linePayload.length) {
+        const { error: lineErr } = await supabase.from('he_dispatch_lines').insert(linePayload)
+        if (lineErr) toast.error('Dispatches imported, but stock-register lines failed: ' + lineErr.message)
       }
       toast.success(`Imported ${rows.length} dispatch records!`)
       qc.invalidateQueries({ queryKey: ['he_dispatch'] })
@@ -1762,11 +1782,14 @@ export const NHESales: React.FC = () => {
       const rk = parseFloat(nf.rate_per_kg) || 0
       if (tw && rk) nf.amount = (tw * rk).toFixed(2)
     }
-    // Payment split auto-total
+    // Payment split auto-total — only suggests the invoice Amount while it's
+    // still blank/zero (a fresh entry). Previously this ran unconditionally,
+    // so recording a partial payment (e.g. ₹4,000 cash against a ₹10,000
+    // sale) silently overwrote the invoice amount itself down to ₹4,000.
     if (['payment_cash','payment_online'].includes(k)) {
       const cash = parseFloat(k==='payment_cash' ? v : nf.payment_cash) || 0
       const onl  = parseFloat(k==='payment_online' ? v : nf.payment_online) || 0
-      if (cash || onl) nf.amount = (cash + onl).toFixed(2)
+      if ((cash || onl) && !(parseFloat(f.amount) || 0)) nf.amount = (cash + onl).toFixed(2)
     }
     return nf
   })
