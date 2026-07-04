@@ -2064,14 +2064,16 @@ export const NHESales: React.FC = () => {
       // After deletion, recompute cull from remaining nhe_sales for each affected flock+date
       for (const { flock_id, sale_date } of affectedPairs) {
         const { data: remaining } = await supabase.from('nhe_sales')
-          .select('quantity,bird_sex')
+          .select('quantity,bird_sex,female_qty,male_qty')
           .eq('flock_id', flock_id).eq('sale_date', sale_date)
           .in('sale_type', ['bird_sale','bird_cull','bird_lame','bird_weak','bird_sex_error'])
           .gt('quantity', 0)
         const totalF = (remaining ?? []).reduce((s, x) =>
-          s + ((x.bird_sex === 'female' || x.bird_sex === 'sex_error' || !x.bird_sex) ? (parseFloat(x.quantity) || 0) : 0), 0)
+          s + (x.bird_sex === 'mixed' ? (parseFloat(x.female_qty) || 0)
+             : (x.bird_sex === 'female' || x.bird_sex === 'sex_error' || !x.bird_sex) ? (parseFloat(x.quantity) || 0) : 0), 0)
         const totalM = (remaining ?? []).reduce((s, x) =>
-          s + (x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
+          s + (x.bird_sex === 'mixed' ? (parseFloat(x.male_qty) || 0)
+             : x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
         const { data: drRows } = await supabase.from('daily_records')
           .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
           .eq('flock_id', flock_id).eq('record_date', sale_date).order('id')
@@ -2307,15 +2309,17 @@ export const NHESales: React.FC = () => {
         // Fetch all bird sales for this flock+date AFTER the current save
         // (the current sale is already saved at this point in the mutation flow)
         const { data: allSales } = await supabase.from('nhe_sales')
-          .select('quantity,bird_sex')
+          .select('quantity,bird_sex,female_qty,male_qty')
           .eq('flock_id', flockId).eq('sale_date', saleDate)
           .in('sale_type', ['bird_sale','bird_cull','bird_lame','bird_weak','bird_sex_error'])
           .gt('quantity', 0)
 
         const totalF = (allSales ?? []).reduce((s, x) =>
-          s + ((x.bird_sex === 'female' || x.bird_sex === 'sex_error' || !x.bird_sex) ? (parseFloat(x.quantity) || 0) : 0), 0)
+          s + (x.bird_sex === 'mixed' ? (parseFloat(x.female_qty) || 0)
+             : (x.bird_sex === 'female' || x.bird_sex === 'sex_error' || !x.bird_sex) ? (parseFloat(x.quantity) || 0) : 0), 0)
         const totalM = (allSales ?? []).reduce((s, x) =>
-          s + (x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
+          s + (x.bird_sex === 'mixed' ? (parseFloat(x.male_qty) || 0)
+             : x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
 
         const { data: drRows } = await supabase.from('daily_records')
           .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
