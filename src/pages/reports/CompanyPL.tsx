@@ -406,6 +406,11 @@ export const CompanyPL: React.FC = () => {
       { label: 'Farm Expenses', ...Object.fromEntries(rows.map(r => [r.label, r.farmExp])) },
       { label: 'TOTAL COST', ...Object.fromEntries(rows.map(r => [r.label, r.totalCost])) },
       { label: 'NET PROFIT / LOSS', ...Object.fromEntries(rows.map(r => [r.label, r.net])) },
+      // Stock-adjustment lines shown on screen — the export used to omit
+      // them, so the exported net never matched the on-screen headline
+      { label: 'Add: Closing Stock (Asset)', Annual: totals.closingStock },
+      { label: 'Less: Opening Stock', Annual: totals.openingStock },
+      { label: 'NET PROFIT (after stock adjustment)', Annual: totals.netAfterStock },
     ]
     const ws = XLSX.utils.json_to_sheet(lineItems)
     const wb = XLSX.utils.book_new()

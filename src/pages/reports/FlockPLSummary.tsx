@@ -7,8 +7,6 @@ import { Card, CardHeader, Button, Select, Spinner } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
-const BIRD_SALE_TYPES = ['bird_sale', 'bird_cull', 'bird_lame', 'culls', 'birds']
-
 const FY_OPTIONS = [
   { value: '2024-25', label: 'FY 2024-25' },
   { value: '2025-26', label: 'FY 2025-26' },

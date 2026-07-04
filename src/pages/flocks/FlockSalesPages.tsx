@@ -2347,10 +2347,22 @@ export const NHESales: React.FC = () => {
       })).filter(r => r.flock_id && r.amount)
 
       if (records.length === 0) throw new Error('No valid rows found. Check flock_no and amount columns.')
-      const { error } = await supabase.from('nhe_sales').insert(records)
+      // Skip rows that already exist — re-importing the same file used to
+      // duplicate every sale.
+      const { data: existingSales } = await supabase.from('nhe_sales')
+        .select('flock_id,sale_date,sale_type,dc_no,amount')
+        .in('flock_id', [...new Set(records.map((r: any) => r.flock_id))])
+        .in('sale_date', [...new Set(records.map((r: any) => r.sale_date))])
+      const isDupe = (r: any) => (existingSales ?? []).some((e: any) =>
+        e.flock_id === r.flock_id && e.sale_date === r.sale_date && e.sale_type === r.sale_type &&
+        (r.dc_no != null ? e.dc_no === r.dc_no : e.amount === r.amount))
+      const freshRecords = records.filter((r: any) => !isDupe(r))
+      const dupCount = records.length - freshRecords.length
+      if (freshRecords.length === 0) throw new Error(`All ${dupCount} rows already exist — nothing imported`)
+      const { error } = await supabase.from('nhe_sales').insert(freshRecords)
       if (error) throw error
       qc.invalidateQueries({ queryKey: ['nhe_sales'] })
-      toast.success(`Imported ${records.length} records!`)
+      toast.success(`Imported ${freshRecords.length} records!${dupCount ? ` (${dupCount} duplicates skipped)` : ''}`)
     } catch (e: any) {
       toast.error('Import failed: ' + e.message)
     } finally {

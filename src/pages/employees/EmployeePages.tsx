@@ -913,12 +913,19 @@ export const SalaryEntryPage: React.FC = () => {
       const otherDedByEmp: Record<string, number> = {}
       for (const a of (advRows ?? [])) advByEmp[a.employee_id] = (advByEmp[a.employee_id] ?? 0) + (a.amount ?? 0)
       for (const d of (dedRows ?? [])) otherDedByEmp[d.employee_id] = (otherDedByEmp[d.employee_id] ?? 0) + (d.amount ?? 0)
+      const [yG, mG] = monthStr.split('-').map(Number)
+      const daysInGenMonth = new Date(yG, mG, 0).getDate()
       const toInsert = (emps ?? []).filter((e: any) => !existingIds.has(e.id)).map((e: any) => {
         // Shared split (overrides → PF-not-applicable whole-to-employee → floor split)
         const comp    = splitSalary(e, skillWages)
-        const basicC  = comp.basic
-        const hraC    = comp.hra
-        const gross   = comp.gross
+        // Pro-rate for an employee leaving mid-month — they used to get a
+        // full month's salary as long as leaving_date was on/after the 1st.
+        const leavesMidMonth = e.leaving_date && e.leaving_date >= monthStr && e.leaving_date.slice(0, 7) === monthStr.slice(0, 7)
+        const workedDays = leavesMidMonth ? parseInt(e.leaving_date.slice(8, 10)) : daysInGenMonth
+        const prorate = workedDays / daysInGenMonth
+        const basicC  = Math.round(comp.basic * prorate)
+        const hraC    = Math.round(comp.hra * prorate)
+        const gross   = Math.round(comp.gross * prorate)
         // ESI on BASIC (farm practice), matching computeSalaryForEmp
         const esi_emp = e.esi_applicable ? Math.ceil(basicC * 0.0075) : 0
         const esi_er  = e.esi_applicable ? Math.ceil(basicC * 0.0325) : 0
@@ -933,6 +940,8 @@ export const SalaryEntryPage: React.FC = () => {
         return {
           employee_id: e.id,
           month: monthStr,
+          days_worked: workedDays,
+          month_days: daysInGenMonth,
           basic_salary: basicC,
           earned_salary: gross,
           gross_salary: gross,

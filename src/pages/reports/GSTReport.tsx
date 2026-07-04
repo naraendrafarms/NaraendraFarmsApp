@@ -145,8 +145,11 @@ export const GSTReportPage: React.FC = () => {
     return rows.sort((a, b) => a.date.localeCompare(b.date))
   }, [grn, month])
 
-  // ── GSTR-1 split ──
-  const b2b = sales.filter(s => s.buyer_gstin && s.buyer_gstin.length === 15)
+  // ── GSTR-1 split — sections must not overlap: 0%-GST invoices belong in
+  // Nil-rated (3.1c) only, even when the buyer has a GSTIN. Previously an
+  // exempt B2B invoice appeared in BOTH the B2B table and the nil-rated
+  // total, double-presenting its taxable value across sections.
+  const b2b = sales.filter(s => s.buyer_gstin && s.buyer_gstin.length === 15 && s.gst_pct > 0)
   const b2c = sales.filter(s => !(s.buyer_gstin && s.buyer_gstin.length === 15) && s.gst_pct > 0)
   const exemptSales = sales.filter(s => s.gst_pct === 0)
   const sum = (rows: SaleRow[], k: keyof SaleRow) => rows.reduce((a, r) => a + n(r[k]), 0)
