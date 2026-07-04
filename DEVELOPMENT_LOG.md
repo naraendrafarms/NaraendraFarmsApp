@@ -530,6 +530,49 @@ send.
 
 ---
 
+## 2026-07-04 — Full-audit remediation: all 111 findings from the 6-module review closed out
+
+Following the whole-app Fable-5 audit (119 initially reported; 111 after
+dedup), every actionable finding was fixed across ~20 commits. Highlights
+by theme, so the pattern is recognisable next time:
+
+- **Silent-overwrite upserts** ("Add" replacing existing data with no
+  warning): HE weekly rates, egg opening stock, bonus, salary Add Entry,
+  electricity bill import, feed flock-allocation. All now either block
+  with a clear "edit the existing entry" error or ask for confirmation.
+- **Import dedupe**: HE dispatch, NHE sales, egg conversions, hatch
+  batches, electricity bills, partners, employees-without-ID, salary CSV
+  — re-importing the same file no longer duplicates records; already-Paid
+  rows are never overwritten by imports.
+- **Timezone (`toISOString()` = UTC)**: week-start/week-end, payslip
+  default month, statutory month-end, PO pay-before, daily summary
+  default date, aging bucket boundaries, day navigation. All rebuilt from
+  local getters. RULE: never build a YYYY-MM-DD via toISOString().
+- **Ledger math**: Bank Ledger prior-FY double count, Cash Book narrowed
+  From-date, Party Ledger dropped opening balances, Company P&L
+  opening-stock deduction + medicine double-count, aging not netting
+  partials, TDS rate derived from GST-inclusive gross.
+- **Merge/delete safety**: every master merge (parties, ingredients,
+  medicines, hatcheries, items, feed names) now error-checks each remap
+  step before deleting, remaps usage history, and rewrites denormalized
+  item_name text columns; deletes are blocked when references exist.
+- **Unit normalization**: MT/Quintal feed purchases now convert to kg at
+  save (rate scaled inversely); "Bag" blocked for feed.
+- **Payroll**: ESI both shares round UP (ESIC rule), month_days defaults
+  to real calendar length, mid-month leavers pro-rated in Quick Generate,
+  attendance 0 preserved, deductions restored on un-pay.
+- **config_options.is_active** now respected in every dropdown, with an
+  activate/deactivate toggle in Admin Centre (distinct cache key from the
+  consumer hook — same-key/different-filter cache poisoning was also
+  found and fixed in two other places).
+
+Deliberately NOT auto-fixed (need a business decision): the
+advance-recovery schedule in computeSalaryForEmp (opening balance never
+recovered), PT February cap, ESI wage-ceiling eligibility basis, Flock
+P&L farm-expense allocation across flocks, Margin% definition.
+
+---
+
 ## Recurring operational notes (apply to every migration going forward)
 
 - `run_sql.py` prints results **only for the first 5 statements in the
