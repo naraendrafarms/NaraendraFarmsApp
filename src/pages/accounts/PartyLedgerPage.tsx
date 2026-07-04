@@ -21,8 +21,12 @@ type LedgerRow = {
 
 export const PartyLedgerPage: React.FC = () => {
   const [partyId, setPartyId] = useState('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  // Previously initialized blank while `fy` showed the current FY — the
+  // page displayed "FY 2026-27" but silently queried all-time data since
+  // applyFY() was only wired to run on change, not on initial load.
+  const initialFyRange = fyRange(currentFY())
+  const [fromDate, setFromDate] = useState(initialFyRange.start)
+  const [toDate, setToDate] = useState(initialFyRange.end)
   const [fy, setFy] = useState(currentFY())
 
   const applyFY = (val: string) => {
@@ -64,19 +68,39 @@ export const PartyLedgerPage: React.FC = () => {
     enabled: !!partyId,
   })
 
+  // Everything before `fromDate` (including the Opening Balance row itself,
+  // which usually predates the FY) was previously dropped by the date
+  // filter above with no replacement — the running balance silently
+  // started at 0 instead of what the party actually owed going into the
+  // period. Sum it separately and use it to seed the balance.
+  const { data: priorBalance = 0 } = useQuery({
+    queryKey: ['party_ledger_prior_balance', partyId, fromDate],
+    queryFn: async () => {
+      if (!partyId || !fromDate) return 0
+      const { data, error } = await supabase
+        .from('v_party_ledger')
+        .select('debit,credit')
+        .eq('party_id', partyId)
+        .lt('txn_date', fromDate)
+      if (error) throw error
+      return (data ?? []).reduce((s, r: any) => s + (r.debit ?? 0) - (r.credit ?? 0), 0)
+    },
+    enabled: !!partyId && !!fromDate,
+  })
+
   const ledger = useMemo(() => {
-    let bal = 0
+    let bal = priorBalance
     return rows.map(r => {
       // debit = party owes us more (we billed them)
       // credit = reduces what party owes us (payment received / advance given)
       bal += (r.debit ?? 0) - (r.credit ?? 0)
       return { ...r, balance: bal }
     })
-  }, [rows])
+  }, [rows, priorBalance])
 
   const totalDebit = rows.reduce((s, r) => s + (r.debit ?? 0), 0)
   const totalCredit = rows.reduce((s, r) => s + (r.credit ?? 0), 0)
-  const netBalance = totalDebit - totalCredit
+  const netBalance = priorBalance + totalDebit - totalCredit
   const selectedParty = (parties as any[]).find(p => p.id === partyId)
 
   const exportXlsx = () => {
