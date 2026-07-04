@@ -64,10 +64,12 @@ jobs:
           MGMT: "${{ secrets.SUPABASE_MGMT_TOKEN }}"
           SK: "${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}"
           REF: kjliulgpipqqwptinrrd
+          ADMIN_EMAIL: "${{ secrets.ADMIN_EMAIL }}"
+          ADMIN_PASSWORD: "${{ secrets.ADMIN_PASSWORD }}"
 
       - name: Done
         run: |
           echo "NARAENDRA FARMS — DATABASE RESET COMPLETE"
           echo "App: https://naraendra-farms.pages.dev"
-          echo "Login: admin@naraendrafarms.com / NaraendraFarms@2025"
+          echo "Admin login credentials: see the ADMIN_EMAIL/ADMIN_PASSWORD repo secrets."
           echo "Admin profile created with role=admin — Admin Centre will be visible."

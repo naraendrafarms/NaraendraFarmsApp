@@ -3,6 +3,8 @@ import subprocess, json, os, sys
 SK   = os.environ["SK"]
 MGMT = os.environ["MGMT"]
 REF  = os.environ["REF"]
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@naraendrafarms.com")
+ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 BASE = f"https://kjliulgpipqqwptinrrd.supabase.co"
 
 def curl_json(method, url, headers, data=None):
@@ -34,8 +36,8 @@ auth_headers = {"apikey": SK, "Authorization": f"Bearer {SK}", "Content-Type": "
 
 # Try to create user
 create_resp = curl_json("POST", f"{BASE}/auth/v1/admin/users", auth_headers, {
-    "email": "admin@naraendrafarms.com",
-    "password": "NaraendraFarms@2025",
+    "email": ADMIN_EMAIL,
+    "password": ADMIN_PASSWORD,
     "email_confirm": True,
     "user_metadata": {"full_name": "Admin", "role": "admin"}
 })
@@ -47,7 +49,7 @@ if not user_id:
     list_resp = curl_json("GET", f"{BASE}/auth/v1/admin/users?per_page=200", auth_headers)
     users = list_resp.get("users", [])
     for u in users:
-        if u.get("email") == "admin@naraendrafarms.com":
+        if u.get("email") == ADMIN_EMAIL:
             user_id = u["id"]
             break
 
