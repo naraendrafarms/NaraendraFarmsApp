@@ -601,12 +601,12 @@ const InlineConfig: React.FC<{ title: string; grp: string; placeholder: string }
               {editId === r.id ? (
                 <>
                   <Input label="" value={editVal} onChange={e => setEditVal(e.target.value)} className="flex-1 text-sm" placeholder={placeholder} />
-                  <Button size="sm" onClick={() => saveMut.mutate({ id: r.id, value: editVal })} loading={saveMut.isPending}>Save</Button>
+                  <Button size="sm" onClick={() => { if (confirm(`Renaming "${r.value}" only changes this dropdown — any existing record already saved with the old value won't be updated and will show the old text forever. Continue?`)) saveMut.mutate({ id: r.id, value: editVal }) }} loading={saveMut.isPending}>Save</Button>
                   <Button size="sm" variant="secondary" onClick={() => setEditId(null)}>Cancel</Button>
                 </>
               ) : confirmDelId === r.id ? (
                 <>
-                  <span className="flex-1 text-xs text-red-600">Delete "{r.value}"?</span>
+                  <span className="flex-1 text-xs text-red-600">Delete "{r.value}"? Existing records already saved with this value are NOT updated — they'll keep showing "{r.value}" even though it's no longer a valid option.</span>
                   <Button size="sm" variant="danger" onClick={() => delMut.mutate(r.id)} loading={delMut.isPending}>Yes</Button>
                   <Button size="sm" variant="secondary" onClick={() => setConfirmDelId(null)}>No</Button>
                 </>

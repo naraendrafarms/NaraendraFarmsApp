@@ -136,7 +136,15 @@ export const FarmsMaster: React.FC = () => {
   })
 
   const delMut=useMutation({
-    mutationFn:async(id:string)=>{const{error}=await supabase.from('farms').delete().eq('id',id);if(error)throw error},
+    mutationFn:async(id:string)=>{
+      // sheds.farm_id cascades on delete, so a farm whose only reference is
+      // its sheds deletes cleanly with no FK error — silently taking every
+      // shed capacity record with it. Check explicitly before deleting,
+      // same as the Bank Account delete guard added earlier.
+      const {count}=await supabase.from('sheds').select('id',{count:'exact',head:true}).eq('farm_id',id)
+      if(count && count>0) throw new Error(`Cannot delete — this farm has ${count} shed(s) linked to it, which would be deleted too. Remove/reassign those sheds first.`)
+      const{error}=await supabase.from('farms').delete().eq('id',id);if(error)throw error
+    },
     onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['farms']});setDeleteRow(null)},
     onError:(e:any)=>{
       if(e.message?.includes('foreign key')||e.code==='23503')
@@ -596,9 +604,24 @@ export const PartiesMaster: React.FC = () => {
       bank_name: r.bank_name||null, branch: r.branch||null, account_no: r.account_no||null, ifsc: r.ifsc||null,
     }))
     if (!toUpsert.length) { toast.error('No valid rows'); return }
-    // ignoreDuplicates:false = UPDATE existing records with new GST/address/bank details
-    const { error } = await supabase.from('parties').upsert(toUpsert, { onConflict: 'name,type', ignoreDuplicates: false })
-    if (error) { toast.error(error.message); return }
+    // parties' real unique constraint is a functional index on
+    // (LOWER(TRIM(name)), type) — upsert's onConflict only matches a plain
+    // column-list constraint, so `onConflict: 'name,type'` here always threw
+    // "no unique or exclusion constraint matching" on any duplicate row.
+    // Resolve matches manually instead.
+    const { data: existingParties } = await supabase.from('parties').select('id,name,type')
+    const existingKey = new Map((existingParties ?? []).map((p: any) => [`${p.name.toLowerCase().trim()}|${p.type}`, p.id]))
+    const toInsert = toUpsert.filter(r => !existingKey.has(`${r.name.toLowerCase().trim()}|${r.type}`))
+    const toUpdate = toUpsert.filter(r => existingKey.has(`${r.name.toLowerCase().trim()}|${r.type}`))
+    if (toInsert.length) {
+      const { error } = await supabase.from('parties').insert(toInsert)
+      if (error) { toast.error(error.message); return }
+    }
+    for (const r of toUpdate) {
+      const id = existingKey.get(`${r.name.toLowerCase().trim()}|${r.type}`)
+      const { error } = await supabase.from('parties').update(r).eq('id', id)
+      if (error) { toast.error(error.message); return }
+    }
     toast.success(`Imported / updated ${toUpsert.length} parties`)
     qc.invalidateQueries({ queryKey: ['parties'] })
     if (importRef.current) importRef.current.value = ''
@@ -776,7 +799,14 @@ export const MedicinesMaster: React.FC = () => {
       if(!form.name)throw new Error('Name required')
       const p={name:form.name,type:form.type,unit:form.unit,manufacturer:form.manufacturer||null,rate:parseFloat(form.rate)||null,batch_no:form.batch_no||null,expiry_date:form.expiry_date||null}
       if(editing){const{error}=await supabase.from('medicines_master').update(p).eq('id',editing.id);if(error)throw error}
-      else{const{error}=await supabase.from('medicines_master').insert(p);if(error)throw error}
+      else{
+        // No DB constraint prevents a duplicate name (same class of bug as
+        // the duplicate bank-account issue found and cleaned up earlier) —
+        // check client-side before inserting.
+        const dup=(data??[]).find((m:any)=>m.name.toLowerCase().trim()===form.name.toLowerCase().trim())
+        if(dup)throw new Error(`"${form.name}" already exists — edit that entry instead of adding a duplicate.`)
+        const{error}=await supabase.from('medicines_master').insert(p);if(error)throw error
+      }
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['medicines']});setShowForm(false)},
     onError:(e:any)=>toast.error(e.message)
@@ -849,9 +879,18 @@ export const MedicinesMaster: React.FC = () => {
       batch_no: r.batch_no||null, expiry_date: r.expiry_date||null,
     }))
     if (!toUpsert.length) { toast.error('No valid rows'); return }
-    const { error } = await supabase.from('medicines_master').upsert(toUpsert, { onConflict: 'name', ignoreDuplicates: true })
-    if (error) { toast.error(error.message); return }
-    toast.success(`Imported ${toUpsert.length} medicines`)
+    // medicines_master.name has no unique constraint at all, so onConflict
+    // here always threw "no unique or exclusion constraint matching" the
+    // moment any row's name matched an existing one. Skip rows that already
+    // exist by name instead of trying to upsert.
+    const { data: existingMeds } = await supabase.from('medicines_master').select('name')
+    const existingNames = new Set((existingMeds ?? []).map((m: any) => m.name.toLowerCase().trim()))
+    const newRows = toUpsert.filter(r => !existingNames.has(r.name.toLowerCase().trim()))
+    if (newRows.length) {
+      const { error } = await supabase.from('medicines_master').insert(newRows)
+      if (error) { toast.error(error.message); return }
+    }
+    toast.success(`Imported ${newRows.length} new medicines${toUpsert.length - newRows.length ? ` (${toUpsert.length - newRows.length} already existed, skipped)` : ''}`)
     qc.invalidateQueries({ queryKey: ['medicines'] })
     if (medImportRef.current) medImportRef.current.value = ''
   }
@@ -1140,7 +1179,11 @@ export const HatcheriesMaster: React.FC = () => {
       if(!form.name)throw new Error('Name required')
       const p={name:form.name,type:form.type,location:form.location||null,city:form.city||null,contact:form.contact||null}
       if(editing){const{error}=await supabase.from('hatcheries').update(p).eq('id',editing.id);if(error)throw error}
-      else{const{error}=await supabase.from('hatcheries').insert(p);if(error)throw error}
+      else{
+        const dup=(data??[]).find((h:any)=>h.name.toLowerCase().trim()===form.name.toLowerCase().trim())
+        if(dup)throw new Error(`"${form.name}" already exists — edit that entry instead of adding a duplicate.`)
+        const{error}=await supabase.from('hatcheries').insert(p);if(error)throw error
+      }
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['hatcheries']});setShowForm(false)},
     onError:(e:any)=>toast.error(e.message)
@@ -1201,9 +1244,16 @@ export const HatcheriesMaster: React.FC = () => {
       location:r.location||null,city:r.city||null,contact:r.contact||null,
     }))
     if(!toUpsert.length){toast.error('No valid rows');return}
-    const{error}=await supabase.from('hatcheries').upsert(toUpsert,{onConflict:'name',ignoreDuplicates:true})
-    if(error){toast.error(error.message);return}
-    toast.success(`Imported ${toUpsert.length} hatcheries`)
+    // hatcheries.name has no unique constraint, so this onConflict always
+    // threw "no unique or exclusion constraint matching" on any duplicate.
+    const{data:existingHatch}=await supabase.from('hatcheries').select('name')
+    const existingNames=new Set((existingHatch??[]).map((h:any)=>h.name.toLowerCase().trim()))
+    const newRows=toUpsert.filter(r=>!existingNames.has(r.name.toLowerCase().trim()))
+    if(newRows.length){
+      const{error}=await supabase.from('hatcheries').insert(newRows)
+      if(error){toast.error(error.message);return}
+    }
+    toast.success(`Imported ${newRows.length} new hatcheries${toUpsert.length-newRows.length?` (${toUpsert.length-newRows.length} already existed, skipped)`:''}`)
     qc.invalidateQueries({queryKey:['hatcheries']})
     if(importRef.current)importRef.current.value=''
   }
