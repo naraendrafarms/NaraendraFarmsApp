@@ -1066,8 +1066,17 @@ export const SalaryEntryPage: React.FC = () => {
       .select('amount').eq('employee_id', form.employee_id).eq('deduction_month', start).eq('status','pending')
     const totalDed = (ded ?? []).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
 
-    setForm(f => ({ ...f, days_worked: String(days), further_advance: String(totalAdv), other_deduction: String(totalDed) }))
-    setTimeout(() => calcPayroll(), 50)
+    // calcPayroll actually reads month_days/absent_days, not days_worked —
+    // writing only days_worked here meant attendance never affected pay at
+    // all. Convert present days into absent days against the configured
+    // month length, and pass everything as explicit overrides instead of
+    // relying on setForm + a timeout (which recalculated from state that
+    // hadn't committed yet, silently dropping these same values).
+    const monthDays = parseInt(form.month_days) || 30
+    const absentDays = Math.max(0, monthDays - days)
+    const overrides = { days_worked: String(days), absent_days: String(absentDays), further_advance: String(totalAdv), other_deduction: String(totalDed) }
+    setForm(f => ({ ...f, ...overrides }))
+    calcPayroll(overrides)
     const parts = [`${days} days worked`]
     if (otHours > 0) parts.push(`${otHours}h OT`)
     if (totalAdv > 0) parts.push(`₹${totalAdv.toLocaleString('en-IN')} advance`)
@@ -2540,8 +2549,14 @@ export const PayslipGeneratorPage: React.FC = () => {
   const [manualMode, setManualMode] = useState(false)
   const [empId, setEmpId] = useState('')
   const [month, setMonth] = useState(() => {
-    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1)
-    return d.toISOString().slice(0, 10)
+    // Previously used toISOString() (UTC) on a locally-computed date — before
+    // 5:30am IST this shifted the default back a full extra month. Build the
+    // string from local getters only, never through a UTC serialization.
+    const d = new Date()
+    const y = d.getFullYear(), m = d.getMonth() // 0-indexed "this" month
+    const prevY = m === 0 ? y - 1 : y
+    const prevM = m === 0 ? 12 : m
+    return `${prevY}-${String(prevM).padStart(2, '0')}-01`
   })
   const [slip, setSlip] = useState<typeof EMPTY_SLIP>({ ...EMPTY_SLIP })
   const [manualEmp, setManualEmp] = useState<typeof EMPTY_MANUAL_EMP>({ ...EMPTY_MANUAL_EMP })
@@ -3321,7 +3336,24 @@ export const BulkSalaryPage: React.FC = () => {
     try {
       const [yr, mn] = month.split('-')
       const daysInMonth = new Date(parseInt(yr), parseInt(mn), 0).getDate()
-      const records = (employees as any[]).map(emp => {
+
+      // Re-running Save & Calculate previously reset EVERY employee's salary
+      // to unpaid (computeSalaryForEmp always returns is_paid:false) and
+      // wiped their Cash Book/Bank Ledger entry with nothing to replace it,
+      // plus zeroed advance_opening since it was never fetched here. Skip
+      // anyone already marked Paid this month entirely — recalculating an
+      // already-settled salary should be done from the main Salary Entry
+      // screen, not silently blown away by a bulk re-run.
+      const alreadyPaidIds = new Set((salaries ?? []).filter((s: any) => s.is_paid).map((s: any) => s.employee_id))
+
+      const prevDate = new Date(parseInt(yr), parseInt(mn) - 2, 1)
+      const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-01`
+      const { data: prevSalaries } = await supabase.from('salary_monthly').select('employee_id,advance_closing').eq('month', prevMonth)
+      const prevAdvClosing: Record<string, number> = {}
+      for (const p of (prevSalaries ?? [])) prevAdvClosing[p.employee_id] = p.advance_closing ?? 0
+
+      const toSave = (employees as any[]).filter(emp => !alreadyPaidIds.has(emp.id))
+      const records = toSave.map(emp => {
         const absentDays = parseFloat(absentMap[emp.id] ?? '0') || 0
         const calc = computeSalaryForEmp(emp, {
           absentDays,
@@ -3331,14 +3363,18 @@ export const BulkSalaryPage: React.FC = () => {
           tds: parseFloat(tdsMap[emp.id] ?? '0') || 0,
           furtherAdvance: (advances as any)?.[emp.id] ?? 0,
           otherDeduction: (deductions as any)?.[emp.id] ?? 0,
-        })
+          advanceOpening: prevAdvClosing[emp.id] ?? 0,
+        } as any)
         return { employee_id: emp.id, month: monthDate, ...calc }
       })
-      const { error } = await supabase.from('salary_monthly').upsert(records, { onConflict: 'employee_id,month' })
-      if (error) throw error
+      if (records.length) {
+        const { error } = await supabase.from('salary_monthly').upsert(records, { onConflict: 'employee_id,month' })
+        if (error) throw error
+      }
       await refetchSalaries()
       qc.invalidateQueries({ queryKey: ['bulk_salary'] })
-      toast.success(`Salaries calculated for ${records.length} employees`)
+      const skipped = alreadyPaidIds.size
+      toast.success(`Salaries calculated for ${records.length} employee(s)${skipped ? ` — ${skipped} already-Paid employee(s) skipped, unchanged` : ''}`)
       setTab('salary')
     } catch (e: any) { toast.error(e.message) }
     finally { setSaving(false) }
