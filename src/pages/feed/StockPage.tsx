@@ -36,7 +36,8 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
     queryFn: async () => { const { data } = await supabase.from('v_medicine_stock').select('*').order('name'); return data ?? [] }
   })
 
-  const OUT_TYPES = new Set(['production_out', 'medicine_out', 'adjustment_out', 'transfer_out'])
+  // dispatch_out was missing — those rows fell into the else branch and were ADDED to stock
+  const OUT_TYPES = new Set(['production_out', 'medicine_out', 'adjustment_out', 'transfer_out', 'dispatch_out'])
   const norm = (s?: string | null) => (s ?? '').trim().toLowerCase()
   const stockMap = React.useMemo(() => {
     if (!ingredients) return []

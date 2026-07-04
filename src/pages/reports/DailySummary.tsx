@@ -5,12 +5,13 @@ import { Card, Button, Spinner , DateInput } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Copy, CheckCircle } from 'lucide-react'
 
-import { fmtDate, exportCSV } from '@/lib/utils'
+import { fmtDate, exportCSV, today as todayIST } from '@/lib/utils'
 import { Download } from 'lucide-react'
 function num(n: number) { return n.toLocaleString('en-IN') }
 
 export const DailySummaryPage: React.FC = () => {
-  const today = new Date().toISOString().slice(0, 10)
+  // toISOString() is UTC — before 5:30am IST it opened on yesterday's date
+  const today = todayIST()
   const [date, setDate] = useState(today)
   const [copied, setCopied] = useState(false)
 

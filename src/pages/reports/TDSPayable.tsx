@@ -45,9 +45,17 @@ export const TDSPayable: React.FC = () => {
     staleTime: 60_000,
   })
 
-  // Effective TDS % — use the stored rate, else derive from amount/invoice so
-  // manually-entered TDS (flat amount, no rate) still shows a sensible %.
-  const effPct = (r: any) => r.tds_pct ?? (r.invoice_amount ? +(r.tds_amount / r.invoice_amount * 100).toFixed(2) : 0)
+  // Effective TDS % — use the stored rate; else derive from the TAXABLE base
+  // (basic_amount, or invoice minus GST), not the GST-inclusive gross — a 2%
+  // TDS bill with 18% GST used to derive as ~1.69% and fall outside the rate
+  // filter's ±0.05 tolerance. A stored 0 also falls through to derivation.
+  const effPct = (r: any) => {
+    if (r.tds_pct > 0) return r.tds_pct
+    const base = (r.basic_amount ?? 0) > 0 ? r.basic_amount
+      : (r.invoice_amount ?? 0) - (r.gst_amount ?? 0) > 0 ? (r.invoice_amount ?? 0) - (r.gst_amount ?? 0)
+      : r.invoice_amount ?? 0
+    return base ? +((r.tds_amount ?? 0) / base * 100).toFixed(2) : 0
+  }
 
   const filtered = useMemo(() => {
     return rows.filter((r: any) => {

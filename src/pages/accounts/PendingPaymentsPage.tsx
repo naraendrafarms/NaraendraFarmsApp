@@ -528,7 +528,8 @@ export const PendingPaymentsPage: React.FC = () => {
     const disc = r.discount_amount ?? 0
     return s + Math.max(0, base - paid - disc)
   }, 0)
-  const dueThisWeek = unpaid.filter(r => r.pay_before_date && r.pay_before_date >= todayStr && r.pay_before_date <= new Date(Date.now() + 7*86400000).toISOString().slice(0,10))
+  const weekAhead = (() => { const d = new Date(); d.setDate(d.getDate() + 7); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })()
+  const dueThisWeek = unpaid.filter(r => r.pay_before_date && r.pay_before_date >= todayStr && r.pay_before_date <= weekAhead)
 
   const getBalance = (r: PayRecord) => {
     const base = r.net_payable ?? r.invoice_amount ?? 0
@@ -1133,8 +1134,9 @@ export const PendingPaymentsPage: React.FC = () => {
                       const baseDate = editForm.grn_date || editForm.invoice_date
                       let pay = editForm.pay_before_date
                       if (days !== '' && baseDate) {
-                        const d = new Date(baseDate); d.setDate(d.getDate() + (parseInt(days) || 0))
-                        pay = d.toISOString().slice(0, 10)
+                        // Local getters, not toISOString() (UTC) — the latter lands a day early in IST
+                        const d = new Date(baseDate + 'T00:00:00'); d.setDate(d.getDate() + (parseInt(days) || 0))
+                        pay = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
                       }
                       setEditForm(f => ({ ...f, credit_limit: days, pay_before_date: pay }))
                     }}

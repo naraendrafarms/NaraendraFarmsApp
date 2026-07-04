@@ -43,11 +43,17 @@ export const TDSReceivable: React.FC = () => {
     staleTime: 60_000,
   })
 
+  // One shared derivation for BOTH the filter and the summary — they used to
+  // differ for rows with tds_pct=0 but tds_amount>0, making such rows appear
+  // in the summary under a rate the filter could never match.
+  const effRate = (r: any) => r.tds_pct != null && r.tds_pct > 0
+    ? r.tds_pct
+    : r.amount ? Math.round(r.tds_amount / r.amount * 1000) / 10 : 0
+
   const filtered = useMemo(() => {
     return rows.filter((r: any) => {
       if (rateFilter) {
-        const derived = r.tds_pct ?? (r.amount ? Math.round(r.tds_amount / r.amount * 1000) / 10 : 0)
-        if (Math.abs(derived - parseFloat(rateFilter)) > 0.05) return false
+        if (Math.abs(effRate(r) - parseFloat(rateFilter)) > 0.05) return false
       }
       if (statusFilter) {
         if (statusFilter === 'received' && r.payment_status !== 'Received') return false
@@ -61,9 +67,7 @@ export const TDSReceivable: React.FC = () => {
   const summary = useMemo(() => {
     const map: Record<string, { count: number; invoiceTotal: number; tdsTotal: number; received: number }> = {}
     filtered.forEach((r: any) => {
-      const pct = r.tds_pct != null && r.tds_pct > 0
-        ? r.tds_pct
-        : r.amount ? Math.round(r.tds_amount / r.amount * 1000) / 10 : 0
+      const pct = effRate(r)
       const key = `${pct}%`
       if (!map[key]) map[key] = { count: 0, invoiceTotal: 0, tdsTotal: 0, received: 0 }
       map[key].count++
