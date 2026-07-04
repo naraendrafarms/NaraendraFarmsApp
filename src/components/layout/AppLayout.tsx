@@ -114,6 +114,7 @@ const NAV: NavItem[] = [
       { label: 'TDS Receivable',          to: '/reports/tds-receivable' },
       { label: 'TDS Payable',             to: '/reports/tds-payable' },
       { label: 'Site Invoice (Consolidated)', to: '/reports/site-invoice' },
+      { label: 'Bird / Cull Sales Report',    to: '/reports/bird-sales' },
     ]
   },
   {
