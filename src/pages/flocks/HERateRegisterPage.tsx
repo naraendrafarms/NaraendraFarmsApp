@@ -14,7 +14,10 @@ function weekStartOf(d: Date) {
   x.setDate(x.getDate() - x.getDay())
   return x
 }
-function fmt(d: Date) { return d.toISOString().slice(0, 10) }
+// Local getters, NOT toISOString() (UTC) — the latter shifts the date back a
+// day before 5:30am IST, saving a Saturday as the week's "Sunday" and breaking
+// rate lookups keyed on week_start.
+function fmt(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
 export const HERateRegisterPage: React.FC = () => {
   const [tab, setTab] = useState<typeof TABS[number]>('Weekly Rates')
@@ -67,8 +70,12 @@ const WeeklyRatesTab: React.FC = () => {
           .eq('id', editingId)
         if (error) throw error
       } else {
+        // Adding used to silently overwrite an existing week's rate via
+        // upsert — block it and point at Edit instead.
+        const { data: existing } = await supabase.from('he_rate_register').select('id,rate').eq('week_start', form.week_start).maybeSingle()
+        if (existing) throw new Error(`A rate (₹${existing.rate}) already exists for the week starting ${form.week_start} — edit that entry instead.`)
         const { error } = await supabase.from('he_rate_register')
-          .upsert({ week_start: form.week_start, week_end: form.week_end, rate, declared_date: form.declared_date || null, remarks: form.remarks || null }, { onConflict: 'week_start' })
+          .insert({ week_start: form.week_start, week_end: form.week_end, rate, declared_date: form.declared_date || null, remarks: form.remarks || null })
         if (error) throw error
       }
     },
@@ -80,10 +87,11 @@ const WeeklyRatesTab: React.FC = () => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['he_rate_register'] }); toast.success('Deleted') },
   })
 
-  // Auto-set week_end when week_start picked
+  // Auto-set week_end when week_start picked (parse as local midnight so the
+  // +6-day arithmetic can't straddle a UTC day boundary)
   const onWeekStart = (v: string) => {
     if (!v) { s('week_start', v); return }
-    const d = new Date(v); const end = new Date(d); end.setDate(end.getDate() + 6)
+    const d = new Date(v + 'T00:00:00'); const end = new Date(d); end.setDate(end.getDate() + 6)
     setForm(f => ({ ...f, week_start: v, week_end: fmt(end) }))
   }
 
@@ -167,7 +175,10 @@ const VendorRatesTab: React.FC = () => {
   })
   const { data: latestRate } = useQuery({
     queryKey: ['he_rate_latest'],
-    queryFn: async () => { const { data } = await supabase.from('he_rate_register').select('rate,week_start,week_end').order('week_start', { ascending: false }).limit(1).maybeSingle(); return data }
+    // Only weeks that have already started — new rates default to NEXT
+    // Sunday, so the newest row is usually a not-yet-effective future week
+    // and every vendor's "Effective Rate" was computed against it.
+    queryFn: async () => { const { data } = await supabase.from('he_rate_register').select('rate,week_start,week_end').lte('week_start', today()).order('week_start', { ascending: false }).limit(1).maybeSingle(); return data }
   })
 
   const filtered = search.trim()
@@ -327,10 +338,14 @@ const StdCurveTab: React.FC = () => {
           row.hatch_pct = num(r[8]); row.weekly_chicks_hh = num(r[9]); row.cum_chicks_hh = num(r[10])
           return row
         }).filter(r => !isNaN(r.week_of_age))
-        if (upserts.length) {
-          const { error } = await supabase.from('std_production_curve').upsert(upserts, { onConflict: 'season,week_of_age' })
+        // Dedupe within the sheet by (season, week_of_age) keeping the last —
+        // Postgres aborts the whole upsert if one batch touches a key twice.
+        const byKey = new Map(upserts.map(r => [`${r.season}|${r.week_of_age}`, r]))
+        const deduped = [...byKey.values()]
+        if (deduped.length) {
+          const { error } = await supabase.from('std_production_curve').upsert(deduped, { onConflict: 'season,week_of_age' })
           if (error) throw error
-          totalRows += upserts.length
+          totalRows += deduped.length
         }
       }
       if (totalRows === 0) throw new Error("Couldn't find a SUMMER or WINTER sheet in this file")

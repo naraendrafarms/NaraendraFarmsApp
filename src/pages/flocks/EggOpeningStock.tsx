@@ -80,11 +80,19 @@ export const EggOpeningStockPage: React.FC = () => {
         be_eggs: parseInt(form.be_eggs) || 0,
         le_eggs: parseInt(form.le_eggs) || 0,
       }
+      // Reject negative counts before they seed the stock-register running total
+      for (const k of ['he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs'] as const) {
+        if ((payload as any)[k] < 0) throw new Error('Egg counts cannot be negative')
+      }
       if (editing) {
         const { error } = await supabase.from('egg_opening_stock').update(payload).eq('id', editing.id)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('egg_opening_stock').upsert(payload, { onConflict: 'flock_id' })
+        // Add used to silently overwrite an existing flock's balance via
+        // upsert — block it and point at Edit instead.
+        const { data: existing } = await supabase.from('egg_opening_stock').select('id').eq('flock_id', form.flock_id).maybeSingle()
+        if (existing) throw new Error('This flock already has an opening stock entry — edit that entry instead of adding a new one.')
+        const { error } = await supabase.from('egg_opening_stock').insert(payload)
         if (error) throw error
       }
     },
@@ -161,9 +169,14 @@ export const EggOpeningStockPage: React.FC = () => {
         }
       }).filter((r: any) => r.flock_id)
       if (!parsed.length) { toast.error('No rows matched a known flock'); return }
-      const { error } = await supabase.from('egg_opening_stock').upsert(parsed, { onConflict: 'flock_id' })
+      // Dedupe by flock within the file (keep last) — one upsert batch
+      // touching the same flock twice aborts the whole import in Postgres.
+      const byFlock = new Map(parsed.map((r: any) => [r.flock_id, r]))
+      const deduped = [...byFlock.values()]
+      const collapsed = parsed.length - deduped.length
+      const { error } = await supabase.from('egg_opening_stock').upsert(deduped, { onConflict: 'flock_id' })
       if (error) throw error
-      toast.success(`Imported ${parsed.length} entries`)
+      toast.success(`Imported ${deduped.length} entries${collapsed ? ` (${collapsed} duplicate file-row(s) collapsed)` : ''}`)
       qc.invalidateQueries({ queryKey: ['egg_opening_stock'] })
     } catch (err: any) {
       toast.error('Import failed: ' + err.message)

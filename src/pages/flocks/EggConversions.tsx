@@ -35,11 +35,18 @@ export const EggConversions: React.FC = () => {
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
     queryFn: async () => {
-      let q = supabase.from('flocks').select('id,flock_no').order('flock_no')
+      let q = supabase.from('flocks').select('id,flock_no,laying_farm_id,rearing_farm_id').order('flock_no')
       q = applyFlockFarmFilter(q)
       const { data } = await q; return data ?? []
     }
   })
+
+  // farm_id was never populated on conversions, making them invisible to
+  // any farm-scoped report — derive it from the flock's laying/rearing farm.
+  const farmIdForFlock = (flockId: string) => {
+    const f = (flocks ?? []).find((x: any) => x.id === flockId)
+    return f?.laying_farm_id ?? f?.rearing_farm_id ?? null
+  }
 
   const { data: conversions, isLoading } = useQuery({
     queryKey: ['egg_conversions', flockFilter],
@@ -86,8 +93,11 @@ export const EggConversions: React.FC = () => {
         throw new Error('Flock, from qty and to qty required')
       if (form.from_type === form.to_type)
         throw new Error('From and To types cannot be the same')
+      if ((parseInt(form.from_qty) || 0) <= 0 || (parseInt(form.to_qty) || 0) <= 0)
+        throw new Error('Quantities must be positive')
       const payload = {
         flock_id: form.flock_id,
+        farm_id: farmIdForFlock(form.flock_id),
         conversion_date: form.conversion_date,
         from_type: form.from_type,
         from_qty: parseInt(form.from_qty),
@@ -173,11 +183,23 @@ export const EggConversions: React.FC = () => {
           to_qty: parseInt(r[col('to_qty')]) || 0,
           reason: r[col('reason')] || null,
         }
-      }).filter((r: any) => r.flock_id)
-      if (!parsed.length) { toast.error('No rows matched a known flock'); return }
-      const { error } = await supabase.from('egg_conversions').insert(parsed)
+      }).filter((r: any) => r.flock_id && r.from_type !== r.to_type && r.from_qty > 0 && r.to_qty > 0)
+        .map((r: any) => ({ ...r, farm_id: farmIdForFlock(r.flock_id) }))
+      if (!parsed.length) { toast.error('No valid rows matched a known flock'); return }
+      // Skip rows that already exist — re-importing the same file used to
+      // double-count every conversion against stock.
+      const { data: existing } = await supabase.from('egg_conversions')
+        .select('flock_id,conversion_date,from_type,to_type,from_qty')
+        .in('flock_id', [...new Set(parsed.map((r: any) => r.flock_id))])
+      const exists = (r: any) => (existing ?? []).some((e: any) =>
+        e.flock_id === r.flock_id && e.conversion_date === r.conversion_date &&
+        e.from_type === r.from_type && e.to_type === r.to_type && e.from_qty === r.from_qty)
+      const fresh = parsed.filter((r: any) => !exists(r))
+      const skipped = parsed.length - fresh.length
+      if (!fresh.length) { toast.error(`All ${skipped} rows already exist — nothing imported`); return }
+      const { error } = await supabase.from('egg_conversions').insert(fresh)
       if (error) throw error
-      toast.success(`Imported ${parsed.length} conversions`)
+      toast.success(`Imported ${fresh.length} conversions${skipped ? ` (${skipped} duplicates skipped)` : ''}`)
       qc.invalidateQueries({ queryKey: ['egg_conversions'] })
     } catch (err: any) {
       toast.error('Import failed: ' + err.message)
