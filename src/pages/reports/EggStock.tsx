@@ -323,11 +323,13 @@ export const EggStockPage: React.FC = () => {
     let balA = op?.he_grade_a ?? 0, balB = op?.he_grade_b ?? 0, balC = op?.he_grade_c ?? 0
     let balJE = op?.nhe_je ?? 0, balTE = op?.nhe_te ?? 0, balBE = op?.nhe_be ?? 0
 
-    // Carry forward everything before fromDate into opening
+    // Carry forward everything before fromDate into opening — wastage
+    // wasn't subtracted here either, so the opening balance itself was
+    // overstated whenever any wastage was recorded before the filter date.
     for (const r of (dailyRecs ?? []).filter((r: any) => r.flock_id === flockFilter)) {
       if (fd && r.record_date < fd) {
-        balA += r.he_grade_a ?? 0; balB += r.he_grade_b ?? 0; balC += r.he_grade_c ?? 0
-        balJE += r.je_eggs ?? 0; balTE += r.te_eggs ?? 0; balBE += r.be_eggs ?? 0
+        balA += (r.he_grade_a ?? 0) - (r.wastage_he ?? 0); balB += r.he_grade_b ?? 0; balC += r.he_grade_c ?? 0
+        balJE += (r.je_eggs ?? 0) - (r.wastage_je ?? 0); balTE += (r.te_eggs ?? 0) - (r.wastage_te ?? 0); balBE += (r.be_eggs ?? 0) - (r.wastage_be ?? 0)
       }
     }
     for (const d of (heDisp ?? []).filter((d: any) => d.flock_id === flockFilter)) {
@@ -365,6 +367,12 @@ export const EggStockPage: React.FC = () => {
       const pBE = dayProd.reduce((s: number, r: any) => s + (r.be_eggs ?? 0), 0)
       const pLE = dayProd.reduce((s: number, r: any) => s + (r.le_eggs ?? 0), 0)
       const wHE = dayProd.reduce((s: number, r: any) => s + (r.wastage_he ?? 0), 0)
+      // Previously only wastage_he was read here — wastage_je/te/be were
+      // ignored, so this day-wise view disagreed with the summary table
+      // (which does subtract all four) whenever any NHE wastage existed.
+      const wJE = dayProd.reduce((s: number, r: any) => s + (r.wastage_je ?? 0), 0)
+      const wTE = dayProd.reduce((s: number, r: any) => s + (r.wastage_te ?? 0), 0)
+      const wBE = dayProd.reduce((s: number, r: any) => s + (r.wastage_be ?? 0), 0)
 
       // Sales / dispatch for this day
       const dayDisp = (heDisp ?? []).filter((d: any) => d.flock_id === flockFilter && d.dispatch_date === date)
@@ -378,9 +386,9 @@ export const EggStockPage: React.FC = () => {
 
       // Update running balance
       balA += pA - sA - wHE; balB += pB - sB; balC += pC - sC
-      balJE += pJE - sJE; balTE += pTE - sTE; balBE += pBE - sBE
+      balJE += pJE - sJE - wJE; balTE += pTE - sTE - wTE; balBE += pBE - sBE - wBE
 
-      return { date, opA, opB, opC, opJE, opTE, opBE, pA, pB, pC, pJE, pTE, pBE, pLE, wHE, sA, sB, sC, sJE, sTE, sBE, clA: balA, clB: balB, clC: balC, clJE: balJE, clTE: balTE, clBE: balBE }
+      return { date, opA, opB, opC, opJE, opTE, opBE, pA, pB, pC, pJE, pTE, pBE, pLE, wHE, wJE, wTE, wBE, sA, sB, sC, sJE, sTE, sBE, clA: balA, clB: balB, clC: balC, clJE: balJE, clTE: balTE, clBE: balBE }
     })
   }, [flockFilter, dailyRecs, heDisp, nheSales, openingStock, fromDate, toDate])
 

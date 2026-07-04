@@ -99,10 +99,22 @@ const BillsTab: React.FC = () => {
     mutationFn: async () => {
       const payload = { meter_id: form.meter_id, bill_month: form.bill_month+'-01', units_consumed: parseInt(form.units_consumed)||null, amount: parseFloat(form.amount), acd_dc_due: parseFloat(form.acd_dc_due)||0, deposit_amount: parseFloat(form.deposit_amount)||0, deposit_interest: parseFloat(form.deposit_interest)||0, meter_rent: parseFloat(form.meter_rent)||0, paid_date: form.paid_date||null, remarks: form.remarks||null }
       if (!payload.meter_id || !payload.bill_month || !payload.amount) throw new Error('Meter, month and amount required')
-      if (editing) { const{error}=await supabase.from('electricity_bills').update(payload).eq('id',editing.id); if(error)throw error }
+      if (editing) {
+        const{error}=await supabase.from('electricity_bills').update(payload).eq('id',editing.id); if(error)throw error
+        // Allocations store both alloc_pct and a pre-computed allocated_amount
+        // (= old bill amount x pct). Editing the bill amount previously left
+        // allocated_amount stale, drifting out of sync with both the new
+        // total and its own stored percentage — recompute every allocation
+        // row for this bill now.
+        const { data: allocs } = await supabase.from('electricity_allocation').select('id,alloc_pct').eq('bill_id', editing.id)
+        for (const a of (allocs ?? [])) {
+          const newAmt = Math.round((payload.amount * (a.alloc_pct ?? 0) / 100) * 100) / 100
+          await supabase.from('electricity_allocation').update({ allocated_amount: newAmt }).eq('id', a.id)
+        }
+      }
       else { const{error}=await supabase.from('electricity_bills').insert(payload); if(error)throw error }
     },
-    onSuccess: () => { toast.success(editing?'Updated!':'Saved!'); qc.invalidateQueries({queryKey:['elec_bills']}); setShowForm(false) },
+    onSuccess: () => { toast.success(editing?'Updated!':'Saved!'); qc.invalidateQueries({queryKey:['elec_bills']}); qc.invalidateQueries({queryKey:['elec_allocations']}); setShowForm(false) },
     onError: (e:any) => toast.error(e.message)
   })
 
