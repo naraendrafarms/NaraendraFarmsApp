@@ -311,6 +311,85 @@ export const ReceivePaymentModal: React.FC<{
   )
 }
 
+// ── Refund Excess Payment Modal ────────────────────────────────────
+// When a buyer overpays a Cull Bird (or other NHE) sale, this posts the
+// refund as a Bank Ledger Debit linked back to the sale (nhe_sale_id), so
+// the full receive → refund cycle stays traceable instead of a silent,
+// unlinked manual withdrawal.
+const RefundExcessModal: React.FC<{
+  open: boolean; sale: any; bankAccounts: any[]; onClose: () => void; onSaved: () => void
+}> = ({ open, sale, bankAccounts, onClose, onSaved }) => {
+  const [amount, setAmount] = useState('')
+  const [date, setDate] = useState(today())
+  const [bankAccountId, setBankAccountId] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (open && sale) {
+      const excess = Math.max(0, (Number(sale.amount_received) || 0) - (Number(sale.amount) || 0))
+      setAmount(excess ? String(excess) : '')
+      setDate(today())
+      setBankAccountId(sale.refund_bank_account_id ?? '')
+    }
+  }, [open, sale])
+
+  if (!open || !sale) return null
+
+  const handleSave = async () => {
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { toast.error('Enter a valid refund amount'); return }
+    if (!bankAccountId) { toast.error('Select the bank account the refund is paid from'); return }
+    setSaving(true)
+    try {
+      const { data: txn, error: txnErr } = await supabase.from('bank_transactions').insert({
+        bank_account_id: bankAccountId, txn_date: date, txn_type: 'Debit',
+        category: 'Refund — Excess Payment', amount: amt,
+        description: `Refund to ${sale.parties?.name ?? 'party'} — excess on Cull Bird sale ${sale.dc_no ? 'DC#'+sale.dc_no : ''}`.trim(),
+        nhe_sale_id: sale.id,
+      }).select('id').single()
+      if (txnErr) throw txnErr
+      const { error } = await supabase.from('nhe_sales').update({
+        refund_amount: amt, refund_date: date, refund_bank_account_id: bankAccountId, refund_bank_txn_id: txn.id,
+      }).eq('id', sale.id)
+      if (error) throw error
+      toast.success('Refund recorded and posted to Bank Ledger')
+      onSaved()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const excess = Math.max(0, (Number(sale.amount_received) || 0) - (Number(sale.amount) || 0))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900">Refund Excess Payment</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        </div>
+        <p className="text-xs text-gray-500">
+          Invoice: {inr(sale.amount)} · Received: {inr(sale.amount_received)}
+          {excess > 0 && <span className="text-orange-600 font-medium"> · Excess: {inr(excess)}</span>}
+        </p>
+        <Input label="Refund Amount (₹)" type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
+        <div>
+          <label className="text-sm font-medium text-gray-700">Date</label>
+          <DateInput value={date} onChange={e => setDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+        <Select label="Refund From Bank Account" placeholder="— Select —" value={bankAccountId} onChange={e => setBankAccountId(e.target.value)}
+          options={bankAccounts.map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — '+b.account_name : ''}` }))} />
+        <div className="flex gap-2 pt-2">
+          <Button onClick={handleSave} loading={saving} className="flex-1">Save Refund</Button>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Reverse party_advances.amount_used for sales paid via Advance before they
 // are deleted — otherwise the advance stays permanently consumed by a sale
 // that no longer exists.
@@ -1693,6 +1772,8 @@ const EMPTY_NHE_FORM = {
   quantity: '', unit: 'nos', rate: '', amount: '',
   bird_sex: 'female', bird_category: 'cull',
   avg_weight_kg: '', total_weight_kg: '', rate_per_kg: '',
+  gross_weight_kg: '', tare_weight_kg: '', net_weight_kg: '',
+  female_qty: '', female_weight_kg: '', male_qty: '', male_weight_kg: '',
   payment_cash: '', payment_online: '', cash_farm_id: 'ho', bank_account_id: '',
   remarks: '',
   is_employee_sale: false, employee_id: '', deduct_salary: false,
@@ -1719,6 +1800,7 @@ export const NHESales: React.FC = () => {
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [receiptSale, setReceiptSale] = useState<any>(null)
+  const [refundSale, setRefundSale] = useState<any>(null)
   const [nheLines, setNheLines] = useState<NheLine[]>([emptyNheLine()])
 
   const { data: bankAccounts } = useQuery({
@@ -1832,12 +1914,30 @@ export const NHESales: React.FC = () => {
   const sv = (k: string, v: string) => setForm((f: any) => {
     const nf = { ...f, [k]: v }
     // Bird sale auto-calcs
-    if (['quantity','avg_weight_kg'].includes(k)) {
+    if (['quantity','avg_weight_kg'].includes(k) && nf.bird_sex !== 'mixed') {
       const q = parseFloat(k==='quantity' ? v : nf.quantity) || 0
       const w = parseFloat(k==='avg_weight_kg' ? v : nf.avg_weight_kg) || 0
       nf.total_weight_kg = q && w ? (q*w).toFixed(3) : ''
     }
-    if (['total_weight_kg','rate_per_kg','avg_weight_kg','quantity'].includes(k)) {
+    // Mixed (Female+Male) split — quantity/total weight derive from the two sub-blocks
+    if (['female_qty','female_weight_kg','male_qty','male_weight_kg'].includes(k)) {
+      const fq = parseFloat(k==='female_qty' ? v : nf.female_qty) || 0
+      const fw = parseFloat(k==='female_weight_kg' ? v : nf.female_weight_kg) || 0
+      const mq = parseFloat(k==='male_qty' ? v : nf.male_qty) || 0
+      const mw = parseFloat(k==='male_weight_kg' ? v : nf.male_weight_kg) || 0
+      nf.quantity = (fq + mq) ? String(fq + mq) : ''
+      if (!nf.net_weight_kg) nf.total_weight_kg = (fw + mw) ? (fw + mw).toFixed(3) : ''
+    }
+    // Weighbridge: Gross - Tare = Net, and Net (when present) is the weight used for billing
+    if (['gross_weight_kg','tare_weight_kg'].includes(k)) {
+      const g = parseFloat(k==='gross_weight_kg' ? v : nf.gross_weight_kg) || 0
+      const t = parseFloat(k==='tare_weight_kg' ? v : nf.tare_weight_kg) || 0
+      const net = g && t && g > t ? g - t : 0
+      nf.net_weight_kg = net ? net.toFixed(3) : ''
+      if (net) nf.total_weight_kg = net.toFixed(3)
+    }
+    if (['total_weight_kg','rate_per_kg','avg_weight_kg','quantity','net_weight_kg',
+         'female_qty','female_weight_kg','male_qty','male_weight_kg','gross_weight_kg','tare_weight_kg'].includes(k)) {
       const tw = parseFloat(nf.total_weight_kg) || 0
       const rk = parseFloat(nf.rate_per_kg) || 0
       if (tw && rk) nf.amount = (tw * rk).toFixed(2)
@@ -2019,6 +2119,13 @@ export const NHESales: React.FC = () => {
         payload.avg_weight_kg  = parseFloat(form.avg_weight_kg)  || null
         payload.total_weight_kg= parseFloat(form.total_weight_kg)|| null
         payload.rate_per_kg    = parseFloat(form.rate_per_kg)    || null
+        payload.gross_weight_kg = parseFloat(form.gross_weight_kg) || null
+        payload.tare_weight_kg  = parseFloat(form.tare_weight_kg)  || null
+        payload.net_weight_kg   = parseFloat(form.net_weight_kg)   || null
+        payload.female_qty        = form.bird_sex === 'mixed' ? (parseInt(form.female_qty) || null) : null
+        payload.female_weight_kg  = form.bird_sex === 'mixed' ? (parseFloat(form.female_weight_kg) || null) : null
+        payload.male_qty          = form.bird_sex === 'mixed' ? (parseInt(form.male_qty) || null) : null
+        payload.male_weight_kg    = form.bird_sex === 'mixed' ? (parseFloat(form.male_weight_kg) || null) : null
         payload.payment_cash   = cashAmt
         payload.payment_online = onlineAmt
       }
@@ -2238,6 +2345,13 @@ export const NHESales: React.FC = () => {
       avg_weight_kg:   row.avg_weight_kg ?? '',
       total_weight_kg: row.total_weight_kg ?? '',
       rate_per_kg:     row.rate_per_kg ?? '',
+      gross_weight_kg: row.gross_weight_kg ?? '',
+      tare_weight_kg:  row.tare_weight_kg ?? '',
+      net_weight_kg:   row.net_weight_kg ?? '',
+      female_qty:       row.female_qty != null ? String(row.female_qty) : '',
+      female_weight_kg: row.female_weight_kg ?? '',
+      male_qty:         row.male_qty != null ? String(row.male_qty) : '',
+      male_weight_kg:   row.male_weight_kg ?? '',
       payment_cash:    row.payment_cash ?? '',
       payment_online:  row.payment_online ?? '',
       cash_farm_id:    row.cash_farm_id ?? 'ho',
@@ -2659,6 +2773,9 @@ export const NHESales: React.FC = () => {
                   <Td className="text-xs text-gray-400">{s.vehicle_no ?? s.dc_no ?? '—'}</Td>
                   <Td>
                     <div className="flex gap-1">
+                      {isBirdSale(s.sale_type) && (Number(s.amount_received) || 0) > (Number(s.amount) || 0) && (
+                        <button onClick={() => setRefundSale(s)} className="p-1 text-orange-500 hover:text-orange-700" title="Refund excess payment to bank">↩</button>
+                      )}
                       <button onClick={() => openEdit(s)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit sale"><Edit2 size={13}/></button>
                       <button onClick={() => printNHESale({
                         id: s.id, sale_date: s.sale_date, sale_type: s.sale_type,
@@ -2708,6 +2825,18 @@ export const NHESales: React.FC = () => {
         }}
       />
 
+      <RefundExcessModal
+        open={!!refundSale}
+        sale={refundSale}
+        bankAccounts={bankAccounts ?? []}
+        onClose={() => setRefundSale(null)}
+        onSaved={() => {
+          setRefundSale(null)
+          qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+          qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+        }}
+      />
+
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}
         title={editing ? 'Edit NHE / Bird Sale' : 'Record NHE / Bird Sale'} size="lg"
         footer={<><Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}>Cancel</Button>
@@ -2751,16 +2880,39 @@ export const NHESales: React.FC = () => {
                     value={form.bird_sex} onChange={e => sv('bird_sex', e.target.value)} />
                   <Select label="Category" options={BIRD_CAT_OPTS}
                     value={form.bird_category} onChange={e => sv('bird_category', e.target.value)} />
-                  <Input label="No. of Birds" type="number"
-                    value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
-                  <Input label="Avg Weight/bird (kg)" type="number" step="0.001"
-                    value={form.avg_weight_kg} onChange={e => sv('avg_weight_kg', e.target.value)}
-                    hint="per bird live weight" />
+                  {form.bird_sex !== 'mixed' && <>
+                    <Input label="No. of Birds" type="number"
+                      value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
+                    <Input label="Avg Weight/bird (kg)" type="number" step="0.001"
+                      value={form.avg_weight_kg} onChange={e => sv('avg_weight_kg', e.target.value)}
+                      hint="per bird live weight" />
+                  </>}
+                </FormRow>
+                {form.bird_sex === 'mixed' && (
+                  <FormRow cols={4}>
+                    <Input label="Female Qty" type="number"
+                      value={form.female_qty} onChange={e => sv('female_qty', e.target.value)} />
+                    <Input label="Female Weight (kg)" type="number" step="0.001"
+                      value={form.female_weight_kg} onChange={e => sv('female_weight_kg', e.target.value)} />
+                    <Input label="Male Qty" type="number"
+                      value={form.male_qty} onChange={e => sv('male_qty', e.target.value)} />
+                    <Input label="Male Weight (kg)" type="number" step="0.001"
+                      value={form.male_weight_kg} onChange={e => sv('male_weight_kg', e.target.value)} />
+                  </FormRow>
+                )}
+                <p className="text-[10px] text-orange-600 font-medium uppercase">Vehicle Weighbridge (optional — overrides weight above when filled)</p>
+                <FormRow cols={3}>
+                  <Input label="Gross Weight (kg)" type="number" step="0.001"
+                    value={form.gross_weight_kg} onChange={e => sv('gross_weight_kg', e.target.value)} />
+                  <Input label="Tare Weight (kg)" type="number" step="0.001"
+                    value={form.tare_weight_kg} onChange={e => sv('tare_weight_kg', e.target.value)} />
+                  <Input label="Net Weight (kg)" type="number" step="0.001" disabled
+                    value={form.net_weight_kg} hint="Auto: Gross − Tare" />
                 </FormRow>
                 <FormRow cols={3}>
                   <Input label="Total Weight (kg)" type="number" step="0.001"
                     value={form.total_weight_kg} onChange={e => sv('total_weight_kg', e.target.value)}
-                    hint={form.quantity && form.avg_weight_kg ? `Auto: ${(parseFloat(form.quantity)*(parseFloat(form.avg_weight_kg)||0)).toFixed(3)} kg` : 'qty × avg wt'} />
+                    hint={form.net_weight_kg ? 'From weighbridge Net Weight' : form.quantity && form.avg_weight_kg ? `Auto: ${(parseFloat(form.quantity)*(parseFloat(form.avg_weight_kg)||0)).toFixed(3)} kg` : 'qty × avg wt, or Female+Male wt'} />
                   <Input label="Rate per kg (₹)" type="number" step="0.01"
                     value={form.rate_per_kg} onChange={e => sv('rate_per_kg', e.target.value)} />
                   <Input label="Total Amount (₹)" required type="number" step="0.01"

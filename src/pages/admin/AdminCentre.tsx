@@ -55,7 +55,7 @@ const CompanySettingsCard: React.FC = () => {
   return (
     <Card className="space-y-4">
       <p className="text-sm font-semibold text-gray-700">Company Profile</p>
-      <p className="text-xs text-gray-400">Used on the Purchase Order printout (letterhead, GSTIN, locations, terms &amp; conditions).</p>
+      <p className="text-xs text-gray-400">Used on the Purchase Order printout (letterhead, GSTIN, locations, terms &amp; conditions). This is the same company record used by Employees → Payslip Generator's "Company Settings" (PAN/PF/ESI reg. numbers are edited there).</p>
       <FormRow cols={2}>
         <Input label="Company Name" value={form.company_name ?? ''} onChange={e => s('company_name', e.target.value)} />
         <Input label="GSTIN" value={form.gstin ?? ''} onChange={e => s('gstin', e.target.value)} />
