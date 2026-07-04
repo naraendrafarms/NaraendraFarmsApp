@@ -1948,7 +1948,7 @@ export const NHESales: React.FC = () => {
   const { data: sales, isLoading } = useQuery({
     queryKey: ['nhe_sales', flockFilter, empFilter, payFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount)')
+      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount)')
         .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (empFilter) q = q.eq('employee_id', empFilter)
@@ -1956,7 +1956,9 @@ export const NHESales: React.FC = () => {
       if (fromDate) q = q.gte('sale_date', fromDate)
       if (toDate) q = q.lte('sale_date', toDate)
       if (!hasFilter) q = q.limit(200)
-      const { data } = await q; return data ?? []
+      const { data, error } = await q
+      if (error) { toast.error(error.message); return [] }
+      return data ?? []
     }
   })
 
