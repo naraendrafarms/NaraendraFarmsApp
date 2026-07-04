@@ -294,15 +294,20 @@ export const BankLedgerPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
-  // Load transactions for selected account
+  // Load transactions for selected account — scoped to the selected FY's
+  // start. Previously this fetched ALL-time transactions while the running
+  // balance started at the FY's opening figure, so every prior FY's
+  // movement was counted twice (once inside the opening balance, once
+  // again walking through those old rows).
   const { data: transactions, isLoading: txLoading } = useQuery({
-    queryKey: ['bank_transactions', selectedAccount],
+    queryKey: ['bank_transactions', selectedAccount, fy],
     queryFn: async () => {
       if (!selectedAccount) return []
       const { data } = await supabase
         .from('bank_transactions')
         .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type)')
         .eq('bank_account_id', selectedAccount)
+        .gte('txn_date', fyRange(fy).start)
         .order('txn_date', { ascending: true })
         .order('created_at', { ascending: true })
       return data ?? []
@@ -341,17 +346,10 @@ export const BankLedgerPage: React.FC = () => {
     if (!transactions) return { filteredRows: [], summary: { credits: 0, debits: 0, closing: 0 } }
 
     let running = openingBalance
-    let credits = 0
-    let debits = 0
 
     const allWithBalance = (transactions as any[]).map(t => {
-      if (t.txn_type === 'Credit') {
-        running += t.amount ?? 0
-        credits += t.amount ?? 0
-      } else {
-        running -= t.amount ?? 0
-        debits += t.amount ?? 0
-      }
+      if (t.txn_type === 'Credit') running += t.amount ?? 0
+      else running -= t.amount ?? 0
       return { ...t, balance: running }
     })
 
@@ -362,6 +360,11 @@ export const BankLedgerPage: React.FC = () => {
     })
 
     const closing = filtered.length > 0 ? filtered[filtered.length - 1].balance : openingBalance
+    // Credits/Debits stat cards previously summed over ALL FY transactions
+    // regardless of the From/To date filter, so they never matched the
+    // rows actually visible in the table below. Compute over `filtered`.
+    const credits = filtered.reduce((s, t) => s + (t.txn_type === 'Credit' ? (t.amount ?? 0) : 0), 0)
+    const debits = filtered.reduce((s, t) => s + (t.txn_type === 'Debit' ? (t.amount ?? 0) : 0), 0)
 
     return {
       // Balance computed oldest→newest; display newest first (latest date on top)
@@ -497,7 +500,11 @@ export const BankLedgerPage: React.FC = () => {
       t.txn_type === 'Credit' ? t.amount : '',
       t.balance,
     ])
-    const csv = [headers, ...csvRows].map(row => row.join(',')).join('\n')
+    // Quote every field — bank narrations routinely contain commas
+    // (e.g. "NEFT, HDFC0001..."), which previously shifted every column
+    // after Description in the exported file.
+    const q = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const csv = [headers, ...csvRows].map(row => row.map(q).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
