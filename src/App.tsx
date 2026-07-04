@@ -39,6 +39,7 @@ import { ProductionReport, PLReport, SalaryReport, FeedReport, ExportPage } from
 import { DailySummaryPage } from '@/pages/reports/DailySummary'
 import { CostOverviewPage, ElectricityCostPage, SalaryCostPage } from '@/pages/reports/CostAnalysis'
 import { PurchaseOrdersPage } from '@/pages/reports/POPages'
+import { SiteInvoicePage } from '@/pages/reports/SiteInvoicePage'
 import { PendingPaymentsPage } from '@/pages/accounts/PendingPaymentsPage'
 import { PurchaseEntry } from '@/pages/purchases/PurchaseEntry'
 import { RateCompare } from '@/pages/purchases/RateCompare'
@@ -213,6 +214,7 @@ export const App: React.FC = () => {
             <Route path="accounts/cash-book" element={<CashBookPage />} />
             <Route path="accounts/bank-ledger" element={<BankLedgerPage />} />
             <Route path="reports/flock-pl-summary" element={<FlockPLSummary />} />
+            <Route path="reports/site-invoice" element={<SiteInvoicePage />} />
             <Route path="accounts/payment-planning" element={<PaymentPlanningPage />} />
             <Route path="accounts/cms-upload" element={<CMSUploadPage />} />
             <Route path="accounts/invoices" element={<InvoiceRegister />} />
