@@ -1965,31 +1965,28 @@ export const NHESales: React.FC = () => {
   const [form, setForm] = useState<any>(EMPTY_NHE_FORM)
   const sv = (k: string, v: string) => setForm((f: any) => {
     const nf = { ...f, [k]: v }
-    // Bird sale auto-calcs
-    if (['quantity','avg_weight_kg'].includes(k) && nf.bird_sex !== 'mixed') {
-      const q = parseFloat(k==='quantity' ? v : nf.quantity) || 0
-      const w = parseFloat(k==='avg_weight_kg' ? v : nf.avg_weight_kg) || 0
-      nf.total_weight_kg = q && w ? (q*w).toFixed(3) : ''
-    }
-    // Mixed (Female+Male) split — quantity/total weight derive from the two sub-blocks
-    if (['female_qty','female_weight_kg','male_qty','male_weight_kg'].includes(k)) {
+    // Bird sale auto-calcs — Female Qty + Male Qty (whichever are filled) always
+    // sum to the bird count; Gross − Tare gives Net Weight; Avg Weight/bird is
+    // always derived (Net ÷ birds), never typed by hand; Amount = Net × Rate/kg.
+    if (['female_qty','male_qty'].includes(k)) {
       const fq = parseFloat(k==='female_qty' ? v : nf.female_qty) || 0
-      const fw = parseFloat(k==='female_weight_kg' ? v : nf.female_weight_kg) || 0
       const mq = parseFloat(k==='male_qty' ? v : nf.male_qty) || 0
-      const mw = parseFloat(k==='male_weight_kg' ? v : nf.male_weight_kg) || 0
       nf.quantity = (fq + mq) ? String(fq + mq) : ''
-      if (!nf.net_weight_kg) nf.total_weight_kg = (fw + mw) ? (fw + mw).toFixed(3) : ''
     }
-    // Weighbridge: Gross - Tare = Net, and Net (when present) is the weight used for billing
     if (['gross_weight_kg','tare_weight_kg'].includes(k)) {
       const g = parseFloat(k==='gross_weight_kg' ? v : nf.gross_weight_kg) || 0
       const t = parseFloat(k==='tare_weight_kg' ? v : nf.tare_weight_kg) || 0
       const net = g && t && g > t ? g - t : 0
       nf.net_weight_kg = net ? net.toFixed(3) : ''
-      if (net) nf.total_weight_kg = net.toFixed(3)
+      nf.total_weight_kg = net ? net.toFixed(3) : ''
     }
-    if (['total_weight_kg','rate_per_kg','avg_weight_kg','quantity','net_weight_kg',
-         'female_qty','female_weight_kg','male_qty','male_weight_kg','gross_weight_kg','tare_weight_kg'].includes(k)) {
+    if (['female_qty','male_qty','gross_weight_kg','tare_weight_kg'].includes(k)) {
+      const qty = parseFloat(nf.quantity) || 0
+      const net = parseFloat(nf.net_weight_kg) || 0
+      nf.avg_weight_kg = qty && net ? (net / qty).toFixed(3) : ''
+    }
+    if (['total_weight_kg','rate_per_kg','quantity','net_weight_kg',
+         'female_qty','male_qty','gross_weight_kg','tare_weight_kg'].includes(k)) {
       const tw = parseFloat(nf.total_weight_kg) || 0
       const rk = parseFloat(nf.rate_per_kg) || 0
       if (tw && rk) nf.amount = (tw * rk).toFixed(2)
@@ -2174,10 +2171,8 @@ export const NHESales: React.FC = () => {
         payload.gross_weight_kg = parseFloat(form.gross_weight_kg) || null
         payload.tare_weight_kg  = parseFloat(form.tare_weight_kg)  || null
         payload.net_weight_kg   = parseFloat(form.net_weight_kg)   || null
-        payload.female_qty        = form.bird_sex === 'mixed' ? (parseInt(form.female_qty) || null) : null
-        payload.female_weight_kg  = form.bird_sex === 'mixed' ? (parseFloat(form.female_weight_kg) || null) : null
-        payload.male_qty          = form.bird_sex === 'mixed' ? (parseInt(form.male_qty) || null) : null
-        payload.male_weight_kg    = form.bird_sex === 'mixed' ? (parseFloat(form.male_weight_kg) || null) : null
+        payload.female_qty        = parseInt(form.female_qty) || null
+        payload.male_qty          = parseInt(form.male_qty) || null
         payload.payment_cash   = cashAmt
         payload.payment_online = onlineAmt
       }
@@ -2932,32 +2927,21 @@ export const NHESales: React.FC = () => {
             <>
               <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg space-y-3">
                 <p className="text-xs font-semibold text-orange-700 uppercase">Bird Details</p>
-                <FormRow cols={4}>
-                  <Select label="Bird Sex" options={BIRD_SEX_OPTS}
+                <FormRow cols={3}>
+                  <Select label="Bird Sex (for reporting)" options={BIRD_SEX_OPTS}
                     value={form.bird_sex} onChange={e => sv('bird_sex', e.target.value)} />
                   <Select label="Category" options={BIRD_CAT_OPTS}
                     value={form.bird_category} onChange={e => sv('bird_category', e.target.value)} />
-                  {form.bird_sex !== 'mixed' && <>
-                    <Input label="No. of Birds" type="number"
-                      value={form.quantity} onChange={e => sv('quantity', e.target.value)} />
-                    <Input label="Avg Weight/bird (kg)" type="number" step="0.001"
-                      value={form.avg_weight_kg} onChange={e => sv('avg_weight_kg', e.target.value)}
-                      hint="per bird live weight" />
-                  </>}
                 </FormRow>
-                {form.bird_sex === 'mixed' && (
-                  <FormRow cols={4}>
-                    <Input label="Female Qty" type="number"
-                      value={form.female_qty} onChange={e => sv('female_qty', e.target.value)} />
-                    <Input label="Female Weight (kg)" type="number" step="0.001"
-                      value={form.female_weight_kg} onChange={e => sv('female_weight_kg', e.target.value)} />
-                    <Input label="Male Qty" type="number"
-                      value={form.male_qty} onChange={e => sv('male_qty', e.target.value)} />
-                    <Input label="Male Weight (kg)" type="number" step="0.001"
-                      value={form.male_weight_kg} onChange={e => sv('male_weight_kg', e.target.value)} />
-                  </FormRow>
-                )}
-                <p className="text-[10px] text-orange-600 font-medium uppercase">Vehicle Weighbridge (optional — overrides weight above when filled)</p>
+                <FormRow cols={3}>
+                  <Input label="Female Qty" type="number"
+                    value={form.female_qty} onChange={e => sv('female_qty', e.target.value)} />
+                  <Input label="Male Qty" type="number"
+                    value={form.male_qty} onChange={e => sv('male_qty', e.target.value)} />
+                  <Input label="Total Birds" type="number" disabled
+                    value={form.quantity} hint="Auto: Female + Male" />
+                </FormRow>
+                <p className="text-[10px] text-orange-600 font-medium uppercase">Vehicle Weighbridge</p>
                 <FormRow cols={3}>
                   <Input label="Gross Weight (kg)" type="number" step="0.001"
                     value={form.gross_weight_kg} onChange={e => sv('gross_weight_kg', e.target.value)} />
@@ -2967,14 +2951,13 @@ export const NHESales: React.FC = () => {
                     value={form.net_weight_kg} hint="Auto: Gross − Tare" />
                 </FormRow>
                 <FormRow cols={3}>
-                  <Input label="Total Weight (kg)" type="number" step="0.001"
-                    value={form.total_weight_kg} onChange={e => sv('total_weight_kg', e.target.value)}
-                    hint={form.net_weight_kg ? 'From weighbridge Net Weight' : form.quantity && form.avg_weight_kg ? `Auto: ${(parseFloat(form.quantity)*(parseFloat(form.avg_weight_kg)||0)).toFixed(3)} kg` : 'qty × avg wt, or Female+Male wt'} />
+                  <Input label="Avg Weight/bird (kg)" type="number" step="0.001" disabled
+                    value={form.avg_weight_kg} hint="Auto: Net ÷ Total Birds" />
                   <Input label="Rate per kg (₹)" type="number" step="0.01"
                     value={form.rate_per_kg} onChange={e => sv('rate_per_kg', e.target.value)} />
                   <Input label="Total Amount (₹)" required type="number" step="0.01"
                     value={form.amount} onChange={e => sv('amount', e.target.value)}
-                    hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : 'wt × rate/kg'} />
+                    hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : 'Net wt × rate/kg'} />
                 </FormRow>
               </div>
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
