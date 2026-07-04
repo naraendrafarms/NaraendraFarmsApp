@@ -1279,6 +1279,20 @@ export const SalaryEntryPage: React.FC = () => {
         bank_account_id: (form.payment_mode||'Cash').toLowerCase()!=='cash' ? (form.bank_account_id||null) : null,
         paid_date:      form.is_paid==='true' ? (form.paid_date || today()) : null,
       }
+      // "Add Entry" upsert can silently replace an EXISTING row for the same
+      // employee+month (with origIsPaid=false, so ledger cleanup is skipped and
+      // re-marking Paid duplicates the cash_book/bank entries). Guard: refuse if
+      // the existing row is already Paid; if unpaid, treat like an edit and clear
+      // any stale ledger rows before the potential re-post below.
+      if(!editingId){
+        const{data:existing}=await supabase.from('salary_monthly')
+          .select('id,is_paid').eq('employee_id',payload.employee_id).eq('month',payload.month).maybeSingle()
+        if(existing){
+          if(existing.is_paid) throw new Error('A salary entry for this employee and month already exists and is marked Paid — edit that entry instead')
+          await supabase.from('cash_book').delete().eq('salary_monthly_id',existing.id)
+          await supabase.from('bank_transactions').delete().eq('salary_monthly_id',existing.id)
+        }
+      }
       const{data:upserted,error}=await supabase.from('salary_monthly').upsert(payload,{onConflict:'employee_id,month'}).select('id').single()
       if(error)throw error
       // Keep Cash Book / Bank Ledger in sync with the Paid flag, same

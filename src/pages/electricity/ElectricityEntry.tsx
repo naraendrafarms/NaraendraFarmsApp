@@ -166,9 +166,20 @@ const BillsTab: React.FC = () => {
       return { meter_id, bill_month: month, units_consumed: parseInt(obj.units_consumed)||null, amount: parseFloat(obj.amount)||0, acd_dc_due: parseFloat(obj.acd_dc_due)||0, deposit_amount: parseFloat(obj.deposit_amount)||0, paid_date: obj.paid_date||null, remarks: obj.remarks||null }
     }).filter(Boolean) as any[]
     if (!toInsert.length) { toast.error('No valid rows (meter_name/usc_no not matched)'); return }
-    const { error } = await supabase.from('electricity_bills').upsert(toInsert, { onConflict: 'meter_id,bill_month' })
+    // Never overwrite existing bills silently — fetch existing (meter_id, bill_month)
+    // pairs first, insert only the genuinely new rows and report skipped conflicts.
+    const meterIds = [...new Set(toInsert.map(r => r.meter_id))]
+    const months = [...new Set(toInsert.map(r => r.bill_month))]
+    const { data: existing, error: exErr } = await supabase.from('electricity_bills')
+      .select('meter_id,bill_month').in('meter_id', meterIds).in('bill_month', months)
+    if (exErr) { toast.error(exErr.message); return }
+    const existingKeys = new Set((existing ?? []).map((b: any) => `${b.meter_id}|${b.bill_month}`))
+    const newRows = toInsert.filter(r => !existingKeys.has(`${r.meter_id}|${r.bill_month}`))
+    const skipped = toInsert.length - newRows.length
+    if (!newRows.length) { toast.error(`All ${skipped} rows already exist — nothing imported (existing bills are never overwritten)`); if (importRef.current) importRef.current.value = ''; return }
+    const { error } = await supabase.from('electricity_bills').insert(newRows)
     if (error) { toast.error(error.message); return }
-    toast.success(`Imported ${toInsert.length} bills`)
+    toast.success(`Imported ${newRows.length} bills${skipped > 0 ? ` · skipped ${skipped} existing (not overwritten)` : ''}`)
     qc.invalidateQueries({queryKey:['elec_bills']})
     if (importRef.current) importRef.current.value = ''
   }
@@ -351,7 +362,10 @@ const AllocationTab: React.FC = () => {
   const allocMut = useMutation({
     mutationFn: async () => {
       if (!allocModal) return
-      const total = allocForm.reduce((s,r)=>s+parseFloat(r.alloc_pct||'0'),0)
+      // Only rows with a flock selected are saved — validate over those same rows,
+      // and refuse rows that carry a percentage but no flock (they'd be silently dropped).
+      if (allocForm.some(r=>!r.flock_id && (parseFloat(r.alloc_pct||'0')||0) !== 0)) throw new Error('A row has a percentage but no flock selected — pick a flock or remove the row')
+      const total = allocForm.filter(r=>r.flock_id).reduce((s,r)=>s+parseFloat(r.alloc_pct||'0'),0)
       if (Math.abs(total-100)>0.5) throw new Error(`Percentages must add up to 100% (currently ${total.toFixed(1)}%)`)
       await supabase.from('electricity_allocation').delete().eq('bill_id', allocModal.id)
       const rows = allocForm.filter(r=>r.flock_id).map(r=>({

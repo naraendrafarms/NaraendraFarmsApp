@@ -81,6 +81,9 @@ export const ReceivePaymentModal: React.FC<{
     if (sale) {
       setMode(sale.payment_mode ?? 'Cash')
       setBankId(sale.bank_account_id ?? '')
+      // nhe_sales stores where cash was received; he_dispatch has no such
+      // column so this falls back to Head Office.
+      setCashFarmId(sale.cash_farm_id ?? 'ho')
       setDate(sale.received_date ?? today())
       setAmtReceived(sale.amount_received?.toString() ?? sale.amount?.toString() ?? '')
       setUtr(sale.utr_ref ?? '')
@@ -200,7 +203,7 @@ export const ReceivePaymentModal: React.FC<{
           ...sourceCol,
         })
         if (cbErr) throw new Error('Payment saved but Cash Book entry failed: ' + cbErr.message)
-      } else if (mode !== 'Cash' && bankId && amt > 0) {
+      } else if (mode !== 'Cash' && bankId && amt > 0 && status !== 'Pending') {
         // Delete any existing bank_transactions entry for this sale first (prevents duplicate on re-save)
         const linkCol = table === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id'
         await supabase.from('bank_transactions').delete().eq(linkCol, sale.id)
@@ -306,6 +309,23 @@ export const ReceivePaymentModal: React.FC<{
       </div>
     </div>
   )
+}
+
+// Reverse party_advances.amount_used for sales paid via Advance before they
+// are deleted — otherwise the advance stays permanently consumed by a sale
+// that no longer exists.
+async function reverseAdvanceAdjustments(rows: any[]) {
+  for (const r of rows ?? []) {
+    if (r.party_advance_id && (r.advance_adjusted ?? 0) > 0) {
+      const { data: adv } = await supabase.from('party_advances')
+        .select('amount_used').eq('id', r.party_advance_id).single()
+      if (adv) {
+        await supabase.from('party_advances')
+          .update({ amount_used: Math.max(0, adv.amount_used - r.advance_adjusted) })
+          .eq('id', r.party_advance_id)
+      }
+    }
+  }
 }
 
 // ── CSV helper ────────────────────────────────────────────────────
@@ -505,7 +525,8 @@ export const HEDispatch: React.FC = () => {
   const { data: parties } = useQuery({
     queryKey: ['parties_buyers'],
     queryFn: async () => {
-      const { data } = await supabase.from('parties').select('id,name,state_code,gstin').order('name')
+      const { data } = await supabase.from('parties').select('id,name,state_code,gstin')
+        .in('type', ['buyer','both']).eq('is_active', true).order('name')
       return data ?? []
     }
   })
@@ -690,8 +711,9 @@ export const HEDispatch: React.FC = () => {
     mutationFn: async (ids: string[]) => {
       const { data: dispatches } = await supabase
         .from('he_dispatch')
-        .select('id, flock_id, dispatch_date, invoice_no, amount')
+        .select('id, flock_id, dispatch_date, invoice_no, amount, party_advance_id, advance_adjusted')
         .in('id', ids)
+      await reverseAdvanceAdjustments(dispatches ?? [])
       // By FK CASCADE; also explicit for safety
       await supabase.from('cash_book').delete().in('he_dispatch_id', ids)
       // Fallback for old unlinked entries
@@ -969,7 +991,23 @@ export const HEDispatch: React.FC = () => {
         return
       }
 
-      const { data: inserted, error } = await supabase.from('he_dispatch').insert(rows).select('id, grade_a, grade_b, dispatch_date')
+      // Dedupe against existing dispatches so re-importing the same file
+      // doesn't double the records
+      const { data: existing } = await supabase.from('he_dispatch')
+        .select('flock_id,dispatch_date,dc_no,amount')
+        .in('flock_id', [...new Set(rows.map((r: any) => r.flock_id))])
+        .in('dispatch_date', [...new Set(rows.map((r: any) => r.dispatch_date))])
+      const isDupe = (r: any) => (existing ?? []).some((e: any) =>
+        e.flock_id === r.flock_id && e.dispatch_date === r.dispatch_date &&
+        (r.dc_no != null ? e.dc_no === r.dc_no : e.amount === r.amount))
+      const skippedCount = rows.filter(isDupe).length
+      const freshRows = rows.filter((r: any) => !isDupe(r))
+      if (freshRows.length === 0) {
+        toast.error(`All ${skippedCount} rows already exist — nothing imported`)
+        return
+      }
+
+      const { data: inserted, error } = await supabase.from('he_dispatch').insert(freshRows).select('id, grade_a, grade_b, dispatch_date')
       if (error) {
         if (error.message.includes('duplicate') || error.message.includes('unique')) {
           toast.error('Some records already exist (duplicate dispatch dates). Please check your data.')
@@ -1531,7 +1569,16 @@ export const HEDispatch: React.FC = () => {
             <Input label="Default Rate (Rs/egg)" type="number" step="0.0001" value={form.rate}
               onChange={e => s('rate', e.target.value)} hint="Used for lines without individual rate" />
             <Input label="Invoice Amount (Rs)" type="number" step="0.01" value={form.amount}
-              onChange={e => s('amount', e.target.value)}
+              onChange={e => {
+                const v = e.target.value
+                s('amount', v)
+                // Keep TDS in sync when the amount changes after the rate was picked
+                const pct = parseFloat(form.tds_pct) || 0
+                if (pct > 0) {
+                  const base = parseFloat(v) || autoAmount || 0
+                  s('tds_amount', (Math.round(base * pct / 100 * 100) / 100).toString())
+                }
+              }}
               hint={rawAmount > 0 ? `Auto (rounded): ${inr(autoAmount)}${rawAmount !== autoAmount ? ` (raw: ${inr(Math.round(rawAmount*100)/100)})` : ''}` : undefined} />
           </FormRow>
           <FormRow cols={3}>
@@ -1694,7 +1741,7 @@ export const NHESales: React.FC = () => {
   })
   const { data: parties } = useQuery({
     queryKey: ['parties_buyers'],
-    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name,state_code,gstin').order('name'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('parties').select('id,name,state_code,gstin').in('type', ['buyer','both']).eq('is_active', true).order('name'); return data ?? [] }
   })
 
   const { data: employees } = useQuery({
@@ -1820,8 +1867,9 @@ export const NHESales: React.FC = () => {
       // Fetch sale details BEFORE deleting so we can clean up cash_book and daily_records
       const { data: sales } = await supabase
         .from('nhe_sales')
-        .select('id, flock_id, sale_date, dc_no, amount, payment_cash, sale_type, quantity, bird_sex')
+        .select('id, flock_id, sale_date, dc_no, amount, payment_cash, sale_type, quantity, bird_sex, party_advance_id, advance_adjusted')
         .in('id', ids)
+      await reverseAdvanceAdjustments(sales ?? [])
 
       // 1. Delete cash_book rows linked by nhe_sale_id (FK CASCADE handles this automatically,
       //    but also do it explicitly to cover rows where nhe_sale_id may be NULL from old data)
@@ -1934,9 +1982,16 @@ export const NHESales: React.FC = () => {
       }
       // For egg sales: aggregate qty from lines, rate stored per-line
       const eggTotalQty = egg ? nheLines.reduce((s, l) => s + (parseFloat(l.quantity)||0), 0) : null
+      // Header sale_type for multi-line egg sales = the line carrying the
+      // largest amount (was hardcoded 'je', mislabelling TE/BE-dominant sales)
+      const lineAmtOf = (l: NheLine) => parseFloat(l.amount) || ((parseFloat(l.quantity)||0) * (parseFloat(l.rate)||0))
+      const dominantEggType = egg
+        ? (nheLines.filter(l => lineAmtOf(l) > 0 || (parseFloat(l.quantity)||0) > 0)
+            .sort((a, b) => lineAmtOf(b) - lineAmtOf(a))[0]?.sale_type ?? nheLines[0]?.sale_type ?? 'je')
+        : 'je'
       const payload: any = {
         flock_id: form.flock_id, sale_date: form.sale_date,
-        sale_type: bird ? 'bird_sale' : (egg ? (nheLines.length > 1 ? 'je' : (nheLines[0]?.sale_type ?? 'je')) : form.sale_type),
+        sale_type: bird ? 'bird_sale' : (egg ? dominantEggType : form.sale_type),
         party_id: form.party_id || null, dc_no: form.dc_no || null,
         invoice_no: finalInvoiceNo,
         quantity: egg ? (eggTotalQty || null) : (parseFloat(form.quantity) || null),
@@ -1975,6 +2030,17 @@ export const NHESales: React.FC = () => {
         payload.bank_account_id = onlineAmt > 0 && form.bank_account_id ? form.bank_account_id : null
         payload.payment_mode    = cashAmt > 0 && onlineAmt === 0 ? 'Cash'
           : cashAmt === 0 ? 'NEFT' : 'Cash+NEFT'
+      } else if (editing && editing.payment_mode !== 'Advance') {
+        // Payment fields cleared on edit: the old cash_book/bank rows are
+        // deleted below, so leaving payment_status='Received' with a stale
+        // amount_received would point at no ledger entry. Advance-paid sales
+        // are left alone — their receipt lives in party_advances, managed by
+        // the Receive Payment modal.
+        payload.payment_status  = 'Pending'
+        payload.amount_received = null
+        payload.received_date   = null
+        payload.bank_account_id = null
+        payload.payment_mode    = null
       }
       let savedId: string | null = null
       if (editing) {

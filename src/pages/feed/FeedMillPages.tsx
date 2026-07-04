@@ -632,6 +632,12 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
+    // Percentages must sum to 100 (±0.5) or the formula is unusable for production
+    const namedPct = ings.filter(i => i.ingredient_name?.trim()).reduce((s, i) => s + (Number(i.percentage) || 0), 0)
+    if (Math.abs(namedPct - 100) > 0.5) {
+      toast.error(`Ingredient percentages must total 100% (±0.5). Current total: ${namedPct.toFixed(4)}%`)
+      return
+    }
     onSave({
       ...form,
       age_week_from: form.age_week_from !== '' ? Number(form.age_week_from) : null,
@@ -826,9 +832,16 @@ const ProductionTab: React.FC = () => {
   const saveMut = useMutation({
     mutationFn: async (d: any) => {
       const { ingredients: ings, ...logData } = d
+      // ids of the OLD ingredient rows (edit only) — deleted only AFTER the new
+      // rows insert successfully, so a failed insert can't wipe existing lines.
+      let oldIngIds: string[] = []
       if (logData.id) {
+        // Editing with no ingredient lines would silently erase consumption — block it.
+        if (!ings?.length) throw new Error('Keep at least one ingredient line — an edit with no ingredients would erase this batch\'s consumption')
         const {error} = await supabase.from('feed_production_log').update(logData).eq('id', logData.id); if(error) throw error
-        await supabase.from('feed_production_ingredients').delete().eq('production_id', logData.id)
+        const { data: oldRows, error: oldErr } = await supabase.from('feed_production_ingredients').select('id').eq('production_id', logData.id)
+        if (oldErr) throw oldErr
+        oldIngIds = (oldRows ?? []).map((r: any) => r.id)
       } else {
         const {data: inserted, error} = await supabase.from('feed_production_log').insert(logData).select('id').single(); if(error) throw error
         logData.id = inserted.id
@@ -855,6 +868,11 @@ const ProductionTab: React.FC = () => {
         })
         const { error: ingErr } = await supabase.from('feed_production_ingredients').insert(rows)
         if (ingErr) throw new Error('Production saved, but ingredients failed: ' + (ingErr.message || ingErr.details))
+      }
+      // New rows are in — now it's safe to remove the old ones
+      if (oldIngIds.length) {
+        const { error: delErr } = await supabase.from('feed_production_ingredients').delete().in('id', oldIngIds)
+        if (delErr) throw new Error('Saved, but old ingredient lines could not be removed: ' + delErr.message)
       }
     },
     onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); setShowForm(false); setEditing(null); toast.success('Saved') },

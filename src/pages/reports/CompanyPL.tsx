@@ -163,9 +163,11 @@ export const CompanyPL: React.FC = () => {
     queryKey: ['cpl_grn', fy],
     queryFn: async () => {
       const { data } = await supabase.from('grn')
-        .select('grn_date,total_amount')
+        .select('grn_date,total_amount,category')
         .gte('grn_date', start).lte('grn_date', end)
-      return data ?? []
+      // Medicine/Vaccine GRNs are excluded here — that spend is already counted
+      // via the medicine_usage line, so including it would double-count.
+      return (data ?? []).filter((r: any) => r.category !== 'Medicine' && r.category !== 'Vaccine')
     }
   })
 
@@ -295,8 +297,8 @@ export const CompanyPL: React.FC = () => {
   }, [salaryData])
   const farmExpByMonth = useMemo(() => sumByMonth(farmExpData ?? [], 'expense_date', 'amount'), [farmExpData])
 
-  // Closing stock value as of FY end date
-  const closingStockValue = useMemo(() => {
+  // Stock value as of a cutoff date (used for both FY-end closing and FY-start opening)
+  const stockValueAsOf = useMemo(() => (cutoff: string) => {
     const m: Record<string, { received: number; used: number; opening: number; adjusted: number; rate: number; lastDate: string }> = {}
     const norm = (s?: string | null) => (s ?? '').trim().toLowerCase()
     const ensure = (name: string) => {
@@ -305,17 +307,17 @@ export const CompanyPL: React.FC = () => {
       return m[k]
     }
     for (const g of allGrnStock ?? []) {
-      if (!g.item_name || g.grn_date > end) continue
+      if (!g.item_name || g.grn_date > cutoff) continue
       const r = ensure(g.item_name)
       r.received += Number(g.qty ?? 0)
       if (g.grn_date >= r.lastDate) { r.rate = Number(g.price_per_unit ?? 0); r.lastDate = g.grn_date }
     }
     for (const u of allProdUsage ?? []) {
-      if (!u.item_name || (u.date && u.date > end)) continue
+      if (!u.item_name || (u.date && u.date > cutoff)) continue
       ensure(u.item_name).used += Number(u.qty ?? 0)
     }
     for (const a of allAdjustments ?? []) {
-      if (!a.ingredient_name || (a.adjustment_date && a.adjustment_date > end)) continue
+      if (!a.ingredient_name || (a.adjustment_date && a.adjustment_date > cutoff)) continue
       const r = ensure(a.ingredient_name)
       if (a.adjustment_type === 'Opening') r.opening += Number(a.adjustment_kg ?? 0)
       else r.adjusted += Number(a.adjustment_kg ?? 0)
@@ -326,7 +328,14 @@ export const CompanyPL: React.FC = () => {
       if (closing > 0 && r.rate > 0) total += closing * r.rate
     }
     return total
-  }, [allGrnStock, allProdUsage, allAdjustments, end])
+  }, [allGrnStock, allProdUsage, allAdjustments])
+
+  // Closing stock value as of FY end date
+  const closingStockValue = useMemo(() => stockValueAsOf(end), [stockValueAsOf, end])
+  // Opening stock = stock value the day before the FY starts (prior FY's closing)
+  const openingStockValue = useMemo(
+    () => stockValueAsOf(`${start.slice(0, 4)}-03-31`), // day before FY start (start is always YYYY-04-01)
+    [stockValueAsOf, start])
 
   // ── MONTHLY TABLE DATA ────────────────────────────────────────────────────
   const rows = useMemo(() => months.map(m => {
@@ -367,9 +376,15 @@ export const CompanyPL: React.FC = () => {
       totalCost: acc.totalCost + r.totalCost,
       net: acc.net + r.net,
     }), { heAmt: 0, nheEgg: 0, chickSale: 0, cull: 0, otherInc: 0, totalRev: 0, chickCost: 0, feed: 0, med: 0, elec: 0, salary: 0, farmExp: 0, totalCost: 0, net: 0 })
-    // Closing stock reduces effective cost; add it for annual totals display
-    return { ...base, closingStock: closingStockValue, netAfterStock: base.net + closingStockValue }
-  }, [rows, closingStockValue])
+    // Stock adjustment: add closing stock (asset) and deduct opening stock
+    // (prior FY's closing) so profit reflects only this year's stock movement.
+    return {
+      ...base,
+      closingStock: closingStockValue,
+      openingStock: openingStockValue,
+      netAfterStock: base.net + closingStockValue - openingStockValue,
+    }
+  }, [rows, closingStockValue, openingStockValue])
 
   const isLoading = heLoading
 
@@ -422,7 +437,8 @@ export const CompanyPL: React.FC = () => {
     { label: 'Salary',         key: 'salary',    style: 'cost' },
     { label: 'Farm Expenses',  key: 'farmExp',   style: 'cost' },
     { label: 'TOTAL COST',     key: 'totalCost', style: 'total-cost' },
-    { label: 'Less: Closing Stock (Asset)', key: 'closingStock', style: 'stock', annualOnly: true },
+    { label: 'Add: Closing Stock (Asset)', key: 'closingStock', style: 'stock', annualOnly: true },
+    { label: 'Less: Opening Stock', key: 'openingStock', style: 'stock', annualOnly: true },
     { label: 'NET PROFIT / LOSS', key: 'net',   style: 'net' },
     { label: 'NET PROFIT (after stock adjustment)', key: 'netAfterStock', style: 'net', annualOnly: true },
   ]

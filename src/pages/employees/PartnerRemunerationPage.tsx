@@ -52,7 +52,12 @@ const ManagePartners: React.FC = () => {
         default_tds_pct: Number(form.default_tds_pct) || 0,
       }
       if (editId) { const { error } = await supabase.from('partners').update(payload).eq('id', editId); if (error) throw error }
-      else { const { error } = await supabase.from('partners').insert(payload); if (error) throw error }
+      else {
+        // Block duplicate partner names (case/whitespace-insensitive)
+        const dup = (rows as any[]).find((r: any) => (r.name ?? '').trim().toLowerCase() === payload.name.toLowerCase())
+        if (dup) throw new Error(`Partner "${dup.name}" already exists — edit that entry instead`)
+        const { error } = await supabase.from('partners').insert(payload); if (error) throw error
+      }
     },
     onSuccess: () => { toast.success('Saved'); inv(); setForm(blank); setEditId(null) },
     onError: (e: any) => toast.error(e.message)
@@ -458,6 +463,8 @@ const PaidStatus: React.FC = () => {
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('pending_payments').update({
         payment_status: 'Pending', paid_amount: 0, paid_date: null,
+        // Clear payment details too — a later re-pay as Cash must not carry a stale bank link
+        account_type: null, bank_account_id: null,
       }).eq('id', id)
       if (error) throw error
       // Clear whatever ledger entry markPaid created, so undoing "Paid"

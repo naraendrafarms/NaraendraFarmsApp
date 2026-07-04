@@ -204,17 +204,40 @@ export const CashBookPage: React.FC = () => {
     }
   })
 
+  // Net movement between FY start and the From-date, so the running balance is
+  // still correct when the visible range is narrowed inside the FY.
+  const fyStart = fyRange(fy).start
+  const { data: preNet = 0 } = useQuery({
+    queryKey: ['cash_book_prenet', fy, filterFrom, filterLocation, filterFlock],
+    enabled: !!filterFrom && filterFrom > fyStart,
+    queryFn: async () => {
+      let q = supabase
+        .from('cash_book')
+        .select('amount_in,amount_out')
+        .gte('txn_date', fyStart)
+        .lt('txn_date', filterFrom)
+        .limit(10000)
+      if (filterLocation === 'ho') q = q.is('farm_id', null)
+      else if (filterLocation) q = q.eq('farm_id', filterLocation)
+      if (filterFlock) q = q.eq('flock_id', filterFlock)
+      const { data } = await q
+      return (data ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
+    }
+  })
+
   // ── Derived data ─────────────────────────────────────────────────────────
+
+  const effectiveOpening = openingBalance + (filterFrom && filterFrom > fyStart ? preNet : 0)
 
   // Compute running balance (asc order for calculation)
   const rowsWithBalance = useMemo(() => {
     if (!txns) return []
-    let balance = openingBalance
+    let balance = effectiveOpening
     return txns.map((t: any) => {
       balance += (t.amount_in ?? 0) - (t.amount_out ?? 0)
       return { ...t, runningBalance: balance }
     })
-  }, [txns, openingBalance])
+  }, [txns, effectiveOpening])
 
   // Display in reverse order (newest first), with optional party name search
   const displayRows = useMemo(() => {
@@ -240,7 +263,7 @@ export const CashBookPage: React.FC = () => {
   const isFiltered = !!filterParty.trim() || !!filterMode
   const closingBalance = isFiltered
     ? totalReceipts - totalPayments
-    : openingBalance + totalReceipts - totalPayments
+    : effectiveOpening + totalReceipts - totalPayments
 
   const ids     = displayRows.map((r: any) => r.id)
   const allSel  = ids.length > 0 && ids.every((id: string) => sel.has(id))
