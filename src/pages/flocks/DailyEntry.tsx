@@ -375,8 +375,10 @@ export const DailyEntry: React.FC = () => {
           )
         }
       }
-      // Save medicine usage rows — delete existing then re-insert
-      await supabase.from('medicine_usage').delete().eq('flock_id', selectedFlock).eq('usage_date', date)
+      // Save medicine usage rows — delete existing FLOCK-LEVEL rows then
+      // re-insert. The shed_id filter matters: without it this wiped the
+      // per-shed medicine rows saved from Bulk Daily Entry for the same day.
+      await supabase.from('medicine_usage').delete().eq('flock_id', selectedFlock).eq('usage_date', date).is('shed_id', null)
       const validMedRows = medRows.filter(r => r.medicine_id && r.qty)
       if (validMedRows.length > 0) {
         const medPayload = validMedRows.map(r => ({
@@ -405,17 +407,19 @@ export const DailyEntry: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  // Local-time date maths — toISOString() is UTC and shifts a day early in IST
+  const localYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   const prevDay = () => {
-    const d = new Date(date); d.setDate(d.getDate()-1)
-    setDate(d.toISOString().split('T')[0])
+    const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate()-1)
+    setDate(localYMD(d))
   }
   const nextDay = () => {
-    const d = new Date(date); d.setDate(d.getDate()+1)
-    setDate(d.toISOString().split('T')[0])
+    const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate()+1)
+    setDate(localYMD(d))
   }
 
   // Recent 14 days records for selected flock (all sheds)
-  const fourteenDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate()-14); return d.toISOString().split('T')[0] })()
+  const fourteenDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate()-14); return localYMD(d) })()
   const { data: recentRecords } = useQuery({
     queryKey: ['recent_records', selectedFlock, fourteenDaysAgo],
     queryFn: async () => {

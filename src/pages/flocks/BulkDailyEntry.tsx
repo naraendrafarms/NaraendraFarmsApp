@@ -354,8 +354,11 @@ export const BulkDailyEntry: React.FC = () => {
       if (!hasData) continue
       const of_ = parseInt(r.opening_female) || null
       const om = parseInt(r.opening_male) || null
-      const clf = parseInt(r.closing_female) || null
-      const clm = parseInt(r.closing_male) || null
+      // Preserve a legitimate closing of 0 — `|| null` treated 0 as "no data",
+      // so a flock could never be brought down to zero birds via bulk entry
+      const intOrNull = (v: string) => v === '' || v == null || isNaN(parseInt(v)) ? null : parseInt(v)
+      const clf = intOrNull(r.closing_female)
+      const clm = intOrNull(r.closing_male)
       const payload: any = {
         flock_id: selectedFlock, shed_id: shed.id,
         farm_id: shed.farm_id ?? farmIdForFlock ?? null,
@@ -400,6 +403,10 @@ export const BulkDailyEntry: React.FC = () => {
           ? await supabase.from('medicine_usage').update(medPayload).eq('id', r.existingMedId)
           : await supabase.from('medicine_usage').insert(medPayload)
         if (me) console.error(me)
+      } else if (r.existingMedId) {
+        // Medicine cleared on a row that had one — delete the stale usage row
+        // instead of leaving it in the database forever
+        await supabase.from('medicine_usage').delete().eq('id', r.existingMedId)
       }
     }
     // Write the combined per-type feed total for the whole flock/day, once

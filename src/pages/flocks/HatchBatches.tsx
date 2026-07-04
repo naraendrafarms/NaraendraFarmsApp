@@ -247,6 +247,12 @@ export const HatchBatches: React.FC = () => {
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.setting_date) throw new Error('Setting date required')
+      // Basic sanity guards — negatives here silently corrupted every % stat
+      if (fBroken > N(form.eggs_set)) throw new Error('Broken-in-transit cannot exceed eggs set')
+      if (fHatchEggs > 0 && (N(form.hatched_chicks) + fCulled + fRejects) > fHatchEggs)
+        throw new Error('Hatched + culled + rejects cannot exceed hatchable eggs (setting − infertile − blasters)')
+      if (form.hatch_date && form.hatch_date < form.setting_date)
+        throw new Error('Hatch date cannot be before setting date')
       let flockId = form.flock_id
       if (!flockId && form.dispatch_id) {
         const d = dispatches?.find((d: any) => d.id === form.dispatch_id)
@@ -278,7 +284,10 @@ export const HatchBatches: React.FC = () => {
         chick_rate:       F(form.chick_rate) || null,
         chick_amount:     N(form.chicks_sold) * F(form.chick_rate) || null,
         remarks:          form.remarks || null,
-        fertility_pct:    fertileVal && N(form.eggs_set) ? p2(fertileVal / N(form.eggs_set) * 100) : null,
+        // Same denominator as hatchability (post-broken setting count) — was
+        // eggs_set (received), understating fertility whenever transit
+        // breakage > 0.
+        fertility_pct:    fertileVal && settingVal > 0 ? p2(fertileVal / settingVal * 100) : null,
         hatchability_pct: stdVal && fHatchEggs > 0 ? p2(stdVal / fHatchEggs * 100) : null,
       }
       if (editing) {
@@ -341,7 +350,8 @@ export const HatchBatches: React.FC = () => {
         if (!v) return null
         const s = String(v)
         const [d, m, y] = s.includes('/') ? s.split('/') : [null, null, null]
-        if (d && m && y) return `${y.padStart(4,'20')}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
+        // Reject non-4-digit years instead of padStart forcing "1" -> "2001"
+        if (d && m && y && /^\d{4}$/.test(y)) return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
         return null
       }
       return {
@@ -358,8 +368,9 @@ export const HatchBatches: React.FC = () => {
         blasters:       parseInt(r['Blasters']) || 0,
         hatched_chicks: parseInt(r['Hatched Chicks']) || null,
         culled_chicks:  parseInt(r['Culled Chicks']) || 0,
-        // std_chicks derived = hatched − culled − rejects
-        std_chicks:     ((parseInt(r['Hatched Chicks']) || 0) - (parseInt(r['Culled Chicks']) || 0) - (parseInt(r['Rejects']) || 0)) || null,
+        // std_chicks derived = hatched − culled − rejects, clamped at 0 so a
+        // blank Hatched with nonzero culls can't produce a negative figure
+        std_chicks:     Math.max(0, (parseInt(r['Hatched Chicks']) || 0) - (parseInt(r['Culled Chicks']) || 0) - (parseInt(r['Rejects']) || 0)) || null,
         unhatched:      parseInt(r['Unhatched']) || null,
         rejects:        parseInt(r['Rejects']) || 0,
         chicks_sold:    parseInt(r['Chicks Sold']) || null,
@@ -367,9 +378,21 @@ export const HatchBatches: React.FC = () => {
         remarks:        r['Remarks'] ? String(r['Remarks']) : null,
       }
     })
-    const { error } = await supabase.from('hatch_batches').insert(parsed)
+    // Skip rows with no flock match, and rows that duplicate an existing
+    // batch — re-importing the same file used to double-book everything.
+    const valid = parsed.filter((r: any) => r.flock_id)
+    const noFlock = parsed.length - valid.length
+    const { data: existingBatches } = await supabase.from('hatch_batches')
+      .select('flock_id,setting_date,hatchery_name')
+      .in('flock_id', [...new Set(valid.map((r: any) => r.flock_id))])
+    const isDup = (r: any) => (existingBatches ?? []).some((e: any) =>
+      e.flock_id === r.flock_id && e.setting_date === r.setting_date && (e.hatchery_name ?? '') === (r.hatchery_name ?? ''))
+    const fresh = valid.filter((r: any) => !isDup(r))
+    const dups = valid.length - fresh.length
+    if (!fresh.length) { toast.error(`Nothing imported — ${dups} duplicate(s), ${noFlock} row(s) with unknown flock`); return }
+    const { error } = await supabase.from('hatch_batches').insert(fresh)
     if (error) toast.error(`Import failed: ${error.message}`)
-    else { toast.success(`Imported ${parsed.length} batches`); qc.invalidateQueries({ queryKey: ['hatch_batches'] }) }
+    else { toast.success(`Imported ${fresh.length} batches${dups ? `, ${dups} duplicate(s) skipped` : ''}${noFlock ? `, ${noFlock} unknown-flock row(s) skipped` : ''}`); qc.invalidateQueries({ queryKey: ['hatch_batches'] }) }
   }
 
   // ── display state ─────────────────────────────────────────────────────────────
@@ -379,16 +402,22 @@ export const HatchBatches: React.FC = () => {
     label: `${d.invoice_no ? d.invoice_no + ' — ' : d.dc_no ? 'DC-' + d.dc_no + ' — ' : ''}${fmtDate(d.dispatch_date)} (${d.total_dispatched?.toLocaleString('en-IN')} eggs) F-${d.flocks?.flock_no}`
   }))
 
-  const pipeline  = (batches ?? []).filter((b: any) => !b.hatched_chicks && b.setting_date)
-  const completed = (batches ?? []).filter((b: any) => b.hatched_chicks)
+  // null/undefined = awaiting hatch; a recorded 0 is a total-failure batch
+  // that IS completed (it used to be stuck in "pipeline" forever)
+  const pipeline  = (batches ?? []).filter((b: any) => b.hatched_chicks == null && b.setting_date)
+  const completed = (batches ?? []).filter((b: any) => b.hatched_chicks != null)
   const displayed = tab === 'pipeline' ? pipeline : (batches ?? [])
 
   const totalEggsSet    = completed.reduce((s: number, b: any) => s + (b.eggs_set ?? 0), 0)
   const totalHatched    = completed.reduce((s: number, b: any) => s + (b.std_chicks ?? (b.hatched_chicks ?? 0)), 0)
-  const avgFertility    = completed.filter((b: any) => b.fertility_pct).length
-    ? completed.reduce((s: number, b: any) => s + (b.fertility_pct ?? 0), 0) / completed.filter((b: any) => b.fertility_pct).length : 0
-  const avgHatch        = completed.filter((b: any) => b.hatchability_pct).length
-    ? completed.reduce((s: number, b: any) => s + (b.hatchability_pct ?? 0), 0) / completed.filter((b: any) => b.hatchability_pct).length : 0
+  // Egg-weighted averages — a tiny batch used to skew the herd average as
+  // much as a huge one under the old unweighted mean of percentages
+  const fertWeight = completed.reduce((s: number, b: any) => s + (b.fertility_pct != null ? (b.eggs_set ?? 0) : 0), 0)
+  const avgFertility = fertWeight
+    ? completed.reduce((s: number, b: any) => s + (b.fertility_pct != null ? b.fertility_pct * (b.eggs_set ?? 0) : 0), 0) / fertWeight : 0
+  const hatchWeight = completed.reduce((s: number, b: any) => s + (b.hatchability_pct != null ? (b.eggs_set ?? 0) : 0), 0)
+  const avgHatch = hatchWeight
+    ? completed.reduce((s: number, b: any) => s + (b.hatchability_pct != null ? b.hatchability_pct * (b.eggs_set ?? 0) : 0), 0) / hatchWeight : 0
 
   const allSel = displayed.length > 0 && displayed.every((b: any) => sel.has(b.id))
   const toggleAll = () => {
