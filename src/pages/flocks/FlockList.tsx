@@ -199,6 +199,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
     flock_no: '', breed: 'VENCO-430', rearing_farm_id: '', laying_farm_id: '',
     status: 'rearing', placement_date: '', laying_start_date: '',
     chick_rate: '320', supplier: '', remarks: '', laying_season: '',
+    is_vhl_contract: false,
   })
 
   // populate form once flock loads
@@ -215,6 +216,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
       supplier: flock.supplier ?? '',
       remarks: flock.remarks ?? '',
       laying_season: flock.laying_season ?? '',
+      is_vhl_contract: flock.is_vhl_contract ?? false,
     })
   }, [flock])
   const s = (k:string,v:string) => setForm(f=>({...f,[k]:v}))
@@ -246,6 +248,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
         supplier: form.supplier || null,
         remarks: form.remarks || null,
         laying_season: form.laying_season || null,
+        is_vhl_contract: form.is_vhl_contract,
       }).eq('id', flockId)
       if (error) throw error
     },
@@ -288,6 +291,10 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
       <FormRow>
         <Input label="Remarks" value={form.remarks} onChange={e=>s('remarks',e.target.value)}/>
       </FormRow>
+      <label className="flex items-center gap-2 text-sm text-gray-700">
+        <input type="checkbox" checked={form.is_vhl_contract} onChange={e => setForm(f => ({ ...f, is_vhl_contract: e.target.checked }))} className="rounded" />
+        VHL Contract Flock (tracked separately under the VHL module — daily entry, medicine, egg production, billing)
+      </label>
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save Changes</Button>

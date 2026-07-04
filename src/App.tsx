@@ -41,6 +41,7 @@ import { CostOverviewPage, ElectricityCostPage, SalaryCostPage } from '@/pages/r
 import { PurchaseOrdersPage } from '@/pages/reports/POPages'
 import { SiteInvoicePage } from '@/pages/reports/SiteInvoicePage'
 import { BirdSalesReport } from '@/pages/reports/BirdSalesReport'
+import { VHLFlocksPage, VHLDailyEntryPage, VHLMedicineMasterPage, VHLMedicineUsagePage, VHLEggProductionPage } from '@/pages/vhl/VHLPages'
 import { PendingPaymentsPage } from '@/pages/accounts/PendingPaymentsPage'
 import { PurchaseEntry } from '@/pages/purchases/PurchaseEntry'
 import { RateCompare } from '@/pages/purchases/RateCompare'
@@ -217,6 +218,11 @@ export const App: React.FC = () => {
             <Route path="reports/flock-pl-summary" element={<FlockPLSummary />} />
             <Route path="reports/site-invoice" element={<SiteInvoicePage />} />
             <Route path="reports/bird-sales" element={<BirdSalesReport />} />
+            <Route path="vhl/flocks" element={<VHLFlocksPage />} />
+            <Route path="vhl/daily-entry" element={<VHLDailyEntryPage />} />
+            <Route path="vhl/egg-production" element={<VHLEggProductionPage />} />
+            <Route path="vhl/medicine-master" element={<VHLMedicineMasterPage />} />
+            <Route path="vhl/medicine-usage" element={<VHLMedicineUsagePage />} />
             <Route path="accounts/payment-planning" element={<PaymentPlanningPage />} />
             <Route path="accounts/cms-upload" element={<CMSUploadPage />} />
             <Route path="accounts/invoices" element={<InvoiceRegister />} />

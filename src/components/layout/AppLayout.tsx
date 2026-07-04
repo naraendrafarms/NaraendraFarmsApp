@@ -151,6 +151,16 @@ const NAV: NavItem[] = [
     ]
   },
   {
+    label: 'VHL', icon: <Bird size={18}/>,
+    children: [
+      { label: 'VHL Flocks',            to: '/vhl/flocks' },
+      { label: 'VHL Daily Entry',       to: '/vhl/daily-entry' },
+      { label: 'VHL Egg Production',    to: '/vhl/egg-production' },
+      { label: 'VHL Medicine Master',   to: '/vhl/medicine-master' },
+      { label: 'VHL Medicine Usage',    to: '/vhl/medicine-usage' },
+    ]
+  },
+  {
     label: 'Import Data', icon: <Database size={18}/>,
     roles: ['admin', 'accounts'],
     children: [
