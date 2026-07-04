@@ -16,7 +16,15 @@ export const PaymentPlanningPage: React.FC = () => {
   const [planDate, setPlanDate] = useState(today())
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [markPaidOpen, setMarkPaidOpen] = useState(false)
-  const [markPaidForm, setMarkPaidForm] = useState({ paid_date: today(), utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online' })
+  const [markPaidForm, setMarkPaidForm] = useState({ paid_date: today(), utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online', bank_account_id: '' })
+
+  const { data: bankAccountsList } = useQuery({
+    queryKey: ['bank_accounts_list'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_accounts').select('id,account_name,bank_name').eq('is_active', true).order('bank_name')
+      return data ?? []
+    }
+  })
 
   // Kotak bank account balance (opening_balance + sum of credits - sum of debits)
   const { data: kotakBalance } = useQuery({
@@ -56,17 +64,18 @@ export const PaymentPlanningPage: React.FC = () => {
     queryKey: ['pending_receivables'],
     queryFn: async () => {
       const [nhe, he] = await Promise.all([
+        // SQL NULL never matches IN or NOT EQUAL, so the previous
+        // .in('payment_status', ['Pending', null]) silently excluded every
+        // NULL-status row instead of catching it — use OR with IS NULL.
         supabase.from('nhe_sales')
           .select('id,sale_date,sale_type,amount,parties(name),flocks(flock_no)')
-          .in('payment_status', ['Pending', null as any])
-          .not('payment_status', 'eq', 'Received')
+          .or('payment_status.eq.Pending,payment_status.is.null')
           .or('is_employee_sale.is.null,is_employee_sale.eq.false')
           .order('sale_date', { ascending: false })
           .limit(100),
         supabase.from('he_dispatch')
           .select('id,dispatch_date,amount,parties(name),flocks(flock_no)')
-          .in('payment_status', ['Pending', null as any])
-          .not('payment_status', 'eq', 'Received')
+          .or('payment_status.eq.Pending,payment_status.is.null')
           .order('dispatch_date', { ascending: false })
           .limit(100),
       ])
@@ -140,17 +149,53 @@ export const PaymentPlanningPage: React.FC = () => {
   const markPaidMut = useMutation({
     mutationFn: async () => {
       const ids = Array.from(selected)
-      const disc = parseFloat(markPaidForm.discount_amount) || 0
-      for (let i = 0; i < ids.length; i += 50) {
+      const isCash = markPaidForm.account_type.toLowerCase() === 'cash'
+      if (!isCash && !markPaidForm.bank_account_id) {
+        throw new Error('Select which bank account this is paid from, or it won\'t be recorded in any ledger')
+      }
+      const totalDisc = parseFloat(markPaidForm.discount_amount) || 0
+      // Previously the FULL discount was written to every selected row
+      // ("applied equally" was only a UI hint, not the actual behavior) —
+      // split it evenly across the rows instead.
+      const discPerRow = ids.length > 0 ? totalDisc / ids.length : 0
+      const cbMode = isCash ? 'cash' : markPaidForm.account_type.toLowerCase() === 'upi' ? 'upi'
+        : ['neft','rtgs','imps'].includes(markPaidForm.account_type.toLowerCase()) ? markPaidForm.account_type.toLowerCase() : 'cheque'
+
+      for (const id of ids) {
+        const row = (selectedPayments as any[]).find(p => p.id === id)
+        const netAmt = Math.max(0, (row?.net_payable ?? row?.invoice_amount ?? 0) - discPerRow)
         const { error } = await supabase.from('pending_payments').update({
           payment_status: 'Paid',
           paid_date: markPaidForm.paid_date,
           utr_no: markPaidForm.utr_no || null,
           account_type: markPaidForm.account_type,
-          discount_amount: disc > 0 ? disc : null,
+          bank_account_id: isCash ? null : markPaidForm.bank_account_id,
+          discount_amount: discPerRow > 0 ? discPerRow : null,
           discount_reason: markPaidForm.discount_reason || null,
-        }).in('id', ids.slice(i, i + 50))
+        }).eq('id', id)
         if (error) throw error
+
+        // Mark Paid here previously wrote no Cash Book/Bank Ledger entry at
+        // all — post one now, same as every other "mark paid" flow.
+        await supabase.from('cash_book').delete().eq('pending_payment_id', id)
+        await supabase.from('bank_transactions').delete().eq('linked_payment_id', id)
+        if (netAmt > 0) {
+          await supabase.from('cash_book').insert({
+            txn_date: markPaidForm.paid_date, txn_type: 'payment', category: 'purchase_payment',
+            description: `Payment to ${row?.vendor_name ?? ''}${row?.invoice_no ? ' — Inv ' + row.invoice_no : ''}`,
+            party_name: row?.vendor_name ?? null, amount_in: 0, amount_out: netAmt,
+            payment_mode: cbMode, reference_no: markPaidForm.utr_no || null,
+            pending_payment_id: id,
+          })
+          if (!isCash && markPaidForm.bank_account_id) {
+            await supabase.from('bank_transactions').insert({
+              bank_account_id: markPaidForm.bank_account_id, txn_date: markPaidForm.paid_date, txn_type: 'Debit',
+              category: 'Vendor Payment', reference_no: markPaidForm.utr_no || null,
+              description: `Payment to ${row?.vendor_name ?? ''}${row?.invoice_no ? ' — Inv ' + row.invoice_no : ''}`,
+              amount: netAmt, linked_payment_id: id,
+            })
+          }
+        }
       }
     },
     onSuccess: () => {
@@ -158,6 +203,8 @@ export const PaymentPlanningPage: React.FC = () => {
       setSelected(new Set())
       setMarkPaidOpen(false)
       qc.invalidateQueries({ queryKey: ['pending_payments_plan'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
     },
     onError: (e: any) => toast.error(e.message),
   })
@@ -248,7 +295,7 @@ export const PaymentPlanningPage: React.FC = () => {
           <div className="flex items-center gap-3">
             <DateInput value={planDate} onChange={e => setPlanDate(e.target.value)} />
             {selected.size > 0 && (
-              <Button variant="secondary" icon={<CheckCircle size={16} />} onClick={() => { setMarkPaidForm({ paid_date: planDate, utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online' }); setMarkPaidOpen(true) }}>
+              <Button variant="secondary" icon={<CheckCircle size={16} />} onClick={() => { setMarkPaidForm({ paid_date: planDate, utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online', bank_account_id: '' }); setMarkPaidOpen(true) }}>
                 Mark Paid ({selected.size})
               </Button>
             )}
@@ -419,8 +466,20 @@ export const PaymentPlanningPage: React.FC = () => {
             </div>
           </div>
           <Input label="UTR / Reference No" value={markPaidForm.utr_no} onChange={e => setMarkPaidForm(f => ({ ...f, utr_no: e.target.value }))} placeholder="NEFT/RTGS UTR or bank reference" />
+          {markPaidForm.account_type.toLowerCase() !== 'cash' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Paid From Bank Account</label>
+              <select value={markPaidForm.bank_account_id} onChange={e => setMarkPaidForm(f => ({ ...f, bank_account_id: e.target.value }))}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                <option value="">— Select account —</option>
+                {(bankAccountsList ?? []).map((b: any) => (
+                  <option key={b.id} value={b.id}>{b.account_name ? `${b.account_name} — ` : ''}{b.bank_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Discount / Deduction (₹)" type="number" value={markPaidForm.discount_amount} onChange={e => setMarkPaidForm(f => ({ ...f, discount_amount: e.target.value }))} hint="Applied equally across all selected" />
+            <Input label="Discount / Deduction (₹)" type="number" value={markPaidForm.discount_amount} onChange={e => setMarkPaidForm(f => ({ ...f, discount_amount: e.target.value }))} hint={`Split evenly across the ${selected.size} selected`} />
             <Input label="Discount Reason" value={markPaidForm.discount_reason} onChange={e => setMarkPaidForm(f => ({ ...f, discount_reason: e.target.value }))} placeholder="Rate diff, short wt, etc." />
           </div>
         </div>
