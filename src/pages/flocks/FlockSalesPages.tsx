@@ -821,12 +821,18 @@ export const HEDispatch: React.FC = () => {
         .order('he_dispatch(dispatch_date)', { ascending: true })
       let oq = supabase.from('egg_opening_stock')
         .select('flock_id,he_grade_a,he_grade_b,he_grade_c,flocks(flock_no)')
+      // Egg Conversions (e.g. HE Grade C -> TE) previously weren't read here
+      // at all, so converted eggs stayed in HE stock AND became sellable
+      // again as the converted-to type — double-counted.
+      let cq = supabase.from('egg_conversions')
+        .select('flock_id,conversion_date,from_type,from_qty')
       if (flockFilter) {
         dq = dq.eq('flock_id', flockFilter)
         lq = lq.eq('flock_id', flockFilter)
         oq = oq.eq('flock_id', flockFilter)
+        cq = cq.eq('flock_id', flockFilter)
       }
-      const [{ data: prod }, { data: rawLines }, { data: opening }] = await Promise.all([dq, lq, oq])
+      const [{ data: prod }, { data: rawLines }, { data: opening }, { data: conversions }] = await Promise.all([dq, lq, oq, cq])
 
       // Flatten dispatch lines to use dispatch_date (same as EggStock heDisp)
       const dispLines = (rawLines ?? []).map((l: any) => ({
@@ -847,6 +853,7 @@ export const HEDispatch: React.FC = () => {
       const flockIds = [...new Set([
         ...(prod ?? []).map((r: any) => r.flock_id),
         ...dispLines.map((l: any) => l.flock_id),
+        ...(conversions ?? []).map((c: any) => c.flock_id),
       ])]
 
       // Per-flock running balance — same formula as EggStock day-wise
@@ -856,9 +863,12 @@ export const HEDispatch: React.FC = () => {
         const op = openMap[fid] ?? { a: 0, b: 0, c: 0 }
         let balA = op.a, balB = op.b, balC = op.c
 
+        const flockConversions = (conversions ?? []).filter((c: any) => c.flock_id === fid)
+
         const dateSet = new Set<string>()
         ;(prod ?? []).filter((r: any) => r.flock_id === fid).forEach((r: any) => dateSet.add(r.record_date))
         dispLines.filter((l: any) => l.flock_id === fid).forEach((l: any) => dateSet.add(l.dispatch_date))
+        flockConversions.forEach((c: any) => dateSet.add(c.conversion_date))
         const dates = [...dateSet].sort()
 
         for (const date of dates) {
@@ -873,11 +883,14 @@ export const HEDispatch: React.FC = () => {
           const dB = dayDisp.reduce((s: number, l: any) => s + l.grade_b, 0)
           const dC = dayDisp.reduce((s: number, l: any) => s + l.grade_c, 0)
 
+          const dayConv = flockConversions.filter((c: any) => c.conversion_date === date && c.from_type === 'he_grade_c')
+          const cC = dayConv.reduce((s: number, c: any) => s + (c.from_qty ?? 0), 0)
+
           const open_a = balA, open_b = balB, open_c = balC
           // Exactly matches EggStock: balA += pA - sA - wHE
           balA += pA - dA - wHE
           balB += pB - dB
-          balC += pC - dC
+          balC += pC - dC - cC
 
           allRows.push({
             date, flock_id: fid, flock: `F-${flockLabel ?? fid.slice(0,4)}`,
