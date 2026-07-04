@@ -135,7 +135,7 @@ export const Dashboard: React.FC = () => {
   const { data: flocks, isLoading: loadingFlocks } = useQuery({
     queryKey: ['flock_summary'],
     queryFn: async () => {
-      const { data } = await supabase.from('v_flock_summary').select('*').order('flock_no')
+      const { data } = await supabase.from('v_flock_summary').select('*').eq('is_vhl_contract', false).order('flock_no')
       return data ?? []
     }
   })

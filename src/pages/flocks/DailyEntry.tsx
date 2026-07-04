@@ -45,6 +45,7 @@ export const DailyEntry: React.FC = () => {
         .from('flocks')
         .select('id, flock_no, status, laying_farm_id, rearing_farm_id, laying_start_date, placement_date, farms!laying_farm_id(name)')
         .neq('status', 'closed')
+        .eq('is_vhl_contract', false)
         .order('flock_no')
       q = applyFlockFarmFilter(q)
       const { data } = await q

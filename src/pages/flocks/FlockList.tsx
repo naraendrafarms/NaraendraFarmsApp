@@ -320,6 +320,7 @@ export const FlockList: React.FC = () => {
       let q = supabase
         .from('v_flock_summary')
         .select('*')
+        .eq('is_vhl_contract', false)
         .order('flock_no')
       q = applyFlockFarmFilter(q)
       const { data } = await q

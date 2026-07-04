@@ -176,6 +176,7 @@ export const FlockDashboard: React.FC = () => {
       const { data } = await supabase
         .from('flocks')
         .select('id,flock_no,breed,placement_date,paid_female,paid_male,free_female,free_male,chick_rate,supplier,status,close_date,total_placed_f,total_placed_m,chick_cost')
+        .eq('is_vhl_contract', false)
         .order('placement_date', { ascending: false })
       return data ?? []
     }

@@ -101,7 +101,7 @@ export const BulkDailyEntry: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase.from('flocks')
         .select('id,flock_no,breed,status,laying_farm_id,rearing_farm_id,laying_farm:farms!laying_farm_id(name,code)')
-        .neq('status', 'closed').order('flock_no', { ascending: true })
+        .neq('status', 'closed').eq('is_vhl_contract', false).order('flock_no', { ascending: true })
       return data ?? []
     }
   })
