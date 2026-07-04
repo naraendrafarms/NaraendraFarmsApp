@@ -551,15 +551,26 @@ const InlineConfig: React.FC<{ title: string; grp: string; placeholder: string }
   const [editVal, setEditVal] = useState('')
   const [confirmDelId, setConfirmDelId] = useState<number|null>(null)
 
+  // Distinct query key from the useConfigOptions hook — the hook filters to
+  // active options only; this management list must show everything.
   const { data: rows = [], isLoading } = useQuery({
-    queryKey: ['config_options', grp],
+    queryKey: ['config_options_admin', grp],
     queryFn: async () => {
-      const { data } = await supabase.from('config_options').select('id,value,sort_order').eq('grp', grp).order('sort_order').order('value')
+      const { data } = await supabase.from('config_options').select('id,value,sort_order,is_active').eq('grp', grp).order('sort_order').order('value')
       return data ?? []
     }
   })
 
-  const inv = () => qc.invalidateQueries({ queryKey: ['config_options', grp] })
+  const inv = () => { qc.invalidateQueries({ queryKey: ['config_options_admin', grp] }); qc.invalidateQueries({ queryKey: ['config_options', grp] }) }
+
+  const toggleActiveMut = useMutation({
+    mutationFn: async (r: any) => {
+      const { error } = await supabase.from('config_options').update({ is_active: !(r.is_active ?? true) }).eq('id', r.id)
+      if (error) throw error
+    },
+    onSuccess: () => inv(),
+    onError: (e: any) => toast.error(e.message)
+  })
 
   const addMut = useMutation({
     mutationFn: async () => {
@@ -612,7 +623,13 @@ const InlineConfig: React.FC<{ title: string; grp: string; placeholder: string }
                 </>
               ) : (
                 <>
-                  <span className="flex-1 text-sm text-gray-700 bg-gray-50 rounded px-2 py-1">{r.value}</span>
+                  <span className={`flex-1 text-sm rounded px-2 py-1 ${r.is_active === false ? 'text-gray-400 bg-gray-100 line-through' : 'text-gray-700 bg-gray-50'}`}>
+                    {r.value}{r.is_active === false && <span className="ml-1.5 text-[10px] uppercase tracking-wide no-underline text-amber-600 font-semibold">inactive</span>}
+                  </span>
+                  <button onClick={() => toggleActiveMut.mutate(r)} title={r.is_active === false ? 'Activate — show in dropdowns again' : 'Deactivate — hide from dropdowns without deleting'}
+                    className="px-1.5 py-0.5 text-[10px] rounded border border-gray-200 text-gray-500 hover:text-amber-600 hover:border-amber-300">
+                    {r.is_active === false ? 'On' : 'Off'}
+                  </button>
                   <button onClick={() => { setEditId(r.id); setEditVal(r.value) }}
                     className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
                   <button onClick={() => setConfirmDelId(r.id)}

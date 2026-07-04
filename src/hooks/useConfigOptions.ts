@@ -11,10 +11,13 @@ export function useConfigOptions(grp: string, fallback: ConfigOption[] = []): Co
   const { data } = useQuery({
     queryKey: ['config_options', grp],
     queryFn: async () => {
+      // Deactivated options were still appearing in every dropdown — the
+      // is_active flag (migration 163) was never respected here.
       const { data } = await supabase
         .from('config_options')
         .select('value, label, sort_order')
         .eq('grp', grp)
+        .eq('is_active', true)
         .order('sort_order')
         .order('value')
       return (data ?? []).map((r: any) => ({

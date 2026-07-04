@@ -227,7 +227,9 @@ export const IngredientsMaster: React.FC = () => {
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.code||!form.name)throw new Error('Code and name required')
-      const p={code:form.code.toUpperCase(),name:form.name,short_name:form.short_name||null,category:form.category,unit:form.unit,protein_pct:parseFloat(form.protein_pct)||null,moisture_pct:parseFloat(form.moisture_pct)||null,hsn_code:form.hsn_code||null,gst_rate:parseFloat(form.gst_rate)||0}
+      // Preserve an intentional 0 — `|| null` turned 0 into NULL
+      const numOrNull=(v:string)=>v===''||v==null||isNaN(parseFloat(v))?null:parseFloat(v)
+      const p={code:form.code.toUpperCase(),name:form.name,short_name:form.short_name||null,category:form.category,unit:form.unit,protein_pct:numOrNull(form.protein_pct),moisture_pct:numOrNull(form.moisture_pct),hsn_code:form.hsn_code||null,gst_rate:parseFloat(form.gst_rate)||0}
       if(editing){const{error}=await supabase.from('feed_ingredients').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('feed_ingredients').insert(p);if(error)throw error}
     },
@@ -260,9 +262,12 @@ export const IngredientsMaster: React.FC = () => {
   const mergeMut=useMutation({
     mutationFn:async({keepId,dropIds}:{keepId:string;dropIds:string[]})=>{
       for(const oldId of dropIds){
-        // Remap formula composition and GRN lines to the kept ingredient
-        await supabase.from('feed_formula_ingredients').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
-        await supabase.from('grn').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
+        // Remap formula composition and GRN lines to the kept ingredient —
+        // error-checked so a failed remap can't silently proceed to delete
+        const{error:e1}=await supabase.from('feed_formula_ingredients').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
+        if(e1)throw new Error(`formula remap failed: ${e1.message}`)
+        const{error:e2}=await supabase.from('grn').update({ingredient_id:keepId}).eq('ingredient_id',oldId)
+        if(e2)throw new Error(`grn remap failed: ${e2.message}`)
         const{error}=await supabase.from('feed_ingredients').delete().eq('id',oldId)
         if(error)throw error
       }
@@ -531,9 +536,13 @@ export const PartiesMaster: React.FC = () => {
         const { data: oldParty } = await supabase.from('parties').select('name').eq('id', oldId).single()
         const oldName = oldParty?.name
 
-        await supabase.from('grn').update({ party_id: keepId }).eq('party_id', oldId)
-        await supabase.from('he_dispatch').update({ party_id: keepId }).eq('party_id', oldId)
-        await supabase.from('nhe_sales').update({ party_id: keepId }).eq('party_id', oldId)
+        // Error-checked so a failed remap can't silently proceed to delete
+        const { error: eg } = await supabase.from('grn').update({ party_id: keepId }).eq('party_id', oldId)
+        if (eg) throw new Error(`grn remap failed: ${eg.message}`)
+        const { error: eh } = await supabase.from('he_dispatch').update({ party_id: keepId }).eq('party_id', oldId)
+        if (eh) throw new Error(`he_dispatch remap failed: ${eh.message}`)
+        const { error: en } = await supabase.from('nhe_sales').update({ party_id: keepId }).eq('party_id', oldId)
+        if (en) throw new Error(`nhe_sales remap failed: ${en.message}`)
 
         // pending_payments.vendor_name is a denormalized TEXT column, not
         // FK-driven — the grn.party_id update above re-triggers
@@ -836,13 +845,19 @@ export const MedicinesMaster: React.FC = () => {
 
   const mergeMut=useMutation({
     mutationFn:async({keepId,dropIds}:{keepId:string;dropIds:string[]})=>{
-      // Delete duplicates (no FK remap — medicine_usage links are complex)
+      // Remap usage/purchase history to the kept medicine BEFORE deleting —
+      // deleting without remapping either FK-failed mid-loop or silently
+      // detached the history.
       for(const oldId of dropIds){
+        const{error:e1}=await supabase.from('medicine_usage').update({medicine_id:keepId}).eq('medicine_id',oldId)
+        if(e1)throw new Error(`medicine_usage remap failed: ${e1.message}`)
+        const{error:e2}=await supabase.from('medicine_purchases').update({medicine_id:keepId}).eq('medicine_id',oldId)
+        if(e2 && !e2.message.includes('does not exist'))throw new Error(`medicine_purchases remap failed: ${e2.message}`)
         const{error}=await supabase.from('medicines_master').delete().eq('id',oldId)
         if(error)throw error
       }
     },
-    onSuccess:()=>{toast.success('Merged — duplicates deleted');qc.invalidateQueries({queryKey:['medicines']});setSel(new Set());setMergeOpen(false)},
+    onSuccess:()=>{toast.success('Merged — history remapped, duplicates deleted');qc.invalidateQueries({queryKey:['medicines']});setSel(new Set());setMergeOpen(false)},
     onError:(e:any)=>toast.error(e.message)
   })
 
@@ -1214,8 +1229,10 @@ export const HatcheriesMaster: React.FC = () => {
   const mergeMut=useMutation({
     mutationFn:async({keepId,dropIds}:{keepId:string;dropIds:string[]})=>{
       for(const oldId of dropIds){
-        // Remap he_dispatch records to kept hatchery
-        await supabase.from('he_dispatch').update({hatchery_id:keepId}).eq('hatchery_id',oldId)
+        // Remap he_dispatch records to kept hatchery — error-checked so a
+        // failed remap can't silently proceed to delete
+        const{error:e1}=await supabase.from('he_dispatch').update({hatchery_id:keepId}).eq('hatchery_id',oldId)
+        if(e1)throw new Error(`he_dispatch remap failed: ${e1.message}`)
         const{error}=await supabase.from('hatcheries').delete().eq('id',oldId)
         if(error)throw error
       }
@@ -1706,8 +1723,11 @@ export const VaccinationSchedulePage: React.FC = () => {
 
   const clearAllMut = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from('vaccination_schedule').delete().gte('created_at', '2000-01-01')
+      // Two passes: date cutoff missed rows with NULL created_at
+      const { error } = await supabase.from('vaccination_schedule').delete().gte('created_at', '1900-01-01')
       if (error) throw error
+      const { error: e2 } = await supabase.from('vaccination_schedule').delete().is('created_at', null)
+      if (e2) throw e2
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); setClearAll(false); toast.success('All records cleared') },
     onError: (e: any) => toast.error(e.message),

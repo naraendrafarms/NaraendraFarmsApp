@@ -222,6 +222,18 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
   const mut = useMutation({
     mutationFn: async () => {
       if (!flockId) return
+      // Closing a flock zeroes its bird count in summaries — warn if it
+      // still has unpaid sales/dispatches, but don't hard-block.
+      if (form.status === 'closed' && flock?.status !== 'closed') {
+        const [{ count: nheOpen }, { count: heOpen }] = await Promise.all([
+          supabase.from('nhe_sales').select('id', { count: 'exact', head: true }).eq('flock_id', flockId).or('payment_status.eq.Pending,payment_status.is.null'),
+          supabase.from('he_dispatch').select('id', { count: 'exact', head: true }).eq('flock_id', flockId).or('payment_status.eq.Pending,payment_status.is.null'),
+        ])
+        const open = (nheOpen ?? 0) + (heOpen ?? 0)
+        if (open > 0 && !window.confirm(`This flock still has ${open} unpaid sale(s)/dispatch(es). Closing it will zero its bird count in summaries. Close anyway?`)) {
+          throw new Error('Close cancelled')
+        }
+      }
       const { error } = await supabase.from('flocks').update({
         flock_no: form.flock_no,
         breed: form.breed,
