@@ -5,7 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 if (typeof window !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs`
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, currentFY } from '@/lib/utils'
+import { inr, fmtDate, currentFY, today } from '@/lib/utils'
 import { useAuth, can } from '@/lib/auth'
 import {
   Card, SectionHeader, Spinner, Table, Th, Td,
@@ -34,8 +34,6 @@ const STATUS_CLS: Record<string,string> = {
   Received: 'bg-green-100 text-green-700', Pending: 'bg-yellow-100 text-yellow-700',
   HOLD: 'bg-red-100 text-red-700', Paid: 'bg-blue-100 text-blue-700', 'Not Paid': 'bg-orange-100 text-orange-700',
 }
-
-const today = () => new Date().toISOString().slice(0,10)
 
 // ── small helpers ─────────────────────────────────────────────────
 const Sel = ({ label, value, onChange, options, className = '' }: any) => (
@@ -724,9 +722,12 @@ const POTab: React.FC = () => {
           const creditDays = receiptPO.credit_limit_days ? Number(receiptPO.credit_limit_days) : 0
           const payBefore = (() => {
             if (!receiptForm.receipt_date || !creditDays) return null
+            // Previously round-tripped through toISOString() (UTC), landing
+            // a day early in IST. Build the result from local getters only.
             const d = new Date(receiptForm.receipt_date + 'T00:00:00')
             d.setDate(d.getDate() + creditDays)
-            return d.toISOString().slice(0, 10)
+            const y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate()
+            return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
           })()
           return (
             <div className="space-y-3">

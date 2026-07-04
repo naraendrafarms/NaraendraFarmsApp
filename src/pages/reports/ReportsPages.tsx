@@ -180,10 +180,18 @@ export const PLReport: React.FC = () => {
     queryKey: ['pl_feed_records', flockId], enabled,
     queryFn: async () => { const { data } = await supabase.from('daily_records').select('feed_female_kg,feed_type_f,feed_male_kg,feed_type_m').eq('flock_id', flockId); return data ?? [] }
   })
-  // Electricity: bills for flock's farm
+  // Electricity: bills for flock's farm — electricity_bills has no farm_id
+  // column of its own (farm comes via the meter), so the previous query
+  // errored on every call and the cost silently read as ₹0 in every Flock
+  // P&L, overstating profit whenever electricity bills existed.
   const { data: elecBills } = useQuery({
     queryKey: ['pl_elec', farmId], enabled: !!farmId,
-    queryFn: async () => { const { data } = await supabase.from('electricity_bills').select('amount').eq('farm_id', farmId); return data ?? [] }
+    queryFn: async () => {
+      const { data } = await supabase.from('electricity_bills')
+        .select('amount, electricity_meters!inner(farm_id)')
+        .eq('electricity_meters.farm_id', farmId)
+      return data ?? []
+    }
   })
   // Salary: abstracts for flock's farm
   const { data: salaryAbstracts } = useQuery({

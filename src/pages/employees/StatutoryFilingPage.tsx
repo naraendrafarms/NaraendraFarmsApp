@@ -18,7 +18,12 @@ function csv(rows: (string | number)[][]) {
 const monthRange = (month: string) => {
   const [y, m] = month.split('-').map(Number)
   const start = `${month}-01`
-  const end = new Date(y, m, 0).toISOString().slice(0, 10) // last day of month
+  // Previously used toISOString() (UTC) on a locally-computed date — before
+  // 5:30am IST this dropped the actual last day of the month, silently
+  // excluding any bill/sale/RCM entry dated on the 30th/31st from every
+  // statutory "Amount Due" figure. Build the string from local getters only.
+  const lastDay = new Date(y, m, 0).getDate()
+  const end = `${month}-${String(lastDay).padStart(2, '0')}`
   return { start, end }
 }
 
