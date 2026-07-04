@@ -328,6 +328,16 @@ export const BulkDailyEntry: React.FC = () => {
   const handleSaveShedMode = async () => {
     if (!flockSheds.length || !selectedFlock) return
     setSaving(true); let errors = 0; let saved = 0
+    // Feed is mirrored to daily_feed keyed by flock+date+type (not per shed) —
+    // accumulate every shed's kg per feed type here and write ONE combined
+    // total per type after the loop, instead of each shed's upsert
+    // overwriting the previous shed's entry.
+    const feedTotals: Record<string, { female_kg: number; male_kg: number }> = {}
+    const addFeed = (type: string, femaleKg: number, maleKg: number) => {
+      const t = feedTotals[type] ?? { female_kg: 0, male_kg: 0 }
+      t.female_kg += femaleKg; t.male_kg += maleKg
+      feedTotals[type] = t
+    }
     for (const shed of flockSheds) {
       const r = shedRows[shed.id]
       if (!r) continue
@@ -340,7 +350,7 @@ export const BulkDailyEntry: React.FC = () => {
       const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
       const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
-      const hasData = he || je || te || be || le || mf || mm || ff || fm || tf || cf || r.lighting_hrs || r.remarks
+      const hasData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || r.lighting_hrs || r.remarks
       if (!hasData) continue
       const of_ = parseInt(r.opening_female) || null
       const om = parseInt(r.opening_male) || null
@@ -369,24 +379,17 @@ export const BulkDailyEntry: React.FC = () => {
         : await supabase.from('daily_records').insert(payload)
       if (error) { console.error(error); errors++ } else saved++
 
-      // Mirror feed to daily_feed so Flock → Feed tab shows it
+      // Accumulate feed per type across all sheds — written once after the
+      // loop below (was previously upserted per-shed, so shed N's write
+      // overwrote shed N-1's instead of summing).
       if (ff > 0 || fm > 0) {
         const ftF = r.feed_type_f || 'BCM'
         const ftM = r.feed_type_m || 'BCM'
         if (ftF === ftM) {
-          await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: fm, female_cost: Math.round(ff * feedRates.rate(ftF) * 100) / 100, male_cost: Math.round(fm * feedRates.rate(ftF) * 100) / 100 },
-            { onConflict: 'flock_id,feed_date,feed_type' }
-          )
+          addFeed(ftF, ff, fm)
         } else {
-          if (ff > 0) await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftF, female_kg: ff, male_kg: 0, female_cost: Math.round(ff * feedRates.rate(ftF) * 100) / 100, male_cost: 0 },
-            { onConflict: 'flock_id,feed_date,feed_type' }
-          )
-          if (fm > 0) await supabase.from('daily_feed').upsert(
-            { flock_id: selectedFlock, feed_date: date, feed_type: ftM, female_kg: 0, male_kg: fm, female_cost: 0, male_cost: Math.round(fm * feedRates.rate(ftM) * 100) / 100 },
-            { onConflict: 'flock_id,feed_date,feed_type' }
-          )
+          if (ff > 0) addFeed(ftF, ff, 0)
+          if (fm > 0) addFeed(ftM, 0, fm)
         }
       }
 
@@ -398,6 +401,19 @@ export const BulkDailyEntry: React.FC = () => {
           : await supabase.from('medicine_usage').insert(medPayload)
         if (me) console.error(me)
       }
+    }
+    // Write the combined per-type feed total for the whole flock/day, once
+    // per feed type, now that every shed's contribution has been summed.
+    for (const [feedType, totals] of Object.entries(feedTotals)) {
+      await supabase.from('daily_feed').upsert(
+        {
+          flock_id: selectedFlock, feed_date: date, feed_type: feedType,
+          female_kg: totals.female_kg, male_kg: totals.male_kg,
+          female_cost: Math.round(totals.female_kg * feedRates.rate(feedType) * 100) / 100,
+          male_cost: Math.round(totals.male_kg * feedRates.rate(feedType) * 100) / 100,
+        },
+        { onConflict: 'flock_id,feed_date,feed_type' }
+      )
     }
     // Save flock-level grade breakdown (shed_id IS NULL)
     const ga = parseInt(gradeRow.he_grade_a) || null
@@ -463,9 +479,20 @@ export const BulkDailyEntry: React.FC = () => {
             feed_female_kg: ff, feed_type_f: r.feed_type_f || 'BCM',
             feed_male_kg: fm, feed_type_m: r.feed_type_m || 'BCM',
           }
-          const { error } = r.existingDailyId
-            ? await supabase.from('daily_records').update(payload).eq('id', r.existingDailyId)
-            : await supabase.from('daily_records').upsert(payload, { onConflict: 'flock_id,record_date,farm_id' })
+          // farm_id is often NULL for flocks with no farm assigned, and
+          // Postgres treats NULLs as distinct in a unique/ON CONFLICT key —
+          // so upserting on (flock_id,record_date,farm_id) can't match an
+          // existing NULL-farm_id row and inserts a duplicate every save.
+          // Look the row up explicitly instead of relying on ON CONFLICT.
+          let existingId = r.existingDailyId
+          if (!existingId) {
+            const { data: existing } = await supabase.from('daily_records')
+              .select('id').eq('flock_id', flock.id).eq('record_date', date).is('shed_id', null).maybeSingle()
+            existingId = existing?.id ?? null
+          }
+          const { error } = existingId
+            ? await supabase.from('daily_records').update(payload).eq('id', existingId)
+            : await supabase.from('daily_records').insert(payload)
           if (error) { console.error(error); errors++ }
         }
         if (ff || fm) {
