@@ -196,6 +196,13 @@ export const PurchaseEntry: React.FC = () => {
       // 1. Route to the category-specific table
       let paidPendingPaymentId: string | null = null
       if (form.category === 'Feed') {
+        // Feed stock/consumption is aggregated in kg everywhere — convert
+        // MT/Quintal to kg at save time (rate scaled inversely so amounts
+        // stay identical). A 10 MT purchase used to add "10" to a kg balance.
+        const unitFactor = form.unit === 'MT' ? 1000 : form.unit === 'Quintal' ? 100 : 1
+        if (form.unit === 'Bag') throw new Error('For Feed items use kg, MT or Quintal — "Bag" has no fixed kg conversion')
+        const feedQty = qty * unitFactor
+        const feedRate = unitFactor !== 1 && rate ? rate / unitFactor : rate
         const feedGrnNo = form.grn_no || `GRN-${form.purchase_date}-${Date.now() % 100000}`
         const { error } = await supabase.from('grn').insert({
           grn_no: feedGrnNo,
@@ -207,8 +214,8 @@ export const PurchaseEntry: React.FC = () => {
           item_name: itemName,
           invoice_no: form.invoice_no || null,
           invoice_date: form.invoice_date || null,
-          qty, unit: form.unit || 'kg',
-          price_per_unit: rate || null,
+          qty: feedQty, unit: 'kg',
+          price_per_unit: feedRate || null,
           basic_amount: basic || null,
           gst_pct: gst || null,
           gst_amount: taxSplit.total || 0,

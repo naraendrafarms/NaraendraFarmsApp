@@ -230,11 +230,24 @@ export const GRNPage: React.FC = () => {
     mutationFn: async () => {
       if (!form.grn_no || !form.grn_date || !form.farm_id) throw new Error('GRN No, date and farm are required')
       if (isChick && !form.flock_id) throw new Error('Select the flock for this chick GRN')
+      if (form.expiry_date && form.expiry_date < form.grn_date) throw new Error('Expiry date is before the GRN date — goods already expired at receipt?')
+      const p = payload() as any
+      // Feed stock is aggregated in kg everywhere — normalize MT/Quintal at
+      // save time, scaling the rate inversely so amounts stay identical.
+      if (form.category === 'Feed Ingredient') {
+        if (form.unit === 'Bag') throw new Error('For Feed Ingredients use kg, MT or Quintal — "Bag" has no fixed kg conversion')
+        const unitFactor = form.unit === 'MT' ? 1000 : form.unit === 'Quintal' ? 100 : 1
+        if (unitFactor !== 1) {
+          p.qty = (p.qty ?? 0) * unitFactor
+          p.price_per_unit = p.price_per_unit != null ? p.price_per_unit / unitFactor : null
+          p.unit = 'kg'
+        }
+      }
       if (editing) {
-        const { error } = await supabase.from('grn').update(payload()).eq('id', editing.id)
+        const { error } = await supabase.from('grn').update(p).eq('id', editing.id)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('grn').insert(payload())
+        const { error } = await supabase.from('grn').insert(p)
         if (error) throw error
       }
     },
@@ -321,8 +334,11 @@ export const GRNPage: React.FC = () => {
           gst_pct: gstPct || 0,
           gst_amount: gstAmt || null,
           total_amount: total || null,
-          batch_no: get(r, 'batch_no') || null,
-          expiry_date: get(r, 'expiry_date') || null,
+          // Mirror the form's payload(): batch/expiry only apply to
+          // medicine-type categories — the import used to write them for
+          // every category, and a later form-edit silently erased them.
+          batch_no: BATCH_CATS.has(category) ? (get(r, 'batch_no') || null) : null,
+          expiry_date: BATCH_CATS.has(category) ? (get(r, 'expiry_date') || null) : null,
           vehicle_no: get(r, 'vehicle_no') || null,
           remarks: get(r, 'remarks') || null,
         }

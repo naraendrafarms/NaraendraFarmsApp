@@ -1303,12 +1303,19 @@ const StockTab: React.FC = () => {
   async function doMerge() {
     if (!mergeFrom || !mergeTo || mergeFrom === mergeTo) return
     if (!confirm(`Rename all "${mergeFrom}" entries to "${mergeTo}"?`)) return
-    // Update in production_ingredients
-    await supabase.from('feed_production_ingredients').update({ingredient_name: mergeTo}).eq('ingredient_name', mergeFrom)
-    // Update in stock_adjustments
-    await supabase.from('feed_stock_adjustments').update({ingredient_name: mergeTo}).eq('ingredient_name', mergeFrom)
-    // Update in feed_formula_ingredients
-    await supabase.from('feed_formula_ingredients').update({ingredient_name: mergeTo}).eq('ingredient_name', mergeFrom)
+    // Every rename is error-checked so the merge can't half-complete silently.
+    // grn/stock_ledger item_name were previously NOT renamed, leaving receipts
+    // under the old name while consumption moved — splitting one ingredient's
+    // balance across two names.
+    const steps: [string, any][] = [
+      ['feed_production_ingredients', await supabase.from('feed_production_ingredients').update({ingredient_name: mergeTo}).eq('ingredient_name', mergeFrom)],
+      ['feed_stock_adjustments', await supabase.from('feed_stock_adjustments').update({ingredient_name: mergeTo}).eq('ingredient_name', mergeFrom)],
+      ['feed_formula_ingredients', await supabase.from('feed_formula_ingredients').update({ingredient_name: mergeTo}).eq('ingredient_name', mergeFrom)],
+      ['grn', await supabase.from('grn').update({item_name: mergeTo}).eq('item_name', mergeFrom)],
+      ['stock_ledger', await supabase.from('stock_ledger').update({item_name: mergeTo}).eq('item_name', mergeFrom)],
+    ]
+    const failed = steps.find(([, res]) => res.error)
+    if (failed) { toast.error(`Merge failed at ${failed[0]}: ${failed[1].error.message} — some tables may already be renamed, re-run the merge to finish`); return }
     qc.invalidateQueries({queryKey:['stock_grn']}); qc.invalidateQueries({queryKey:['stock_prod']}); qc.invalidateQueries({queryKey:['stock_adj']})
     qc.invalidateQueries({queryKey:['feed_formula_ingredients']})
     setShowMerge(false); setMergeFrom(''); setMergeTo('')
@@ -1846,6 +1853,15 @@ const FlockAllocationTab: React.FC = () => {
     setSaving(true)
     try {
       const feedDate = month + '-01'
+      // Warn before silently replacing existing entries for this month/type
+      const { data: existingFeed } = await supabase.from('daily_feed')
+        .select('flock_id').eq('feed_date', feedDate).eq('feed_type', feedType)
+        .in('flock_id', validRows.map(r => r.flockId))
+      if ((existingFeed ?? []).length > 0) {
+        if (!window.confirm(`${(existingFeed ?? []).length} flock(s) already have a ${feedType} entry for ${month} — re-allocating will REPLACE those entries. Continue?`)) {
+          setSaving(false); return
+        }
+      }
       const ratePerKg = rate(feedType)
       for (const r of validRows) {
         const femaleKg = parseFloat(r.femaleKg) || 0

@@ -106,6 +106,14 @@ export const ItemsMasterPage: React.FC = () => {
 
   const deleteMut = useMutation({
     mutationFn: async (ids: string[]) => {
+      // Deleting an item silently SET NULLs every GRN/ledger link it has —
+      // block if references exist; merge into another item instead.
+      const [{ count: grnCount }, { count: ledgerCount }] = await Promise.all([
+        supabase.from('grn').select('id', { count: 'exact', head: true }).in('item_id', ids),
+        supabase.from('stock_ledger').select('id', { count: 'exact', head: true }).in('item_id', ids),
+      ])
+      const refs = (grnCount ?? 0) + (ledgerCount ?? 0)
+      if (refs > 0) throw new Error(`Can't delete — ${grnCount ?? 0} GRN(s) and ${ledgerCount ?? 0} stock ledger row(s) reference these item(s). Merge into another item instead, or deactivate.`)
       const { error } = await supabase.from('items').delete().in('id', ids)
       if (error) throw error
     },
@@ -134,6 +142,20 @@ export const ItemsMasterPage: React.FC = () => {
           .update({ item_id: keepId })
           .in('item_id', dupeIds)
         if (error && !error.message.includes('does not exist')) throw error
+      }
+      // Also rewrite the denormalized item_name text columns — name-keyed
+      // aggregations (Feed Mill stock, ledger fallbacks) still split the
+      // merged item across names otherwise.
+      const { data: keptItem } = await supabase.from('items').select('name').eq('id', keepId).single()
+      const { data: dropped } = await supabase.from('items').select('name').in('id', dupeIds)
+      if (keptItem?.name) {
+        for (const d of (dropped ?? [])) {
+          if (!d.name || d.name === keptItem.name) continue
+          const { error: e1 } = await supabase.from('grn').update({ item_name: keptItem.name }).eq('item_name', d.name)
+          if (e1) throw new Error(`grn rename failed: ${e1.message}`)
+          const { error: e2 } = await supabase.from('stock_ledger').update({ item_name: keptItem.name }).eq('item_name', d.name)
+          if (e2) throw new Error(`stock_ledger rename failed: ${e2.message}`)
+        }
       }
       // Delete the duplicates
       const { error: delErr } = await supabase.from('items').delete().in('id', dupeIds)
