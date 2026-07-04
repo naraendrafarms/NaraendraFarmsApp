@@ -155,6 +155,7 @@ const NAV: NavItem[] = [
     children: [
       { label: 'VHL Flocks',            to: '/vhl/flocks' },
       { label: 'VHL Daily Entry',       to: '/vhl/daily-entry' },
+      { label: 'VHL Bulk Daily Entry',  to: '/vhl/bulk-daily-entry' },
       { label: 'VHL Egg Production',    to: '/vhl/egg-production' },
       { label: 'VHL Medicine Master',   to: '/vhl/medicine-master' },
       { label: 'VHL Medicine Usage',    to: '/vhl/medicine-usage' },

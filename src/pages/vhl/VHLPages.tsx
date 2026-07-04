@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
@@ -666,6 +666,294 @@ export const VHLEggProductionPage: React.FC = () => {
             </tbody>
           </Table>
         </Card>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VHL Bulk (Shed-wise) Daily Entry — mirrors the regular Bulk Daily Entry's
+// shed mode: enter each shed separately, closing auto-computed per shed,
+// plus one flock-level HE grade breakdown (graded after collecting from
+// all sheds). Writes to vhl_daily_entry (shed_id set per shed, null for the
+// grade-only flock-level row) — no medicine here (use VHL Medicine Usage
+// Log instead) and no feed costing (VHL feed isn't ours to cost).
+// ═══════════════════════════════════════════════════════════════
+type VhlShedRow = {
+  opening_female: string; opening_male: string
+  he_eggs: string; je_eggs: string; te_eggs: string; be_eggs: string; le_eggs: string
+  wastage_he: string; wastage_je: string; wastage_te: string; wastage_be: string
+  mortality_female: string; mortality_male: string
+  feed_female_kg: string; feed_type_f: string; feed_male_kg: string; feed_type_m: string
+  transfer_female: string; transfer_male: string; cull_female: string; cull_male: string
+  closing_female: string; closing_male: string
+  lighting_hrs: string; remarks: string
+  existingId: string | null
+}
+const emptyVhlShedRow = (): VhlShedRow => ({
+  opening_female: '', opening_male: '',
+  he_eggs: '', je_eggs: '', te_eggs: '', be_eggs: '', le_eggs: '',
+  wastage_he: '', wastage_je: '', wastage_te: '', wastage_be: '',
+  mortality_female: '', mortality_male: '',
+  feed_female_kg: '', feed_type_f: '', feed_male_kg: '', feed_type_m: '',
+  transfer_female: '', transfer_male: '', cull_female: '', cull_male: '',
+  closing_female: '', closing_male: '',
+  lighting_hrs: '', remarks: '',
+  existingId: null,
+})
+
+export const VHLBulkDailyEntryPage: React.FC = () => {
+  const qc = useQueryClient()
+  const [flockId, setFlockId] = useState('')
+  const [date, setDate] = useState(today())
+  const [saving, setSaving] = useState(false)
+  const [shedRows, setShedRows] = useState<Record<string, VhlShedRow>>({})
+  const [gradeRow, setGradeRow] = useState({ he_grade_a: '', he_grade_b: '', he_grade_c: '', existingId: null as string | null })
+  const [showWastage, setShowWastage] = useState(false)
+
+  const { data: flocks } = useQuery({
+    queryKey: ['vhl_flocks_active'],
+    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no,laying_farm_id,rearing_farm_id').eq('is_vhl_contract', true).neq('status', 'closed').order('flock_no'); return data ?? [] }
+  })
+  const flock = flocks?.find((f: any) => f.id === flockId)
+
+  const { data: sheds } = useQuery({
+    queryKey: ['vhl_sheds', flockId],
+    queryFn: async () => {
+      const farmId = flock?.laying_farm_id ?? flock?.rearing_farm_id
+      if (!farmId) return []
+      const { data } = await supabase.from('sheds').select('id,shed_no,shed_name').eq('farm_id', farmId).eq('is_active', true).order('shed_no')
+      return data ?? []
+    },
+    enabled: !!flockId && !!flock
+  })
+
+  const { data: existingRows } = useQuery({
+    queryKey: ['vhl_bulk_existing', flockId, date],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).eq('record_date', date)
+      return data ?? []
+    },
+    enabled: !!flockId && !!date
+  })
+
+  const { data: prevRows } = useQuery({
+    queryKey: ['vhl_bulk_prev', flockId, date],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_daily_entry').select('shed_id,closing_female,closing_male,record_date')
+        .eq('flock_id', flockId).lt('record_date', date).order('record_date', { ascending: false }).limit((sheds ?? []).length + 5)
+      return data ?? []
+    },
+    enabled: !!flockId && !!date && !!sheds
+  })
+
+  // Populate shed rows from existing records (or previous day's closing)
+  useEffect(() => {
+    if (!sheds) return
+    const rows: Record<string, VhlShedRow> = {}
+    for (const shed of sheds as any[]) {
+      const ex = (existingRows ?? []).find((r: any) => r.shed_id === shed.id)
+      const prev = (prevRows ?? []).find((r: any) => r.shed_id === shed.id)
+      const row = emptyVhlShedRow()
+      if (ex) {
+        row.opening_female = ex.opening_female?.toString() ?? ''
+        row.opening_male = ex.opening_male?.toString() ?? ''
+        row.he_eggs = ex.he_eggs?.toString() ?? ''
+        row.je_eggs = ex.je_eggs?.toString() ?? ''
+        row.te_eggs = ex.te_eggs?.toString() ?? ''
+        row.be_eggs = ex.be_eggs?.toString() ?? ''
+        row.le_eggs = ex.le_eggs?.toString() ?? ''
+        row.wastage_he = ex.wastage_he?.toString() ?? ''
+        row.wastage_je = ex.wastage_je?.toString() ?? ''
+        row.wastage_te = ex.wastage_te?.toString() ?? ''
+        row.wastage_be = ex.wastage_be?.toString() ?? ''
+        row.mortality_female = ex.mortality_female?.toString() ?? ''
+        row.mortality_male = ex.mortality_male?.toString() ?? ''
+        row.feed_female_kg = ex.feed_female_kg?.toString() ?? ''
+        row.feed_type_f = ex.feed_type_f ?? ''
+        row.feed_male_kg = ex.feed_male_kg?.toString() ?? ''
+        row.feed_type_m = ex.feed_type_m ?? ''
+        row.transfer_female = ex.transfer_female?.toString() ?? ''
+        row.transfer_male = ex.transfer_male?.toString() ?? ''
+        row.cull_female = ex.cull_female?.toString() ?? ''
+        row.cull_male = ex.cull_male?.toString() ?? ''
+        row.closing_female = ex.closing_female?.toString() ?? ''
+        row.closing_male = ex.closing_male?.toString() ?? ''
+        row.lighting_hrs = ex.lighting_hrs?.toString() ?? ''
+        row.remarks = ex.remarks ?? ''
+        row.existingId = ex.id
+      } else if (prev) {
+        row.opening_female = prev.closing_female?.toString() ?? ''
+        row.opening_male = prev.closing_male?.toString() ?? ''
+      }
+      rows[shed.id] = row
+    }
+    setShedRows(rows)
+    const flockLevel = (existingRows ?? []).find((r: any) => !r.shed_id)
+    setGradeRow({
+      he_grade_a: flockLevel?.he_grade_a?.toString() ?? '', he_grade_b: flockLevel?.he_grade_b?.toString() ?? '',
+      he_grade_c: flockLevel?.he_grade_c?.toString() ?? '', existingId: flockLevel?.id ?? null,
+    })
+  }, [sheds, existingRows, prevRows])
+
+  const setShed = (shedId: string, k: keyof VhlShedRow, v: string) => setShedRows(rows => {
+    const r = { ...(rows[shedId] ?? emptyVhlShedRow()), [k]: v }
+    if (['opening_female','opening_male','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male'].includes(k)) {
+      const of_ = parseInt(r.opening_female) || 0, om = parseInt(r.opening_male) || 0
+      const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
+      const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
+      const mf = parseInt(r.mortality_female) || 0, mm = parseInt(r.mortality_male) || 0
+      r.closing_female = Math.max(0, of_ - tf - cf - mf).toString()
+      r.closing_male = Math.max(0, om - tm - cm - mm).toString()
+    }
+    return { ...rows, [shedId]: r }
+  })
+
+  const handleSave = async () => {
+    if (!flockId || !date) { toast.error('Select flock and date'); return }
+    setSaving(true)
+    let saved = 0, errors = 0
+    for (const shed of (sheds ?? []) as any[]) {
+      const r = shedRows[shed.id]
+      if (!r) continue
+      const he = parseInt(r.he_eggs) || 0, je = parseInt(r.je_eggs) || 0, te = parseInt(r.te_eggs) || 0, be = parseInt(r.be_eggs) || 0, le = parseInt(r.le_eggs) || 0
+      const mf = parseInt(r.mortality_female) || 0, mm = parseInt(r.mortality_male) || 0
+      const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
+      const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
+      const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
+      const hasData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || r.lighting_hrs || r.remarks
+      if (!hasData) continue
+      const intOrNull = (v: string) => v === '' || v == null || isNaN(parseInt(v)) ? null : parseInt(v)
+      const payload = {
+        flock_id: flockId, shed_id: shed.id, record_date: date,
+        opening_female: intOrNull(r.opening_female), opening_male: intOrNull(r.opening_male),
+        he_eggs: he, je_eggs: je, te_eggs: te, be_eggs: be, le_eggs: le, total_eggs: he+je+te+be+le,
+        wastage_he: parseInt(r.wastage_he) || null, wastage_je: parseInt(r.wastage_je) || null,
+        wastage_te: parseInt(r.wastage_te) || null, wastage_be: parseInt(r.wastage_be) || null,
+        mortality_female: mf, mortality_male: mm,
+        feed_female_kg: ff, feed_type_f: r.feed_type_f || null, feed_male_kg: fm, feed_type_m: r.feed_type_m || null,
+        transfer_female: tf, transfer_male: tm, cull_female: cf, cull_male: cm,
+        trcull_female: tf + cf, trcull_male: tm + cm,
+        closing_female: intOrNull(r.closing_female), closing_male: intOrNull(r.closing_male),
+        lighting_hrs: parseFloat(r.lighting_hrs) || null, remarks: r.remarks || null,
+      }
+      const { error } = r.existingId
+        ? await supabase.from('vhl_daily_entry').update(payload).eq('id', r.existingId)
+        : await supabase.from('vhl_daily_entry').insert(payload)
+      if (error) { console.error(error); errors++ } else saved++
+    }
+    const ga = parseInt(gradeRow.he_grade_a) || null, gb = parseInt(gradeRow.he_grade_b) || null, gc = parseInt(gradeRow.he_grade_c) || null
+    if (ga !== null || gb !== null || gc !== null) {
+      if (gradeRow.existingId) {
+        await supabase.from('vhl_daily_entry').update({ he_grade_a: ga, he_grade_b: gb, he_grade_c: gc }).eq('id', gradeRow.existingId)
+      } else {
+        await supabase.from('vhl_daily_entry').insert({
+          flock_id: flockId, record_date: date, shed_id: null,
+          he_grade_a: ga, he_grade_b: gb, he_grade_c: gc,
+          he_eggs: 0, je_eggs: 0, te_eggs: 0, be_eggs: 0, le_eggs: 0, total_eggs: 0, mortality_female: 0, mortality_male: 0,
+        })
+      }
+    }
+    setSaving(false)
+    qc.invalidateQueries({ queryKey: ['vhl_bulk_existing'] })
+    if (errors) toast.error(`Saved ${saved} shed(s), ${errors} failed`)
+    else toast.success(`Saved ${saved} shed record(s)`)
+  }
+
+  const gradeTotal = (parseInt(gradeRow.he_grade_a)||0) + (parseInt(gradeRow.he_grade_b)||0) + (parseInt(gradeRow.he_grade_c)||0)
+  const heTotal = useMemo(() => Object.values(shedRows).reduce((s, r) => s + (parseInt(r.he_eggs)||0), 0), [shedRows])
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="VHL Bulk Daily Entry (Shed-wise)" subtitle="Enter each shed separately — combines into the VHL flock's daily record." />
+      <Card>
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex-1 min-w-48">
+            <Select label="VHL Flock" required placeholder="— Choose flock —"
+              options={(flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))}
+              value={flockId} onChange={e => setFlockId(e.target.value)} />
+          </div>
+          <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
+          <button type="button" onClick={() => setShowWastage(w => !w)}
+            className={`text-xs px-2 py-1.5 rounded border ${showWastage ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+            {showWastage ? '× Hide Wastage by Type' : '+ Wastage by Type'}
+          </button>
+        </div>
+      </Card>
+
+      {flockId && !sheds?.length && <EmptyState title="No sheds found for this flock's site" />}
+
+      {flockId && (sheds ?? []).map((shed: any) => {
+        const r = shedRows[shed.id] ?? emptyVhlShedRow()
+        const sv = (k: keyof VhlShedRow, v: string) => setShed(shed.id, k, v)
+        return (
+          <Card key={shed.id}>
+            <CardHeader title={`Shed ${shed.shed_no}${shed.shed_name ? ' — '+shed.shed_name : ''}`} />
+            <div className="space-y-3">
+              <FormRow cols={4}>
+                <Input label="Opening Female" type="number" value={r.opening_female} onChange={e => sv('opening_female', e.target.value)} />
+                <Input label="Opening Male" type="number" value={r.opening_male} onChange={e => sv('opening_male', e.target.value)} />
+                <Input label="Mortality Female" type="number" value={r.mortality_female} onChange={e => sv('mortality_female', e.target.value)} />
+                <Input label="Mortality Male" type="number" value={r.mortality_male} onChange={e => sv('mortality_male', e.target.value)} />
+              </FormRow>
+              <FormRow cols={4}>
+                <Input label="Transfer Female" type="number" value={r.transfer_female} onChange={e => sv('transfer_female', e.target.value)} />
+                <Input label="Transfer Male" type="number" value={r.transfer_male} onChange={e => sv('transfer_male', e.target.value)} />
+                <Input label="Cull Female" type="number" value={r.cull_female} onChange={e => sv('cull_female', e.target.value)} />
+                <Input label="Cull Male" type="number" value={r.cull_male} onChange={e => sv('cull_male', e.target.value)} />
+              </FormRow>
+              <FormRow cols={4}>
+                <Input label="Closing Female" type="number" disabled value={r.closing_female} />
+                <Input label="Closing Male" type="number" disabled value={r.closing_male} />
+              </FormRow>
+              <FormRow cols={4}>
+                <Input label="Female Feed (kg)" type="number" step="0.001" value={r.feed_female_kg} onChange={e => sv('feed_female_kg', e.target.value)} />
+                <Input label="Female Feed Type" value={r.feed_type_f} onChange={e => sv('feed_type_f', e.target.value)} />
+                <Input label="Male Feed (kg)" type="number" step="0.001" value={r.feed_male_kg} onChange={e => sv('feed_male_kg', e.target.value)} />
+                <Input label="Male Feed Type" value={r.feed_type_m} onChange={e => sv('feed_type_m', e.target.value)} />
+              </FormRow>
+              <FormRow cols={4}>
+                <Input label="HE" type="number" value={r.he_eggs} onChange={e => sv('he_eggs', e.target.value)} />
+                <Input label="JE" type="number" value={r.je_eggs} onChange={e => sv('je_eggs', e.target.value)} />
+                <Input label="TE" type="number" value={r.te_eggs} onChange={e => sv('te_eggs', e.target.value)} />
+                <Input label="BE" type="number" value={r.be_eggs} onChange={e => sv('be_eggs', e.target.value)} />
+              </FormRow>
+              <FormRow cols={4}>
+                <Input label="LE" type="number" value={r.le_eggs} onChange={e => sv('le_eggs', e.target.value)} />
+                <Input label="Lighting Hrs" type="number" step="0.5" value={r.lighting_hrs} onChange={e => sv('lighting_hrs', e.target.value)} />
+                <Input label="Remarks" value={r.remarks} onChange={e => sv('remarks', e.target.value)} />
+              </FormRow>
+              {showWastage && (
+                <FormRow cols={4}>
+                  <Input label="Wastage HE" type="number" value={r.wastage_he} onChange={e => sv('wastage_he', e.target.value)} />
+                  <Input label="Wastage JE" type="number" value={r.wastage_je} onChange={e => sv('wastage_je', e.target.value)} />
+                  <Input label="Wastage TE" type="number" value={r.wastage_te} onChange={e => sv('wastage_te', e.target.value)} />
+                  <Input label="Wastage BE" type="number" value={r.wastage_be} onChange={e => sv('wastage_be', e.target.value)} />
+                </FormRow>
+              )}
+            </div>
+          </Card>
+        )
+      })}
+
+      {flockId && (sheds ?? []).length > 0 && (
+        <Card>
+          <CardHeader title="HE Grade Breakdown (flock-level — after grading all sheds)" />
+          <FormRow cols={4}>
+            <Input label="Grade A" type="number" value={gradeRow.he_grade_a} onChange={e => setGradeRow(g => ({ ...g, he_grade_a: e.target.value }))} />
+            <Input label="Grade B" type="number" value={gradeRow.he_grade_b} onChange={e => setGradeRow(g => ({ ...g, he_grade_b: e.target.value }))} />
+            <Input label="Grade C" type="number" value={gradeRow.he_grade_c} onChange={e => setGradeRow(g => ({ ...g, he_grade_c: e.target.value }))} />
+            <div className="flex items-end pb-2 text-xs text-gray-500">
+              A+B+C: {gradeTotal} {heTotal ? `| Shed HE total: ${heTotal} ${gradeTotal === heTotal ? '✓' : `(diff ${heTotal-gradeTotal})`}` : ''}
+            </div>
+          </FormRow>
+        </Card>
+      )}
+
+      {flockId && (sheds ?? []).length > 0 && (
+        <div className="flex justify-end">
+          <Button icon={<Save size={16}/>} loading={saving} onClick={handleSave}>Save All Sheds</Button>
+        </div>
       )}
     </div>
   )

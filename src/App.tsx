@@ -41,7 +41,7 @@ import { CostOverviewPage, ElectricityCostPage, SalaryCostPage } from '@/pages/r
 import { PurchaseOrdersPage } from '@/pages/reports/POPages'
 import { SiteInvoicePage } from '@/pages/reports/SiteInvoicePage'
 import { BirdSalesReport } from '@/pages/reports/BirdSalesReport'
-import { VHLFlocksPage, VHLDailyEntryPage, VHLMedicineMasterPage, VHLMedicineUsagePage, VHLEggProductionPage } from '@/pages/vhl/VHLPages'
+import { VHLFlocksPage, VHLDailyEntryPage, VHLBulkDailyEntryPage, VHLMedicineMasterPage, VHLMedicineUsagePage, VHLEggProductionPage } from '@/pages/vhl/VHLPages'
 import { PendingPaymentsPage } from '@/pages/accounts/PendingPaymentsPage'
 import { PurchaseEntry } from '@/pages/purchases/PurchaseEntry'
 import { RateCompare } from '@/pages/purchases/RateCompare'
@@ -220,6 +220,7 @@ export const App: React.FC = () => {
             <Route path="reports/bird-sales" element={<BirdSalesReport />} />
             <Route path="vhl/flocks" element={<VHLFlocksPage />} />
             <Route path="vhl/daily-entry" element={<VHLDailyEntryPage />} />
+            <Route path="vhl/bulk-daily-entry" element={<VHLBulkDailyEntryPage />} />
             <Route path="vhl/egg-production" element={<VHLEggProductionPage />} />
             <Route path="vhl/medicine-master" element={<VHLMedicineMasterPage />} />
             <Route path="vhl/medicine-usage" element={<VHLMedicineUsagePage />} />
