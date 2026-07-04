@@ -97,6 +97,7 @@ function useFlocks() {
       const { data } = await supabase
         .from('flocks')
         .select('id,flock_no,breed,placement_date,paid_female,paid_male,free_female,free_male,chick_rate,chick_cost,status,close_date,total_placed_f,total_placed_m')
+        .eq('is_vhl_contract', false)
         .order('flock_no', { ascending: true })
       return (data ?? []) as FlockRow[]
     }

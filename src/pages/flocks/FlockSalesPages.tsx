@@ -638,7 +638,7 @@ export const HEDispatch: React.FC = () => {
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
     queryFn: async () => {
-      let q = supabase.from('flocks').select('id,flock_no,status,laying_farm_id,rearing_farm_id').order('flock_no')
+      let q = supabase.from('flocks').select('id,flock_no,status,laying_farm_id,rearing_farm_id').eq('is_vhl_contract', false).order('flock_no')
       q = applyFlockFarmFilter(q)
       const { data } = await q
       return data ?? []
@@ -3191,7 +3191,7 @@ export const MedicineEntry: React.FC = () => {
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
     queryFn: async () => {
-      let q = supabase.from('flocks').select('id,flock_no,laying_farm_id,rearing_farm_id').order('flock_no')
+      let q = supabase.from('flocks').select('id,flock_no,laying_farm_id,rearing_farm_id').eq('is_vhl_contract', false).order('flock_no')
       q = applyFlockFarmFilter(q)
       const { data } = await q; return data ?? []
     }
