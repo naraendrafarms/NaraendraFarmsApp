@@ -420,15 +420,58 @@ const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => 
   return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
 }
 
-const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean }> = ({ count, onDelete, onClear, loading }) => count === 0 ? null : (
+const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => void; loading?: boolean; extraAction?: React.ReactNode }> = ({ count, onDelete, onClear, loading, extraAction }) => count === 0 ? null : (
   <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
     <span className="text-sm font-medium text-red-700">{count} selected</span>
     <button onClick={onClear} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
-    <div className="ml-auto">
+    <div className="ml-auto flex items-center gap-2">
+      {extraAction}
       <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={loading} onClick={onDelete}>Delete {count} rows</Button>
     </div>
   </div>
 )
+
+// ── Consolidate to Invoice ──────────────────────────────────────────
+// Stamps ONE shared invoice number across many selected rows — e.g. a
+// month's worth of daily dispatches to the same buyer, or C-grade eggs
+// from several different flocks that go out on a single invoice.
+const ConsolidateInvoiceModal: React.FC<{
+  open: boolean; ids: string[]; table: 'nhe_sales' | 'he_dispatch'; onClose: () => void; onSaved: () => void
+}> = ({ open, ids, table, onClose, onSaved }) => {
+  const [invoiceNo, setInvoiceNo] = useState('')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { if (open) setInvoiceNo('') }, [open])
+  if (!open) return null
+
+  const handleSave = async () => {
+    if (!invoiceNo.trim()) { toast.error('Enter an invoice number'); return }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from(table).update({ invoice_no: invoiceNo.trim() }).in('id', ids)
+      if (error) throw error
+      toast.success(`Invoice ${invoiceNo.trim()} applied to ${ids.length} rows`)
+      onSaved()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <h3 className="font-semibold text-gray-900">Consolidate to One Invoice</h3>
+        <p className="text-xs text-gray-500">Stamps the same invoice number on all {ids.length} selected rows — e.g. a month's daily dispatches, or several flocks' eggs going out on one invoice.</p>
+        <Input label="Invoice No" value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="e.g. INV/2026-27/0142" />
+        <div className="flex gap-2 pt-2">
+          <Button onClick={handleSave} loading={saving} className="flex-1">Apply to {ids.length} rows</Button>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -566,6 +609,7 @@ export const HEDispatch: React.FC = () => {
   const [toDate, setToDate] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [consolidateOpen, setConsolidateOpen] = useState(false)
   const [importing, setImporting] = useState(false)
   const [noInvoiceOnly, setNoInvoiceOnly] = useState(false)
   const [hePartyFilter, setHePartyFilter] = useState('')
@@ -1225,7 +1269,8 @@ export const HEDispatch: React.FC = () => {
         </div>
       )}
 
-      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)}
+        extraAction={sel.size > 1 ? <Button variant="outline" size="sm" onClick={() => setConsolidateOpen(true)}>Consolidate to Invoice</Button> : undefined} />
 
       {tab === 'dispatch' && (isLoading ? <Spinner /> : (
         <Card padding={false}>
@@ -1423,6 +1468,10 @@ export const HEDispatch: React.FC = () => {
         <ConfirmBulkDelete label={`Delete ${sel.size} HE dispatch records? This cannot be undone.`}
           onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
+
+      <ConsolidateInvoiceModal open={consolidateOpen} ids={[...sel]} table="he_dispatch"
+        onClose={() => setConsolidateOpen(false)}
+        onSaved={() => { setConsolidateOpen(false); setSel(new Set()); qc.invalidateQueries({ queryKey: ['he_dispatch'] }) }} />
 
       <ReceivePaymentModal
         open={!!receiptSale}
@@ -1797,6 +1846,7 @@ export const NHESales: React.FC = () => {
   const [toDate, setToDate]       = useState('')
   const [sel, setSel]             = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [consolidateOpen, setConsolidateOpen] = useState(false)
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [receiptSale, setReceiptSale] = useState<any>(null)
@@ -2710,7 +2760,8 @@ export const NHESales: React.FC = () => {
         </div>
       )}
 
-      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+      <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)}
+        extraAction={sel.size > 1 ? <Button variant="outline" size="sm" onClick={() => setConsolidateOpen(true)}>Consolidate to Invoice</Button> : undefined} />
 
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
@@ -2809,6 +2860,10 @@ export const NHESales: React.FC = () => {
         <ConfirmBulkDelete label={`Delete ${sel.size} NHE/bird sale records? This cannot be undone.`}
           onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
       )}
+
+      <ConsolidateInvoiceModal open={consolidateOpen} ids={[...sel]} table="nhe_sales"
+        onClose={() => setConsolidateOpen(false)}
+        onSaved={() => { setConsolidateOpen(false); setSel(new Set()); qc.invalidateQueries({ queryKey: ['nhe_sales'] }) }} />
 
       <ReceivePaymentModal
         open={!!receiptSale}
