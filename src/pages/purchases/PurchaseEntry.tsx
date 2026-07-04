@@ -27,11 +27,16 @@ const toCbMode = (mode: string) => {
 }
 type Cat = typeof CATEGORIES[number]
 
-// Which existing master a new item of this category should be created in
-const masterFor = (cat: Cat) =>
-  cat === 'Feed' ? 'feed_ingredients'
-  : cat === 'Medicine' ? 'medicines_master'
-  : 'general_items'
+// Maps a Purchase Entry category to the unified items.category value.
+// Previously this pointed at the legacy feed_ingredients/medicines_master/
+// general_items tables — new items created there never appeared in Items
+// Master, GRN, or Inventory (which all read the unified `items` table),
+// the same root cause as the GRN FK crash fixed earlier this session.
+const itemCategoryFor = (cat: Cat) =>
+  cat === 'Feed' ? 'Feed Ingredient'
+  : cat === 'Medicine' ? 'Medicine'
+  : cat === 'Equipment' ? 'Equipment'
+  : 'Other'
 
 export const PurchaseEntry: React.FC = () => {
   const qc = useQueryClient()
@@ -345,10 +350,8 @@ export const PurchaseEntry: React.FC = () => {
   const addItemMut = useMutation({
     mutationFn: async () => {
       if (!newItemName.trim()) throw new Error('Item name required')
-      const table = masterFor(form.category)
-      const payload: any = { name: newItemName.trim(), unit: newItemUnit || form.unit }
-      if (table === 'general_items') payload.category = form.category
-      const { data, error } = await supabase.from(table).insert(payload).select('id,name').single()
+      const payload: any = { name: newItemName.trim(), unit: newItemUnit || form.unit, category: itemCategoryFor(form.category) }
+      const { data, error } = await supabase.from('items').insert(payload).select('id,name').single()
       if (error) throw error
       return data
     },

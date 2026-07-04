@@ -209,11 +209,15 @@ export const GRNPage: React.FC = () => {
     unit: form.unit || null,
     bags: parseInt(form.bags) || null,
     price_per_unit: parseFloat(form.price_per_unit) || null,
-    basic_amount: parseFloat(form.basic_amount) || basicCalc || null,
+    // The live qty×rate calculation now wins over the stored/manually-typed
+    // value whenever it's available — previously the stored value (which
+    // stays populated on edit even after qty/rate change) always won,
+    // silently saving stale amounts when a GRN's quantity was corrected.
+    basic_amount: (basicCalc > 0 ? basicCalc : parseFloat(form.basic_amount)) || null,
     gst_pct: parseFloat(form.gst_pct) || 0,
-    gst_amount: parseFloat(form.gst_amount) || (gstCalc > 0 ? +gstCalc.toFixed(2) : null),
+    gst_amount: (gstCalc > 0 ? +gstCalc.toFixed(2) : parseFloat(form.gst_amount)) || null,
     other_charges: otherCharges || null,
-    total_amount: parseFloat(form.total_amount) || totalCalc || null,
+    total_amount: (totalCalc > 0 ? totalCalc : parseFloat(form.total_amount)) || null,
     batch_no: needsBatch ? (form.batch_no || null) : null,
     expiry_date: needsBatch ? (form.expiry_date || null) : null,
     flock_id: (isChick || needsBatch) ? (form.flock_id || null) : null,

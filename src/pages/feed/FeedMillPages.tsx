@@ -834,8 +834,14 @@ const ProductionTab: React.FC = () => {
         logData.id = inserted.id
       }
       if (ings?.length) {
-        // Resolve ingredient IDs so raw-material stock is properly decremented
-        const { data: ingrMaster } = await supabase.from('feed_ingredients').select('id,name,code')
+        // Resolve item IDs so raw-material stock is properly decremented.
+        // Previously looked up the legacy feed_ingredients table — any
+        // ingredient added after the items-table unification (migration 151)
+        // only exists in `items`, so it silently failed to resolve here
+        // (same root cause as the GRN FK crash fixed earlier). Resolve
+        // against `items` and write item_id (which FKs to items, not the
+        // legacy ingredient_id which FKs to feed_ingredients).
+        const { data: ingrMaster } = await supabase.from('items').select('id,name,code').eq('category', 'Feed Ingredient')
         const byName: Record<string, string> = {}
         const byCode: Record<string, string> = {}
         for (const fi of (ingrMaster ?? [])) {
@@ -844,8 +850,8 @@ const ProductionTab: React.FC = () => {
         }
         const rows = ings.map((i: any) => {
           const key = (i.ingredient_name ?? '').toLowerCase().trim()
-          const ingredient_id = byName[key] ?? byCode[key] ?? null
-          return { production_id: logData.id, ingredient_name: i.ingredient_name, quantity_kg: i.quantity_kg, ingredient_id }
+          const item_id = byName[key] ?? byCode[key] ?? null
+          return { production_id: logData.id, ingredient_name: i.ingredient_name, quantity_kg: i.quantity_kg, item_id }
         })
         const { error: ingErr } = await supabase.from('feed_production_ingredients').insert(rows)
         if (ingErr) throw new Error('Production saved, but ingredients failed: ' + (ingErr.message || ingErr.details))
