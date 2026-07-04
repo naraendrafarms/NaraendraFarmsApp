@@ -7,6 +7,7 @@ import {
 , DateInput } from '@/components/ui'
 import { Download, ChevronDown, ChevronRight, IndianRupee } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import toast from 'react-hot-toast'
 import { ReceivePaymentModal } from '@/pages/flocks/FlockSalesPages'
 
 // ── FY helper ─────────────────────────────────────────────────────
@@ -16,9 +17,15 @@ function fyRange(fy: string): [string, string] {
 }
 
 // ── AGING BUCKET ──────────────────────────────────────────────────
+// Parse the due date at LOCAL midnight — new Date('YYYY-MM-DD') is UTC
+// midnight, which shifted bucket boundaries by ~5.5h in IST.
+function localMidnight(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d).getTime()
+}
 function agingBucket(dueDate: string | null): string {
   if (!dueDate) return 'Not Due'
-  const days = Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000)
+  const days = Math.floor((Date.now() - localMidnight(dueDate)) / 86400000)
   if (days < 0) return 'Not Due'
   if (days <= 30) return '0-30d'
   if (days <= 60) return '31-60d'
@@ -28,7 +35,7 @@ function agingBucket(dueDate: string | null): string {
 
 function daysOverdue(dueDate: string | null): number | null {
   if (!dueDate) return null
-  const d = Math.floor((Date.now() - new Date(dueDate).getTime()) / 86400000)
+  const d = Math.floor((Date.now() - localMidnight(dueDate)) / 86400000)
   return d > 0 ? d : null
 }
 
@@ -67,7 +74,10 @@ const DebtorsTab: React.FC = () => {
       if (dateFrom) q = q.gte('dispatch_date', dateFrom)
       if (dateTo)   q = q.lte('dispatch_date', dateTo)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
-      const { data } = await q.limit(2000)
+      // Descending order + a low limit silently truncated the OLDEST unpaid
+      // sales — exactly what a receivables report must show
+      const { data } = await q.limit(10000)
+      if ((data ?? []).length === 10000) toast.error('HE dispatch results truncated at 10,000 rows — totals may be understated')
       return data ?? []
     }
   })
@@ -83,7 +93,8 @@ const DebtorsTab: React.FC = () => {
       if (dateFrom) q = q.gte('sale_date', dateFrom)
       if (dateTo)   q = q.lte('sale_date', dateTo)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
-      const { data } = await q.limit(2000)
+      const { data } = await q.limit(10000)
+      if ((data ?? []).length === 10000) toast.error('NHE sales results truncated at 10,000 rows — totals may be understated')
       return data ?? []
     }
   })
@@ -316,13 +327,16 @@ const CreditorsTab: React.FC = () => {
     return payments.filter((p: any) => p.payment_status === statusFilter)
   }, [payments, statusFilter])
 
-  // Aging buckets
+  // Aging buckets — net each bill against partial payments already made
+  // (the full invoice amount used to be bucketed even when mostly paid)
   const aging = useMemo(() => {
     const buckets: Record<string, number> = { 'Not Due': 0, '0-30d': 0, '31-60d': 0, '61-90d': 0, '90d+': 0 }
     for (const p of (payments ?? [])) {
       if (p.payment_status === 'Paid') continue
+      const bal = Math.max(0, (p.net_payable ?? p.invoice_amount ?? 0) - (p.paid_amount ?? 0))
+      if (bal <= 0) continue
       const b = agingBucket(p.pay_before_date)
-      buckets[b] = (buckets[b] ?? 0) + (p.net_payable ?? p.invoice_amount ?? 0)
+      buckets[b] = (buckets[b] ?? 0) + bal
     }
     return buckets
   }, [payments])

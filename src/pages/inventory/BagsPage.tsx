@@ -173,6 +173,11 @@ const BalanceTab: React.FC<{ farms: any[] }> = ({ farms }) => {
     const sld = (sold as any)[f.id] ?? 0
     return { name: f.name, received: rec, sold: sld, balance: rec - sld }
   })
+  // GRNs/sales with no farm accumulate under '_none' — previously invisible
+  // in this table, so those bags vanished from every balance
+  const noneRec = (received as any)['_none'] ?? 0
+  const noneSld = (sold as any)['_none'] ?? 0
+  if (noneRec || noneSld) rows.push({ name: 'No farm / Head Office', received: noneRec, sold: noneSld, balance: noneRec - noneSld })
   const totals = rows.reduce((acc: any, r: any) => ({ received: acc.received + r.received, sold: acc.sold + r.sold, balance: acc.balance + r.balance }), { received: 0, sold: 0, balance: 0 })
 
   return (

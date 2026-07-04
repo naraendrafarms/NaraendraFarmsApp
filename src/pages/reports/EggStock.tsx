@@ -26,10 +26,12 @@ export const EggStockPage: React.FC = () => {
   const { data: flocks, isLoading: flocksLoading } = useQuery({
     queryKey: ['egg_stock_flocks'],
     queryFn: async () => {
+      // Closed flocks are included — a flock closed while still holding
+      // unsold eggs used to vanish from the register entirely, breaking the
+      // opening + received − sold − wastage reconciliation at farm level.
       const { data } = await supabase
         .from('flocks')
         .select('id, flock_no, status, farms!laying_farm_id(name)')
-        .neq('status', 'closed')
         .order('flock_no')
       return data ?? []
     }
@@ -310,7 +312,7 @@ export const EggStockPage: React.FC = () => {
       })
   }, [flocks, flockFilter, dailyRecs, heDisp, nheSales, openingStock, fromDate, toDate])
 
-  const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))
+  const flockOptions = (flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}${f.status === 'closed' ? ' (closed)' : ''}` }))
 
   // Day-wise view when a single flock is selected
   const dayRows = useMemo(() => {
