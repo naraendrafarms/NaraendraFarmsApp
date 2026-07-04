@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, SectionHeader, Spinner, EmptyState, Table, Th, Td, DateInput, SearchableSelect } from '@/components/ui'
 import { Download, Bird } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 const isBirdSale = (t: string) => t === 'bird_sale' || ['bird_cull','bird_lame','bird_weak','bird_sex_error'].includes(t)
 
@@ -42,7 +43,7 @@ export const BirdSalesReport: React.FC = () => {
       if (fromDate) q = q.gte('sale_date', fromDate)
       if (toDate) q = q.lte('sale_date', toDate)
       const { data, error } = await q
-      if (error) { console.error(error); return [] }
+      if (error) { toast.error(error.message); return [] }
       return data ?? []
     }
   })
