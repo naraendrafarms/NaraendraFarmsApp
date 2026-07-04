@@ -275,9 +275,26 @@ export const EmployeeList: React.FC = () => {
     }))
 
     if (!toUpsert.length) { toast.error('No valid rows'); return }
-    const { error } = await supabase.from('employees').upsert(toUpsert, { onConflict: 'emp_id', ignoreDuplicates: false })
-    if (error) { toast.error(error.message); return }
-    toast.success(`Imported ${toUpsert.length} employees`)
+    // Rows without emp_id bypass the emp_id conflict key and would re-insert
+    // as duplicates on every re-import — match those by exact name instead.
+    const withId = toUpsert.filter(r => r.emp_id)
+    const withoutId = toUpsert.filter(r => !r.emp_id)
+    let skippedNoId = 0
+    if (withId.length) {
+      const { error } = await supabase.from('employees').upsert(withId, { onConflict: 'emp_id', ignoreDuplicates: false })
+      if (error) { toast.error(error.message); return }
+    }
+    if (withoutId.length) {
+      const { data: existingEmps } = await supabase.from('employees').select('name').is('emp_id', null)
+      const existingNames = new Set((existingEmps ?? []).map((e: any) => (e.name ?? '').trim().toLowerCase()))
+      const fresh = withoutId.filter(r => !existingNames.has(r.name.trim().toLowerCase()))
+      skippedNoId = withoutId.length - fresh.length
+      if (fresh.length) {
+        const { error } = await supabase.from('employees').insert(fresh)
+        if (error) { toast.error(error.message); return }
+      }
+    }
+    toast.success(`Imported ${withId.length + withoutId.length - skippedNoId} employees${skippedNoId ? ` (${skippedNoId} no-ID duplicate(s) skipped)` : ''}`)
     qc.invalidateQueries({ queryKey: ['employees'] })
     if (importRef.current) importRef.current.value = ''
   }
@@ -784,7 +801,7 @@ function computeSalaryForEmp(emp: any, opts: {
   const totalEarning = grossEarning + extraPay
 
   const esiEmp = emp.esi_applicable ? Math.ceil(basicEarned * 0.0075) : 0
-  const esiEr  = emp.esi_applicable ? Math.round(basicEarned * 0.0325) : 0
+  const esiEr  = emp.esi_applicable ? Math.ceil(basicEarned * 0.0325) : 0 // ESIC rounds both shares UP
 
   const pfBase  = emp.pf_applicable ? (emp.restrict_pf ? Math.min(basicEarned, 15000) : basicEarned) : 0
   const pfEmp   = emp.pf_applicable ? Math.round(pfBase * 0.12) : 0
@@ -904,7 +921,7 @@ export const SalaryEntryPage: React.FC = () => {
         const gross   = comp.gross
         // ESI on BASIC (farm practice), matching computeSalaryForEmp
         const esi_emp = e.esi_applicable ? Math.ceil(basicC * 0.0075) : 0
-        const esi_er  = e.esi_applicable ? Math.round(basicC * 0.0325) : 0
+        const esi_er  = e.esi_applicable ? Math.ceil(basicC * 0.0325) : 0
         // PF on Basic, capped at the ₹15,000 wage ceiling when restrict_pf is set
         const pfBase  = e.pf_applicable ? (e.restrict_pf ? Math.min(basicC, 15000) : basicC) : 0
         const pf_emp  = Math.round(pfBase * 0.12)
@@ -1119,7 +1136,7 @@ export const SalaryEntryPage: React.FC = () => {
 
     // ESI on Basic earned
     const esiEmp = emp.esi_applicable ? Math.ceil(basicEarned * 0.0075) : 0
-    const esiEr  = emp.esi_applicable ? Math.round(basicEarned * 0.0325) : 0
+    const esiEr  = emp.esi_applicable ? Math.ceil(basicEarned * 0.0325) : 0 // ESIC rounds both shares UP
 
     // PF on Basic (capped at 15000 if restrict_pf)
     const pfBase   = emp.pf_applicable ? (emp.restrict_pf ? Math.min(basicEarned, 15000) : basicEarned) : 0
@@ -1383,11 +1400,22 @@ export const SalaryEntryPage: React.FC = () => {
         remarks: r.remarks||null,
       }
     }).filter(r=>r.employee_id)
+      // Reject malformed months before they insert bad dates
+      .filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.month))
 
-    if (!toUpsert.length) { toast.error('No valid rows (emp_id not found)'); return }
-    const { error } = await supabase.from('salary_monthly').upsert(toUpsert, { onConflict: 'employee_id,month' })
+    if (!toUpsert.length) { toast.error('No valid rows (emp_id not found or month not YYYY-MM)'); return }
+    // Never overwrite an already-Paid month from a bulk import — the linked
+    // Cash Book/Bank Ledger entry would silently stop matching the salary.
+    const monthsInFile=[...new Set(toUpsert.map(r=>r.month))]
+    const { data: paidRows } = await supabase.from('salary_monthly')
+      .select('employee_id,month').eq('is_paid',true).in('month',monthsInFile)
+    const paidKeys=new Set((paidRows??[]).map((p:any)=>`${p.employee_id}|${p.month}`))
+    const importable=toUpsert.filter(r=>!paidKeys.has(`${r.employee_id}|${r.month}`))
+    const skippedPaid=toUpsert.length-importable.length
+    if (!importable.length) { toast.error(`Nothing imported — all ${skippedPaid} row(s) are already marked Paid`); return }
+    const { error } = await supabase.from('salary_monthly').upsert(importable, { onConflict: 'employee_id,month' })
     if (error) { toast.error(error.message); return }
-    toast.success(`Imported ${toUpsert.length} records`)
+    toast.success(`Imported ${importable.length} records${skippedPaid?` (${skippedPaid} already-Paid row(s) skipped, unchanged)`:''}`)
     qc.invalidateQueries({ queryKey: ['salary_monthly_detail','salary_fy_summary'] })
     if (importRef.current) importRef.current.value = ''
   }
@@ -1583,7 +1611,14 @@ export const SalaryEntryPage: React.FC = () => {
                 onChange={e=>{ s('employee_id',e.target.value); const emp=employees?.find((x:any)=>x.id===e.target.value); if(emp) s('gross_rate', emp.base_salary?.toString()??'') }}/>
             </FormRow>
             <FormRow>
-              <Input label="Month" required type="month" value={form.month} onChange={e=>s('month',e.target.value)}/>
+              <Input label="Month" required type="month" value={form.month} onChange={e=>{
+                const v=e.target.value
+                // Default month_days to the real calendar length (was always 30) — still user-overridable
+                const [yy,mm]=v.split('-').map(Number)
+                const realDays=yy&&mm?new Date(yy,mm,0).getDate():30
+                setForm(f=>({...f,month:v,month_days:String(realDays)}))
+                calcPayroll({month:v,month_days:String(realDays)})
+              }}/>
               <div className="flex items-end">
                 <Button variant="secondary" size="sm" onClick={autoFillFromAttendance}>📋 Auto-fill Attendance</Button>
               </div>
@@ -1720,7 +1755,10 @@ export const BonusPage: React.FC = () => {
   const importRef = useRef<HTMLInputElement>(null)
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
-  const {data:employees}=useQuery({queryKey:['employees',filterFarm],queryFn:async()=>{let q=supabase.from('employees').select('id,name,emp_id,farms(name,code)').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false });if(filterFarm)q=q.eq('farm_id',filterFarm);const{data}=await q;return data??[]}})
+  // Distinct cache key — this active-only 4-column list previously shared
+  // ['employees', farm] with the main employee page's full-column query,
+  // poisoning whichever loaded second.
+  const {data:employees}=useQuery({queryKey:['employees_bonus_picker',filterFarm],queryFn:async()=>{let q=supabase.from('employees').select('id,name,emp_id,farms(name,code)').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false });if(filterFarm)q=q.eq('farm_id',filterFarm);const{data}=await q;return data??[]}})
   const {data:bonuses,isLoading}=useQuery({queryKey:['bonuses'],queryFn:async()=>{const{data}=await supabase.from('bonus').select('*, employees!employee_id(name,emp_id,farms(name,code))').order('paid_date',{ascending:false});return data??[]}})
 
   const mut=useMutation({
@@ -2333,7 +2371,9 @@ export const AttendanceRegisterPage: React.FC = () => {
     if (!editCell) return
     setSavingCell(true)
     const entry = empMap[editCell.empId]?.months[editCell.month]
-    const days = parseInt(editCell.days) || null
+    // Preserve an entered 0 ("|| null" treated it as no-data) and clamp 0-31
+    const parsed = editCell.days === '' ? null : parseInt(editCell.days)
+    const days = parsed == null || isNaN(parsed) ? null : Math.min(31, Math.max(0, parsed))
     if (entry?.id) {
       await supabase.from('salary_monthly').update({ days_worked: days }).eq('id', entry.id)
     }
