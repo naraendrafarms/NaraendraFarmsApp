@@ -14,7 +14,7 @@ import {
 import {
   ShoppingCart, Clock, CheckCircle, AlertCircle, Plus, Pencil, Trash2,
   TrendingUp, Download, PackageCheck, BarChart3, Upload, LineChart,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Printer
 } from 'lucide-react'
 import {
   LineChart as ReLineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -33,6 +33,142 @@ const FY_OPTIONS   = [{ value:'2024-25',label:'FY 2024-25'},{ value:'2025-26',la
 const STATUS_CLS: Record<string,string> = {
   Received: 'bg-green-100 text-green-700', Pending: 'bg-yellow-100 text-yellow-700',
   HOLD: 'bg-red-100 text-red-700', Paid: 'bg-blue-100 text-blue-700', 'Not Paid': 'bg-orange-100 text-orange-700',
+}
+
+// ── PO print (company letterhead format) ──────────────────────────
+const COMPANY = {
+  name: 'Naraendra Farms',
+  addr1: '5-9-22/21, JVR Amrit Enclave, Roshanlal Residency,',
+  addr2: 'Adarsh Nagar, Hyderabad - 500063',
+}
+
+// Amount in words, Indian numbering (rupees only, rounded)
+function amountInWords(n: number): string {
+  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen']
+  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety']
+  const two = (x: number): string => x < 20 ? ones[x] : `${tens[Math.floor(x / 10)]}${x % 10 ? ' ' + ones[x % 10] : ''}`
+  const three = (x: number): string => x >= 100 ? `${ones[Math.floor(x / 100)]} Hundred${x % 100 ? ' ' + two(x % 100) : ''}` : two(x)
+  let x = Math.round(Math.abs(n))
+  if (x === 0) return 'Zero Rupees'
+  const parts: string[] = []
+  const crore = Math.floor(x / 10000000); x %= 10000000
+  const lakh = Math.floor(x / 100000); x %= 100000
+  const thousand = Math.floor(x / 1000); x %= 1000
+  if (crore) parts.push(`${two(crore)} Crore`)
+  if (lakh) parts.push(`${two(lakh)} Lakh`)
+  if (thousand) parts.push(`${two(thousand)} Thousand`)
+  if (x) parts.push(three(x))
+  return `${parts.join(' ')} Rupees Only`
+}
+
+const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// Renders a formal PO document into a hidden iframe and prints it — same
+// isolated-iframe approach as the shared Modal's print, so nothing from the
+// live page bleeds into the output.
+function printPurchaseOrder(items: any[], party: any | null) {
+  if (!items.length) return
+  const first = items[0]
+  const rows = items.map((o: any, i: number) => {
+    const basic = (Number(o.quantity) || 0) * (Number(o.rate) || 0)
+    return `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${esc(o.item_name)}</td>
+      <td>${esc(o.material_type)}</td>
+      <td class="r">${o.quantity != null ? Number(o.quantity).toLocaleString('en-IN') : ''}</td>
+      <td class="c">${esc(o.unit)}</td>
+      <td class="r">${o.rate != null ? Number(o.rate).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}</td>
+      <td class="r">${o.gst_pct != null ? o.gst_pct + '%' : ''}</td>
+      <td class="r">${basic ? basic.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}</td>
+      <td class="r">${o.total_amount != null ? Number(o.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : ''}</td>
+    </tr>`
+  }).join('')
+  const basicTotal = items.reduce((s, o) => s + (Number(o.quantity) || 0) * (Number(o.rate) || 0), 0)
+  const grandTotal = items.reduce((s, o) => s + (Number(o.total_amount) || 0), 0)
+  const gstTotal = Math.max(0, grandTotal - basicTotal)
+
+  const html = `<!doctype html><html><head><title>PO ${esc(first.po_no)}</title><style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #111; padding: 24px; }
+    .head { text-align: center; border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 12px; }
+    .head h1 { font-size: 20px; letter-spacing: .5px; }
+    .head p { font-size: 11px; color: #333; }
+    .doc-title { text-align: center; font-size: 14px; font-weight: bold; text-decoration: underline; margin: 10px 0 14px; }
+    .meta { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+    .meta .box { border: 1px solid #999; padding: 8px 10px; flex: 1; }
+    .meta .box b { display: block; font-size: 10px; text-transform: uppercase; color: #555; margin-bottom: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    th, td { border: 1px solid #999; padding: 5px 7px; }
+    th { background: #f0f0f0; font-size: 11px; text-transform: uppercase; }
+    td.c { text-align: center; } td.r { text-align: right; }
+    tfoot td { font-weight: bold; }
+    .words { border: 1px solid #999; padding: 8px 10px; margin-bottom: 14px; font-style: italic; }
+    .terms { font-size: 11px; color: #333; margin-bottom: 40px; }
+    .terms b { display: block; margin-bottom: 3px; }
+    .sign { display: flex; justify-content: space-between; margin-top: 50px; }
+    .sign div { text-align: center; width: 200px; border-top: 1px solid #111; padding-top: 5px; font-size: 11px; }
+    @media print { body { padding: 8px; } }
+  </style></head><body>
+    <div class="head">
+      <h1>${esc(COMPANY.name)}</h1>
+      <p>${esc(COMPANY.addr1)}</p>
+      <p>${esc(COMPANY.addr2)}</p>
+    </div>
+    <div class="doc-title">PURCHASE ORDER</div>
+    <div class="meta">
+      <div class="box">
+        <b>To (Vendor)</b>
+        <div style="font-weight:bold">${esc(first.vendor_name)}</div>
+        ${party?.address ? `<div>${esc(party.address)}</div>` : ''}
+        ${party?.gstin ? `<div>GSTIN: ${esc(party.gstin)}</div>` : ''}
+        ${party?.contact ? `<div>Contact: ${esc(party.contact)}</div>` : ''}
+      </div>
+      <div class="box" style="max-width:220px">
+        <b>PO Details</b>
+        <div>PO No: <strong>${esc(first.po_no)}</strong></div>
+        <div>PO Date: ${first.po_date ? fmtDate(first.po_date) : '—'}</div>
+        <div>FY: ${esc(first.fiscal_year)}</div>
+        ${first.credit_limit_days ? `<div>Credit Days: ${esc(first.credit_limit_days)}</div>` : ''}
+      </div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>#</th><th>Item Description</th><th>Type</th><th>Qty</th><th>Unit</th>
+        <th>Rate (Rs)</th><th>GST%</th><th>Basic (Rs)</th><th>Total (Rs)</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td colspan="7" class="r">Basic Total</td><td class="r">${basicTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td></td></tr>
+        <tr><td colspan="7" class="r">GST</td><td class="r">${gstTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td><td></td></tr>
+        <tr><td colspan="8" class="r">GRAND TOTAL</td><td class="r">${grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td></tr>
+      </tfoot>
+    </table>
+    <div class="words"><b>Amount in words:</b> ${amountInWords(grandTotal)}</div>
+    <div class="terms">
+      <b>Terms &amp; Conditions</b>
+      1. Please mention the PO number on all invoices, delivery challans and correspondence.<br/>
+      2. Material must match the specifications above; rejected material will be returned at vendor's cost.<br/>
+      3. Invoice to be raised in the name of ${esc(COMPANY.name)}.
+    </div>
+    <div class="sign">
+      <div>Prepared By</div>
+      <div>Approved By</div>
+      <div>For ${esc(COMPANY.name)}</div>
+    </div>
+  </body></html>`
+
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'fixed'
+  iframe.style.right = '100%'
+  document.body.appendChild(iframe)
+  const doc = iframe.contentWindow?.document
+  if (!doc) { document.body.removeChild(iframe); return }
+  doc.open(); doc.write(html); doc.close()
+  iframe.onload = () => {
+    iframe.contentWindow?.focus()
+    iframe.contentWindow?.print()
+    setTimeout(() => document.body.removeChild(iframe), 2000)
+  }
 }
 
 // ── small helpers ─────────────────────────────────────────────────
@@ -152,6 +288,21 @@ const POTab: React.FC = () => {
   const setVendorParty = (partyId: string) => {
     const p = parties.find((x: any) => x.id === partyId)
     setForm((f: any) => ({ ...f, party_id: partyId, vendor_name: p?.name ?? f.vendor_name }))
+  }
+
+  // Print a full PO (all its line items) on company letterhead. Vendor
+  // address/GSTIN/contact come from the Parties master when linkable.
+  const handlePrintPO = async (items: any[]) => {
+    const first = items[0]
+    let party: any = null
+    if (first?.party_id) {
+      const { data } = await supabase.from('parties').select('name,address,gstin,contact').eq('id', first.party_id).maybeSingle()
+      party = data
+    } else if (first?.vendor_name) {
+      const { data } = await supabase.from('parties').select('name,address,gstin,contact').ilike('name', first.vendor_name.trim()).limit(1)
+      party = data?.[0] ?? null
+    }
+    printPurchaseOrder(items, party)
   }
   const rf = (k: string) => (e: any) => setReceiptForm((p: any) => ({...p,[k]:e.target.value}))
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
@@ -500,6 +651,7 @@ const POTab: React.FC = () => {
                   <Td><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[o.material_status] ?? 'bg-gray-100 text-gray-500'}`}>{o.material_status ?? '—'}</span></Td>
                   <Td>
                     <div className="flex gap-1">
+                      <button onClick={() => handlePrintPO(filtered.filter((x: any) => x.po_no === o.po_no && x.vendor_name === o.vendor_name))} className="p-1 text-gray-500 hover:text-gray-800" title="Print Purchase Order (all items of this PO)"><Printer size={13}/></button>
                       {canEdit && <button onClick={() => openEdit(o)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit"><Pencil size={13}/></button>}
                       {canEdit && o.material_status !== 'Received' && (
                         <button onClick={() => { setReceiptPO(o); setReceiptForm({ receipt_date: today(), qty_received: String(o.quantity||''), unit: o.unit||'', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', farm_id: '', remarks: '' }); setReceiptOpen(true) }}
@@ -550,6 +702,7 @@ const POTab: React.FC = () => {
                 <span className="font-semibold text-sm text-gray-900">{inr(groupTotal)}</span>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[worstStatus] ?? 'bg-gray-100 text-gray-500'}`}>{worstStatus}</span>
                 <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => handlePrintPO(items)} className="p-1 text-gray-500 hover:text-gray-800" title="Print Purchase Order"><Printer size={13}/></button>
                   {canEdit && <button onClick={() => openEdit(first)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit PO"><Pencil size={13}/></button>}
                   {canEdit && <button onClick={() => { setEditing(null); setForm({...EMPTY_PO, fiscal_year: fy, po_no: first.po_no, vendor_name: first.vendor_name}); setOpen(true) }} className="p-1 text-green-500 hover:text-green-700" title="Add item to PO"><Plus size={13}/></button>}
                 </div>
