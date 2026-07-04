@@ -175,6 +175,7 @@ const NAV: NavItem[] = [
     roles: ['admin'],
     children: [
       { label: 'Setup Overview',          to: '/admin' },
+      { label: 'Company Profile',         to: '/admin?tab=company' },
       { label: 'Masters',                 to: '/admin?tab=masters' },
       { label: 'Flock–Shed Assignment',   to: '/admin?tab=flocks' },
       { label: 'Electricity Allocation',  to: '/admin?tab=electricity' },
