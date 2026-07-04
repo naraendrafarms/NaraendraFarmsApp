@@ -277,7 +277,15 @@ const EnterRemuneration: React.FC = () => {
     setSaving(true)
     try {
       const monthEnd = lastDayOfMonth(month)
+      // Re-saving previously deleted ALL existing rows for the month —
+      // including ones already marked Paid — then reinserted everything as
+      // fresh 'Pending' rows. That orphaned the Paid rows' Cash Book/Bank
+      // Ledger entries (which pointed at the now-deleted pending_payment_id)
+      // and reset their status, so marking the "new" row Paid again would
+      // double-post the payment. Skip any partner already Paid this month.
+      const alreadyPaidPartnerIds = new Set((existing as any[]).filter(e => e.payment_status === 'Paid').map(e => e.partner_id))
       const rows = (partners as any[])
+        .filter((p: any) => !alreadyPaidPartnerIds.has(p.id))
         .map((p: any) => ({ p, ...calcRow(p.id) }))
         .filter(r => r.amt > 0)
         .map(r => ({
@@ -296,17 +304,20 @@ const EnterRemuneration: React.FC = () => {
           pay_before_date: monthEnd,
           po_raised_by: 'Hyderabad',
         }))
-      if (!rows.length) { toast.error('Enter at least one amount'); setSaving(false); return }
+      if (!rows.length && !alreadyPaidPartnerIds.size) { toast.error('Enter at least one amount'); setSaving(false); return }
 
-      // Delete existing remuneration rows for this month first (avoid duplicates), then insert
-      const ids = (existing as any[]).map(e => e.id)
+      // Delete only the non-Paid existing rows for this month, then insert fresh
+      const ids = (existing as any[]).filter(e => e.payment_status !== 'Paid').map(e => e.id)
       if (ids.length) { await supabase.from('pending_payments').delete().in('id', ids) }
-      const { error } = await supabase.from('pending_payments').insert(rows)
-      if (error) throw error
+      if (rows.length) {
+        const { error } = await supabase.from('pending_payments').insert(rows)
+        if (error) throw error
+      }
       qc.invalidateQueries({ queryKey: ['partner_remun', month] })
       qc.invalidateQueries({ queryKey: ['cms_pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
-      toast.success(`Saved ${rows.length} partner remuneration entries`)
+      const skipped = alreadyPaidPartnerIds.size
+      toast.success(`Saved ${rows.length} partner remuneration entries${skipped ? ` — ${skipped} already-Paid partner(s) left untouched` : ''}`)
     } catch (e: any) { toast.error(e.message) }
     finally { setSaving(false) }
   }
