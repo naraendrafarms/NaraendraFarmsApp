@@ -166,6 +166,9 @@ export const PaymentPlanningPage: React.FC = () => {
         const netAmt = Math.max(0, (row?.net_payable ?? row?.invoice_amount ?? 0) - discPerRow)
         const { error } = await supabase.from('pending_payments').update({
           payment_status: 'Paid',
+          // Record the settled amount too — flipping only the status flag
+          // left the Paid column blank and a stale Balance on the list
+          paid_amount: netAmt,
           paid_date: markPaidForm.paid_date,
           utr_no: markPaidForm.utr_no || null,
           account_type: markPaidForm.account_type,

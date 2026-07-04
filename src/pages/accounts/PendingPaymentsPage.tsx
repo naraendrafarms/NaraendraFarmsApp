@@ -671,6 +671,12 @@ export const PendingPaymentsPage: React.FC = () => {
         category: editForm.category || null,
         remarks: editForm.remarks || null,
         bank_account_id: (editForm.account_type || '').toLowerCase() !== 'cash' ? (editForm.bank_account_id || null) : null,
+        // Status "Paid" is a flag; the Paid column/Balance read paid_amount.
+        // The edit path used to flip only the flag, leaving Paid blank and a
+        // stale Balance on the list. Record the settled amount too.
+        ...(editForm.payment_status === 'Paid'
+          ? { paid_amount: Math.max(0, netPayable - (parseFloat(editForm.discount_amount) || 0)) }
+          : {}),
       }
       let savedId: string
       if (isNew) {
