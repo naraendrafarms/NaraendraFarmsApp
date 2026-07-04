@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput, Modal } from '@/components/ui'
 import toast from 'react-hot-toast'
-import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
@@ -551,6 +551,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
   const [filterMonth, setFilterMonth] = useState(curMonth)
   const [form, setForm] = useState({ ...EMPTY_FORM, salary_month: curMonth })
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
@@ -598,7 +599,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
       if (!form.employee_id) throw new Error('Select an employee')
       if (!form.amount || parseFloat(form.amount) <= 0) throw new Error('Enter a valid amount')
       const emp = (employees ?? []).find((e: any) => e.id === form.employee_id)
-      const { error } = await supabase.from('employee_advances').insert({
+      const payload = {
         employee_id: form.employee_id,
         farm_id: farmId || emp?.farm_id || null,
         advance_date: form.advance_date,
@@ -608,17 +609,35 @@ export const EmployeeAdvancesPage: React.FC = () => {
         egg_rate: form.advance_type === 'egg' ? parseFloat(form.egg_rate) || null : null,
         narration: form.narration || null,
         salary_month: form.salary_month || null,
-      })
-      if (error) throw error
+      }
+      if (editing) {
+        const { error } = await supabase.from('employee_advances').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('employee_advances').insert(payload)
+        if (error) throw error
+      }
     },
     onSuccess: () => {
-      toast.success('Advance recorded')
+      toast.success(editing ? 'Advance updated' : 'Advance recorded')
       qc.invalidateQueries({ queryKey: ['employee_advances'] })
       setForm({ ...EMPTY_FORM, salary_month: curMonth })
+      setEditing(null)
       setShowForm(false)
     },
     onError: (e: any) => toast.error(e.message)
   })
+
+  const openEdit = (r: any) => {
+    setEditing(r)
+    setForm({
+      employee_id: r.employee_id, farm_id: r.farm_id ?? '', advance_date: r.advance_date,
+      advance_type: r.advance_type, amount: String(r.amount ?? ''),
+      egg_qty: r.egg_qty != null ? String(r.egg_qty) : '', egg_rate: r.egg_rate != null ? String(r.egg_rate) : '',
+      narration: r.narration ?? '', salary_month: r.salary_month ?? '',
+    })
+    setShowForm(true)
+  }
 
   const delMut = useMutation({
     mutationFn: async (ids: string[]) => {
@@ -650,11 +669,11 @@ export const EmployeeAdvancesPage: React.FC = () => {
   return (
     <div className="space-y-5">
       <SectionHeader title="Employee Advances" subtitle="Cash, egg, and other advances deducted from salary"
-        action={<Button size="sm" onClick={() => setShowForm(v => !v)}><Plus size={14} className="mr-1" />{showForm ? 'Cancel' : 'Add Advance'}</Button>} />
+        action={<Button size="sm" onClick={() => { if (showForm) { setEditing(null); setForm({ ...EMPTY_FORM, salary_month: curMonth }) }; setShowForm(v => !v) }}><Plus size={14} className="mr-1" />{showForm ? 'Cancel' : 'Add Advance'}</Button>} />
 
       {showForm && (
         <Card>
-          <CardHeader title="New Advance" />
+          <CardHeader title={editing ? 'Edit Advance' : 'New Advance'} />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <Select label="Site Filter" placeholder="All Sites" options={farmOptions} value={farmId} onChange={e => { setFarmId(e.target.value); s('employee_id', '') }} />
             <Select label="Employee *" placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={e => s('employee_id', e.target.value)} />
@@ -694,8 +713,8 @@ export const EmployeeAdvancesPage: React.FC = () => {
             </div>
           </div>
           <div className="mt-4 flex gap-2">
-            <Button onClick={() => addMut.mutate()} loading={addMut.isPending}>Save Advance</Button>
-            <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button onClick={() => addMut.mutate()} loading={addMut.isPending}>{editing ? 'Update Advance' : 'Save Advance'}</Button>
+            <Button variant="secondary" onClick={() => { setEditing(null); setForm({ ...EMPTY_FORM, salary_month: curMonth }); setShowForm(false) }}>Cancel</Button>
           </div>
         </Card>
       )}
@@ -768,8 +787,12 @@ export const EmployeeAdvancesPage: React.FC = () => {
                   <Td className="font-semibold text-red-700">{inr(r.amount)}</Td>
                   <Td className="text-xs text-gray-500">{r.salary_month ?? '—'}</Td>
                   <Td>
-                    <button onClick={() => { setSel(new Set([r.id])); setBulkConfirm(true) }}
-                      className="text-red-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => openEdit(r)}
+                        className="text-gray-400 hover:text-brand-600 p-1"><Pencil size={14} /></button>
+                      <button onClick={() => { setSel(new Set([r.id])); setBulkConfirm(true) }}
+                        className="text-red-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
+                    </div>
                   </Td>
                 </tr>
               ))}

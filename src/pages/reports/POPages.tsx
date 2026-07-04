@@ -36,10 +36,12 @@ const STATUS_CLS: Record<string,string> = {
 }
 
 // ── PO print (company letterhead format) ──────────────────────────
-const COMPANY = {
-  name: 'Naraendra Farms',
-  addr1: '5-9-22/21, JVR Amrit Enclave, Roshanlal Residency,',
-  addr2: 'Adarsh Nagar, Hyderabad - 500063',
+const COMPANY_FALLBACK = {
+  company_name: 'Naraendra Farms',
+  address_line1: '5-9-22/21, JVR Amrit Enclave, Roshanlal Residency,',
+  address_line2: 'Adarsh Nagar, Hyderabad - 500063',
+  gstin: null, office_phone: null, billing_location: null, site_location: null,
+  po_terms: '1. Please mention the PO number on all invoices, delivery challans and correspondence.\n2. Material must match the specifications above; rejected material will be returned at vendor\'s cost.\n3. Invoice to be raised in the name of Naraendra Farms.',
 }
 
 // Amount in words, Indian numbering (rupees only, rounded)
@@ -66,8 +68,9 @@ const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&l
 // Renders a formal PO document into a hidden iframe and prints it — same
 // isolated-iframe approach as the shared Modal's print, so nothing from the
 // live page bleeds into the output.
-function printPurchaseOrder(items: any[], party: any | null) {
+function printPurchaseOrder(items: any[], party: any | null, company: any | null) {
   if (!items.length) return
+  const co = company ?? COMPANY_FALLBACK
   const first = items[0]
   const rows = items.map((o: any, i: number) => {
     const basic = (Number(o.quantity) || 0) * (Number(o.rate) || 0)
@@ -110,9 +113,11 @@ function printPurchaseOrder(items: any[], party: any | null) {
     @media print { body { padding: 8px; } }
   </style></head><body>
     <div class="head">
-      <h1>${esc(COMPANY.name)}</h1>
-      <p>${esc(COMPANY.addr1)}</p>
-      <p>${esc(COMPANY.addr2)}</p>
+      <h1>${esc(co.company_name)}</h1>
+      <p>${esc(co.address_line1)}</p>
+      <p>${esc(co.address_line2)}</p>
+      ${co.gstin ? `<p>GSTIN: ${esc(co.gstin)}</p>` : ''}
+      ${co.office_phone ? `<p>Phone: ${esc(co.office_phone)}</p>` : ''}
     </div>
     <div class="doc-title">PURCHASE ORDER</div>
     <div class="meta">
@@ -129,6 +134,8 @@ function printPurchaseOrder(items: any[], party: any | null) {
         <div>PO Date: ${first.po_date ? fmtDate(first.po_date) : '—'}</div>
         <div>FY: ${esc(first.fiscal_year)}</div>
         ${first.credit_limit_days ? `<div>Credit Days: ${esc(first.credit_limit_days)}</div>` : ''}
+        ${co.billing_location ? `<div>Billing Location: ${esc(co.billing_location)}</div>` : ''}
+        ${co.site_location ? `<div>Deliver To: ${esc(co.site_location)}</div>` : ''}
       </div>
     </div>
     <table>
@@ -146,14 +153,12 @@ function printPurchaseOrder(items: any[], party: any | null) {
     <div class="words"><b>Amount in words:</b> ${amountInWords(grandTotal)}</div>
     <div class="terms">
       <b>Terms &amp; Conditions</b>
-      1. Please mention the PO number on all invoices, delivery challans and correspondence.<br/>
-      2. Material must match the specifications above; rejected material will be returned at vendor's cost.<br/>
-      3. Invoice to be raised in the name of ${esc(COMPANY.name)}.
+      ${String(co.po_terms ?? '').split('\n').filter(Boolean).map((line: string) => esc(line)).join('<br/>')}
     </div>
     <div class="sign">
       <div>Prepared By</div>
       <div>Approved By</div>
-      <div>For ${esc(COMPANY.name)}</div>
+      <div>For ${esc(co.company_name)}</div>
     </div>
   </body></html>`
 
@@ -280,6 +285,7 @@ const POTab: React.FC = () => {
   const [receiptPO, setReceiptPO]     = useState<any>(null)
   const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', farm_id: '', remarks: '' })
   const { data: farms=[] } = useQuery({ queryKey: ['farms_po'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
+  const { data: itemsMaster=[] } = useQuery({ queryKey: ['items_master_po'], queryFn: async () => { const { data } = await supabase.from('items').select('name').eq('is_active',true).order('name'); return data ?? [] } })
   const { data: parties=[] } = useQuery({
     queryKey: ['parties_supp'],
     queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type', ['supplier', 'both']).order('name'); return data ?? [] }
@@ -302,7 +308,8 @@ const POTab: React.FC = () => {
       const { data } = await supabase.from('parties').select('name,address,gstin,contact').ilike('name', first.vendor_name.trim()).limit(1)
       party = data?.[0] ?? null
     }
-    printPurchaseOrder(items, party)
+    const { data: company } = await supabase.from('company_settings').select('*').limit(1).maybeSingle()
+    printPurchaseOrder(items, party, company)
   }
   const rf = (k: string) => (e: any) => setReceiptForm((p: any) => ({...p,[k]:e.target.value}))
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
@@ -772,11 +779,12 @@ const POTab: React.FC = () => {
             <Sel label="Material Status" value={form.material_status} onChange={f('material_status')} options={MAT_STATUS.map(s=>({value:s,label:s}))} />
           </div>
 
+          <datalist id="po-items-master">{itemsMaster.map((it: any) => <option key={it.name} value={it.name} />)}</datalist>
           {editing ? (
             /* Single-line edit */
             <>
               <div className="grid grid-cols-2 gap-3">
-                <Input label="Item Name" value={form.item_name} onChange={f('item_name')} />
+                <Input label="Item Name" value={form.item_name} onChange={f('item_name')} list="po-items-master" />
                 <Sel label="Material Type" value={form.material_type} onChange={f('material_type')} options={[{value:'',label:'Select type'},...MAT_TYPES.map(t=>({value:t,label:t}))]} />
               </div>
               <div className="grid grid-cols-4 gap-3">
@@ -810,7 +818,7 @@ const POTab: React.FC = () => {
                   <tbody>
                     {newLines.map((l, i) => (
                       <tr key={i} className="border-b border-gray-100">
-                        <td className="px-1 py-1"><input className="w-36 border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Item name" value={l.item_name} onChange={e => setLine(i,'item_name',e.target.value)} /></td>
+                        <td className="px-1 py-1"><input list="po-items-master" className="w-36 border border-gray-300 rounded px-2 py-1 text-xs" placeholder="Item name" value={l.item_name} onChange={e => setLine(i,'item_name',e.target.value)} /></td>
                         <td className="px-1 py-1">
                           <select className="border border-gray-300 rounded px-1 py-1 text-xs" value={l.material_type} onChange={e => setLine(i,'material_type',e.target.value)}>
                             <option value="">—</option>

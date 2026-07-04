@@ -3,19 +3,78 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import {
-  Card, Button, Input, Select, FormRow, Modal,
+  Card, Button, Input, Select, FormRow, Modal, Textarea,
   Table, Th, Td, Badge, SectionHeader, Spinner, Divider
 } from '@/components/ui'
 import {
   Shield, Users, Bird, Factory, Zap, IndianRupee,
   CheckCircle, AlertCircle, Plus, Edit2, ChevronRight,
-  BookOpen, Trash2
+  BookOpen, Trash2, Building2
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 // ── TAB IDs ──────────────────────────────────────────────────────
-type Tab = 'overview' | 'users' | 'flocks' | 'elec' | 'salary' | 'masters'
+type Tab = 'overview' | 'users' | 'flocks' | 'elec' | 'salary' | 'masters' | 'company'
+
+// ── COMPANY PROFILE TAB ──────────────────────────────────────────
+const CompanySettingsCard: React.FC = () => {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['company_settings'],
+    queryFn: async () => {
+      const { data } = await supabase.from('company_settings').select('*').limit(1).maybeSingle()
+      return data
+    },
+  })
+  const [form, setForm] = useState<any>(null)
+  useEffect(() => { if (data) setForm(data) }, [data])
+  const s = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }))
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        company_name: form.company_name || 'Naraendra Farms',
+        address_line1: form.address_line1 || null,
+        address_line2: form.address_line2 || null,
+        gstin: form.gstin || null,
+        office_phone: form.office_phone || null,
+        billing_location: form.billing_location || null,
+        site_location: form.site_location || null,
+        po_terms: form.po_terms || null,
+        updated_at: new Date().toISOString(),
+      }
+      const { error } = await supabase.from('company_settings').update(payload).eq('id', form.id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Company profile saved'); qc.invalidateQueries({ queryKey: ['company_settings'] }) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  if (isLoading || !form) return <Spinner />
+  return (
+    <Card className="space-y-4">
+      <p className="text-sm font-semibold text-gray-700">Company Profile</p>
+      <p className="text-xs text-gray-400">Used on the Purchase Order printout (letterhead, GSTIN, locations, terms &amp; conditions).</p>
+      <FormRow cols={2}>
+        <Input label="Company Name" value={form.company_name ?? ''} onChange={e => s('company_name', e.target.value)} />
+        <Input label="GSTIN" value={form.gstin ?? ''} onChange={e => s('gstin', e.target.value)} />
+      </FormRow>
+      <FormRow cols={2}>
+        <Input label="Address Line 1" value={form.address_line1 ?? ''} onChange={e => s('address_line1', e.target.value)} />
+        <Input label="Address Line 2" value={form.address_line2 ?? ''} onChange={e => s('address_line2', e.target.value)} />
+      </FormRow>
+      <FormRow cols={3}>
+        <Input label="Office Phone" value={form.office_phone ?? ''} onChange={e => s('office_phone', e.target.value)} />
+        <Input label="Billing Location" value={form.billing_location ?? ''} onChange={e => s('billing_location', e.target.value)} />
+        <Input label="Site / Delivery Location" value={form.site_location ?? ''} onChange={e => s('site_location', e.target.value)} />
+      </FormRow>
+      <Textarea label="Purchase Order — Terms & Conditions" rows={4} value={form.po_terms ?? ''} onChange={e => s('po_terms', e.target.value)} />
+      <p className="text-xs text-gray-400 -mt-2">One point per line — shown as-is on the PO printout.</p>
+      <Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save Company Profile</Button>
+    </Card>
+  )
+}
 
 // ── OVERVIEW TAB ─────────────────────────────────────────────────
 const Overview: React.FC = () => {
@@ -1038,6 +1097,7 @@ const MastersHub: React.FC = () => (
 // ── MAIN ADMIN CENTRE ────────────────────────────────────────────
 const TAB_PARAM_MAP: Record<string, Tab> = {
   overview: 'overview',
+  company: 'company',
   flocks: 'flocks',
   electricity: 'elec',
   elec: 'elec',
@@ -1061,6 +1121,7 @@ export const AdminCentre: React.FC = () => {
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id:'overview', label:'Setup Overview',       icon:<CheckCircle size={15}/> },
+    { id:'company',  label:'Company Profile',      icon:<Building2 size={15}/> },
     { id:'masters',  label:'Masters',              icon:<BookOpen size={15}/> },
     { id:'flocks',   label:'Flock–Shed Assignment', icon:<Bird size={15}/> },
     { id:'elec',     label:'Electricity Allocation', icon:<Zap size={15}/> },
@@ -1080,6 +1141,7 @@ export const AdminCentre: React.FC = () => {
       </div>
 
       {tab === 'overview' && <Overview />}
+      {tab === 'company'  && <CompanySettingsCard />}
       {tab === 'masters'  && <MastersHub />}
       {tab === 'flocks'   && <FlockShedAssign />}
       {tab === 'elec'     && <ElecAllocation />}
