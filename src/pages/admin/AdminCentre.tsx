@@ -41,6 +41,8 @@ const CompanySettingsCard: React.FC = () => {
         office_phone: form.office_phone || null,
         billing_location: form.billing_location || null,
         site_location: form.site_location || null,
+        site_contact_1: form.site_contact_1 || null,
+        site_contact_2: form.site_contact_2 || null,
         po_terms: form.po_terms || null,
         updated_at: new Date().toISOString(),
       }
@@ -68,6 +70,10 @@ const CompanySettingsCard: React.FC = () => {
         <Input label="Office Phone" value={form.office_phone ?? ''} onChange={e => s('office_phone', e.target.value)} />
         <Input label="Billing Location" value={form.billing_location ?? ''} onChange={e => s('billing_location', e.target.value)} />
         <Input label="Site / Delivery Location" value={form.site_location ?? ''} onChange={e => s('site_location', e.target.value)} />
+      </FormRow>
+      <FormRow cols={2}>
+        <Input label="Site Contact 1" value={form.site_contact_1 ?? ''} onChange={e => s('site_contact_1', e.target.value)} placeholder="Name / phone for delivery at site" />
+        <Input label="Site Contact 2" value={form.site_contact_2 ?? ''} onChange={e => s('site_contact_2', e.target.value)} placeholder="Name / phone for delivery at site" />
       </FormRow>
       <Textarea label="Purchase Order — Terms & Conditions" rows={4} value={form.po_terms ?? ''} onChange={e => s('po_terms', e.target.value)} />
       <p className="text-xs text-gray-400 -mt-2">One point per line — shown as-is on the PO printout.</p>

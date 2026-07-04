@@ -41,6 +41,7 @@ const COMPANY_FALLBACK = {
   address_line1: '5-9-22/21, JVR Amrit Enclave, Roshanlal Residency,',
   address_line2: 'Adarsh Nagar, Hyderabad - 500063',
   gstin: null, office_phone: null, billing_location: null, site_location: null,
+  site_contact_1: null, site_contact_2: null,
   po_terms: '1. Please mention the PO number on all invoices, delivery challans and correspondence.\n2. Material must match the specifications above; rejected material will be returned at vendor\'s cost.\n3. Invoice to be raised in the name of Naraendra Farms.',
 }
 
@@ -136,6 +137,8 @@ function printPurchaseOrder(items: any[], party: any | null, company: any | null
         ${first.credit_limit_days ? `<div>Credit Days: ${esc(first.credit_limit_days)}</div>` : ''}
         ${co.billing_location ? `<div>Billing Location: ${esc(co.billing_location)}</div>` : ''}
         ${co.site_location ? `<div>Deliver To: ${esc(co.site_location)}</div>` : ''}
+        ${co.site_contact_1 ? `<div>Site Contact: ${esc(co.site_contact_1)}</div>` : ''}
+        ${co.site_contact_2 ? `<div>Site Contact: ${esc(co.site_contact_2)}</div>` : ''}
       </div>
     </div>
     <table>
