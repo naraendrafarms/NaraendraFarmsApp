@@ -1310,6 +1310,14 @@ export const SalaryEntryPage: React.FC = () => {
       } else if(origIsPaid && !payload.is_paid && upserted?.id){
         await supabase.from('cash_book').delete().eq('salary_monthly_id',upserted.id)
         await supabase.from('bank_transactions').delete().eq('salary_monthly_id',upserted.id)
+        // Reverting Paid -> Pending previously left deductions permanently
+        // marked 'deducted' with no way back — when this salary is later
+        // re-paid (possibly corrected), the deduction was silently lost
+        // from the recovery pipeline. Restore it to pending.
+        await supabase.from('employee_deductions')
+          .update({status:'pending',deducted_at:null,salary_monthly_id:null})
+          .eq('salary_monthly_id',upserted.id).eq('status','deducted')
+        qc.invalidateQueries({queryKey:['employee_deductions_pending']})
       }
       // When marking as paid: auto-deduct pending employee_deductions for this employee+month
       if(payload.is_paid && upserted?.id){
