@@ -275,6 +275,8 @@ const POTab: React.FC = () => {
   const [search, setSearch]   = useState('')
   const [open, setOpen]       = useState(false)
   const [editing, setEditing] = useState<any>(null)
+  const [multiEditMode, setMultiEditMode] = useState(false)
+  const [groupEditIds, setGroupEditIds] = useState<string[]>([])
   const [form, setForm]       = useState<any>(EMPTY_PO)
   const [delId, setDelId]     = useState<string|null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -360,7 +362,37 @@ const POTab: React.FC = () => {
     mutationFn: async () => {
       if (!form.po_no) throw new Error('PO No is required')
       if (!form.vendor_name) throw new Error('Vendor Name is required')
-      if (editing) {
+      if (editing && multiEditMode) {
+        // Multi-line edit — update existing rows (by id), insert newly added
+        // lines, and delete any original line the user removed from the table.
+        const validLines = newLines.filter(l => l.item_name || l.total_amount)
+        if (!validLines.length) throw new Error('Add at least one item')
+        const keptIds = validLines.filter(l => l.id).map(l => l.id)
+        const removedIds = groupEditIds.filter(id => !keptIds.includes(id))
+        if (removedIds.length) {
+          const { error } = await supabase.from('purchase_orders').delete().in('id', removedIds)
+          if (error) throw error
+        }
+        for (const l of validLines) {
+          const payload = {
+            po_no: form.po_no, po_date: form.po_date || null, fiscal_year: form.fiscal_year,
+            vendor_name: form.vendor_name, party_id: form.party_id || null,
+            item_name: l.item_name || null, material_type: l.material_type || null,
+            quantity: l.quantity ? Number(l.quantity) : null, unit: l.unit || null,
+            rate: l.rate ? Number(l.rate) : null, gst_pct: l.gst_pct ? Number(l.gst_pct) : null,
+            total_amount: l.total_amount ? Number(l.total_amount) : null,
+            material_status: form.material_status,
+            credit_limit_days: form.credit_limit_days ? Number(form.credit_limit_days) : null,
+          }
+          if (l.id) {
+            const { error } = await supabase.from('purchase_orders').update(payload).eq('id', l.id)
+            if (error) throw error
+          } else {
+            const { error } = await supabase.from('purchase_orders').insert(payload)
+            if (error) throw error
+          }
+        }
+      } else if (editing) {
         // Single-row edit
         const payload = {
           po_no: form.po_no, po_date: form.po_date || null, fiscal_year: form.fiscal_year,
@@ -403,6 +435,8 @@ const POTab: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
       setOpen(false)
       setNewLines([emptyLine()])
+      setMultiEditMode(false)
+      setGroupEditIds([])
       toast.success('Saved')
     },
     onError: (e: any) => toast.error(e.message),
@@ -583,8 +617,27 @@ const POTab: React.FC = () => {
     })
   }, [filtered])
 
-  const openNew  = () => { setEditing(null); setForm({...EMPTY_PO, fiscal_year: fy}); setOpen(true) }
-  const openEdit = (r: any) => { setEditing(r); setForm({...r, po_date:r.po_date??'', grn_date:r.grn_date??''}); setOpen(true) }
+  const openNew  = () => { setEditing(null); setMultiEditMode(false); setForm({...EMPTY_PO, fiscal_year: fy}); setOpen(true) }
+  const openEdit = (r: any) => { setEditing(r); setMultiEditMode(false); setForm({...r, po_date:r.po_date??'', grn_date:r.grn_date??''}); setOpen(true) }
+
+  // Edit ALL line items of a PO together (instead of only the first item) —
+  // reuses the multi-line table from New PO, but each line carries its
+  // original row `id` so save updates it in place instead of re-inserting.
+  const openEditGroup = (items: any[]) => {
+    const first = items[0]
+    setEditing(first)
+    setMultiEditMode(true)
+    setForm({...first, po_date: first.po_date ?? '', grn_date: first.grn_date ?? ''})
+    setNewLines(items.map((o: any) => ({
+      id: o.id,
+      item_name: o.item_name ?? '', material_type: o.material_type ?? '',
+      quantity: o.quantity != null ? String(o.quantity) : '', unit: o.unit ?? '',
+      rate: o.rate != null ? String(o.rate) : '', gst_pct: o.gst_pct != null ? String(o.gst_pct) : '',
+      total_amount: o.total_amount != null ? String(o.total_amount) : '',
+    })))
+    setGroupEditIds(items.map((o: any) => o.id))
+    setOpen(true)
+  }
 
   if (isLoading) return <Spinner />
 
@@ -713,7 +766,7 @@ const POTab: React.FC = () => {
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_CLS[worstStatus] ?? 'bg-gray-100 text-gray-500'}`}>{worstStatus}</span>
                 <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                   <button onClick={() => handlePrintPO(items)} className="p-1 text-gray-500 hover:text-gray-800" title="Print Purchase Order"><Printer size={13}/></button>
-                  {canEdit && <button onClick={() => openEdit(first)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit PO"><Pencil size={13}/></button>}
+                  {canEdit && <button onClick={() => openEditGroup(items)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit PO (all items)"><Pencil size={13}/></button>}
                   {canEdit && <button onClick={() => { setEditing(null); setForm({...EMPTY_PO, fiscal_year: fy, po_no: first.po_no, vendor_name: first.vendor_name}); setOpen(true) }} className="p-1 text-green-500 hover:text-green-700" title="Add item to PO"><Plus size={13}/></button>}
                 </div>
                 {isExpanded ? <ChevronUp size={16} className="text-gray-400 shrink-0"/> : <ChevronDown size={16} className="text-gray-400 shrink-0"/>}
@@ -764,8 +817,9 @@ const POTab: React.FC = () => {
       </div>
       )}
 
-      <Modal open={open} onClose={() => { setOpen(false); setNewLines([emptyLine()]) }} title={editing ? 'Edit Purchase Order Line' : 'New Purchase Order'} size="lg"
-        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => { setOpen(false); setNewLines([emptyLine()]) }}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
+      <Modal open={open} onClose={() => { setOpen(false); setNewLines([emptyLine()]); setMultiEditMode(false); setGroupEditIds([]) }}
+        title={editing ? (multiEditMode ? `Edit Purchase Order — ${editing.po_no} (all items)` : 'Edit Purchase Order Line') : 'New Purchase Order'} size="lg"
+        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => { setOpen(false); setNewLines([emptyLine()]); setMultiEditMode(false); setGroupEditIds([]) }}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
         <div className="space-y-3">
           {/* PO Header */}
           <div className="grid grid-cols-3 gap-3">
@@ -783,7 +837,7 @@ const POTab: React.FC = () => {
           </div>
 
           <datalist id="po-items-master">{itemsMaster.map((it: any) => <option key={it.name} value={it.name} />)}</datalist>
-          {editing ? (
+          {editing && !multiEditMode ? (
             /* Single-line edit */
             <>
               <div className="grid grid-cols-2 gap-3">
