@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
@@ -708,7 +708,6 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
   const [date, setDate] = useState(today())
   const [saving, setSaving] = useState(false)
   const [shedRows, setShedRows] = useState<Record<string, VhlShedRow>>({})
-  const [gradeRow, setGradeRow] = useState({ he_grade_a: '', he_grade_b: '', he_grade_c: '', existingId: null as string | null })
   const [showWastage, setShowWastage] = useState(false)
 
   const { data: flocks } = useQuery({
@@ -789,11 +788,6 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
       rows[shed.id] = row
     }
     setShedRows(rows)
-    const flockLevel = (existingRows ?? []).find((r: any) => !r.shed_id)
-    setGradeRow({
-      he_grade_a: flockLevel?.he_grade_a?.toString() ?? '', he_grade_b: flockLevel?.he_grade_b?.toString() ?? '',
-      he_grade_c: flockLevel?.he_grade_c?.toString() ?? '', existingId: flockLevel?.id ?? null,
-    })
   }, [sheds, existingRows, prevRows])
 
   const setShed = (shedId: string, k: keyof VhlShedRow, v: string) => setShedRows(rows => {
@@ -842,26 +836,16 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
         : await supabase.from('vhl_daily_entry').insert(payload)
       if (error) { console.error(error); errors++ } else saved++
     }
-    const ga = parseInt(gradeRow.he_grade_a) || null, gb = parseInt(gradeRow.he_grade_b) || null, gc = parseInt(gradeRow.he_grade_c) || null
-    if (ga !== null || gb !== null || gc !== null) {
-      if (gradeRow.existingId) {
-        await supabase.from('vhl_daily_entry').update({ he_grade_a: ga, he_grade_b: gb, he_grade_c: gc }).eq('id', gradeRow.existingId)
-      } else {
-        await supabase.from('vhl_daily_entry').insert({
-          flock_id: flockId, record_date: date, shed_id: null,
-          he_grade_a: ga, he_grade_b: gb, he_grade_c: gc,
-          he_eggs: 0, je_eggs: 0, te_eggs: 0, be_eggs: 0, le_eggs: 0, total_eggs: 0, mortality_female: 0, mortality_male: 0,
-        })
-      }
-    }
     setSaving(false)
     qc.invalidateQueries({ queryKey: ['vhl_bulk_existing'] })
     if (errors) toast.error(`Saved ${saved} shed(s), ${errors} failed`)
     else toast.success(`Saved ${saved} shed record(s)`)
   }
 
-  const gradeTotal = (parseInt(gradeRow.he_grade_a)||0) + (parseInt(gradeRow.he_grade_b)||0) + (parseInt(gradeRow.he_grade_c)||0)
-  const heTotal = useMemo(() => Object.values(shedRows).reduce((s, r) => s + (parseInt(r.he_eggs)||0), 0), [shedRows])
+  const numInput = (val: string, onChange: (v: string) => void, w = 'w-14') => (
+    <input type="number" min="0" value={val} onChange={e => onChange(e.target.value)} placeholder="0"
+      className={`${w} text-center border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white`} />
+  )
 
   return (
     <div className="space-y-5">
@@ -874,86 +858,102 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
               value={flockId} onChange={e => setFlockId(e.target.value)} />
           </div>
           <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
-          <button type="button" onClick={() => setShowWastage(w => !w)}
-            className={`text-xs px-2 py-1.5 rounded border ${showWastage ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
-            {showWastage ? '× Hide Wastage by Type' : '+ Wastage by Type'}
-          </button>
+          <Button icon={<Save size={16}/>} loading={saving} onClick={handleSave} disabled={!flockId || !sheds?.length}>Save All</Button>
         </div>
       </Card>
 
       {flockId && !sheds?.length && <EmptyState title="No sheds found for this flock's site" />}
 
-      {flockId && (sheds ?? []).map((shed: any) => {
-        const r = shedRows[shed.id] ?? emptyVhlShedRow()
-        const sv = (k: keyof VhlShedRow, v: string) => setShed(shed.id, k, v)
-        return (
-          <Card key={shed.id}>
-            <CardHeader title={`Shed ${shed.shed_no}${shed.shed_name ? ' — '+shed.shed_name : ''}`} />
-            <div className="space-y-3">
-              <FormRow cols={4}>
-                <Input label="Opening Female" type="number" value={r.opening_female} onChange={e => sv('opening_female', e.target.value)} />
-                <Input label="Opening Male" type="number" value={r.opening_male} onChange={e => sv('opening_male', e.target.value)} />
-                <Input label="Mortality Female" type="number" value={r.mortality_female} onChange={e => sv('mortality_female', e.target.value)} />
-                <Input label="Mortality Male" type="number" value={r.mortality_male} onChange={e => sv('mortality_male', e.target.value)} />
-              </FormRow>
-              <FormRow cols={4}>
-                <Input label="Transfer Female" type="number" value={r.transfer_female} onChange={e => sv('transfer_female', e.target.value)} />
-                <Input label="Transfer Male" type="number" value={r.transfer_male} onChange={e => sv('transfer_male', e.target.value)} />
-                <Input label="Cull Female" type="number" value={r.cull_female} onChange={e => sv('cull_female', e.target.value)} />
-                <Input label="Cull Male" type="number" value={r.cull_male} onChange={e => sv('cull_male', e.target.value)} />
-              </FormRow>
-              <FormRow cols={4}>
-                <Input label="Closing Female" type="number" disabled value={r.closing_female} />
-                <Input label="Closing Male" type="number" disabled value={r.closing_male} />
-              </FormRow>
-              <FormRow cols={4}>
-                <Input label="Female Feed (kg)" type="number" step="0.001" value={r.feed_female_kg} onChange={e => sv('feed_female_kg', e.target.value)} />
-                <Input label="Female Feed Type" value={r.feed_type_f} onChange={e => sv('feed_type_f', e.target.value)} />
-                <Input label="Male Feed (kg)" type="number" step="0.001" value={r.feed_male_kg} onChange={e => sv('feed_male_kg', e.target.value)} />
-                <Input label="Male Feed Type" value={r.feed_type_m} onChange={e => sv('feed_type_m', e.target.value)} />
-              </FormRow>
-              <FormRow cols={4}>
-                <Input label="HE" type="number" value={r.he_eggs} onChange={e => sv('he_eggs', e.target.value)} />
-                <Input label="JE" type="number" value={r.je_eggs} onChange={e => sv('je_eggs', e.target.value)} />
-                <Input label="TE" type="number" value={r.te_eggs} onChange={e => sv('te_eggs', e.target.value)} />
-                <Input label="BE" type="number" value={r.be_eggs} onChange={e => sv('be_eggs', e.target.value)} />
-              </FormRow>
-              <FormRow cols={4}>
-                <Input label="LE" type="number" value={r.le_eggs} onChange={e => sv('le_eggs', e.target.value)} />
-                <Input label="Lighting Hrs" type="number" step="0.5" value={r.lighting_hrs} onChange={e => sv('lighting_hrs', e.target.value)} />
-                <Input label="Remarks" value={r.remarks} onChange={e => sv('remarks', e.target.value)} />
-              </FormRow>
-              {showWastage && (
-                <FormRow cols={4}>
-                  <Input label="Wastage HE" type="number" value={r.wastage_he} onChange={e => sv('wastage_he', e.target.value)} />
-                  <Input label="Wastage JE" type="number" value={r.wastage_je} onChange={e => sv('wastage_je', e.target.value)} />
-                  <Input label="Wastage TE" type="number" value={r.wastage_te} onChange={e => sv('wastage_te', e.target.value)} />
-                  <Input label="Wastage BE" type="number" value={r.wastage_be} onChange={e => sv('wastage_be', e.target.value)} />
-                </FormRow>
-              )}
-            </div>
-          </Card>
-        )
-      })}
-
       {flockId && (sheds ?? []).length > 0 && (
-        <Card>
-          <CardHeader title="HE Grade Breakdown (flock-level — after grading all sheds)" />
-          <FormRow cols={4}>
-            <Input label="Grade A" type="number" value={gradeRow.he_grade_a} onChange={e => setGradeRow(g => ({ ...g, he_grade_a: e.target.value }))} />
-            <Input label="Grade B" type="number" value={gradeRow.he_grade_b} onChange={e => setGradeRow(g => ({ ...g, he_grade_b: e.target.value }))} />
-            <Input label="Grade C" type="number" value={gradeRow.he_grade_c} onChange={e => setGradeRow(g => ({ ...g, he_grade_c: e.target.value }))} />
-            <div className="flex items-end pb-2 text-xs text-gray-500">
-              A+B+C: {gradeTotal} {heTotal ? `| Shed HE total: ${heTotal} ${gradeTotal === heTotal ? '✓' : `(diff ${heTotal-gradeTotal})`}` : ''}
-            </div>
-          </FormRow>
+        <Card padding={false}>
+          <div className="px-4 py-2 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
+            <h3 className="font-semibold text-brand-800 text-sm">Flock {flock?.flock_no} — {(sheds ?? []).length} Sheds</h3>
+            <button onClick={() => setShowWastage(w => !w)}
+              className={`text-xs px-2 py-0.5 rounded border ${showWastage ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+              {showWastage ? '× Hide Wastage' : '+ Wastage'}
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-500 uppercase tracking-wide">
+                  <th className="px-2 py-2 text-left sticky left-0 bg-gray-50 z-10">Shed</th>
+                  <th className="px-1 py-2 text-center">Open ♀</th>
+                  <th className="px-1 py-2 text-center">Open ♂</th>
+                  <th className="px-1 py-2 text-center">Feed ♀ kg</th>
+                  <th className="px-1 py-2 text-center">Type ♀</th>
+                  <th className="px-1 py-2 text-center">Feed ♂ kg</th>
+                  <th className="px-1 py-2 text-center">Type ♂</th>
+                  <th className="px-1 py-2 text-center">Transfer ♀</th>
+                  <th className="px-1 py-2 text-center">Transfer ♂</th>
+                  <th className="px-1 py-2 text-center">Cull ♀</th>
+                  <th className="px-1 py-2 text-center">Cull ♂</th>
+                  <th className="px-1 py-2 text-center">Death ♀</th>
+                  <th className="px-1 py-2 text-center">Death ♂</th>
+                  <th className="px-1 py-2 text-center">HE</th>
+                  <th className="px-1 py-2 text-center">JE</th>
+                  <th className="px-1 py-2 text-center">TE</th>
+                  <th className="px-1 py-2 text-center">BE</th>
+                  <th className="px-1 py-2 text-center">LE</th>
+                  {showWastage && <><th className="px-1 py-2 text-center bg-red-50">Wst HE</th><th className="px-1 py-2 text-center bg-red-50">Wst JE</th><th className="px-1 py-2 text-center bg-red-50">Wst TE</th><th className="px-1 py-2 text-center bg-red-50">Wst BE</th></>}
+                  <th className="px-1 py-2 text-center bg-blue-50">Close ♀</th>
+                  <th className="px-1 py-2 text-center bg-blue-50">Close ♂</th>
+                  <th className="px-1 py-2 text-center">Light</th>
+                  <th className="px-1 py-2 text-left" style={{ minWidth: 100 }}>Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(sheds ?? []).map((shed: any, idx: number) => {
+                  const r = shedRows[shed.id] ?? emptyVhlShedRow()
+                  const u = (f: keyof VhlShedRow) => (v: string) => setShed(shed.id, f, v)
+                  return (
+                    <tr key={shed.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                      <td className="px-2 py-1.5 sticky left-0 bg-inherit z-10 font-semibold text-brand-700 whitespace-nowrap">
+                        Shed {shed.shed_no}{shed.shed_name ? ` · ${shed.shed_name}` : ''}
+                      </td>
+                      <td className="px-1 py-1">{numInput(r.opening_female, u('opening_female'))}</td>
+                      <td className="px-1 py-1">{numInput(r.opening_male, u('opening_male'))}</td>
+                      <td className="px-1 py-1">{numInput(r.feed_female_kg, u('feed_female_kg'))}</td>
+                      <td className="px-1 py-1">
+                        <input type="text" value={r.feed_type_f} onChange={e => u('feed_type_f')(e.target.value)} placeholder="type"
+                          className="w-16 border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
+                      </td>
+                      <td className="px-1 py-1">{numInput(r.feed_male_kg, u('feed_male_kg'))}</td>
+                      <td className="px-1 py-1">
+                        <input type="text" value={r.feed_type_m} onChange={e => u('feed_type_m')(e.target.value)} placeholder="type"
+                          className="w-16 border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
+                      </td>
+                      <td className="px-1 py-1">{numInput(r.transfer_female, u('transfer_female'))}</td>
+                      <td className="px-1 py-1">{numInput(r.transfer_male, u('transfer_male'))}</td>
+                      <td className="px-1 py-1">{numInput(r.cull_female, u('cull_female'))}</td>
+                      <td className="px-1 py-1">{numInput(r.cull_male, u('cull_male'))}</td>
+                      <td className="px-1 py-1">{numInput(r.mortality_female, u('mortality_female'))}</td>
+                      <td className="px-1 py-1">{numInput(r.mortality_male, u('mortality_male'))}</td>
+                      <td className="px-1 py-1">{numInput(r.he_eggs, u('he_eggs'))}</td>
+                      <td className="px-1 py-1">{numInput(r.je_eggs, u('je_eggs'))}</td>
+                      <td className="px-1 py-1">{numInput(r.te_eggs, u('te_eggs'))}</td>
+                      <td className="px-1 py-1">{numInput(r.be_eggs, u('be_eggs'))}</td>
+                      <td className="px-1 py-1">{numInput(r.le_eggs, u('le_eggs'))}</td>
+                      {showWastage && <>
+                        <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_he, u('wastage_he'))}</td>
+                        <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_je, u('wastage_je'))}</td>
+                        <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_te, u('wastage_te'))}</td>
+                        <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_be, u('wastage_be'))}</td>
+                      </>}
+                      <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_female, u('closing_female'))}</td>
+                      <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_male, u('closing_male'))}</td>
+                      <td className="px-1 py-1">{numInput(r.lighting_hrs, u('lighting_hrs'))}</td>
+                      <td className="px-1 py-1">
+                        <input type="text" value={r.remarks} onChange={e => u('remarks')(e.target.value)} placeholder="remarks"
+                          className="w-24 border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </Card>
-      )}
-
-      {flockId && (sheds ?? []).length > 0 && (
-        <div className="flex justify-end">
-          <Button icon={<Save size={16}/>} loading={saving} onClick={handleSave}>Save All Sheds</Button>
-        </div>
       )}
     </div>
   )
