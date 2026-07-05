@@ -86,7 +86,7 @@ export const VHLDailyEntryPage: React.FC = () => {
   useEffect(() => { localStorage.setItem('vhl_de_date', date) }, [date])
 
   const { data: flocks } = useQuery({
-    queryKey: ['vhl_flocks_active'],
+    queryKey: ['vhl_flocks_active_de'],
     queryFn: async () => {
       const { data } = await supabase.from('flocks').select('id,flock_no,status,placement_date,laying_start_date')
         .eq('is_vhl_contract', true).neq('status', 'closed').order('flock_no')
@@ -513,7 +513,7 @@ export const VHLMedicineUsagePage: React.FC = () => {
   const [form, setForm] = useState({ usage_date: today(), vhl_medicine_id: '', quantity: '', unit: '', remarks: '' })
 
   const { data: flocks } = useQuery({
-    queryKey: ['vhl_flocks_active'],
+    queryKey: ['vhl_flocks_active_medusage'],
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').eq('is_vhl_contract', true).order('flock_no'); return data ?? [] }
   })
   const { data: meds } = useQuery({
@@ -633,7 +633,7 @@ export const VHLEggProductionPage: React.FC = () => {
   const [sel, setSel] = useState<Set<string>>(new Set())
 
   const { data: flocks } = useQuery({
-    queryKey: ['vhl_flocks_active'],
+    queryKey: ['vhl_flocks_active_eggprod'],
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').eq('is_vhl_contract', true).order('flock_no'); return data ?? [] }
   })
   const { data: rateHistory } = useQuery({
@@ -865,7 +865,7 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
   const [showWastage, setShowWastage] = useState(false)
 
   const { data: flocks } = useQuery({
-    queryKey: ['vhl_flocks_active'],
+    queryKey: ['vhl_flocks_active_bulk'],
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no,laying_farm_id,rearing_farm_id').eq('is_vhl_contract', true).neq('status', 'closed').order('flock_no'); return data ?? [] }
   })
   const flock = flocks?.find((f: any) => f.id === flockId)
