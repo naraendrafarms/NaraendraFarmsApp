@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 import { Eye, EyeOff, LogIn } from 'lucide-react'
+import { LogoChip } from '@/components/Logo'
 
 export const Login: React.FC = () => {
   const { signIn } = useAuth()
@@ -24,39 +25,13 @@ export const Login: React.FC = () => {
     <div className="min-h-screen flex flex-col items-center justify-center p-4"
       style={{ background: 'linear-gradient(160deg, #1a5c38 0%, #14532d 50%, #0f3d22 100%)' }}>
 
-      <style>{`
-        @keyframes birdBob {
-          0%,100% { transform: translateY(0px) rotate(-2deg) scale(1); }
-          40%      { transform: translateY(-14px) rotate(3deg) scale(1.05); }
-          70%      { transform: translateY(-7px) rotate(-1deg) scale(0.98); }
-        }
-        .bird-bob { animation: birdBob 2s ease-in-out infinite; transform-origin: center bottom; }
-      `}</style>
-
-      {/* Bird + Title */}
-      <div className="flex flex-col items-center mb-6 select-none">
-        <div className="bird-bob mb-2" style={{ filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.5))' }}>
-          <div style={{
-            width: 120, height: 120,
-            borderRadius: '50%',
-            overflow: 'hidden',
-            border: '3px solid rgba(255,255,255,0.3)',
-            boxShadow: '0 0 30px rgba(255,255,255,0.1)',
-          }}>
-            <img
-              src="/broiler-bird.jpg"
-              alt="Naraendra Farms Broiler Bird"
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                objectPosition: 'center 15%',
-              }}
-            />
-          </div>
+      {/* Logo + Title */}
+      <div className="flex flex-col items-center gap-3 mb-6 select-none">
+        <div style={{ filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.5))' }}>
+          <LogoChip size={84} radius={14} />
         </div>
         <h1 className="text-3xl font-extrabold text-white mt-1 tracking-tight">
-          Naraendra Farms
+          Nara<span style={{ color: '#d6ab5f' }}>e</span>ndra Farms
         </h1>
         <p className="text-green-300 text-sm mt-1 font-medium">
           Poultry Broiler Breeder Management

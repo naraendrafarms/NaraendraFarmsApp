@@ -109,6 +109,7 @@ export const SiteInvoicePage: React.FC = () => {
       * { box-sizing:border-box; margin:0; padding:0; } body { font-family:Arial,Helvetica,sans-serif; font-size:12px; color:#111; padding:24px; }
       .head { text-align:center; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:12px; }
       .head h1 { font-size:20px; } .head p { font-size:11px; color:#333; }
+      .head-row { display:flex; align-items:center; justify-content:center; gap:12px; }
       .doc-title { text-align:center; font-size:14px; font-weight:bold; text-decoration:underline; margin:10px 0 14px; }
       .meta { display:flex; justify-content:space-between; gap:16px; margin-bottom:14px; }
       .meta .box { border:1px solid #999; padding:8px 10px; flex:1; }
@@ -117,7 +118,7 @@ export const SiteInvoicePage: React.FC = () => {
       th { background:#f0f0f0; font-size:11px; text-transform:uppercase; } td.c{text-align:center;} td.r{text-align:right;}
       tfoot td { font-weight:bold; } @media print { body{padding:8px;} }
     </style></head><body>
-      <div class="head"><h1>${esc(co.company_name)}</h1><p>${esc(co.address_line1)}</p><p>${esc(co.address_line2)}</p>${co.gstin?`<p>GSTIN: ${esc(co.gstin)}</p>`:''}</div>
+      <div class="head"><div class="head-row"><svg width="36" height="36" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="#14532d"/><text x="32" y="43" font-family="Georgia, 'Iowan Old Style', serif" font-weight="700" font-size="30" letter-spacing="-1" text-anchor="middle"><tspan fill="#f7f1e4">N</tspan><tspan fill="#d6ab5f">F</tspan></text></svg><h1>${esc(co.company_name)}</h1></div><p>${esc(co.address_line1)}</p><p>${esc(co.address_line2)}</p>${co.gstin?`<p>GSTIN: ${esc(co.gstin)}</p>`:''}</div>
       <div class="doc-title">CONSOLIDATED SITE INVOICE — ${esc(farm?.name ?? '')}</div>
       <div class="meta">
         <div class="box"><b>Bill To</b><div style="font-weight:bold">${esc(party?.name)}</div>${party?.address?`<div>${esc(party.address)}</div>`:''}${party?.gstin?`<div>GSTIN: ${esc(party.gstin)}</div>`:''}</div>

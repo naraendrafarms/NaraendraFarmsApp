@@ -111,10 +111,14 @@ function printPurchaseOrder(items: any[], party: any | null, company: any | null
     .terms b { display: block; margin-bottom: 3px; }
     .sign { display: flex; justify-content: space-between; margin-top: 50px; }
     .sign div { text-align: center; width: 200px; border-top: 1px solid #111; padding-top: 5px; font-size: 11px; }
+    .head-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
     @media print { body { padding: 8px; } }
   </style></head><body>
     <div class="head">
-      <h1>${esc(co.company_name)}</h1>
+      <div class="head-row">
+        <svg width="40" height="40" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="#14532d"/><text x="32" y="43" font-family="Georgia, 'Iowan Old Style', serif" font-weight="700" font-size="30" letter-spacing="-1" text-anchor="middle"><tspan fill="#f7f1e4">N</tspan><tspan fill="#d6ab5f">F</tspan></text></svg>
+        <h1>${esc(co.company_name)}</h1>
+      </div>
       <p>${esc(co.address_line1)}</p>
       <p>${esc(co.address_line2)}</p>
       ${co.gstin ? `<p>GSTIN: ${esc(co.gstin)}</p>` : ''}

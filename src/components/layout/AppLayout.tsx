@@ -8,6 +8,7 @@ import {
 import { useAuth, can, type Role } from '@/lib/auth'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ChatPanel } from '@/components/chat/ChatPanel'
+import { LogoChip } from '@/components/Logo'
 
 interface NavChild { label: string; to: string }
 interface NavItem {
@@ -370,35 +371,13 @@ export const AppLayout: React.FC = () => {
         ${sidebarOpen ? 'w-64' : 'w-16'}
       `} style={{ background: 'linear-gradient(180deg,#1a5c38 0%,#14532d 60%,#0f3d22 100%)' }}>
 
-        <style>{`
-          @keyframes sbBob { 0%,100%{transform:translateY(0) rotate(-3deg)} 50%{transform:translateY(-5px) rotate(3deg)} }
-          .sb-bird { animation: sbBob 2s ease-in-out infinite; }
-        `}</style>
-
-        {/* Logo + Bird */}
+        {/* Logo */}
         <div className={`flex items-center border-b border-green-800/40 shrink-0 ${sidebarOpen ? 'h-24 px-4 gap-3' : 'h-16 justify-center'}`}>
           {sidebarOpen ? (
             <>
-              <div className="sb-bird shrink-0">
-                <svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg" width="46" height="50">
-                  <path d="M72 55 Q85 35 82 55 Q80 42 74 55Z" fill="#2d8f2d"/>
-                  <path d="M74 60 Q90 42 86 60 Q84 48 76 60Z" fill="#1a6e1a"/>
-                  <ellipse cx="52" cy="68" rx="24" ry="19" fill="#c07c2a"/>
-                  <ellipse cx="50" cy="70" rx="18" ry="12" fill="#a86820"/>
-                  <ellipse cx="36" cy="56" rx="9" ry="13" fill="#c07c2a"/>
-                  <circle cx="30" cy="44" r="15" fill="#d4902e"/>
-                  <path d="M23 30 Q25 23 28 30 Q30 22 33 30 Q36 25 38 31" stroke="#e53e3e" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
-                  <path d="M22 48 Q18 52 20 57 Q24 60 26 55 Q25 52 22 48Z" fill="#e53e3e"/>
-                  <circle cx="25" cy="41" r="4.5" fill="white"/>
-                  <circle cx="24" cy="40.5" r="2.5" fill="#1a1a1a"/>
-                  <circle cx="23" cy="39.5" r="1" fill="white"/>
-                  <path d="M16 43 L10 46 L16 49Z" fill="#f0a830"/>
-                  <line x1="46" y1="86" x2="42" y2="100" stroke="#f0a830" strokeWidth="4" strokeLinecap="round"/>
-                  <line x1="56" y1="86" x2="60" y2="100" stroke="#f0a830" strokeWidth="4" strokeLinecap="round"/>
-                </svg>
-              </div>
+              <div className="shrink-0"><LogoChip size={40} /></div>
               <div>
-                <p className="font-extrabold text-sm text-white leading-tight">Naraendra Farms</p>
+                <p className="font-extrabold text-sm text-white leading-tight">Nara<span style={{ color: '#d6ab5f' }}>e</span>ndra Farms</p>
                 <p className="text-[10px] text-green-300">Broiler Breeder</p>
               </div>
               <button onClick={() => setSidebarOpen(o => !o)}
@@ -409,18 +388,7 @@ export const AppLayout: React.FC = () => {
           ) : (
             <button onClick={() => setSidebarOpen(o => !o)}
               className="flex flex-col items-center gap-1 p-1 rounded-lg hover:bg-green-700/40 transition-colors">
-              <div className="sb-bird">
-                <svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg" width="28" height="30">
-                  <ellipse cx="52" cy="68" rx="24" ry="19" fill="#c07c2a"/>
-                  <ellipse cx="36" cy="56" rx="9" ry="13" fill="#c07c2a"/>
-                  <circle cx="30" cy="44" r="15" fill="#d4902e"/>
-                  <path d="M23 30 Q25 23 28 30 Q30 22 33 30 Q36 25 38 31" stroke="#e53e3e" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
-                  <path d="M22 48 Q18 52 20 57 Q24 60 26 55Z" fill="#e53e3e"/>
-                  <circle cx="25" cy="41" r="4" fill="white"/>
-                  <circle cx="24" cy="40.5" r="2" fill="#1a1a1a"/>
-                  <path d="M16 43 L10 46 L16 49Z" fill="#f0a830"/>
-                </svg>
-              </div>
+              <LogoChip size={28} />
               <Menu size={12} className="text-green-300" />
             </button>
           )}
@@ -476,22 +444,9 @@ export const AppLayout: React.FC = () => {
             style={{ background: 'linear-gradient(180deg,#1a5c38,#0f3d22)' }}>
             {/* Header with bird */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-green-800/40">
-              <div style={{ animation: 'sbBob 2s ease-in-out infinite' }}>
-                <svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg" width="38" height="42">
-                  <path d="M72 55 Q85 35 82 55 Q80 42 74 55Z" fill="#2d8f2d"/>
-                  <ellipse cx="52" cy="68" rx="24" ry="19" fill="#c07c2a"/>
-                  <ellipse cx="50" cy="70" rx="18" ry="12" fill="#a86820"/>
-                  <ellipse cx="36" cy="56" rx="9" ry="13" fill="#c07c2a"/>
-                  <circle cx="30" cy="44" r="15" fill="#d4902e"/>
-                  <path d="M23 30 Q25 23 28 30 Q30 22 33 30 Q36 25 38 31" stroke="#e53e3e" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
-                  <path d="M22 48 Q18 52 20 57 Q24 60 26 55Z" fill="#e53e3e"/>
-                  <circle cx="25" cy="41" r="4.5" fill="white"/>
-                  <circle cx="24" cy="40.5" r="2.5" fill="#1a1a1a"/>
-                  <path d="M16 43 L10 46 L16 49Z" fill="#f0a830"/>
-                </svg>
-              </div>
+              <LogoChip size={38} />
               <div className="flex-1">
-                <p className="font-extrabold text-sm text-white">Naraendra Farms</p>
+                <p className="font-extrabold text-sm text-white">Nara<span style={{ color: '#d6ab5f' }}>e</span>ndra Farms</p>
                 {profile && (
                   <div className="flex items-center gap-1 mt-0.5">
                     <p className="text-xs text-green-200 truncate">{profile.full_name}</p>
