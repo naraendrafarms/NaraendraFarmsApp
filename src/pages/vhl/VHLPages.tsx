@@ -6,8 +6,10 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, SectionHeader, Spinner,
   EmptyState, Table, Th, Td, DateInput, Badge
 } from '@/components/ui'
-import { Save, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Bird, Download, Printer } from 'lucide-react'
+import { Save, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Bird, Download, Printer, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
+import * as XLSX from 'xlsx'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -211,9 +213,79 @@ export const VHLDailyEntryPage: React.FC = () => {
   const totalEggs = parseInt(form.total_eggs) || 0
   const hdPct = openF > 0 ? (totalEggs / openF * 100).toFixed(1) + '%' : '—'
 
+  const VHL_DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','he_eggs','je_eggs','te_eggs','be_eggs','le_eggs','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male','lighting_hrs','age_weeks','remarks']
+  const VHL_DAILY_EXAMPLE = ['2026-01-01',20800,2500,1200,'L1',150,'MALE',15000,0,0,300,0,0,0,0,0,20,15,16,60,'']
+  const importRef = React.useRef<HTMLInputElement>(null)
+
+  const handleTemplate = () => downloadXlsxTemplate('vhl_daily_entry_template.xlsx', VHL_DAILY_HEADERS, VHL_DAILY_EXAMPLE)
+  const handleExport = async () => {
+    if (!flockId) { toast.error('Select a flock first'); return }
+    const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).is('shed_id', null).order('record_date')
+    if (!data?.length) { toast.error('No records to export'); return }
+    exportCSV(`vhl_daily_${flock?.flock_no}_records.csv`, VHL_DAILY_HEADERS,
+      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.he_eggs,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.transfer_female,r.transfer_male,r.cull_female,r.cull_male,r.mortality_female,r.mortality_male,r.lighting_hrs,r.age_weeks,r.remarks]))
+  }
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    if (!flockId) { toast.error('Select a flock first'); e.target.value = ''; return }
+    const { headers, rows } = await parseFile(file)
+    const col = (n: string) => { const i = headers.indexOf(n); return i >= 0 ? i : headers.indexOf(n.replace(/_/g,'')) }
+    let saved = 0, skipped = 0
+    for (const r of rows) {
+      const dateVal = r[col('date')]?.trim()
+      if (!dateVal) { skipped++; continue }
+      const openingF = parseInt(r[col('opening_female')] || '0') || 0
+      const openingM = parseInt(r[col('opening_male')] || '0') || 0
+      const transferF = parseInt(r[col('transfer_female')] || '0') || 0
+      const transferM = parseInt(r[col('transfer_male')] || '0') || 0
+      const cullF = parseInt(r[col('cull_female')] || '0') || 0
+      const cullM = parseInt(r[col('cull_male')] || '0') || 0
+      const mortalityF = parseInt(r[col('mortality_female')] || '0') || 0
+      const mortalityM = parseInt(r[col('mortality_male')] || '0') || 0
+      const he = parseInt(r[col('he_eggs')] || '0') || 0
+      const je = parseInt(r[col('je_eggs')] || '0') || 0
+      const te = parseInt(r[col('te_eggs')] || '0') || 0
+      const be = parseInt(r[col('be_eggs')] || '0') || 0
+      const le = parseInt(r[col('le_eggs')] || '0') || 0
+      const payload: any = {
+        flock_id: flockId, record_date: dateVal,
+        opening_female: openingF, opening_male: openingM,
+        feed_female_kg: parseFloat(r[col('feed_female_kg')] || '0') || 0,
+        feed_male_kg: parseFloat(r[col('feed_male_kg')] || '0') || 0,
+        feed_type_f: r[col('feed_type_f')] || null, feed_type_m: r[col('feed_type_m')] || null,
+        he_eggs: he, je_eggs: je, te_eggs: te, be_eggs: be, le_eggs: le, total_eggs: he+je+te+be+le,
+        transfer_female: transferF, transfer_male: transferM, cull_female: cullF, cull_male: cullM,
+        trcull_female: transferF + cullF, trcull_male: transferM + cullM,
+        mortality_female: mortalityF, mortality_male: mortalityM,
+        closing_female: Math.max(0, openingF - transferF - cullF - mortalityF),
+        closing_male: Math.max(0, openingM - transferM - cullM - mortalityM),
+        lighting_hrs: parseFloat(r[col('lighting_hrs')] || '') || null,
+        age_weeks: parseFloat(r[col('age_weeks')] || '') || null,
+        remarks: r[col('remarks')] || null,
+      }
+      const { data: existingRow } = await supabase.from('vhl_daily_entry').select('id').eq('flock_id', flockId).eq('record_date', dateVal).is('shed_id', null).maybeSingle()
+      const { error } = existingRow
+        ? await supabase.from('vhl_daily_entry').update(payload).eq('id', existingRow.id)
+        : await supabase.from('vhl_daily_entry').insert(payload)
+      if (error) { skipped++; console.error(error) } else saved++
+    }
+    qc.invalidateQueries({ queryKey: ['vhl_daily_record'] })
+    qc.invalidateQueries({ queryKey: ['vhl_recent_records'] })
+    toast.success(`Imported ${saved} records${skipped ? `, skipped ${skipped}` : ''}`)
+    e.target.value = ''
+  }
+
   return (
     <div className="space-y-5">
-      <SectionHeader title="VHL Daily Entry" subtitle="Daily production & bird movement for VHL contract flocks — separate from our regular flock records." />
+      <SectionHeader title="VHL Daily Entry" subtitle="Daily production & bird movement for VHL contract flocks — separate from our regular flock records."
+        action={
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTemplate}>Template</Button>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import Excel/CSV</Button>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
+          </div>
+        } />
       <Card>
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-48">
@@ -372,6 +444,17 @@ export const VHLMedicineMasterPage: React.FC = () => {
 
   const openEdit = (m: any) => { setEditing(m); setForm({ name: m.name, unit: m.unit ?? 'ml', is_active: m.is_active }); setShowForm(true) }
 
+  const delMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { count } = await supabase.from('vhl_medicine_usage').select('id', { count: 'exact', head: true }).eq('vhl_medicine_id', id)
+      if ((count ?? 0) > 0) throw new Error(`Cannot delete — ${count} usage record(s) reference this medicine. Mark it Inactive instead.`)
+      const { error } = await supabase.from('vhl_medicines').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({ queryKey: ['vhl_medicines'] }) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   return (
     <div className="space-y-5">
       <SectionHeader title="VHL Medicine Master" subtitle="Medicines/vaccines used per VHL's regulations — separate from our Items Master, no stock impact."
@@ -402,7 +485,12 @@ export const VHLMedicineMasterPage: React.FC = () => {
                   <Td className="font-medium">{m.name}</Td>
                   <Td className="text-xs">{m.unit}</Td>
                   <Td><Badge color={m.is_active ? 'green' : 'gray'}>{m.is_active ? 'Active' : 'Inactive'}</Badge></Td>
-                  <Td><button onClick={() => openEdit(m)} className="p-1 text-blue-400 hover:text-blue-600"><Pencil size={14}/></button></Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(m)} className="p-1 text-blue-400 hover:text-blue-600"><Pencil size={14}/></button>
+                      <button onClick={() => { if (window.confirm(`Delete "${m.name}"?`)) delMut.mutate(m.id) }} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -419,6 +507,7 @@ export const VHLMedicineMasterPage: React.FC = () => {
 export const VHLMedicineUsagePage: React.FC = () => {
   const qc = useQueryClient()
   const [flockId, setFlockId] = useState('')
+  const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({ usage_date: today(), vhl_medicine_id: '', quantity: '', unit: '', remarks: '' })
 
   const { data: flocks } = useQuery({
@@ -426,8 +515,8 @@ export const VHLMedicineUsagePage: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').eq('is_vhl_contract', true).order('flock_no'); return data ?? [] }
   })
   const { data: meds } = useQuery({
-    queryKey: ['vhl_medicines_active'],
-    queryFn: async () => { const { data } = await supabase.from('vhl_medicines').select('id,name,unit').eq('is_active', true).order('name'); return data ?? [] }
+    queryKey: ['vhl_medicines_all'],
+    queryFn: async () => { const { data } = await supabase.from('vhl_medicines').select('id,name,unit').order('name'); return data ?? [] }
   })
   const { data: rows, isLoading } = useQuery({
     queryKey: ['vhl_medicine_usage', flockId],
@@ -443,18 +532,29 @@ export const VHLMedicineUsagePage: React.FC = () => {
     mutationFn: async () => {
       if (!flockId) throw new Error('Select a VHL flock first')
       if (!form.vhl_medicine_id || !form.quantity) throw new Error('Medicine and quantity required')
-      const { error } = await supabase.from('vhl_medicine_usage').insert({
+      const payload = {
         flock_id: flockId, usage_date: form.usage_date, vhl_medicine_id: form.vhl_medicine_id,
         quantity: parseFloat(form.quantity), unit: form.unit || null, remarks: form.remarks || null,
-      })
-      if (error) throw error
+      }
+      if (editing) {
+        const { error } = await supabase.from('vhl_medicine_usage').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('vhl_medicine_usage').insert(payload)
+        if (error) throw error
+      }
     },
     onSuccess: () => {
-      toast.success('Usage recorded'); qc.invalidateQueries({ queryKey: ['vhl_medicine_usage'] })
-      setForm({ usage_date: today(), vhl_medicine_id: '', quantity: '', unit: '', remarks: '' })
+      toast.success(editing ? 'Usage updated' : 'Usage recorded'); qc.invalidateQueries({ queryKey: ['vhl_medicine_usage'] })
+      setForm({ usage_date: today(), vhl_medicine_id: '', quantity: '', unit: '', remarks: '' }); setEditing(null)
     },
     onError: (e: any) => toast.error(e.message),
   })
+
+  const openEdit = (r: any) => {
+    setEditing(r); setFlockId(r.flock_id)
+    setForm({ usage_date: r.usage_date, vhl_medicine_id: r.vhl_medicine_id ?? '', quantity: r.quantity?.toString() ?? '', unit: r.unit ?? '', remarks: r.remarks ?? '' })
+  }
 
   const delMut = useMutation({
     mutationFn: async (id: string) => { const { error } = await supabase.from('vhl_medicine_usage').delete().eq('id', id); if (error) throw error },
@@ -479,7 +579,10 @@ export const VHLMedicineUsagePage: React.FC = () => {
           <Input label="Unit" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
         </FormRow>
         <Input label="Remarks" value={form.remarks} onChange={e => setForm(f => ({ ...f, remarks: e.target.value }))} />
-        <Button onClick={() => addMut.mutate()} loading={addMut.isPending}>Record Usage</Button>
+        <div className="flex gap-2">
+          <Button onClick={() => addMut.mutate()} loading={addMut.isPending}>{editing ? 'Update Usage' : 'Record Usage'}</Button>
+          {editing && <Button variant="secondary" onClick={() => { setEditing(null); setForm({ usage_date: today(), vhl_medicine_id: '', quantity: '', unit: '', remarks: '' }) }}>Cancel</Button>}
+        </div>
       </Card>
 
       {isLoading ? <Spinner /> : !rows?.length ? (
@@ -497,7 +600,12 @@ export const VHLMedicineUsagePage: React.FC = () => {
                   <Td right className="text-xs">{r.quantity}</Td>
                   <Td className="text-xs">{r.unit ?? r.vhl_medicines?.unit ?? '—'}</Td>
                   <Td className="text-xs">{r.remarks ?? '—'}</Td>
-                  <Td><button onClick={() => delMut.mutate(r.id)} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={14}/></button></Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(r)} className="p-1 text-blue-400 hover:text-blue-600"><Pencil size={14}/></button>
+                      <button onClick={() => delMut.mutate(r.id)} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -516,9 +624,11 @@ export const VHLMedicineUsagePage: React.FC = () => {
 export const VHLEggProductionPage: React.FC = () => {
   const qc = useQueryClient()
   const [flockId, setFlockId] = useState('')
+  const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({ production_date: today(), he_qty: '', te_qty: '', dc_no: '', vehicle_no: '', remarks: '' })
   const [month, setMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })
   const [invoiceNo, setInvoiceNo] = useState('')
+  const [sel, setSel] = useState<Set<string>>(new Set())
 
   const { data: flocks } = useQuery({
     queryKey: ['vhl_flocks_active'],
@@ -556,19 +666,37 @@ export const VHLEggProductionPage: React.FC = () => {
       if (!flockId) throw new Error('Select a VHL flock')
       const he = parseInt(form.he_qty) || 0, te = parseInt(form.te_qty) || 0
       if (!he && !te) throw new Error('Enter HE or TE quantity')
-      const amount = Math.round((he + te) * currentRate * 100) / 100
-      const { data: dup } = await supabase.from('vhl_egg_production').select('id').eq('flock_id', flockId).eq('production_date', form.production_date).maybeSingle()
-      if (dup) throw new Error('An entry already exists for this flock and date — edit it instead')
-      const { error } = await supabase.from('vhl_egg_production').insert({
+      const rate = editing ? Number(editing.rate_per_egg) : currentRate
+      const amount = Math.round((he + te) * rate * 100) / 100
+      const payload = {
         flock_id: flockId, production_date: form.production_date, he_qty: he, te_qty: te,
-        rate_per_egg: currentRate, amount, dc_no: form.dc_no || null, vehicle_no: form.vehicle_no || null, remarks: form.remarks || null,
-      })
-      if (error) throw error
+        rate_per_egg: rate, amount, dc_no: form.dc_no || null, vehicle_no: form.vehicle_no || null, remarks: form.remarks || null,
+      }
+      if (editing) {
+        const { error } = await supabase.from('vhl_egg_production').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { data: dup } = await supabase.from('vhl_egg_production').select('id').eq('flock_id', flockId).eq('production_date', form.production_date).maybeSingle()
+        if (dup) throw new Error('An entry already exists for this flock and date — edit it instead')
+        const { error } = await supabase.from('vhl_egg_production').insert(payload)
+        if (error) throw error
+      }
     },
     onSuccess: () => {
-      toast.success('Production recorded'); qc.invalidateQueries({ queryKey: ['vhl_egg_production'] })
-      setForm({ production_date: today(), he_qty: '', te_qty: '', dc_no: '', vehicle_no: '', remarks: '' })
+      toast.success(editing ? 'Production updated' : 'Production recorded'); qc.invalidateQueries({ queryKey: ['vhl_egg_production'] })
+      setForm({ production_date: today(), he_qty: '', te_qty: '', dc_no: '', vehicle_no: '', remarks: '' }); setEditing(null)
     },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const openEdit = (r: any) => {
+    setEditing(r); setFlockId(r.flock_id)
+    setForm({ production_date: r.production_date, he_qty: r.he_qty?.toString() ?? '', te_qty: r.te_qty?.toString() ?? '', dc_no: r.dc_no ?? '', vehicle_no: r.vehicle_no ?? '', remarks: r.remarks ?? '' })
+  }
+
+  const delMut = useMutation({
+    mutationFn: async (ids: string[]) => { const { error } = await supabase.from('vhl_egg_production').delete().in('id', ids); if (error) throw error },
+    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({ queryKey: ['vhl_egg_production'] }); setSel(new Set()) },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -613,9 +741,12 @@ export const VHLEggProductionPage: React.FC = () => {
           <Input label="Vehicle No" value={form.vehicle_no} onChange={e => setForm(f => ({ ...f, vehicle_no: e.target.value }))} />
         </FormRow>
         {(parseInt(form.he_qty)||0) + (parseInt(form.te_qty)||0) > 0 && (
-          <p className="text-sm text-green-700 font-medium">Auto Amount: {inr(((parseInt(form.he_qty)||0)+(parseInt(form.te_qty)||0)) * currentRate)}</p>
+          <p className="text-sm text-green-700 font-medium">Auto Amount: {inr(((parseInt(form.he_qty)||0)+(parseInt(form.te_qty)||0)) * (editing ? Number(editing.rate_per_egg) : currentRate))}</p>
         )}
-        <Button onClick={() => addMut.mutate()} loading={addMut.isPending}>Save Dispatch</Button>
+        <div className="flex gap-2">
+          <Button onClick={() => addMut.mutate()} loading={addMut.isPending}>{editing ? 'Update Dispatch' : 'Save Dispatch'}</Button>
+          {editing && <Button variant="secondary" onClick={() => { setEditing(null); setForm({ production_date: today(), he_qty: '', te_qty: '', dc_no: '', vehicle_no: '', remarks: '' }) }}>Cancel</Button>}
+        </div>
       </Card>
 
       <Card className="space-y-3">
@@ -641,16 +772,31 @@ export const VHLEggProductionPage: React.FC = () => {
         )}
       </Card>
 
+      {sel.size > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
+          <span className="text-sm font-medium text-red-700">{sel.size} selected</span>
+          <button onClick={() => setSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+          <div className="ml-auto">
+            <Button variant="danger" size="sm" icon={<Trash2 size={14}/>} loading={delMut.isPending}
+              onClick={() => { if (window.confirm(`Delete ${sel.size} row(s)?`)) delMut.mutate([...sel]) }}>Delete {sel.size} rows</Button>
+          </div>
+        </div>
+      )}
+
       {isLoading ? <Spinner /> : !rows?.length ? (
         <EmptyState icon={<Bird size={32}/>} title="No production recorded for this period" />
       ) : (
         <Card padding={false}>
           <CardHeader title={`${rows.length} days — ${totalEggs.toLocaleString('en-IN')} eggs — ${inr(totalAmount)}`} />
           <Table>
-            <thead><tr><Th>Date</Th><Th>Flock</Th><Th right>HE</Th><Th right>TE</Th><Th right>Total</Th><Th right>Rate</Th><Th right>Amount</Th><Th>DC No</Th><Th>Vehicle</Th><Th>Invoice No</Th></tr></thead>
+            <thead><tr>
+              <Th><input type="checkbox" checked={sel.size > 0 && sel.size === rows.length} onChange={() => setSel(sel.size === rows.length ? new Set() : new Set(rows.map((r: any) => r.id)))} className="rounded" /></Th>
+              <Th>Date</Th><Th>Flock</Th><Th right>HE</Th><Th right>TE</Th><Th right>Total</Th><Th right>Rate</Th><Th right>Amount</Th><Th>DC No</Th><Th>Vehicle</Th><Th>Invoice No</Th><Th></Th>
+            </tr></thead>
             <tbody>
               {rows.map((r: any) => (
-                <tr key={r.id} className="hover:bg-gray-50 text-sm">
+                <tr key={r.id} className={`hover:bg-gray-50 text-sm ${sel.has(r.id) ? 'bg-brand-50' : ''}`}>
+                  <Td><input type="checkbox" checked={sel.has(r.id)} onChange={() => setSel(s => { const n = new Set(s); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n })} className="rounded" /></Td>
                   <Td className="text-xs">{fmtDate(r.production_date)}</Td>
                   <Td className="text-xs">{r.flocks?.flock_no ?? '—'}</Td>
                   <Td right className="text-xs">{r.he_qty ?? 0}</Td>
@@ -661,6 +807,12 @@ export const VHLEggProductionPage: React.FC = () => {
                   <Td className="text-xs">{r.dc_no ?? '—'}</Td>
                   <Td className="text-xs">{r.vehicle_no ?? '—'}</Td>
                   <Td className="text-xs">{r.invoice_no ?? <span className="text-orange-500">not invoiced</span>}</Td>
+                  <Td>
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(r)} className="p-1 text-blue-400 hover:text-blue-600"><Pencil size={14}/></button>
+                      <button onClick={() => { if (window.confirm('Delete this row?')) delMut.mutate([r.id]) }} className="p-1 text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -842,6 +994,81 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
     else toast.success(`Saved ${saved} shed record(s)`)
   }
 
+  const importRef = React.useRef<HTMLInputElement>(null)
+  const SHED_HEADERS = ['Shed No','Open F','Open M','Feed F kg','Feed Type F','Feed M kg','Feed Type M',
+    'Transfer F','Transfer M','Cull F','Cull M','Death F','Death M','HE','JE','TE','BE','LE',
+    'Wastage HE','Wastage JE','Wastage TE','Wastage BE','Lighting Hrs','Remarks']
+
+  const handleTemplate = () => downloadXlsxTemplate('vhl_bulk_daily_template.xlsx', SHED_HEADERS,
+    ['1','20800','2500','1200','L1','150','MALE','0','0','0','0','20','15','15000','0','0','300','0','','','','','16','OK (Closing auto-calculated)'])
+
+  const handleExport = () => {
+    if (!flockId || !sheds?.length) { toast.error('Select a flock first'); return }
+    const data = (sheds as any[]).map((shed) => {
+      const r = shedRows[shed.id] ?? emptyVhlShedRow()
+      return {
+        'Shed No': shed.shed_no, 'Open F': r.opening_female, 'Open M': r.opening_male,
+        'Feed F kg': r.feed_female_kg, 'Feed Type F': r.feed_type_f, 'Feed M kg': r.feed_male_kg, 'Feed Type M': r.feed_type_m,
+        'Transfer F': r.transfer_female, 'Transfer M': r.transfer_male, 'Cull F': r.cull_female, 'Cull M': r.cull_male,
+        'Death F': r.mortality_female, 'Death M': r.mortality_male,
+        HE: r.he_eggs, JE: r.je_eggs, TE: r.te_eggs, BE: r.be_eggs, LE: r.le_eggs,
+        'Wastage HE': r.wastage_he, 'Wastage JE': r.wastage_je, 'Wastage TE': r.wastage_te, 'Wastage BE': r.wastage_be,
+        'Lighting Hrs': r.lighting_hrs, Remarks: r.remarks,
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(data, { header: SHED_HEADERS })
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Sheds')
+    XLSX.writeFile(wb, `VHL_BulkDaily_Flock${flock?.flock_no}_${date}.xlsx`)
+    toast.success('Exported current grid')
+  }
+
+  const handleImport = async (file: File) => {
+    if (!flockId) { toast.error('Select a flock first'); return }
+    try {
+      const { headers, rows } = await parseFile(file)
+      const idx = (n: string) => headers.findIndex(h => h.toLowerCase().trim() === n.toLowerCase())
+      const ci = {
+        shed: idx('Shed No'), of: idx('Open F'), om: idx('Open M'), ff: idx('Feed F kg'), ftf: idx('Feed Type F'),
+        fm: idx('Feed M kg'), ftm: idx('Feed Type M'), trf: idx('Transfer F'), trm: idx('Transfer M'),
+        cf: idx('Cull F'), cm: idx('Cull M'), df: idx('Death F'), dm: idx('Death M'),
+        he: idx('HE'), je: idx('JE'), te: idx('TE'), be: idx('BE'), le: idx('LE'),
+        whe: idx('Wastage HE'), wje: idx('Wastage JE'), wte: idx('Wastage TE'), wbe: idx('Wastage BE'),
+        light: idx('Lighting Hrs'), rem: idx('Remarks'),
+      }
+      const shedByNo: Record<string, any> = {}
+      for (const s of (sheds ?? []) as any[]) shedByNo[String(s.shed_no).trim()] = s
+      let matched = 0
+      setShedRows(prev => {
+        const next = { ...prev }
+        for (const row of rows) {
+          const shedNo = ci.shed >= 0 ? row[ci.shed]?.trim() : ''
+          const shed = shedByNo[shedNo]
+          if (!shed) continue
+          matched++
+          const g = (i: number) => i >= 0 ? row[i] : ''
+          const cur = next[shed.id] ?? emptyVhlShedRow()
+          next[shed.id] = {
+            ...cur,
+            opening_female: g(ci.of) || cur.opening_female, opening_male: g(ci.om) || cur.opening_male,
+            feed_female_kg: g(ci.ff) || cur.feed_female_kg, feed_type_f: g(ci.ftf) || cur.feed_type_f,
+            feed_male_kg: g(ci.fm) || cur.feed_male_kg, feed_type_m: g(ci.ftm) || cur.feed_type_m,
+            transfer_female: g(ci.trf) || cur.transfer_female, transfer_male: g(ci.trm) || cur.transfer_male,
+            cull_female: g(ci.cf) || cur.cull_female, cull_male: g(ci.cm) || cur.cull_male,
+            mortality_female: g(ci.df) || cur.mortality_female, mortality_male: g(ci.dm) || cur.mortality_male,
+            he_eggs: g(ci.he) || cur.he_eggs, je_eggs: g(ci.je) || cur.je_eggs, te_eggs: g(ci.te) || cur.te_eggs,
+            be_eggs: g(ci.be) || cur.be_eggs, le_eggs: g(ci.le) || cur.le_eggs,
+            wastage_he: g(ci.whe) || cur.wastage_he, wastage_je: g(ci.wje) || cur.wastage_je,
+            wastage_te: g(ci.wte) || cur.wastage_te, wastage_be: g(ci.wbe) || cur.wastage_be,
+            lighting_hrs: g(ci.light) || cur.lighting_hrs, remarks: g(ci.rem) || cur.remarks,
+          }
+        }
+        return next
+      })
+      toast.success(`Imported ${matched} shed(s) into grid — review and click Save All`)
+    } catch (e: any) { toast.error(e.message) }
+    finally { if (importRef.current) importRef.current.value = '' }
+  }
+
   const numInput = (val: string, onChange: (v: string) => void, w = 'w-14') => (
     <input type="number" min="0" value={val} onChange={e => onChange(e.target.value)} placeholder="0"
       className={`${w} text-center border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white`} />
@@ -849,7 +1076,15 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="VHL Bulk Daily Entry (Shed-wise)" subtitle="Enter each shed separately — combines into the VHL flock's daily record." />
+      <SectionHeader title="VHL Bulk Daily Entry (Shed-wise)" subtitle="Enter each shed separately — combines into the VHL flock's daily record."
+        action={
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTemplate}>Template</Button>
+            <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export</Button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
+          </div>
+        } />
       <Card>
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-48">
