@@ -20,6 +20,7 @@ import { useAuth, can } from '@/lib/auth'
 import { parseFile } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { LogoChip } from '@/components/Logo'
 
 // ── CSV export helper ─────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -2526,7 +2527,10 @@ const PayslipView: React.FC<{
   return (
     <div className="border-2 border-gray-800 p-6 bg-white max-w-3xl mx-auto text-sm font-sans">
       <div className="text-center border-b-2 border-gray-800 pb-4 mb-4">
-        <h1 className="text-xl font-bold text-gray-900">{cs.company_name}</h1>
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <LogoChip size={28} />
+          <h1 className="text-xl font-bold text-gray-900">{cs.company_name}</h1>
+        </div>
         {(cs.address_line1||cs.city)&&<p className="text-xs text-gray-600">{[cs.address_line1,cs.address_line2,cs.city,cs.state,cs.pincode].filter(Boolean).join(', ')}</p>}
         {(cs.phone||cs.email)&&<p className="text-xs text-gray-500">{[cs.phone&&`Ph: ${cs.phone}`,cs.email&&`Email: ${cs.email}`].filter(Boolean).join(' | ')}</p>}
         <h2 className="text-base font-bold mt-2 text-gray-800">SALARY SLIP — {monthLabel(month).toUpperCase()}</h2>

@@ -1,6 +1,9 @@
 // Invoice print utility — opens a styled print window
 // Company details are embedded here; update if address changes.
 
+const LOGO_SVG = `<svg width="30" height="30" viewBox="0 0 64 64" style="flex-shrink:0"><rect width="64" height="64" rx="10" fill="#14532d"/><text x="32" y="43" font-family="Georgia, 'Iowan Old Style', serif" font-weight="700" font-size="30" letter-spacing="-1" text-anchor="middle"><tspan fill="#f7f1e4">N</tspan><tspan fill="#d6ab5f">F</tspan></text></svg>`
+const LOGO_ROW_CSS = `<style>.co-name-row{display:flex;align-items:center;gap:8px;}</style>`
+
 const CO = {
   name: 'Naraendra Farms',
   addr1: '5-9-22/21, 1st Floor, JVR Amrit Enclave',
@@ -151,10 +154,10 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[], opts: HEPr
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
   <title>Invoice ${d.invoice_no ?? 'Draft'}</title>
-  <style>${CSS}</style></head><body>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
   <div class="header">
     <div>
-      <h1>${CO.name}</h1>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
       ${showCompany ? `<div class="sub">${CO.addr1}</div>
       <div class="sub">${CO.addr2}</div>
       <div class="sub">GSTIN: ${CO.gstin} | State: ${CO.state} (${CO.stateCode})</div>
@@ -339,10 +342,10 @@ export function printNHESale(d: NHESaleRecord) {
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
   <title>Sales Invoice ${d.invoice_no ?? 'Draft'}</title>
-  <style>${CSS}</style></head><body>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
   <div class="header">
     <div>
-      <h1>${CO.name}</h1>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
       <div class="sub">${CO.addr1}</div>
       <div class="sub">${CO.addr2}</div>
       <div class="sub">GSTIN: ${CO.gstin} | State: ${CO.state} (${CO.stateCode})</div>
@@ -482,10 +485,10 @@ export function printGRN(d: GRNRecord) {
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
   <title>GRN ${d.grn_no ?? ''}</title>
-  <style>${CSS}</style></head><body>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
   <div class="header">
     <div>
-      <h1>${CO.name}</h1>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
       <div class="sub">${CO.addr1}</div>
       <div class="sub">${CO.addr2}</div>
       <div class="sub">GSTIN: ${CO.gstin} | State: ${CO.state} (${CO.stateCode})</div>
