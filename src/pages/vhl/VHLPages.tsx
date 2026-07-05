@@ -149,7 +149,14 @@ export const VHLDailyEntryPage: React.FC = () => {
 
   const set = (k: string, v: string) => setForm((f: any) => {
     const nf = { ...f, [k]: v }
-    if (['opening_female','opening_male','trcull_female','trcull_male','mortality_female','mortality_male'].includes(k)) {
+    // First-ever entry for this flock (no prior day to carry Opening forward
+    // from) — Received IS the Opening count, so auto-fill it instead of
+    // making you type the same number twice.
+    if (!existing && !prevRecord) {
+      if (k === 'received_female' && !f.opening_female) nf.opening_female = v
+      if (k === 'received_male' && !f.opening_male) nf.opening_male = v
+    }
+    if (['opening_female','opening_male','received_female','received_male','trcull_female','trcull_male','mortality_female','mortality_male'].includes(k)) {
       const of = parseInt(nf.opening_female) || 0, om = parseInt(nf.opening_male) || 0
       const tf = parseInt(nf.trcull_female) || 0, tm = parseInt(nf.trcull_male) || 0
       const mf = parseInt(nf.mortality_female) || 0, mm = parseInt(nf.mortality_male) || 0
