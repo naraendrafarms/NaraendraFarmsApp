@@ -6,7 +6,9 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, SectionHeader, Spinner,
   EmptyState, Table, Th, Td, DateInput, Badge
 } from '@/components/ui'
-import { Save, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Bird, Download, Printer, Upload } from 'lucide-react'
+import { Save, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Bird, Download, Printer, Upload, Egg, TrendingUp, Activity, DollarSign } from 'lucide-react'
+import { StatCard } from '@/components/ui'
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import toast from 'react-hot-toast'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
@@ -1188,6 +1190,274 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VHL Dashboard — KPI overview for VHL contract flocks, reads from
+// vhl_daily_entry / vhl_egg_production so numbers never mix with our
+// regular Dashboard's daily_records/v_flock_summary figures.
+// ═══════════════════════════════════════════════════════════════
+export const VHLDashboardPage: React.FC = () => {
+  const { data: flocks, isLoading } = useQuery({
+    queryKey: ['vhl_dashboard_flocks'],
+    queryFn: async () => {
+      const { data } = await supabase.from('flocks')
+        .select('id,flock_no,status,placement_date,total_placed_f,total_placed_m,laying_farm_id,farms!laying_farm_id(name)')
+        .eq('is_vhl_contract', true).order('flock_no')
+      return data ?? []
+    }
+  })
+
+  const thirtyDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate()-30); return localYMD(d) })()
+  const { data: recentDaily } = useQuery({
+    queryKey: ['vhl_dashboard_daily', thirtyDaysAgo],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_daily_entry')
+        .select('flock_id,record_date,total_eggs,he_eggs,mortality_female,mortality_male,closing_female,closing_male')
+        .gte('record_date', thirtyDaysAgo).order('record_date')
+      return data ?? []
+    },
+    enabled: !!flocks?.length
+  })
+
+  const monthStart = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01` })()
+  const { data: eggProdMonth } = useQuery({
+    queryKey: ['vhl_dashboard_egg_prod', monthStart],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_egg_production').select('flock_id,he_qty,te_qty,amount').gte('production_date', monthStart)
+      return data ?? []
+    },
+    enabled: !!flocks?.length
+  })
+
+  // Current birds per flock — sum of the latest date's rows (shed-wise or single, never both for the same date)
+  const currentByFlock = React.useMemo(() => {
+    const latestDatePerFlock: Record<string, string> = {}
+    for (const r of (recentDaily ?? [])) {
+      if (!latestDatePerFlock[r.flock_id] || r.record_date > latestDatePerFlock[r.flock_id]) latestDatePerFlock[r.flock_id] = r.record_date
+    }
+    const out: Record<string, { female: number; male: number }> = {}
+    for (const r of (recentDaily ?? [])) {
+      if (r.record_date !== latestDatePerFlock[r.flock_id]) continue
+      if (!out[r.flock_id]) out[r.flock_id] = { female: 0, male: 0 }
+      out[r.flock_id].female += r.closing_female ?? 0
+      out[r.flock_id].male += r.closing_male ?? 0
+    }
+    return out
+  }, [recentDaily])
+
+  const activeFlocks = (flocks ?? []).filter((f: any) => f.status !== 'closed')
+  const totalBirds = activeFlocks.reduce((s: number, f: any) => {
+    const c = currentByFlock[f.id]
+    return s + (c ? c.female + c.male : (f.total_placed_f ?? 0) + (f.total_placed_m ?? 0))
+  }, 0)
+  const totalEggsThisMonth = (eggProdMonth ?? []).reduce((s: number, r: any) => s + (r.he_qty ?? 0) + (r.te_qty ?? 0), 0)
+  const totalRevenueThisMonth = (eggProdMonth ?? []).reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0)
+
+  const chartData = React.useMemo(() => {
+    const byDate: Record<string, { date: string; eggs: number; he: number; mort: number }> = {}
+    for (const r of (recentDaily ?? [])) {
+      if (!byDate[r.record_date]) byDate[r.record_date] = { date: r.record_date, eggs: 0, he: 0, mort: 0 }
+      byDate[r.record_date].eggs += r.total_eggs ?? 0
+      byDate[r.record_date].he += r.he_eggs ?? 0
+      byDate[r.record_date].mort += (r.mortality_female ?? 0) + (r.mortality_male ?? 0)
+    }
+    return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)).slice(-14)
+      .map(r => { const p = r.date.split('-'); const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return { ...r, date: `${p[2]} ${mn[parseInt(p[1])-1]}` } })
+  }, [recentDaily])
+
+  if (isLoading) return <Spinner />
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader title="VHL Dashboard" subtitle={`${activeFlocks.length} active VHL flock${activeFlocks.length !== 1 ? 's' : ''}`} />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard title="Total Birds (VHL)" value={totalBirds.toLocaleString('en-IN')} subtitle={`${activeFlocks.length} flocks running`} icon={<Bird size={18}/>} color="text-brand-600" />
+        <StatCard title="Eggs This Month" value={totalEggsThisMonth.toLocaleString('en-IN')} subtitle="HE + TE dispatched to VHL" icon={<Egg size={18}/>} color="text-yellow-600" />
+        <StatCard title="Revenue This Month" value={inr(totalRevenueThisMonth)} subtitle="At effective ₹/egg rate" icon={<DollarSign size={18}/>} color="text-green-600" />
+        <StatCard title="Active VHL Flocks" value={activeFlocks.length} subtitle={`${(flocks ?? []).filter((f: any) => f.status === 'closed').length} closed`} icon={<Activity size={18}/>} color="text-blue-600" />
+      </div>
+
+      {!activeFlocks.length ? (
+        <EmptyState icon={<Bird size={32}/>} title="No active VHL flocks" subtitle="Tag a flock as VHL Contract in Flock Management to see it here." />
+      ) : (
+        <Card>
+          <CardHeader title="Active VHL Flocks" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {activeFlocks.map((f: any) => {
+              const c = currentByFlock[f.id]
+              return (
+                <div key={f.id} className="p-4 rounded-xl border border-gray-100">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-lg font-bold text-gray-900">F-{f.flock_no}</span>
+                    <Badge color={f.status === 'laying' ? 'green' : f.status === 'rearing' ? 'yellow' : 'gray'}>{f.status}</Badge>
+                  </div>
+                  <div className="space-y-1.5 text-xs text-gray-600">
+                    <div className="flex justify-between"><span>Site</span><span className="font-medium text-gray-900 truncate max-w-[100px]">{f.farms?.name ?? '—'}</span></div>
+                    <div className="flex justify-between"><span>Birds ♀</span><span className="font-medium text-gray-900">{(c?.female ?? f.total_placed_f ?? 0).toLocaleString('en-IN')}</span></div>
+                    <div className="flex justify-between"><span>Birds ♂</span><span className="font-medium text-gray-900">{(c?.male ?? f.total_placed_m ?? 0).toLocaleString('en-IN')}</span></div>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-gray-100 text-xs text-gray-400">Placed: {fmtDate(f.placement_date)}</div>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      {chartData.length > 0 && (
+        <Card>
+          <CardHeader title="14-Day Production" subtitle="Eggs + HE across all VHL flocks" />
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+              <Tooltip formatter={(v: number) => v.toLocaleString('en-IN')} />
+              <Line type="monotone" dataKey="eggs" stroke="#22c55e" strokeWidth={2} dot={false} name="Total Eggs" />
+              <Line type="monotone" dataKey="he" stroke="#3b82f6" strokeWidth={2} dot={false} name="HE Eggs" />
+              <Line type="monotone" dataKey="mort" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Mortality" />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VHL Shed Performance — per-shed breakdown for VHL flocks, reads from
+// vhl_daily_entry (never daily_records) so it stays fully separate from
+// the regular Shed-wise Performance report.
+// ═══════════════════════════════════════════════════════════════
+function vhlPctVal(num: number, den: number) { return den > 0 ? num / den * 100 : null }
+function vhlColorPct(val: number | null, good = 80, warn = 65) {
+  if (val == null) return 'text-gray-400'
+  return val >= good ? 'text-green-600 font-semibold' : val >= warn ? 'text-amber-600 font-semibold' : 'text-red-600 font-semibold'
+}
+
+export const VHLShedPerformancePage: React.FC = () => {
+  const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate()-n); return localYMD(d) }
+  const [fromDate, setFromDate] = useState(daysAgo(30))
+  const [toDate, setToDate] = useState(today())
+
+  const { data: records, isLoading } = useQuery({
+    queryKey: ['vhl_shed_perf', fromDate, toDate],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_daily_entry')
+        .select('record_date,shed_id,flock_id,opening_female,closing_female,mortality_female,mortality_male,total_eggs,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,feed_female_kg,feed_male_kg,sheds(shed_no,shed_name),flocks(flock_no)')
+        .gte('record_date', fromDate).lte('record_date', toDate)
+      return data ?? []
+    }
+  })
+
+  const recs = records ?? []
+  const agg = (rows: any[]) => {
+    const eggs = rows.reduce((s, r) => s + (r.total_eggs ?? 0), 0)
+    const he = rows.reduce((s, r) => s + (r.he_eggs ?? 0), 0)
+    const je = rows.reduce((s, r) => s + (r.je_eggs ?? 0), 0)
+    const te = rows.reduce((s, r) => s + (r.te_eggs ?? 0), 0)
+    const be = rows.reduce((s, r) => s + (r.be_eggs ?? 0), 0)
+    const le = rows.reduce((s, r) => s + (r.le_eggs ?? 0), 0)
+    const mortF = rows.reduce((s, r) => s + (r.mortality_female ?? 0), 0)
+    const mortM = rows.reduce((s, r) => s + (r.mortality_male ?? 0), 0)
+    const feedF = rows.reduce((s, r) => s + (r.feed_female_kg ?? 0), 0)
+    const feedM = rows.reduce((s, r) => s + (r.feed_male_kg ?? 0), 0)
+    const birdDays = rows.reduce((s, r) => s + (r.opening_female ?? 0), 0)
+    return { eggs, he, je, te, be, le, mortF, mortM, feedF, feedM, days: rows.length, hdPct: vhlPctVal(eggs, birdDays), hePct: vhlPctVal(he, eggs) }
+  }
+
+  const byShed = React.useMemo(() => {
+    const map: Record<string, any[]> = {}
+    for (const r of recs) {
+      const k = r.shed_id ?? '__noshed__'
+      if (!map[k]) map[k] = []
+      map[k].push(r)
+    }
+    return Object.entries(map).map(([key, rows]) => {
+      const shed = (rows[0] as any).sheds
+      const flockNos = [...new Set(rows.map((r: any) => r.flocks?.flock_no).filter(Boolean))]
+      return { key, shed, s: agg(rows), flockNos }
+    }).sort((a, b) => (a.shed?.shed_no ?? '').localeCompare(b.shed?.shed_no ?? ''))
+  }, [recs])
+
+  const totals = agg(recs)
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="VHL Shed-wise Performance" subtitle="Per-shed production breakdown for VHL contract flocks." />
+      <Card>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+          <DateInput label="From Date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <DateInput label="To Date" value={toDate} onChange={e => setToDate(e.target.value)} />
+          <div className="flex items-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => { setFromDate(daysAgo(7)); setToDate(today()) }}>7d</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setFromDate(daysAgo(30)); setToDate(today()) }}>30d</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setFromDate(daysAgo(90)); setToDate(today()) }}>90d</Button>
+          </div>
+        </div>
+      </Card>
+
+      {!isLoading && recs.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <StatCard title="Total Eggs" value={totals.eggs.toLocaleString('en-IN')} icon={<Egg size={16}/>} color="text-yellow-600" />
+          <StatCard title="HE Eggs" value={totals.he.toLocaleString('en-IN')} icon={<Egg size={16}/>} color="text-green-600" />
+          <StatCard title="Avg HD%" value={totals.hdPct != null ? totals.hdPct.toFixed(1)+'%' : '—'} icon={<TrendingUp size={16}/>} color={vhlColorPct(totals.hdPct)} />
+          <StatCard title="Avg HE%" value={totals.hePct != null ? totals.hePct.toFixed(1)+'%' : '—'} icon={<TrendingUp size={16}/>} color={vhlColorPct(totals.hePct, 90, 75)} />
+          <StatCard title="Total Mortality F" value={totals.mortF.toLocaleString('en-IN')} icon={<Bird size={16}/>} color="text-red-500" />
+        </div>
+      )}
+
+      {isLoading ? <Spinner /> : recs.length === 0 ? (
+        <EmptyState icon={<Egg size={32}/>} title="No VHL records in this date range" />
+      ) : (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Shed</Th><Th>Flocks</Th><Th right>Days</Th><Th right>Total Eggs</Th><Th right>HE</Th>
+              <Th right>HD%</Th><Th right>HE%</Th><Th right>JE</Th><Th right>TE</Th><Th right>BE+LE</Th>
+              <Th right>Mort F</Th><Th right>Mort M</Th><Th right>Feed kg</Th>
+            </tr></thead>
+            <tbody>
+              {byShed.map(({ key, shed, s, flockNos }) => (
+                <tr key={key} className="hover:bg-gray-50">
+                  <Td className="text-xs font-mono text-purple-700">{shed?.shed_no ?? <span className="text-gray-400">No shed</span>}{shed?.shed_name ? ` — ${shed.shed_name}` : ''}</Td>
+                  <Td className="text-xs">{flockNos.map((f: any) => <span key={f} className="inline-block bg-green-100 text-green-800 rounded px-1 mr-0.5 text-xs">F-{f}</span>)}</Td>
+                  <Td right className="text-xs">{s.days}</Td>
+                  <Td right className="text-xs font-semibold">{s.eggs.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-xs text-green-700">{s.he.toLocaleString('en-IN')}</Td>
+                  <Td right className={`text-xs ${vhlColorPct(s.hdPct)}`}>{s.hdPct != null ? s.hdPct.toFixed(1)+'%' : '—'}</Td>
+                  <Td right className={`text-xs ${vhlColorPct(s.hePct, 90, 75)}`}>{s.hePct != null ? s.hePct.toFixed(1)+'%' : '—'}</Td>
+                  <Td right className="text-xs">{s.je.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-xs">{s.te.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-xs">{(s.be+s.le).toLocaleString('en-IN')}</Td>
+                  <Td right className="text-xs">{s.mortF}</Td>
+                  <Td right className="text-xs">{s.mortM}</Td>
+                  <Td right className="text-xs">{(s.feedF+s.feedM).toFixed(1)}</Td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 font-semibold text-sm">
+                <Td colSpan={2}>TOTAL</Td>
+                <Td right className="text-xs">{totals.days}</Td>
+                <Td right className="text-xs">{totals.eggs.toLocaleString('en-IN')}</Td>
+                <Td right className="text-xs">{totals.he.toLocaleString('en-IN')}</Td>
+                <Td colSpan={2}></Td>
+                <Td right className="text-xs">{totals.je.toLocaleString('en-IN')}</Td>
+                <Td right className="text-xs">{totals.te.toLocaleString('en-IN')}</Td>
+                <Td right className="text-xs">{(totals.be+totals.le).toLocaleString('en-IN')}</Td>
+                <Td right className="text-xs">{totals.mortF}</Td>
+                <Td right className="text-xs">{totals.mortM}</Td>
+                <Td right className="text-xs">{(totals.feedF+totals.feedM).toFixed(1)}</Td>
+              </tr>
+            </tfoot>
+          </Table>
         </Card>
       )}
     </div>

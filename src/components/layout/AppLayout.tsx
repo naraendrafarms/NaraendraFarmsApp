@@ -153,12 +153,14 @@ const NAV: NavItem[] = [
   {
     label: 'VHL', icon: <Bird size={18}/>,
     children: [
+      { label: 'VHL Dashboard',         to: '/vhl/dashboard' },
       { label: 'VHL Flocks',            to: '/vhl/flocks' },
       { label: 'VHL Daily Entry',       to: '/vhl/daily-entry' },
       { label: 'VHL Bulk Daily Entry',  to: '/vhl/bulk-daily-entry' },
       { label: 'VHL Egg Production',    to: '/vhl/egg-production' },
       { label: 'VHL Medicine Master',   to: '/vhl/medicine-master' },
       { label: 'VHL Medicine Usage',    to: '/vhl/medicine-usage' },
+      { label: 'VHL Shed Performance',  to: '/vhl/shed-performance' },
     ]
   },
   {
