@@ -539,7 +539,8 @@ const ADVANCE_TYPES_FB = [
 
 const EMPTY_FORM = {
   employee_id: '', farm_id: '', advance_date: todayStr(),
-  advance_type: 'cash', amount: '', egg_qty: '', egg_rate: '', narration: '', salary_month: ''
+  advance_type: 'cash', amount: '', egg_qty: '', egg_rate: '', narration: '', salary_month: '',
+  payment_mode: 'Cash', bank_account_id: '',
 }
 
 export const EmployeeAdvancesPage: React.FC = () => {
@@ -562,6 +563,11 @@ export const EmployeeAdvancesPage: React.FC = () => {
       const { data } = await supabase.from('farms').select('id,name,code').eq('is_active', true).order('name')
       return data ?? []
     }
+  })
+
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts'],
+    queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name'); return data ?? [] }
   })
 
   const { data: employees } = useQuery({
@@ -598,18 +604,59 @@ export const EmployeeAdvancesPage: React.FC = () => {
     mutationFn: async () => {
       if (!form.employee_id) throw new Error('Select an employee')
       if (!form.amount || parseFloat(form.amount) <= 0) throw new Error('Enter a valid amount')
+      if (form.advance_type === 'cash' && form.payment_mode === 'Bank' && !form.bank_account_id) {
+        throw new Error('Select a Bank Account for a bank-paid advance, or it won\'t be recorded in any ledger')
+      }
       const emp = (employees ?? []).find((e: any) => e.id === form.employee_id)
-      const payload = {
+      const advFarmId = farmId || emp?.farm_id || null
+      const amount = parseFloat(form.amount)
+      const payload: any = {
         employee_id: form.employee_id,
-        farm_id: farmId || emp?.farm_id || null,
+        farm_id: advFarmId,
         advance_date: form.advance_date,
         advance_type: form.advance_type,
-        amount: parseFloat(form.amount),
+        amount,
         egg_qty: form.advance_type === 'egg' ? parseInt(form.egg_qty) || null : null,
         egg_rate: form.advance_type === 'egg' ? parseFloat(form.egg_rate) || null : null,
         narration: form.narration || null,
         salary_month: form.salary_month || null,
+        payment_mode: form.advance_type === 'cash' ? form.payment_mode : null,
+        bank_account_id: form.advance_type === 'cash' && form.payment_mode === 'Bank' ? form.bank_account_id : null,
       }
+
+      // Delete any previously-linked cash_book/bank_transactions row before
+      // re-inserting — same delete-then-reinsert pattern used everywhere
+      // else in the app so editing/re-saving never duplicates the ledger entry.
+      if (editing) {
+        if (editing.cash_book_id) await supabase.from('cash_book').delete().eq('id', editing.cash_book_id)
+        if (editing.bank_txn_id) await supabase.from('bank_transactions').delete().eq('id', editing.bank_txn_id)
+        payload.cash_book_id = null
+        payload.bank_txn_id = null
+      }
+
+      // Cash/bank advances are money actually leaving — post to Cash Book
+      // or Bank Ledger so it shows up there, not just in this table.
+      if (form.advance_type === 'cash') {
+        const empName = emp?.name ?? 'Employee'
+        if (form.payment_mode === 'Bank') {
+          const { data: txn, error: txnErr } = await supabase.from('bank_transactions').insert({
+            bank_account_id: form.bank_account_id, txn_date: form.advance_date, txn_type: 'Debit',
+            category: 'Employee Advance', amount,
+            description: `Advance to ${empName}${form.narration ? ' — ' + form.narration : ''}`,
+          }).select('id').single()
+          if (txnErr) throw txnErr
+          payload.bank_txn_id = txn.id
+        } else {
+          const { data: cb, error: cbErr } = await supabase.from('cash_book').insert({
+            txn_date: form.advance_date, txn_type: 'payment', category: 'advance',
+            farm_id: advFarmId, description: `Advance to ${empName}${form.narration ? ' — ' + form.narration : ''}`,
+            party_name: empName, amount_out: amount, payment_mode: 'cash',
+          }).select('id').single()
+          if (cbErr) throw cbErr
+          payload.cash_book_id = cb.id
+        }
+      }
+
       if (editing) {
         const { error } = await supabase.from('employee_advances').update(payload).eq('id', editing.id)
         if (error) throw error
@@ -621,6 +668,8 @@ export const EmployeeAdvancesPage: React.FC = () => {
     onSuccess: () => {
       toast.success(editing ? 'Advance updated' : 'Advance recorded')
       qc.invalidateQueries({ queryKey: ['employee_advances'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
       setForm({ ...EMPTY_FORM, salary_month: curMonth })
       setEditing(null)
       setShowForm(false)
@@ -635,16 +684,28 @@ export const EmployeeAdvancesPage: React.FC = () => {
       advance_type: r.advance_type, amount: String(r.amount ?? ''),
       egg_qty: r.egg_qty != null ? String(r.egg_qty) : '', egg_rate: r.egg_rate != null ? String(r.egg_rate) : '',
       narration: r.narration ?? '', salary_month: r.salary_month ?? '',
+      payment_mode: r.payment_mode ?? 'Cash', bank_account_id: r.bank_account_id ?? '',
     })
     setShowForm(true)
   }
 
   const delMut = useMutation({
     mutationFn: async (ids: string[]) => {
+      const { data: rows } = await supabase.from('employee_advances').select('id,cash_book_id,bank_txn_id').in('id', ids)
+      const cbIds = (rows ?? []).map((r: any) => r.cash_book_id).filter(Boolean)
+      const btIds = (rows ?? []).map((r: any) => r.bank_txn_id).filter(Boolean)
+      if (cbIds.length) await supabase.from('cash_book').delete().in('id', cbIds)
+      if (btIds.length) await supabase.from('bank_transactions').delete().in('id', btIds)
       const { error } = await supabase.from('employee_advances').delete().in('id', ids)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({ queryKey: ['employee_advances'] }); setSel(new Set()); setBulkConfirm(false) },
+    onSuccess: () => {
+      toast.success('Deleted')
+      qc.invalidateQueries({ queryKey: ['employee_advances'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      setSel(new Set()); setBulkConfirm(false)
+    },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -697,6 +758,17 @@ export const EmployeeAdvancesPage: React.FC = () => {
                 </div>
               </>
             ) : null}
+            {form.advance_type === 'cash' && (
+              <>
+                <Select label="Payment Mode" options={[{value:'Cash',label:'Cash'},{value:'Bank',label:'Bank'}]}
+                  value={form.payment_mode} onChange={e => s('payment_mode', e.target.value)} />
+                {form.payment_mode === 'Bank' && (
+                  <Select label="Bank Account" placeholder="— Select —"
+                    options={(bankAccounts ?? []).map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — '+b.account_name : ''}` }))}
+                    value={form.bank_account_id} onChange={e => s('bank_account_id', e.target.value)} />
+                )}
+              </>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Amount (₹) *</label>
               <input type="number" value={form.amount} onChange={e => s('amount', e.target.value)} placeholder="0.00"
