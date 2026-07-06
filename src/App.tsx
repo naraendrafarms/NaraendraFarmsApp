@@ -23,7 +23,7 @@ import { FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
 import { InventoryPage } from '@/pages/inventory/InventoryPages'
 import { FeedMillPage } from '@/pages/feed/FeedMillPages'
 import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
-import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage, PayslipGeneratorPage, BulkSalaryPage } from '@/pages/employees/EmployeePages'
+import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage, PayslipGeneratorPage, BulkSalaryPage, SiteDesignationCountPage } from '@/pages/employees/EmployeePages'
 import { SalaryRegisterPage } from '@/pages/employees/SalaryRegisterPage'
 import { SalaryHistoryPage } from '@/pages/employees/SalaryHistoryPage'
 import { PartnerRemunerationPage } from '@/pages/employees/PartnerRemunerationPage'
@@ -169,6 +169,7 @@ export const App: React.FC = () => {
             <Route path="employees" element={<EmployeeList />} />
             <Route path="employees/salary" element={<SalaryEntryPage />} />
             <Route path="employees/abstract" element={<SalaryAbstractPage />} />
+            <Route path="employees/site-designation-count" element={<SiteDesignationCountPage />} />
             <Route path="employees/bonus" element={<BonusPage />} />
             <Route path="employees/esi-pf" element={<ESIPFReportPage />} />
             <Route path="employees/payroll-summary" element={<PayrollSummaryPage />} />

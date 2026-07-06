@@ -74,6 +74,7 @@ const NAV: NavItem[] = [
       { label: 'Partner Remuneration', to: '/employees/partner-remuneration' },
       { label: 'Salary Entry',    to: '/employees/salary' },
       { label: 'Salary Abstract', to: '/employees/abstract' },
+      { label: 'Site-wise Employee Count', to: '/employees/site-designation-count' },
       { label: 'Bonus',           to: '/employees/bonus' },
       { label: 'ESI / PF Report', to: '/employees/esi-pf' },
       { label: 'Payroll Summary', to: '/employees/payroll-summary' },

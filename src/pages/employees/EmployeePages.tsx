@@ -606,41 +606,91 @@ export const EmployeeList: React.FC = () => {
 }
 
 // ── SALARY ABSTRACT ───────────────────────────────────────────────
+const SAL_ABSTRACT_SELECT = 'month, days_worked, earned_salary, pf_employee, esi_employee, pt, hold, arrears, ot_bonus, advance, tds, other_deduction, net_salary, employees!employee_id!inner(farm_id, farms(name,code))'
+
+const monthDaysOf = (monthDate: string) => {
+  const [y, m] = monthDate.slice(0, 7).split('-').map(Number)
+  return new Date(y, m, 0).getDate()
+}
+
+// Prior-year same-month comparison key: e.g. 2026-04-01 -> 2025-04-01
+const priorYearMonth = (monthDate: string) => {
+  const [y, m, d] = monthDate.slice(0, 10).split('-')
+  return `${parseInt(y) - 1}-${m}-${d}`
+}
+
 export const SalaryAbstractPage: React.FC = () => {
   const [filterMonth, setFilterMonth] = useState('')
 
   const { data: rows, isLoading } = useQuery({
     queryKey: ['salary_abstract_computed', filterMonth],
     queryFn: async () => {
-      let q = supabase
-        .from('salary_monthly')
-        .select('month, earned_salary, advance, tds, other_deduction, net_salary, employees!employee_id!inner(farm_id, farms(name,code))')
-        .order('month', { ascending: false })
+      let q = supabase.from('salary_monthly').select(SAL_ABSTRACT_SELECT).order('month', { ascending: false })
       if (filterMonth) q = q.eq('month', filterMonth + '-01')
       const { data, error } = await q
       if (error) throw error
 
-      const agg: Record<string, { farm: string; farmCode: string; month: string; earned: number; advance: number; tds: number; deduction: number; net: number; count: number }> = {}
-      for (const r of (data ?? [])) {
-        const emp = (r as any).employees
-        const farm = emp?.farms?.name ?? 'Unknown'
-        const farmCode = emp?.farms?.code ?? ''
-        const key = `${emp?.farm_id ?? 'x'}__${r.month}`
-        if (!agg[key]) agg[key] = { farm, farmCode, month: r.month, earned: 0, advance: 0, tds: 0, deduction: 0, net: 0, count: 0 }
-        agg[key].earned    += (r as any).earned_salary ?? 0
-        agg[key].advance   += (r as any).advance ?? 0
-        agg[key].tds       += (r as any).tds ?? 0
-        agg[key].deduction += (r as any).other_deduction ?? 0
-        agg[key].net       += (r as any).net_salary ?? 0
-        agg[key].count++
+      // Also pull prior-year-same-month data for whichever months are in view,
+      // so each row can show a "same month last year" comparison.
+      const months = [...new Set((data ?? []).map((r: any) => r.month as string))]
+      const priorMonths = months.map(priorYearMonth)
+      const { data: priorData } = priorMonths.length
+        ? await supabase.from('salary_monthly').select(SAL_ABSTRACT_SELECT).in('month', priorMonths)
+        : { data: [] as any[] }
+
+      type Agg = {
+        farmId: string; farm: string; farmCode: string; month: string
+        earned: number; pf: number; esi: number; pt: number; hold: number; arrears: number; ot: number
+        advance: number; tds: number; deduction: number; net: number; count: number; presentDays: number
       }
-      return Object.values(agg).sort((a, b) => b.month.localeCompare(a.month) || a.farm.localeCompare(b.farm))
+      const emptyAgg = (farmId: string, farm: string, farmCode: string, month: string): Agg =>
+        ({ farmId, farm, farmCode, month, earned: 0, pf: 0, esi: 0, pt: 0, hold: 0, arrears: 0, ot: 0, advance: 0, tds: 0, deduction: 0, net: 0, count: 0, presentDays: 0 })
+
+      const buildAgg = (source: any[]) => {
+        const agg: Record<string, Agg> = {}
+        for (const r of source) {
+          const emp = r.employees
+          const farmId = emp?.farm_id ?? 'x'
+          const farm = emp?.farms?.name ?? 'Unknown'
+          const farmCode = emp?.farms?.code ?? ''
+          const key = `${farmId}__${r.month}`
+          if (!agg[key]) agg[key] = emptyAgg(farmId, farm, farmCode, r.month)
+          agg[key].earned      += r.earned_salary ?? 0
+          agg[key].pf          += r.pf_employee ?? 0
+          agg[key].esi         += r.esi_employee ?? 0
+          agg[key].pt          += r.pt ?? 0
+          agg[key].hold        += r.hold ?? 0
+          agg[key].arrears     += r.arrears ?? 0
+          agg[key].ot          += r.ot_bonus ?? 0
+          agg[key].advance     += r.advance ?? 0
+          agg[key].tds         += r.tds ?? 0
+          agg[key].deduction   += r.other_deduction ?? 0
+          agg[key].net         += r.net_salary ?? 0
+          agg[key].presentDays += r.days_worked ?? 0
+          agg[key].count++
+        }
+        return agg
+      }
+
+      const current = buildAgg(data ?? [])
+      const prior = buildAgg(priorData ?? [])
+
+      return Object.values(current)
+        .map(r => {
+          const p = prior[`${r.farmId}__${priorYearMonth(r.month)}`]
+          return { ...r, avgPresent: r.presentDays / monthDaysOf(r.month), priorNet: p?.net ?? null, priorCount: p?.count ?? null }
+        })
+        .sort((a, b) => b.month.localeCompare(a.month) || a.farm.localeCompare(b.farm))
     }
   })
 
   const fmtMonth = (m: string) => {
     const [yr, mn] = m.slice(0,7).split('-')
     return `${MONTH_NAMES[parseInt(mn)-1]} ${yr}`
+  }
+  const priorLabel = (m: string) => {
+    const [yr, mn] = m.slice(0,7).split('-')
+    return `${MONTH_NAMES[parseInt(mn)-1]} ${parseInt(yr)-1}`
   }
 
   const byMonth: Record<string, any[]> = {}
@@ -652,15 +702,19 @@ export const SalaryAbstractPage: React.FC = () => {
   const handleExport = () => {
     if (!rows?.length) return
     exportCSV('salary_abstract.csv',
-      ['Month','Site','Site Code','Employees','Earned Salary','Advance','TDS','Other Deduction','Net Salary'],
-      rows.map(r => [fmtMonth(r.month), r.farm, r.farmCode, r.count, Math.round(r.earned), Math.round(r.advance), Math.round(r.tds), Math.round(r.deduction), Math.round(r.net)])
+      ['Month','Site','Site Code','E.Sal','PF','ESI','PT','Hold','Arrears','OT','Advance','Net Salary',
+       'No Of Employees','Ave Pres Emp/Month','Prior Year Same Month Amount','Prior Year Same Month No Of Emp'],
+      rows.map(r => [fmtMonth(r.month), r.farm, r.farmCode,
+        Math.round(r.earned), Math.round(r.pf), Math.round(r.esi), Math.round(r.pt), Math.round(r.hold), Math.round(r.arrears), Math.round(r.ot),
+        Math.round(r.advance), Math.round(r.net), r.count, r.avgPresent.toFixed(1),
+        r.priorNet != null ? Math.round(r.priorNet) : '', r.priorCount ?? ''])
     )
   }
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Salary Abstract" subtitle="Auto-computed site-wise monthly salary summary"
-        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>}
+      <SectionHeader title="Salary Abstract" subtitle="Auto-computed site-wise monthly salary summary, with prior-year same-month comparison"
+        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>}
       />
       <div className="flex gap-3">
         <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-48" />
@@ -669,50 +723,165 @@ export const SalaryAbstractPage: React.FC = () => {
       {isLoading?<Spinner/>:(
         Object.entries(byMonth).map(([monthKey, farmRows]) => {
           const totEarned = farmRows.reduce((s,r)=>s+r.earned,0)
+          const totPf     = farmRows.reduce((s,r)=>s+r.pf,0)
+          const totEsi    = farmRows.reduce((s,r)=>s+r.esi,0)
+          const totPt     = farmRows.reduce((s,r)=>s+r.pt,0)
+          const totHold   = farmRows.reduce((s,r)=>s+r.hold,0)
+          const totArrears= farmRows.reduce((s,r)=>s+r.arrears,0)
+          const totOt     = farmRows.reduce((s,r)=>s+r.ot,0)
           const totAdv    = farmRows.reduce((s,r)=>s+r.advance,0)
-          const totTds    = farmRows.reduce((s,r)=>s+(r.tds||0),0)
-          const totDed    = farmRows.reduce((s,r)=>s+(r.deduction||0),0)
           const totNet    = farmRows.reduce((s,r)=>s+r.net,0)
           const totCount  = farmRows.reduce((s,r)=>s+r.count,0)
+          const totAvgPres= farmRows.reduce((s,r)=>s+r.avgPresent,0)
+          const totPriorNet = farmRows.reduce((s,r)=>s+(r.priorNet??0),0)
+          const totPriorCount = farmRows.reduce((s,r)=>s+(r.priorCount??0),0)
           return (
             <Card key={monthKey} padding={false}>
               <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                 <h3 className="font-semibold text-gray-900">{fmtMonth(monthKey+'-01')}</h3>
                 <Badge color="gray">{totCount} employees</Badge>
               </div>
-              <Table>
-                <thead><tr>
-                  <Th>Site</Th><Th right>Employees</Th><Th right>Earned Salary</Th>
-                  <Th right>Advance</Th><Th right>TDS</Th><Th right>Other Deduction</Th><Th right>Net Salary</Th>
-                </tr></thead>
-                <tbody>
-                  {farmRows.map(r=>(
-                    <tr key={r.farm+r.month} className="hover:bg-gray-50">
-                      <Td><span className="font-medium">{r.farm}</span>{r.farmCode&&<span className="text-xs text-gray-400 ml-1">({r.farmCode})</span>}</Td>
-                      <Td right>{r.count}</Td>
-                      <Td right>{inr(r.earned)}</Td>
-                      <Td right className="text-orange-600">{r.advance>0?inr(r.advance):'—'}</Td>
-                      <Td right className="text-red-500">{(r.tds||0)>0?inr(r.tds):'—'}</Td>
-                      <Td right className="text-red-500">{(r.deduction||0)>0?inr(r.deduction):'—'}</Td>
-                      <Td right className="font-semibold text-green-700">{inr(r.net)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot><tr className="bg-gray-50 font-semibold">
-                  <Td>TOTAL</Td>
-                  <Td right>{totCount}</Td>
-                  <Td right>{inr(totEarned)}</Td>
-                  <Td right className="text-orange-600">{totAdv>0?inr(totAdv):'—'}</Td>
-                  <Td right className="text-red-500">{totTds>0?inr(totTds):'—'}</Td>
-                  <Td right className="text-red-500">{totDed>0?inr(totDed):'—'}</Td>
-                  <Td right className="text-green-700">{inr(totNet)}</Td>
-                </tr></tfoot>
-              </Table>
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr>
+                    <Th>Site</Th><Th right>E.Sal</Th><Th right>PF</Th><Th right>ESI</Th><Th right>PT</Th>
+                    <Th right>Hold</Th><Th right>Arrears</Th><Th right>OT</Th><Th right>Advance</Th>
+                    <Th right>Net Salary</Th><Th right>No Of Employees</Th><Th right>Ave Pres Emp/Month</Th>
+                    <Th right>{priorLabel(monthKey+'-01')} Amount</Th><Th right>{priorLabel(monthKey+'-01')} No Of Emp</Th>
+                  </tr></thead>
+                  <tbody>
+                    {farmRows.map(r=>(
+                      <tr key={r.farm+r.month} className="hover:bg-gray-50">
+                        <Td><span className="font-medium">{r.farm}</span>{r.farmCode&&<span className="text-xs text-gray-400 ml-1">({r.farmCode})</span>}</Td>
+                        <Td right>{inr(r.earned)}</Td>
+                        <Td right className="text-red-500">{r.pf>0?inr(r.pf):'—'}</Td>
+                        <Td right className="text-red-500">{r.esi>0?inr(r.esi):'—'}</Td>
+                        <Td right className="text-red-500">{r.pt>0?inr(r.pt):'—'}</Td>
+                        <Td right className="text-red-500">{r.hold>0?inr(r.hold):'—'}</Td>
+                        <Td right>{r.arrears>0?inr(r.arrears):'—'}</Td>
+                        <Td right>{r.ot>0?inr(r.ot):'—'}</Td>
+                        <Td right className="text-orange-600">{r.advance>0?inr(r.advance):'—'}</Td>
+                        <Td right className="font-semibold text-green-700">{inr(r.net)}</Td>
+                        <Td right>{r.count}</Td>
+                        <Td right>{r.avgPresent.toFixed(1)}</Td>
+                        <Td right className="text-gray-500">{r.priorNet!=null?inr(r.priorNet):'—'}</Td>
+                        <Td right className="text-gray-500">{r.priorCount??'—'}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className="bg-gray-50 font-semibold">
+                    <Td>TOTAL</Td>
+                    <Td right>{inr(totEarned)}</Td>
+                    <Td right className="text-red-500">{totPf>0?inr(totPf):'—'}</Td>
+                    <Td right className="text-red-500">{totEsi>0?inr(totEsi):'—'}</Td>
+                    <Td right className="text-red-500">{totPt>0?inr(totPt):'—'}</Td>
+                    <Td right className="text-red-500">{totHold>0?inr(totHold):'—'}</Td>
+                    <Td right>{totArrears>0?inr(totArrears):'—'}</Td>
+                    <Td right>{totOt>0?inr(totOt):'—'}</Td>
+                    <Td right className="text-orange-600">{totAdv>0?inr(totAdv):'—'}</Td>
+                    <Td right className="text-green-700">{inr(totNet)}</Td>
+                    <Td right>{totCount}</Td>
+                    <Td right>{totAvgPres.toFixed(1)}</Td>
+                    <Td right className="text-gray-500">{totPriorNet>0?inr(totPriorNet):'—'}</Td>
+                    <Td right className="text-gray-500">{totPriorCount||'—'}</Td>
+                  </tr></tfoot>
+                </Table>
+              </div>
             </Card>
           )
         })
       )}
       {rows?.length===0&&<EmptyState icon={<IndianRupee size={32}/>} title="No salary data loaded" />}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Site-wise Designation-wise Employee Count — active employees only,
+// grouped by Site (farm) then Designation, matching the "Site Wise
+// No.Of Employees" register kept outside the app.
+// ═══════════════════════════════════════════════════════════════
+export const SiteDesignationCountPage: React.FC = () => {
+  const { data: employees, isLoading } = useQuery({
+    queryKey: ['emp_site_designation_count'],
+    queryFn: async () => {
+      const { data } = await supabase.from('employees')
+        .select('id,designation,farm_id,farms(name,code)')
+        .eq('is_active', true)
+      return data ?? []
+    }
+  })
+
+  const bySite = React.useMemo(() => {
+    const sites: Record<string, { name: string; code: string; byDesig: Record<string, number>; total: number }> = {}
+    for (const e of (employees as any[] ?? [])) {
+      const siteId = e.farm_id ?? 'unassigned'
+      const siteName = e.farms?.name ?? 'Unassigned'
+      if (!sites[siteId]) sites[siteId] = { name: siteName, code: e.farms?.code ?? '', byDesig: {}, total: 0 }
+      const desig = e.designation?.trim() || 'Unspecified'
+      sites[siteId].byDesig[desig] = (sites[siteId].byDesig[desig] ?? 0) + 1
+      sites[siteId].total++
+    }
+    return Object.values(sites).sort((a, b) => b.total - a.total)
+  }, [employees])
+
+  const grandTotal = bySite.reduce((s, site) => s + site.total, 0)
+
+  const handleExport = () => {
+    if (!bySite.length) { toast.error('No data'); return }
+    const wb = XLSX.utils.book_new()
+    const rows: (string | number)[][] = [['Site', 'Designation', 'Count']]
+    for (const site of bySite) {
+      for (const [desig, count] of Object.entries(site.byDesig).sort((a, b) => b[1] - a[1])) {
+        rows.push([site.name, desig, count])
+      }
+      rows.push([site.name, 'TOTAL', site.total])
+    }
+    rows.push(['GRAND TOTAL', '', grandTotal])
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    XLSX.utils.book_append_sheet(wb, ws, 'Site-Designation Count')
+    XLSX.writeFile(wb, `Site_Designation_Employee_Count_${today()}.xlsx`)
+    toast.success('Downloaded')
+  }
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="Site-wise Designation-wise Employee Count" subtitle="Active employees only, grouped by site then designation"
+        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>}
+      />
+      {isLoading ? <Spinner /> : !bySite.length ? (
+        <EmptyState icon={<Users size={32}/>} title="No active employees found" />
+      ) : (
+        <>
+          <div className="flex justify-end">
+            <Badge color="gray">Grand Total: {grandTotal}</Badge>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            {bySite.map(site => (
+              <Card key={site.name} padding={false}>
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <h3 className="font-semibold text-gray-900 text-sm">{site.name}{site.code && <span className="text-xs text-gray-400 ml-1">({site.code})</span>}</h3>
+                </div>
+                <Table>
+                  <thead><tr><Th>Designation</Th><Th right>NOS</Th></tr></thead>
+                  <tbody>
+                    {Object.entries(site.byDesig).sort((a, b) => b[1] - a[1]).map(([desig, count]) => (
+                      <tr key={desig} className="hover:bg-gray-50">
+                        <Td className="text-sm">{desig}</Td>
+                        <Td right className="text-sm font-medium">{count}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className="bg-gray-50 font-semibold">
+                    <Td>Total</Td>
+                    <Td right>{site.total}</Td>
+                  </tr></tfoot>
+                </Table>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
