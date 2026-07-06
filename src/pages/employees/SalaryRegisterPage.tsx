@@ -78,6 +78,26 @@ export const SalaryRegisterPage: React.FC = () => {
     }
   })
 
+  const { data: acctEmployees } = useQuery({
+    queryKey: ['employees_accounts_all'],
+    queryFn: async () => {
+      const { data } = await supabase.from('employees').select('id,name,account_no,ifsc,payment_mode,shared_with_emp_id')
+      return data ?? []
+    }
+  })
+
+  // Resolve which account a salary row actually deposited into — an explicit
+  // per-month override wins, else the shared account holder, else own account.
+  const depositHolder = (r: any) => {
+    const emp = (acctEmployees as any[] ?? []).find((e: any) => e.id === r.employee_id)
+    if (!emp) return null
+    if (r.override_account_emp_id) return { holder: (acctEmployees as any[])?.find((e: any) => e.id === r.override_account_emp_id), kind: 'Override' }
+    if ((emp.payment_mode ?? 'own_account') === 'shared_account') {
+      return { holder: (acctEmployees as any[])?.find((e: any) => e.id === emp.shared_with_emp_id), kind: 'Shared' }
+    }
+    return { holder: emp, kind: 'Own' }
+  }
+
   const { data: rows, isLoading } = useQuery({
     queryKey: ['salary_register', month, filterFarm, filterGender, filterDesignation],
     enabled: !!month,
@@ -113,11 +133,13 @@ export const SalaryRegisterPage: React.FC = () => {
       'Basic Earned','HRA Earned','Other Earned','Gross Earned','Extra Pay','Total Earning',
       'PF Emp','ESI Emp','PT','TDS','Other Deduction','Advance',
       'Net Salary',
-      'Employer EPS','Employer EPF','ESI Employer','Admin Charges','EDLI','CTC'
+      'Employer EPS','Employer EPF','ESI Employer','Admin Charges','EDLI','CTC',
+      'Deposited Into','Account No','IFSC'
     ]
     const R = (v: any) => Math.round(Number(v) || 0)  // whole rupees, matches voucher
     const data = (rows as any[]).map(r => {
       const emp = r.employees ?? {}
+      const dep = depositHolder(r)
       return [
         emp.emp_id??'', emp.name??'', emp.emp_category??'', emp.designation??'', emp.farms?.name??'',
         r.month_days??'', r.absent_days??0, r.days_worked??0, r.extra_days??0,
@@ -125,7 +147,8 @@ export const SalaryRegisterPage: React.FC = () => {
         R(r.basic_salary), R(r.hra), R((r.gross_salary??0)-(r.basic_salary??0)-(r.hra??0)), R(r.gross_salary), R(r.extra_pay), R(r.total_earning),
         R(r.pf_employee), R(r.esi_employee), R(r.pt), R(r.tds), R(r.other_deduction), R(r.advance),
         R(r.net_salary),
-        R(r.employer_eps), R(r.employer_epf_diff), R(r.esi_employer), R(r.admin_charges), R(r.edli_charge), R(r.monthly_ctc)
+        R(r.employer_eps), R(r.employer_epf_diff), R(r.esi_employer), R(r.admin_charges), R(r.edli_charge), R(r.monthly_ctc),
+        dep?.holder ? `${dep.kind} — ${dep.holder.name}` : '—', dep?.holder?.account_no ?? '—', dep?.holder?.ifsc ?? '—'
       ]
     })
     const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
@@ -229,11 +252,13 @@ export const SalaryRegisterPage: React.FC = () => {
                 <th className="px-2 py-2 text-right font-semibold text-purple-700">Admin</th>
                 <th className="px-2 py-2 text-right font-semibold text-purple-700">EDLI</th>
                 <th className="px-2 py-2 text-right font-semibold text-indigo-700">CTC</th>
+                <th className="px-2 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Deposited Into</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {(rows as any[]).map((r: any) => {
                 const emp = r.employees ?? {}
+                const dep = depositHolder(r)
                 return (
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td className="px-2 py-1.5 font-mono text-brand-700 font-bold whitespace-nowrap">{emp.emp_id??'—'}</td>
@@ -273,6 +298,15 @@ export const SalaryRegisterPage: React.FC = () => {
                     <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.admin_charges??0)}</td>
                     <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.edli_charge??0)}</td>
                     <td className="px-2 py-1.5 text-right font-semibold text-indigo-700">{inr(r.monthly_ctc??0)}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      {dep?.holder ? (
+                        <>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium mr-1 ${dep.kind==='Override'?'bg-purple-100 text-purple-700':dep.kind==='Shared'?'bg-yellow-100 text-yellow-700':'bg-green-100 text-green-700'}`}>{dep.kind}</span>
+                          <span className="text-gray-700">{dep.holder.name}</span>
+                          <span className="text-gray-400 ml-1">({dep.holder.account_no ?? '—'})</span>
+                        </>
+                      ) : '—'}
+                    </td>
                   </tr>
                 )
               })}
@@ -299,6 +333,7 @@ export const SalaryRegisterPage: React.FC = () => {
                 <td className="px-2 py-2 text-right text-purple-700">{inr(totals.admin_charges??0)}</td>
                 <td className="px-2 py-2 text-right text-purple-700">{inr(totals.edli_charge??0)}</td>
                 <td className="px-2 py-2 text-right font-bold text-indigo-700">{inr(totals.monthly_ctc??0)}</td>
+                <td></td>
               </tr>
             </tfoot>
           </table>

@@ -21,7 +21,7 @@ export const SalaryHistoryPage: React.FC = () => {
   const { data: employees } = useQuery({
     queryKey: ['employees_list'],
     queryFn: async () => {
-      const { data } = await supabase.from('employees').select('id,emp_id,name,designation,farms(name)').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
+      const { data } = await supabase.from('employees').select('id,emp_id,name,designation,farms(name),account_no,ifsc,bank_name,payment_mode,shared_with_emp_id').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     }
   })
@@ -42,18 +42,34 @@ export const SalaryHistoryPage: React.FC = () => {
 
   const selectedEmp = (employees as any[])?.find((e: any) => e.id === empId)
 
+  // Resolve which account a given month's salary actually deposited into —
+  // an explicit per-month override wins, else the shared account holder,
+  // else the employee's own account.
+  const depositHolder = (r: any) => {
+    if (!selectedEmp) return null
+    if (r.override_account_emp_id) return { holder: (employees as any[])?.find((e: any) => e.id === r.override_account_emp_id), kind: 'Override' }
+    if ((selectedEmp.payment_mode ?? 'own_account') === 'shared_account') {
+      return { holder: (employees as any[])?.find((e: any) => e.id === selectedEmp.shared_with_emp_id), kind: 'Shared' }
+    }
+    return { holder: selectedEmp, kind: 'Own' }
+  }
+
   const exportXLSX = () => {
     if (!rows?.length) { toast.error('No data'); return }
     const headers = [
       'Month','Month Days','Absent Days','Paid Days','Extra Days',
       'Gross Rate','Basic Earned','HRA Earned','Gross Earned','Extra Pay','Total Earning',
-      'PF','ESI','PT','Advance','Other Deduction','Net Salary'
+      'PF','ESI','PT','Advance','Other Deduction','Net Salary',
+      'Deposited Into','Account No','IFSC'
     ]
-    const data = (rows as any[]).map(r => [
+    const data = (rows as any[]).map(r => {
+      const dep = depositHolder(r)
+      return [
       monthLabel(r.month?.slice(0,7)), r.month_days??'', r.absent_days??0, r.days_worked??0, r.extra_days??0,
       r.gross_rate??0, r.basic_salary??0, r.hra??0, r.gross_salary??0, r.extra_pay??0, r.total_earning??0,
-      r.pf_employee??0, r.esi_employee??0, r.pt??0, r.advance??0, r.other_deduction??0, r.net_salary??0
-    ])
+      r.pf_employee??0, r.esi_employee??0, r.pt??0, r.advance??0, r.other_deduction??0, r.net_salary??0,
+      dep?.holder ? `${dep.kind} — ${dep.holder.name}` : '—', dep?.holder?.account_no ?? '—', dep?.holder?.ifsc ?? '—'
+    ]})
     const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Salary History')
@@ -116,10 +132,13 @@ export const SalaryHistoryPage: React.FC = () => {
                   <th className="px-2 py-2 text-right font-semibold text-red-500">Advance</th>
                   <th className="px-2 py-2 text-right font-semibold text-red-500">Other Ded</th>
                   <th className="px-2 py-2 text-right font-semibold text-green-800 bg-green-50">Net Salary</th>
+                  <th className="px-2 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Deposited Into</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(rows as any[]).map((r: any) => (
+                {(rows as any[]).map((r: any) => {
+                  const dep = depositHolder(r)
+                  return (
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td className="px-2 py-1.5 font-medium whitespace-nowrap">{monthLabel(r.month?.slice(0,7))}</td>
                     <td className="px-2 py-1.5 text-right">{r.month_days??'—'}</td>
@@ -138,8 +157,17 @@ export const SalaryHistoryPage: React.FC = () => {
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.advance??0)}</td>
                     <td className="px-2 py-1.5 text-right text-red-500">{inr(r.other_deduction??0)}</td>
                     <td className="px-2 py-1.5 text-right font-bold text-green-800 bg-green-50">{inr(r.net_salary??0)}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      {dep?.holder ? (
+                        <>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium mr-1 ${dep.kind==='Override'?'bg-purple-100 text-purple-700':dep.kind==='Shared'?'bg-yellow-100 text-yellow-700':'bg-green-100 text-green-700'}`}>{dep.kind}</span>
+                          <span className="text-gray-700">{dep.holder.name}</span>
+                          <span className="text-gray-400 ml-1">({dep.holder.account_no ?? '—'} · {dep.holder.ifsc ?? '—'})</span>
+                        </>
+                      ) : '—'}
+                    </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
