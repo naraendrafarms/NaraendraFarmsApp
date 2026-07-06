@@ -163,6 +163,7 @@ const NAV: NavItem[] = [
       { label: 'VHL Medicine Master',   to: '/vhl/medicine-master' },
       { label: 'VHL Medicine Usage',    to: '/vhl/medicine-usage' },
       { label: 'VHL Shed Performance',  to: '/vhl/shed-performance' },
+      { label: 'VHL Egg Stock Register', to: '/vhl/egg-stock-register' },
     ]
   },
   {

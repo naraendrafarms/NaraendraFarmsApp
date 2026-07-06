@@ -287,11 +287,13 @@ export const VHLDailyEntryPage: React.FC = () => {
   const prevDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate()-1); setDate(localYMD(d)) }
   const nextDay = () => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate()+1); setDate(localYMD(d)) }
 
-  const fourteenDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate()-14); return localYMD(d) })()
+  // Anchored to the date being edited, not real-world "today" — see same
+  // fix in VHLBulkDailyEntryPage for why.
+  const fourteenDaysBeforeSelected = (() => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate()-14); return localYMD(d) })()
   const { data: recentRecords } = useQuery({
-    queryKey: ['vhl_recent_records', flockId, fourteenDaysAgo],
+    queryKey: ['vhl_recent_records', flockId, fourteenDaysBeforeSelected],
     queryFn: async () => {
-      const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).is('shed_id', null).gte('record_date', fourteenDaysAgo).order('record_date', { ascending: false })
+      const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).is('shed_id', null).gte('record_date', fourteenDaysBeforeSelected).lte('record_date', date).order('record_date', { ascending: false })
       return data ?? []
     },
     enabled: !!flockId
@@ -1163,13 +1165,16 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
       className={`${w} text-center border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white`} />
   )
 
-  const fourteenDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return localYMD(d) })()
+  // Anchored to the date being edited, not real-world "today" — otherwise
+  // historical/backfilled data (e.g. an Excel import of past months) would
+  // never show up here just because it's older than 14 real-world days.
+  const fourteenDaysBeforeSelected = (() => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 14); return localYMD(d) })()
   const { data: recentBulkRows } = useQuery({
-    queryKey: ['vhl_bulk_recent', flockId, fourteenDaysAgo],
+    queryKey: ['vhl_bulk_recent', flockId, fourteenDaysBeforeSelected],
     queryFn: async () => {
       const { data } = await supabase.from('vhl_daily_entry')
         .select('id,record_date,shed_id,opening_female,opening_male,closing_female,closing_male,total_eggs,he_eggs,mortality_female,mortality_male,sheds(shed_no,shed_name)')
-        .eq('flock_id', flockId).not('shed_id', 'is', null).gte('record_date', fourteenDaysAgo)
+        .eq('flock_id', flockId).not('shed_id', 'is', null).gte('record_date', fourteenDaysBeforeSelected).lte('record_date', date)
         .order('record_date', { ascending: false }).order('shed_id')
       return data ?? []
     },
@@ -1295,7 +1300,7 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
 
       {flockId && recentBulkRows && recentBulkRows.length > 0 && (
         <Card>
-          <p className="font-semibold text-gray-800 text-sm mb-3">Recent Shed-wise Entries (Last 14 Days)</p>
+          <p className="font-semibold text-gray-800 text-sm mb-3">Recent Shed-wise Entries (14 days up to {date})</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr className="border-b border-gray-100">
@@ -1590,6 +1595,133 @@ export const VHLShedPerformancePage: React.FC = () => {
                 <Td right className="text-xs">{(totals.feedF+totals.feedM).toFixed(1)}</Td>
               </tr>
             </tfoot>
+          </Table>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VHL Egg Stock Register — running Production vs Dispatched (HE/NHE)
+// balance per day, computed live from vhl_daily_entry (production) and
+// vhl_egg_production (dispatched/billed) — no derived/formula sheet
+// involved, unlike the source Excel's "Egg" tab which this replaces.
+// ═══════════════════════════════════════════════════════════════
+export const VHLEggStockRegisterPage: React.FC = () => {
+  const [flockId, setFlockId] = useState('')
+  const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate()-n); return localYMD(d) }
+  const [fromDate, setFromDate] = useState(daysAgo(30))
+  const [toDate, setToDate] = useState(today())
+
+  const { data: flocks } = useQuery({
+    queryKey: ['vhl_flocks_egg_register'],
+    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').eq('is_vhl_contract', true).order('flock_no'); return data ?? [] }
+  })
+
+  const { data: production } = useQuery({
+    queryKey: ['vhl_egg_register_prod', flockId, fromDate, toDate],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_daily_entry')
+        .select('record_date,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs')
+        .eq('flock_id', flockId).gte('record_date', fromDate).lte('record_date', toDate)
+      return data ?? []
+    },
+    enabled: !!flockId
+  })
+  const { data: dispatched } = useQuery({
+    queryKey: ['vhl_egg_register_dispatch', flockId, fromDate, toDate],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_egg_production')
+        .select('production_date,he_qty,te_qty,invoice_no')
+        .eq('flock_id', flockId).gte('production_date', fromDate).lte('production_date', toDate)
+      return data ?? []
+    },
+    enabled: !!flockId
+  })
+
+  const rows = React.useMemo(() => {
+    const byDate: Record<string, { he_prod: number; nhe_prod: number; he_disp: number; nhe_disp: number }> = {}
+    for (const r of (production ?? [])) {
+      const d = r.record_date
+      if (!byDate[d]) byDate[d] = { he_prod: 0, nhe_prod: 0, he_disp: 0, nhe_disp: 0 }
+      byDate[d].he_prod += r.he_eggs ?? 0
+      byDate[d].nhe_prod += (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0) + (r.le_eggs ?? 0)
+    }
+    for (const r of (dispatched ?? [])) {
+      const d = r.production_date
+      if (!byDate[d]) byDate[d] = { he_prod: 0, nhe_prod: 0, he_disp: 0, nhe_disp: 0 }
+      byDate[d].he_disp += r.he_qty ?? 0
+      byDate[d].nhe_disp += r.te_qty ?? 0
+    }
+    let heBal = 0, nheBal = 0
+    return Object.keys(byDate).sort().map(d => {
+      const r = byDate[d]
+      heBal += r.he_prod - r.he_disp
+      nheBal += r.nhe_prod - r.nhe_disp
+      return { date: d, ...r, heBal, nheBal }
+    })
+  }, [production, dispatched])
+
+  const totals = rows.reduce((acc, r) => ({
+    he_prod: acc.he_prod + r.he_prod, nhe_prod: acc.nhe_prod + r.nhe_prod,
+    he_disp: acc.he_disp + r.he_disp, nhe_disp: acc.nhe_disp + r.nhe_disp,
+  }), { he_prod: 0, nhe_prod: 0, he_disp: 0, nhe_disp: 0 })
+
+  const handleExport = () => {
+    if (!rows.length) return
+    const wb = XLSX.utils.book_new()
+    const data = [['Date','HE Produced','NHE Produced','HE Dispatched','NHE Dispatched','HE Balance','NHE Balance'],
+      ...rows.map(r => [r.date, r.he_prod, r.nhe_prod, r.he_disp, r.nhe_disp, r.heBal, r.nheBal])]
+    const ws = XLSX.utils.aoa_to_sheet(data)
+    XLSX.utils.book_append_sheet(wb, ws, 'Egg Stock Register')
+    XLSX.writeFile(wb, `VHL_EggStockRegister_${fromDate}_${toDate}.xlsx`)
+    toast.success('Downloaded')
+  }
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader title="VHL Egg Stock Register" subtitle="Running HE/NHE production vs dispatched balance — computed live, no formulas"
+        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>} />
+      <Card className="flex flex-wrap gap-3 items-end">
+        <Select label="VHL Flock" placeholder="— Choose flock —" value={flockId} onChange={e => setFlockId(e.target.value)}
+          options={(flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))} />
+        <DateInput label="From" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+        <DateInput label="To" value={toDate} onChange={e => setToDate(e.target.value)} />
+      </Card>
+      {!flockId ? (
+        <EmptyState icon={<Egg size={32}/>} title="Select a VHL flock" />
+      ) : !rows.length ? (
+        <EmptyState icon={<Egg size={32}/>} title="No production or dispatch data in this range" />
+      ) : (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Date</Th><Th right>HE Produced</Th><Th right>NHE Produced</Th>
+              <Th right>HE Dispatched</Th><Th right>NHE Dispatched</Th><Th right>HE Balance</Th><Th right>NHE Balance</Th>
+            </tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.date} className="hover:bg-gray-50">
+                  <Td className="text-sm font-medium">{fmtDate(r.date)}</Td>
+                  <Td right className="text-sm">{r.he_prod.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm">{r.nhe_prod.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm text-orange-600">{r.he_disp>0?r.he_disp.toLocaleString('en-IN'):'—'}</Td>
+                  <Td right className="text-sm text-orange-600">{r.nhe_disp>0?r.nhe_disp.toLocaleString('en-IN'):'—'}</Td>
+                  <Td right className={`text-sm font-semibold ${r.heBal<0?'text-red-600':'text-green-700'}`}>{r.heBal.toLocaleString('en-IN')}</Td>
+                  <Td right className={`text-sm font-semibold ${r.nheBal<0?'text-red-600':'text-green-700'}`}>{r.nheBal.toLocaleString('en-IN')}</Td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr className="bg-gray-50 font-semibold">
+              <Td>TOTAL</Td>
+              <Td right>{totals.he_prod.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.nhe_prod.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.he_disp.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.nhe_disp.toLocaleString('en-IN')}</Td>
+              <Td right>{rows[rows.length-1]?.heBal.toLocaleString('en-IN')}</Td>
+              <Td right>{rows[rows.length-1]?.nheBal.toLocaleString('en-IN')}</Td>
+            </tr></tfoot>
           </Table>
         </Card>
       )}
