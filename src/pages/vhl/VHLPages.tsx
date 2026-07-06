@@ -1608,86 +1608,96 @@ export const VHLShedPerformancePage: React.FC = () => {
 // vhl_egg_production (dispatched/billed) — no derived/formula sheet
 // involved, unlike the source Excel's "Egg" tab which this replaces.
 // ═══════════════════════════════════════════════════════════════
+const EGG_GRADES = ['he', 'je', 'te', 'be', 'le'] as const
+type EggGrade = typeof EGG_GRADES[number]
+const EGG_GRADE_LABEL: Record<EggGrade, string> = { he: 'HE', je: 'JE', te: 'TE', be: 'BE', le: 'LE' }
+
 export const VHLEggStockRegisterPage: React.FC = () => {
   const [flockId, setFlockId] = useState('')
   const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate()-n); return localYMD(d) }
   const [fromDate, setFromDate] = useState(daysAgo(30))
   const [toDate, setToDate] = useState(today())
+  const [grade, setGrade] = useState<EggGrade>('he')
 
   const { data: flocks } = useQuery({
     queryKey: ['vhl_flocks_egg_register'],
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').eq('is_vhl_contract', true).order('flock_no'); return data ?? [] }
   })
 
+  // No lower date bound — need the FULL history up to toDate so Opening on
+  // the first visible row carries forward correctly, not just from 0.
   const { data: production } = useQuery({
-    queryKey: ['vhl_egg_register_prod', flockId, fromDate, toDate],
+    queryKey: ['vhl_egg_register_prod', flockId, toDate],
     queryFn: async () => {
       const { data } = await supabase.from('vhl_daily_entry')
         .select('record_date,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,wastage_he,wastage_je,wastage_te,wastage_be')
-        .eq('flock_id', flockId).gte('record_date', fromDate).lte('record_date', toDate)
+        .eq('flock_id', flockId).lte('record_date', toDate)
       return data ?? []
     },
     enabled: !!flockId
   })
   const { data: dispatched } = useQuery({
-    queryKey: ['vhl_egg_register_dispatch', flockId, fromDate, toDate],
+    queryKey: ['vhl_egg_register_dispatch', flockId, toDate],
     queryFn: async () => {
       const { data } = await supabase.from('vhl_egg_production')
         .select('production_date,he_qty,te_qty,invoice_no')
-        .eq('flock_id', flockId).gte('production_date', fromDate).lte('production_date', toDate)
+        .eq('flock_id', flockId).lte('production_date', toDate)
       return data ?? []
     },
     enabled: !!flockId
   })
 
-  type EggRow = { he_prod: number; je_prod: number; te_prod: number; be_prod: number; le_prod: number; wastage: number; he_disp: number; te_disp: number }
+  type DayTotals = Record<EggGrade, { prod: number; wastage: number; disp: number }>
   const rows = React.useMemo(() => {
-    const byDate: Record<string, EggRow> = {}
-    const blank = (): EggRow => ({ he_prod: 0, je_prod: 0, te_prod: 0, be_prod: 0, le_prod: 0, wastage: 0, he_disp: 0, te_disp: 0 })
+    const byDate: Record<string, DayTotals> = {}
+    const blank = (): DayTotals => ({ he: { prod: 0, wastage: 0, disp: 0 }, je: { prod: 0, wastage: 0, disp: 0 }, te: { prod: 0, wastage: 0, disp: 0 }, be: { prod: 0, wastage: 0, disp: 0 }, le: { prod: 0, wastage: 0, disp: 0 } })
     for (const r of (production ?? [])) {
       const d = r.record_date
       if (!byDate[d]) byDate[d] = blank()
-      byDate[d].he_prod += r.he_eggs ?? 0
-      byDate[d].je_prod += r.je_eggs ?? 0
-      byDate[d].te_prod += r.te_eggs ?? 0
-      byDate[d].be_prod += r.be_eggs ?? 0
-      byDate[d].le_prod += r.le_eggs ?? 0
-      byDate[d].wastage  += (r.wastage_he ?? 0) + (r.wastage_je ?? 0) + (r.wastage_te ?? 0) + (r.wastage_be ?? 0)
+      byDate[d].he.prod += r.he_eggs ?? 0; byDate[d].he.wastage += r.wastage_he ?? 0
+      byDate[d].je.prod += r.je_eggs ?? 0; byDate[d].je.wastage += r.wastage_je ?? 0
+      byDate[d].te.prod += r.te_eggs ?? 0; byDate[d].te.wastage += r.wastage_te ?? 0
+      byDate[d].be.prod += r.be_eggs ?? 0; byDate[d].be.wastage += r.wastage_be ?? 0
+      byDate[d].le.prod += r.le_eggs ?? 0
     }
     for (const r of (dispatched ?? [])) {
       const d = r.production_date
       if (!byDate[d]) byDate[d] = blank()
-      byDate[d].he_disp += r.he_qty ?? 0
-      byDate[d].te_disp += r.te_qty ?? 0
+      byDate[d].he.disp += r.he_qty ?? 0
+      byDate[d].te.disp += r.te_qty ?? 0
     }
-    // Only HE and TE have a dispatch side to net against (vhl_egg_production
-    // only tracks he_qty/te_qty) — JE/BE/LE balances are cumulative
-    // production only, since there's no dispatch data to subtract for them.
-    let heBal = 0, teBal = 0, jeBal = 0, beBal = 0, leBal = 0
-    return Object.keys(byDate).sort().map(d => {
-      const r = byDate[d]
-      heBal += r.he_prod - r.he_disp
-      teBal += r.te_prod - r.te_disp
-      jeBal += r.je_prod
-      beBal += r.be_prod
-      leBal += r.le_prod
-      return { date: d, ...r, heBal, teBal, jeBal, beBal, leBal }
+    // Running Opening -> Closing per grade, same ledger shape as the source
+    // Excel. JE/BE/LE have no dispatch data (vhl_egg_production only tracks
+    // he_qty/te_qty), so their Dispatch column is always 0 for those grades.
+    const bal: Record<EggGrade, number> = { he: 0, je: 0, te: 0, be: 0, le: 0 }
+    const all = Object.keys(byDate).sort().map(d => {
+      const day = byDate[d]
+      const out: any = { date: d }
+      for (const g of EGG_GRADES) {
+        const opening = bal[g]
+        const closing = opening + day[g].prod - day[g].wastage - day[g].disp
+        out[g] = { opening, prod: day[g].prod, wastage: day[g].wastage, disp: day[g].disp, closing }
+        bal[g] = closing
+      }
+      return out
     })
-  }, [production, dispatched])
+    return all.filter(r => r.date >= fromDate)
+  }, [production, dispatched, fromDate])
 
-  const totals = rows.reduce((acc, r) => ({
-    he_prod: acc.he_prod + r.he_prod, je_prod: acc.je_prod + r.je_prod, te_prod: acc.te_prod + r.te_prod,
-    be_prod: acc.be_prod + r.be_prod, le_prod: acc.le_prod + r.le_prod, wastage: acc.wastage + r.wastage,
-    he_disp: acc.he_disp + r.he_disp, te_disp: acc.te_disp + r.te_disp,
-  }), { he_prod: 0, je_prod: 0, te_prod: 0, be_prod: 0, le_prod: 0, wastage: 0, he_disp: 0, te_disp: 0 })
+  const totals = rows.reduce((acc: any, r: any) => {
+    for (const g of EGG_GRADES) {
+      acc[g].prod += r[g].prod; acc[g].wastage += r[g].wastage; acc[g].disp += r[g].disp
+    }
+    return acc
+  }, Object.fromEntries(EGG_GRADES.map(g => [g, { prod: 0, wastage: 0, disp: 0 }])) as Record<EggGrade, { prod: number; wastage: number; disp: number }>)
+
+  const GRADE_LABEL: Record<EggGrade, string> = { he: 'HE', je: 'JE', te: 'TE', be: 'BE', le: 'LE' }
 
   const handleExport = () => {
     if (!rows.length) return
     const wb = XLSX.utils.book_new()
-    const data = [
-      ['Date','HE Prod','JE Prod','TE Prod','BE Prod','LE Prod','Wastage','HE Dispatched','TE Dispatched','HE Balance','JE Balance','TE Balance','BE Balance','LE Balance'],
-      ...rows.map(r => [r.date, r.he_prod, r.je_prod, r.te_prod, r.be_prod, r.le_prod, r.wastage, r.he_disp, r.te_disp, r.heBal, r.jeBal, r.teBal, r.beBal, r.leBal]),
-    ]
+    const headers = ['Date', ...EGG_GRADES.flatMap(g => [`${EGG_GRADE_LABEL[g]} Opening`, `${EGG_GRADE_LABEL[g]} Production`, `${EGG_GRADE_LABEL[g]} Wastage`, `${EGG_GRADE_LABEL[g]} Dispatch`, `${EGG_GRADE_LABEL[g]} Closing`])]
+    const data = [headers, ...rows.map((r: any) => [r.date, ...EGG_GRADES.flatMap(g => [r[g].opening, r[g].prod, r[g].wastage, r[g].disp, r[g].closing])])]
     const ws = XLSX.utils.aoa_to_sheet(data)
     XLSX.utils.book_append_sheet(wb, ws, 'Egg Stock Register')
     XLSX.writeFile(wb, `VHL_EggStockRegister_${fromDate}_${toDate}.xlsx`)
@@ -1696,68 +1706,70 @@ export const VHLEggStockRegisterPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="VHL Egg Stock Register" subtitle="HE/JE/TE/BE/LE production, wastage, and dispatched running balance — computed live, no formulas. Dispatch data only exists for HE/TE, so JE/BE/LE balances are cumulative production only."
+      <SectionHeader title="VHL Egg Stock Register" subtitle="Opening / Production / Wastage / Dispatch / Closing per grade — computed live, no formulas. Dispatch data only exists for HE/TE, so JE/BE/LE Dispatch is always 0."
         action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>} />
       <Card className="flex flex-wrap gap-3 items-end">
         <Select label="VHL Flock" placeholder="— Choose flock —" value={flockId} onChange={e => setFlockId(e.target.value)}
           options={(flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))} />
         <DateInput label="From" value={fromDate} onChange={e => setFromDate(e.target.value)} />
         <DateInput label="To" value={toDate} onChange={e => setToDate(e.target.value)} />
+        <Select label="Grade (detail view)" value={grade} onChange={e => setGrade(e.target.value as EggGrade)}
+          options={EGG_GRADES.map(g => ({ value: g, label: EGG_GRADE_LABEL[g] }))} />
       </Card>
       {!flockId ? (
         <EmptyState icon={<Egg size={32}/>} title="Select a VHL flock" />
       ) : !rows.length ? (
         <EmptyState icon={<Egg size={32}/>} title="No production or dispatch data in this range" />
       ) : (
-        <div className="overflow-x-auto">
-        <Card padding={false}>
-          <Table>
-            <thead><tr>
-              <Th>Date</Th>
-              <Th right>HE Prod</Th><Th right>JE Prod</Th><Th right>TE Prod</Th><Th right>BE Prod</Th><Th right>LE Prod</Th>
-              <Th right>Wastage</Th>
-              <Th right>HE Disp.</Th><Th right>TE Disp.</Th>
-              <Th right>HE Bal</Th><Th right>JE Bal</Th><Th right>TE Bal</Th><Th right>BE Bal</Th><Th right>LE Bal</Th>
-            </tr></thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.date} className="hover:bg-gray-50">
-                  <Td className="text-sm font-medium whitespace-nowrap">{fmtDate(r.date)}</Td>
-                  <Td right className="text-sm">{r.he_prod.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm">{r.je_prod.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm">{r.te_prod.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm">{r.be_prod.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm">{r.le_prod.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm text-red-500">{r.wastage>0?r.wastage.toLocaleString('en-IN'):'—'}</Td>
-                  <Td right className="text-sm text-orange-600">{r.he_disp>0?r.he_disp.toLocaleString('en-IN'):'—'}</Td>
-                  <Td right className="text-sm text-orange-600">{r.te_disp>0?r.te_disp.toLocaleString('en-IN'):'—'}</Td>
-                  <Td right className={`text-sm font-semibold ${r.heBal<0?'text-red-600':'text-green-700'}`}>{r.heBal.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm font-semibold text-gray-700">{r.jeBal.toLocaleString('en-IN')}</Td>
-                  <Td right className={`text-sm font-semibold ${r.teBal<0?'text-red-600':'text-green-700'}`}>{r.teBal.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm font-semibold text-gray-700">{r.beBal.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm font-semibold text-gray-700">{r.leBal.toLocaleString('en-IN')}</Td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot><tr className="bg-gray-50 font-semibold">
-              <Td>TOTAL</Td>
-              <Td right>{totals.he_prod.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.je_prod.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.te_prod.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.be_prod.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.le_prod.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.wastage.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.he_disp.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.te_disp.toLocaleString('en-IN')}</Td>
-              <Td right>{rows[rows.length-1]?.heBal.toLocaleString('en-IN')}</Td>
-              <Td right>{rows[rows.length-1]?.jeBal.toLocaleString('en-IN')}</Td>
-              <Td right>{rows[rows.length-1]?.teBal.toLocaleString('en-IN')}</Td>
-              <Td right>{rows[rows.length-1]?.beBal.toLocaleString('en-IN')}</Td>
-              <Td right>{rows[rows.length-1]?.leBal.toLocaleString('en-IN')}</Td>
-            </tr></tfoot>
-          </Table>
-        </Card>
-        </div>
+        <>
+          <Card padding={false}>
+            <div className="px-4 py-2 border-b border-gray-100"><h3 className="font-semibold text-gray-800 text-sm">{EGG_GRADE_LABEL[grade]} Ledger (Opening → Closing)</h3></div>
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr>
+                  <Th>Date</Th><Th right>Opening</Th><Th right>Production</Th><Th right>Wastage</Th><Th right>Dispatch</Th><Th right>Closing</Th>
+                </tr></thead>
+                <tbody>
+                  {rows.map((r: any) => (
+                    <tr key={r.date} className="hover:bg-gray-50">
+                      <Td className="text-sm font-medium whitespace-nowrap">{fmtDate(r.date)}</Td>
+                      <Td right className="text-sm text-gray-500">{r[grade].opening.toLocaleString('en-IN')}</Td>
+                      <Td right className="text-sm text-green-700">{r[grade].prod>0?r[grade].prod.toLocaleString('en-IN'):'—'}</Td>
+                      <Td right className="text-sm text-red-500">{r[grade].wastage>0?r[grade].wastage.toLocaleString('en-IN'):'—'}</Td>
+                      <Td right className="text-sm text-orange-600">{r[grade].disp>0?r[grade].disp.toLocaleString('en-IN'):'—'}</Td>
+                      <Td right className={`text-sm font-semibold ${r[grade].closing<0?'text-red-600':'text-green-800'}`}>{r[grade].closing.toLocaleString('en-IN')}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr className="bg-gray-50 font-semibold">
+                  <Td>TOTAL</Td>
+                  <Td right>{rows[0]?.[grade].opening.toLocaleString('en-IN')}</Td>
+                  <Td right>{totals[grade].prod.toLocaleString('en-IN')}</Td>
+                  <Td right>{totals[grade].wastage.toLocaleString('en-IN')}</Td>
+                  <Td right>{totals[grade].disp.toLocaleString('en-IN')}</Td>
+                  <Td right>{rows[rows.length-1]?.[grade].closing.toLocaleString('en-IN')}</Td>
+                </tr></tfoot>
+              </Table>
+            </div>
+          </Card>
+
+          <Card padding={false}>
+            <div className="px-4 py-2 border-b border-gray-100"><h3 className="font-semibold text-gray-800 text-sm">All Grades — Closing Balance</h3></div>
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr><Th>Date</Th>{EGG_GRADES.map(g => <Th key={g} right>{EGG_GRADE_LABEL[g]}</Th>)}</tr></thead>
+                <tbody>
+                  {rows.map((r: any) => (
+                    <tr key={r.date} className="hover:bg-gray-50">
+                      <Td className="text-sm font-medium whitespace-nowrap">{fmtDate(r.date)}</Td>
+                      {EGG_GRADES.map(g => <Td key={g} right className={`text-sm ${r[g].closing<0?'text-red-600 font-semibold':''}`}>{r[g].closing.toLocaleString('en-IN')}</Td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          </Card>
+        </>
       )}
     </div>
   )
