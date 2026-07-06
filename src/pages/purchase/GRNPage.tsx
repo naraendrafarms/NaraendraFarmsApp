@@ -5,8 +5,9 @@ import { inr, fmtDate, today } from '@/lib/utils'
 import { Card, CardHeader, Input, Select, FormRow, Modal, EmptyState, Spinner, Td, Th, DateInput, Badge } from '@/components/ui'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import toast from 'react-hot-toast'
-import { Plus, Trash2, Edit2, Download, Upload, X } from 'lucide-react'
+import { Plus, Trash2, Edit2, Download, Upload, X, Printer } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { printGRN } from '@/lib/invoicePrint'
 
 // Raw GRN input columns for the import template — only fields the user types.
 // Amounts (basic / gst / total) are computed in code on import, never imported.
@@ -117,7 +118,7 @@ export const GRNPage: React.FC = () => {
     queryKey: ['grns'],
     queryFn: async () => {
       const { data } = await supabase.from('grn')
-        .select('*, farms(name), parties(name)')
+        .select('*, farms(name), parties(name,gstin)')
         .order('grn_date', { ascending: false })
         .order('grn_no', { ascending: false })
         .limit(2000)
@@ -537,6 +538,17 @@ export const GRNPage: React.FC = () => {
                     <Td>
                       <div className="flex gap-1">
                         <button onClick={() => openEdit(g)} className="p-1 hover:text-blue-600"><Edit2 size={14} /></button>
+                        <button onClick={() => printGRN({
+                          id: g.id, grn_date: g.grn_date, grn_no: g.grn_no, invoice_no: g.invoice_no,
+                          invoice_date: g.invoice_date, party_name: g.parties?.name ?? '—',
+                          item_name: g.item_name ?? '—',
+                          qty: g.qty, unit: g.unit, price_per_unit: g.price_per_unit,
+                          basic_amount: g.basic_amount, gst_pct: g.gst_pct, gst_amount: g.gst_amount,
+                          total_amount: g.total_amount, cgst_amount: null,
+                          sgst_amount: null, igst_amount: null,
+                          party_gstin: g.parties?.gstin ?? null, vehicle_no: g.vehicle_no,
+                          farm_name: g.farms?.name, is_rcm: false
+                        })} className="p-1 hover:text-blue-600" title="Print GRN"><Printer size={14} /></button>
                         <button onClick={() => setDelId(g.id)} className="p-1 hover:text-red-600"><Trash2 size={14} /></button>
                       </div>
                     </Td>
