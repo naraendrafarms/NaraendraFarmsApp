@@ -3,9 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Spinner, EmptyState, SearchableSelect } from '@/components/ui'
-import { IndianRupee, Download } from 'lucide-react'
+import { IndianRupee, Download, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
+import { printReport } from '@/lib/invoicePrint'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -77,10 +78,30 @@ export const SalaryHistoryPage: React.FC = () => {
     toast.success('Downloaded')
   }
 
+  const handlePrint = () => {
+    if (!rows?.length) { toast.error('No data'); return }
+    const rowsOut = (rows as any[]).map(r => {
+      const dep = depositHolder(r)
+      return [
+        monthLabel(r.month?.slice(0,7)), r.absent_days??0, r.days_worked??0,
+        r.gross_salary??0, r.total_earning??0, r.pf_employee??0, r.esi_employee??0, r.pt??0,
+        r.advance??0, r.net_salary??0, dep?.holder ? `${dep.kind} — ${dep.holder.name}` : '—',
+      ]
+    })
+    printReport({
+      title: 'Employee Salary History', subtitle: selectedEmp?.name,
+      headers: ['Month','Absent Days','Paid Days','Gross Earned','Total Earning','PF','ESI','PT','Advance','Net Salary','Deposited Into'],
+      rows: rowsOut, rightAlignFrom: 1,
+    })
+  }
+
   return (
     <div className="p-4 space-y-4">
       <CardHeader title="Employee Salary History" subtitle="View all months for one employee"
-        action={empId ? <Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button> : undefined} />
+        action={empId ? <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button>
+          <Button size="sm" variant="outline" onClick={handlePrint}><Printer size={14} className="mr-1"/>Print</Button>
+        </div> : undefined} />
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
         ⚠️ This page shows the <strong>last saved calculation</strong> per month. It does not recalculate by itself.

@@ -3,8 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput, Modal, SearchableSelect } from '@/components/ui'
 import toast from 'react-hot-toast'
-import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil } from 'lucide-react'
+import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Printer } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { printReport } from '@/lib/invoicePrint'
 
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
   const ref = useRef<HTMLInputElement>(null)
@@ -126,6 +127,19 @@ export const DailyAttendancePage: React.FC = () => {
     )
   }
 
+  const printAttendance = () => {
+    printReport({
+      title: 'Daily Attendance', subtitle: date,
+      headers: ['Emp ID','Name','Designation','Gender','Status','OT Hours'],
+      rows: visibleEmployees.map((e:any)=>[
+        e.emp_id, e.name, e.designation, e.gender,
+        localStatus[e.id] ? (STATUS_LABELS[localStatus[e.id]] ?? localStatus[e.id]) : 'Not marked',
+        localOT[e.id] ?? 0,
+      ]),
+      rightAlignFrom: 5,
+    })
+  }
+
   const saveAll = async () => {
     if (!employees?.length) return
     if (date > todayStr()) { toast.error("Can't save attendance for a future date"); return }
@@ -209,6 +223,7 @@ export const DailyAttendancePage: React.FC = () => {
           <Select label="Gender" placeholder="All" options={[{value:'Male',label:'Male'},{value:'Female',label:'Female'},{value:'Other',label:'Other'}]}
             value={genderFilter} onChange={e=>setGenderFilter(e.target.value)} className="w-32" />
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportAttendance}>Export</Button>
+          <Button variant="outline" size="sm" icon={<Printer size={14}/>} onClick={printAttendance}>Print</Button>
         </>}
       </div>
 
@@ -432,10 +447,27 @@ export const MonthAttendancePage: React.FC = () => {
     )
   }
 
+  const handlePrint = () => {
+    if (!employees?.length) return
+    printReport({
+      title: 'Month Attendance', subtitle: monthStr,
+      headers: ['Employee', 'Emp ID', ...days.map(d => String(d)), 'Total Days'],
+      rows: (employees ?? []).map((e: any) => [
+        e.name, e.emp_id ?? '',
+        ...days.map(d => attMap[e.id]?.[d] ?? ''),
+        calcDays(e.id)
+      ]),
+      rightAlignFrom: 2,
+    })
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Month Attendance" subtitle="Day-wise grid per employee"
-        action={<Button variant="outline" icon={<Download size={14} />} onClick={handleExport}>Export CSV</Button>} />
+        action={<div className="flex gap-2">
+          <Button variant="outline" icon={<Download size={14} />} onClick={handleExport}>Export CSV</Button>
+          <Button variant="outline" icon={<Printer size={14} />} onClick={handlePrint}>Print</Button>
+        </div>} />
 
       <div className="flex flex-wrap gap-3 items-end">
         <Select label="Site" required placeholder="— Select Site —" options={farmOptions}

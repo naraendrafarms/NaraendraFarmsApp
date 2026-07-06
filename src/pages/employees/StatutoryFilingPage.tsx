@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, SectionHeader, Button, Input, Spinner, Table, Th, Td, Badge } from '@/components/ui'
-import { Download, CheckCircle2, Pencil } from 'lucide-react'
+import { Download, CheckCircle2, Pencil, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { printReport } from '@/lib/invoicePrint'
 
 const PF_CEIL = 15000
 
@@ -90,16 +91,27 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
           <p className="font-semibold text-gray-800">Remittance Tracker — {month}</p>
           <p className="text-xs text-gray-400">Amount due is computed live from the source data below. Mark each as remitted once you've actually deposited it with the government — this is separate from whether the underlying vendor bill / customer sale / salary itself has been paid.</p>
         </div>
-        <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={() => downloadFile(
-          `statutory_liabilities_${month}.csv`,
-          csv([
-            ['Liability', 'Amount Due', 'Due', 'Status', 'Challan/Ref No.', 'Remitted On'],
-            ...(Object.keys(LIABILITY_LABELS) as LiabilityType[]).map(t => {
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" icon={<Download size={14} />} onClick={() => downloadFile(
+            `statutory_liabilities_${month}.csv`,
+            csv([
+              ['Liability', 'Amount Due', 'Due', 'Status', 'Challan/Ref No.', 'Remitted On'],
+              ...(Object.keys(LIABILITY_LABELS) as LiabilityType[]).map(t => {
+                const meta = LIABILITY_LABELS[t]; const rec = byType(t); const amt = amounts[t] ?? 0
+                return [meta.label, amt, meta.dueDay, amt <= 0 ? 'Nil' : (rec?.status === 'Paid' ? 'Remitted' : 'Pending'), rec?.challan_no ?? '', rec?.paid_date ?? '']
+              }),
+            ]), 'text/csv'
+          )}>Export CSV</Button>
+          <Button variant="outline" size="sm" icon={<Printer size={14} />} onClick={() => printReport({
+            title: 'Statutory Remittance Tracker', subtitle: month,
+            headers: ['Liability', 'Amount Due', 'Due', 'Status', 'Challan/Ref No.', 'Remitted On'],
+            rows: (Object.keys(LIABILITY_LABELS) as LiabilityType[]).map(t => {
               const meta = LIABILITY_LABELS[t]; const rec = byType(t); const amt = amounts[t] ?? 0
               return [meta.label, amt, meta.dueDay, amt <= 0 ? 'Nil' : (rec?.status === 'Paid' ? 'Remitted' : 'Pending'), rec?.challan_no ?? '', rec?.paid_date ?? '']
             }),
-          ]), 'text/csv'
-        )}>Export CSV</Button>
+            rightAlignFrom: 1,
+          })}>Print</Button>
+        </div>
       </div>
       <Table>
         <thead><tr><Th>Liability</Th><Th right>Amount Due</Th><Th>Due</Th><Th>Status</Th><Th>Challan / Ref No.</Th><Th>Remitted On</Th><Th></Th></tr></thead>

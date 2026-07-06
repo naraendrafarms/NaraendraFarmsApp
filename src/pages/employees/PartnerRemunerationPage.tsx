@@ -10,9 +10,10 @@ const toCbMode = (mode: string) => {
   return ['cash', 'upi', 'neft', 'rtgs', 'imps'].includes(m) ? m : 'cheque'
 }
 import { Card, CardHeader, Button, Input, Select, DateInput, Table, Th, Td, Spinner, EmptyState, Badge } from '@/components/ui'
-import { Plus, Edit2, Trash2, Users, Save, Download, Upload, FileSpreadsheet, IndianRupee } from 'lucide-react'
+import { Plus, Edit2, Trash2, Users, Save, Download, Upload, FileSpreadsheet, IndianRupee, Printer } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
+import { printReport } from '@/lib/invoicePrint'
 import toast from 'react-hot-toast'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -95,6 +96,15 @@ const ManagePartners: React.FC = () => {
     toast.success('Exported')
   }
 
+  const printPartners = () => {
+    if (!(rows as any[]).length) { toast.error('No partners to print'); return }
+    printReport({
+      title: 'Partners', headers: ['Name','PAN','Bank','Branch','IFSC','Account No','Default TDS%'],
+      rows: (rows as any[]).map((r: any) => [r.name, r.pan ?? '—', r.bank_name ?? '—', r.branch ?? '—', r.ifsc ?? '—', r.account_no ?? '—', r.default_tds_pct ?? 0]),
+      rightAlignFrom: 6,
+    })
+  }
+
   const handleImport = async (file: File) => {
     try {
       const { headers, rows: fileRows } = await parseFile(file)
@@ -161,6 +171,7 @@ const ManagePartners: React.FC = () => {
           onChange={e => e.target.files?.[0] && handleImport(e.target.files[0])} />
         <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>
         <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={exportXlsx}>Export Excel</Button>
+        <Button size="sm" variant="outline" icon={<Printer size={14}/>} onClick={printPartners}>Print</Button>
         <Button size="sm" variant="ghost" icon={<FileSpreadsheet size={14}/>} onClick={downloadTemplate}>Template</Button>
         <div className="flex-1" />
         {sel.size > 0 && <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setBulkDel('selected')}>Delete Selected ({sel.size})</Button>}
@@ -278,6 +289,19 @@ const EnterRemuneration: React.FC = () => {
     toast.success('Exported')
   }
 
+  const printRemuneration = () => {
+    const data = (partners as any[]).map((p: any) => {
+      const { amt, pct, tds, net } = calcRow(p.id)
+      return [p.name, amt, pct, tds, net]
+    }).filter(r => (r[1] as number) > 0)
+    if (!data.length) { toast.error('Enter amounts first'); return }
+    printReport({
+      title: 'Partner Remuneration', subtitle: monthLabel(month),
+      headers: ['Partner','Remuneration','TDS %','TDS Amount','Net Payable'],
+      rows: data, rightAlignFrom: 1,
+    })
+  }
+
   const save = async () => {
     setSaving(true)
     try {
@@ -345,6 +369,7 @@ const EnterRemuneration: React.FC = () => {
         </div>
         <Button icon={<Save size={14}/>} onClick={save} loading={saving} disabled={!(partners as any[]).length}>Save Remuneration</Button>
         <Button variant="outline" icon={<Download size={14}/>} onClick={exportXlsx} disabled={!(partners as any[]).length}>Export Excel</Button>
+        <Button variant="outline" icon={<Printer size={14}/>} onClick={printRemuneration} disabled={!(partners as any[]).length}>Print</Button>
       </Card>
 
       <Card padding={false}>

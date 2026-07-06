@@ -22,6 +22,8 @@ import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { LogoChip } from '@/components/Logo'
 import { ifscError, accountNoError } from '@/lib/validators'
+import { printReport } from '@/lib/invoicePrint'
+import { Printer } from 'lucide-react'
 
 // ── CSV export helper ─────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -347,6 +349,16 @@ export const EmployeeList: React.FC = () => {
     )
   }
 
+  const printEmployees = () => {
+    printReport({
+      title: 'Employee List',
+      subtitle: `${filteredEmps.length} employee(s)`,
+      headers: ['Emp ID','Name','Designation','Site','Gender','Mobile','Base Salary','Status'],
+      rows: filteredEmps.map((e:any)=>[e.emp_id, e.name, e.designation, e.farms?.name, e.gender, e.mobile, e.base_salary, e.is_active?'Active':'Left']),
+      rightAlignFrom: 6,
+    })
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Employees"
@@ -354,6 +366,7 @@ export const EmployeeList: React.FC = () => {
         action={
           <div className="flex gap-2 flex-wrap">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportEmployees}>Export</Button>
+            <Button variant="outline" size="sm" icon={<Printer size={14}/>} onClick={printEmployees}>Print</Button>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={downloadTemplate}>Template</Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
             <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportCSV}/>
@@ -711,10 +724,28 @@ export const SalaryAbstractPage: React.FC = () => {
     )
   }
 
+  const handlePrint = () => {
+    if (!rows?.length) return
+    printReport({
+      title: 'Salary Abstract',
+      subtitle: filterMonth ? fmtMonth(filterMonth+'-01') : 'All Months',
+      headers: ['Month','Site','E.Sal','PF','ESI','PT','Hold','Arrears','OT','Advance','Net Salary','No Of Emp','Ave Pres/Month',
+        'Prior Yr Amount','Prior Yr No Of Emp'],
+      rows: rows.map(r => [fmtMonth(r.month), r.farm,
+        Math.round(r.earned), Math.round(r.pf), Math.round(r.esi), Math.round(r.pt), Math.round(r.hold), Math.round(r.arrears), Math.round(r.ot),
+        Math.round(r.advance), Math.round(r.net), r.count, r.avgPresent.toFixed(1),
+        r.priorNet != null ? Math.round(r.priorNet) : '—', r.priorCount ?? '—']),
+      rightAlignFrom: 2,
+    })
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Salary Abstract" subtitle="Auto-computed site-wise monthly salary summary, with prior-year same-month comparison"
-        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>}
+        action={<div className="flex gap-2">
+          <Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>
+          <Button variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
+        </div>}
       />
       <div className="flex gap-3">
         <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-48" />
@@ -844,10 +875,24 @@ export const SiteDesignationCountPage: React.FC = () => {
     toast.success('Downloaded')
   }
 
+  const handlePrint = () => {
+    if (!bySite.length) return
+    const rows: (string|number)[][] = []
+    for (const site of bySite) {
+      for (const [desig, count] of Object.entries(site.byDesig).sort((a, b) => b[1] - a[1])) rows.push([site.name, desig, count])
+      rows.push([site.name, 'TOTAL', site.total])
+    }
+    rows.push(['GRAND TOTAL', '', grandTotal])
+    printReport({ title: 'Site-wise Designation-wise Employee Count', headers: ['Site','Designation','Count'], rows, rightAlignFrom: 2 })
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Site-wise Designation-wise Employee Count" subtitle="Active employees only, grouped by site then designation"
-        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>}
+        action={<div className="flex gap-2">
+          <Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>
+          <Button variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
+        </div>}
       />
       {isLoading ? <Spinner /> : !bySite.length ? (
         <EmptyState icon={<Users size={32}/>} title="No active employees found" />
@@ -2023,6 +2068,15 @@ export const BonusPage: React.FC = () => {
     )
   }
 
+  const handlePrint = () => {
+    if (!bonuses?.length) return
+    printReport({
+      title: 'Bonus', headers: ['Emp ID','Name','Site','Year','Amount','Type','Paid Date','Remarks'],
+      rows: bonuses.map((b:any)=>[b.employees?.emp_id,b.employees?.name,b.employees?.farms?.name,b.bonus_year,b.amount,b.bonus_type,b.paid_date,b.remarks]),
+      rightAlignFrom: 4,
+    })
+  }
+
   const farmOptions=farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
   const empOptions=employees?.map((e:any)=>({value:e.id,label:`${e.name} (${e.farms?.code})`}))??[]
   const totalBonus=bonuses?.reduce((s:number,b:any)=>s+(b.amount??0),0)??0
@@ -2036,6 +2090,7 @@ export const BonusPage: React.FC = () => {
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import CSV</Button>
             <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportCSV}/>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+            <Button variant="outline" size="sm" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
             <Button icon={<Plus size={16}/>} onClick={()=>{setForm({employee_id:'',bonus_year:new Date().getFullYear().toString(),amount:'',bonus_type:'festival',paid_date:'',remarks:''});setEditingId(null);setShowForm(true)}}>Add Bonus</Button>
           </div>
         }
@@ -2227,12 +2282,29 @@ export const ESIPFReportPage: React.FC = () => {
     )
   }
 
+  const handlePrint = () => {
+    if (!rows?.length) return
+    printReport({
+      title: 'ESI / PF Report', subtitle: filterMonth || undefined,
+      headers: ['Emp ID','Name','Site','Gross','ESI Emp','ESI Empr','PF Emp','Empr EPS','Empr EPF','Admin','EDLI','PT'],
+      rows: (rows??[]).map((r:any)=>[
+        r.employees?.emp_id, r.employees?.name, r.employees?.farms?.name,
+        r.gross_salary, r.esi_employee, r.esi_employer, r.pf_employee,
+        r.employer_eps, r.employer_epf_diff, r.admin_charges, r.edli_charge, r.pt
+      ]),
+      rightAlignFrom: 3,
+    })
+  }
+
   const farmOptions=farms?.map((f:any)=>({value:f.id,label:f.name}))??[]
 
   return (
     <div className="space-y-5">
       <SectionHeader title="ESI / PF Report" subtitle="Statutory deduction report for ESIC & EPFO filing"
-        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>}
+        action={<div className="flex gap-2">
+          <Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+          <Button variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
+        </div>}
       />
       <div className="flex gap-3 flex-wrap items-end">
         <Input label="Month" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-48"/>
@@ -2414,10 +2486,22 @@ export const PayrollSummaryPage: React.FC = () => {
     )
   }
 
+  const handlePrint = () => {
+    printReport({
+      title: 'Payroll Summary', subtitle: `FY ${selectedFY}`,
+      headers: ['Month','Employees','Gross','Net','Advance','ESI (Total)','PF (Total)','Empr EPS','Empr EPF','Admin','EDLI','PT'],
+      rows: Object.entries(byMonth).map(([,m])=>[m.label,m.count,m.gross,m.net,m.advance,m.esi,m.pf,m.eps,m.epf,m.admin,m.edli,m.pt]),
+      rightAlignFrom: 1,
+    })
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Payroll Summary" subtitle="FY-wise payroll analysis and charts"
-        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Year CSV</Button>}
+        action={<div className="flex gap-2">
+          <Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Year CSV</Button>
+          <Button variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
+        </div>}
       />
       <div className="flex gap-3 items-end">
         <Select label="Financial Year" options={FY_OPTIONS} value={selectedFY} onChange={e=>setSelectedFY(e.target.value)} className="w-40"/>
@@ -2576,11 +2660,27 @@ export const AttendanceRegisterPage: React.FC = () => {
     )
   }
 
+  const handlePrint = () => {
+    printReport({
+      title: 'Attendance Register', subtitle: `FY ${selectedFY}`,
+      headers: ['Employee','Emp ID','Site',...MONTH_LABELS,'Total Days'],
+      rows: empRows.map(e=>{
+        const mDays = months.map(m=>e.months[m.slice(0,7)]?.days??'')
+        const total = months.reduce((s,m)=>s+(e.months[m.slice(0,7)]?.days??0),0)
+        return [e.name,e.empId,e.site,...mDays,total]
+      }),
+      rightAlignFrom: 3,
+    })
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Attendance Register"
         subtitle="Year-wise working days per employee — click any cell to edit"
-        action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>}
+        action={<div className="flex gap-2">
+          <Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
+          <Button variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
+        </div>}
       />
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="Financial Year" options={FY_OPTIONS} value={selectedFY} onChange={e=>setSelectedFY(e.target.value)} className="w-40"/>
@@ -3385,7 +3485,7 @@ export const PayslipGeneratorPage: React.FC = () => {
       {/* ── SAVED PAYSLIPS TAB ── */}
       {tab === 'saved' && (
         <div className="space-y-3">
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
               'saved_payslips.csv',
               ['Employee','Emp ID','Designation','Month','Gross','Deductions','Net Salary','Generated On'],
@@ -3395,6 +3495,16 @@ export const PayslipGeneratorPage: React.FC = () => {
                 r.generated_at ? fmtDate(r.generated_at) : '',
               ])
             )}>Export Excel</Button>
+            <Button variant="outline" size="sm" icon={<Printer size={14}/>} onClick={() => printReport({
+              title: 'Saved Payslips',
+              headers: ['Employee','Emp ID','Designation','Month','Gross','Deductions','Net Salary','Generated On'],
+              rows: (savedPayslips??[]).map((r:any) => [
+                r.emp_name || '', r.emp_id_manual || '', r.emp_designation || '', monthLabel(r.month),
+                r.gross_earnings ?? 0, r.total_deductions ?? 0, r.net_salary ?? 0,
+                r.generated_at ? fmtDate(r.generated_at) : '',
+              ]),
+              rightAlignFrom: 4,
+            })}>Print</Button>
           </div>
           {selIds.size > 0 && (
             <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
@@ -3648,6 +3758,20 @@ export const BulkSalaryPage: React.FC = () => {
     toast.success(`Attendance_${month}.xlsx downloaded`)
   }
 
+  const printAttendance = () => {
+    if (!employees?.length) { toast.error('No employees loaded'); return }
+    printReport({
+      title: 'Bulk Salary — Attendance', subtitle: month,
+      headers: ['Emp Code','Name','Site','Designation','Base Salary','Advances','Flock Ded.','Absent Days','TDS'],
+      rows: (employees as any[]).map(emp => [
+        emp.emp_id??'', emp.name??'', emp.farms?.name??'', emp.designation??'', emp.base_salary??0,
+        ((advances as any)||{})[emp.id]??0, ((deductions as any)||{})[emp.id]??0,
+        parseFloat(absentMap[emp.id]??'0')||0, parseFloat(tdsMap[emp.id]??'0')||0,
+      ]),
+      rightAlignFrom: 4,
+    })
+  }
+
   const exportPayrollExcel = () => {
     if (!salaries?.length) { toast.error('No salary data — save attendance first'); return }
     const headers = [
@@ -3687,6 +3811,20 @@ export const BulkSalaryPage: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, ws, 'Payroll')
     XLSX.writeFile(wb, `Payroll_${month}.xlsx`)
     toast.success(`Payroll_${month}.xlsx downloaded`)
+  }
+
+  const printPayroll = () => {
+    if (!salaries?.length) { toast.error('No salary data — save attendance first'); return }
+    const headers = ['Emp Code','Name','Designation','Paid Days','Gross Earned','ESI Emp','PF Emp','PT','TDS','Advance','Net Payable']
+    const rows = (salaries as any[]).map(r => {
+      const e = r.employees ?? {}
+      return [e.emp_id??'', e.name??'', e.designation??'', r.total_paid_days??30, r.gross_salary??0,
+        r.esi_employee??0, r.pf_employee??0, r.pt??0, r.tds??0, r.advance??0, r.net_salary??0]
+    })
+    const totRow = ['', 'TOTAL', '', '',
+      ...(['gross_salary','esi_employee','pf_employee','pt','tds','advance','net_salary'] as string[])
+        .map(k => (salaries as any[]).reduce((s, r) => s + (r[k] ?? 0), 0))]
+    printReport({ title: 'Bulk Salary — Payroll', subtitle: month, headers, rows: [...rows, totRow], rightAlignFrom: 3 })
   }
 
   const exportKotakCMS = () => {
@@ -3797,6 +3935,7 @@ export const BulkSalaryPage: React.FC = () => {
             <div className="flex gap-2 flex-wrap">
               <Button variant="outline" onClick={autoFillFromDaily}>📋 Auto-fill from Daily Attendance</Button>
               <Button variant="outline" onClick={exportAttendanceExcel}><Download size={14} className="mr-1"/>Export Excel</Button>
+              <Button variant="outline" onClick={printAttendance}><Printer size={14} className="mr-1"/>Print</Button>
               <Button onClick={saveAttendance} loading={saving}>Save & Calculate Salaries</Button>
             </div>
           </div>
@@ -3861,6 +4000,7 @@ export const BulkSalaryPage: React.FC = () => {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-sm text-gray-600">{salaries?.length??0} employees · {monthLabel}</p>
             <Button variant="outline" icon={<Download size={14}/>} onClick={exportPayrollExcel}>Export Payroll Excel</Button>
+            <Button variant="outline" icon={<Printer size={14}/>} onClick={printPayroll}>Print Payroll</Button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Card><p className="text-xs text-gray-400">Total Earning</p><p className="text-lg font-bold">{inr(salaryTotals.earning)}</p></Card>

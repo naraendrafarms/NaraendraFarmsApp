@@ -62,6 +62,39 @@ function inr(n: number) {
   return 'Rs. ' + (n ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// ── Generic tabular report print (Employees pages: abstracts, registers, etc.) ──
+export function printReport(opts: {
+  title: string
+  subtitle?: string
+  headers: string[]
+  rows: (string | number | null | undefined)[][]
+  rightAlignFrom?: number   // column index from which cells right-align (numbers); default: none
+}) {
+  const { title, subtitle, headers, rows, rightAlignFrom } = opts
+  const thead = headers.map(h => `<th>${h}</th>`).join('')
+  const tbody = rows.map(r => `<tr>${r.map((c, i) =>
+    `<td${rightAlignFrom != null && i >= rightAlignFrom ? ' style="text-align:right"' : ''}>${c ?? ''}</td>`
+  ).join('')}</tr>`).join('')
+  const html = `<!doctype html><html><head><title>${title}</title>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+    <div class="header">
+      <div>
+        <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+        <div class="sub">${CO.addr1}</div>
+        <div class="sub">${CO.addr2}, ${CO.state} — ${CO.stateCode}</div>
+        <div class="sub">GSTIN: ${CO.gstin} · Ph: ${CO.phone}</div>
+      </div>
+      <div class="header-right">
+        <h2>${title}</h2>
+        ${subtitle ? `<div class="sub">${subtitle}</div>` : ''}
+        <div class="sub">Printed: ${new Date().toLocaleString('en-IN')}</div>
+      </div>
+    </div>
+    <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+  </body></html>`
+  openPrint(html)
+}
+
 // ── HE Dispatch Invoice ───────────────────────────────────────────────────────
 export interface HEPrintOpts {
   companyAddr?: boolean    // seller header (default true)

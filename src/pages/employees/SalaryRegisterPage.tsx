@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Table, Th, Td, Spinner, EmptyState, Modal, Badge } from '@/components/ui'
-import { IndianRupee, Download, ExternalLink } from 'lucide-react'
+import { IndianRupee, Download, ExternalLink, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { printReport } from '@/lib/invoicePrint'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -158,6 +159,21 @@ export const SalaryRegisterPage: React.FC = () => {
     toast.success('Downloaded')
   }
 
+  const printRegister = () => {
+    if (!rows?.length) { toast.error('No data to print'); return }
+    const R = (v: any) => Math.round(Number(v) || 0)
+    printReport({
+      title: 'Salary Register', subtitle: monthLabel(month),
+      headers: ['Emp Code','Name','Designation','Farm','Paid Days','Gross Earned','PF Emp','ESI Emp','PT','Advance','Net Salary'],
+      rows: (rows as any[]).map(r => {
+        const emp = r.employees ?? {}
+        return [emp.emp_id??'', emp.name??'', emp.designation??'', emp.farms?.name??'', r.days_worked??0,
+          R(r.gross_salary), R(r.pf_employee), R(r.esi_employee), R(r.pt), R(r.advance), R(r.net_salary)]
+      }),
+      rightAlignFrom: 4,
+    })
+  }
+
   const farmNames = Array.from(new Set((farms as any[])?.map((f: any) => f.name) ?? []))
   const totals = (rows as any[] ?? []).reduce((acc: any, r: any) => {
     acc.gross_rate     = (acc.gross_rate??0) + (r.gross_rate??0)
@@ -185,7 +201,10 @@ export const SalaryRegisterPage: React.FC = () => {
   return (
     <div className="p-4 space-y-4">
       <CardHeader title={`Salary Register — ${monthLabel(month)}`} subtitle="All employees, one row per person"
-        action={<Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button>} />
+        action={<div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={exportXLSX}><Download size={14} className="mr-1"/>Export Excel</Button>
+          <Button size="sm" variant="outline" onClick={printRegister}><Printer size={14} className="mr-1"/>Print</Button>
+        </div>} />
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
         ⚠️ This page shows the <strong>last saved calculation</strong>. It does not recalculate by itself.
