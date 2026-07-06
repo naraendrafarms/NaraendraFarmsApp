@@ -5,6 +5,7 @@ import { inr, today, FY_OPTIONS, currentFY, fyRange } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState } from '@/components/ui'
 import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { ifscError, accountNoError } from '@/lib/validators'
 
 const EMPTY_FORM = {
   txn_date: today(),
@@ -230,6 +231,8 @@ export const BankLedgerPage: React.FC = () => {
   const saveAccountMut = useMutation({
     mutationFn: async () => {
       if (!acctForm.bank_name.trim()) throw new Error('Bank name is required')
+      const ifscErr = ifscError(acctForm.ifsc); if (ifscErr) throw new Error(ifscErr)
+      const acctErr = accountNoError(acctForm.account_no); if (acctErr) throw new Error(acctErr)
       const payload = {
         bank_name: acctForm.bank_name.trim(),
         account_name: acctForm.account_name.trim() || null,
@@ -717,8 +720,8 @@ export const BankLedgerPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Bank Name" value={acctForm.bank_name} onChange={e => setAcctForm(f => ({ ...f, bank_name: e.target.value }))} />
                 <Input label="Account Name (label)" value={acctForm.account_name} onChange={e => setAcctForm(f => ({ ...f, account_name: e.target.value }))} />
-                <Input label="Account No" value={acctForm.account_no} onChange={e => setAcctForm(f => ({ ...f, account_no: e.target.value }))} />
-                <Input label="IFSC" value={acctForm.ifsc} onChange={e => setAcctForm(f => ({ ...f, ifsc: e.target.value }))} />
+                <Input label="Account No" value={acctForm.account_no} onChange={e => setAcctForm(f => ({ ...f, account_no: e.target.value }))} error={accountNoError(acctForm.account_no) ?? undefined} />
+                <Input label="IFSC" value={acctForm.ifsc} onChange={e => setAcctForm(f => ({ ...f, ifsc: e.target.value.toUpperCase() }))} error={ifscError(acctForm.ifsc) ?? undefined} />
                 <Input label="Branch" value={acctForm.branch} onChange={e => setAcctForm(f => ({ ...f, branch: e.target.value }))} />
                 <Input label="Opening Balance" type="number" value={acctForm.opening_balance} onChange={e => setAcctForm(f => ({ ...f, opening_balance: e.target.value }))} />
               </div>

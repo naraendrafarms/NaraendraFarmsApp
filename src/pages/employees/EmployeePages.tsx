@@ -21,6 +21,7 @@ import { parseFile } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { LogoChip } from '@/components/Logo'
+import { ifscError, accountNoError } from '@/lib/validators'
 
 // ── CSV export helper ─────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -158,6 +159,8 @@ export const EmployeeList: React.FC = () => {
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.name || !form.farm_id) throw new Error('Name and site required')
+      const ifscErr = ifscError(form.ifsc); if (ifscErr) throw new Error(ifscErr)
+      const acctErr = accountNoError(form.account_no); if (acctErr) throw new Error(acctErr)
       const payload = {
         emp_id: form.emp_id || null, name: form.name, designation: form.designation || null,
         farm_id: form.farm_id, department: form.department || null,
@@ -561,8 +564,8 @@ export const EmployeeList: React.FC = () => {
             <Input label="Branch" value={form.bank_branch} onChange={e=>s('bank_branch',e.target.value)} />
           </FormRow>
           <FormRow>
-            <Input label="Account No" value={form.account_no} onChange={e=>s('account_no',e.target.value)} />
-            <Input label="IFSC Code" value={form.ifsc} onChange={e=>s('ifsc',e.target.value)} />
+            <Input label="Account No" value={form.account_no} onChange={e=>s('account_no',e.target.value)} error={accountNoError(form.account_no) ?? undefined} />
+            <Input label="IFSC Code" value={form.ifsc} onChange={e=>s('ifsc',e.target.value.toUpperCase())} error={ifscError(form.ifsc) ?? undefined} />
           </FormRow>
           <FormRow>
             <Select label="Salary Payment Mode"
