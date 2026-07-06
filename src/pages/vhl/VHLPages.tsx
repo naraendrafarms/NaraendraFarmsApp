@@ -1623,7 +1623,7 @@ export const VHLEggStockRegisterPage: React.FC = () => {
     queryKey: ['vhl_egg_register_prod', flockId, fromDate, toDate],
     queryFn: async () => {
       const { data } = await supabase.from('vhl_daily_entry')
-        .select('record_date,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs')
+        .select('record_date,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,wastage_he,wastage_je,wastage_te,wastage_be')
         .eq('flock_id', flockId).gte('record_date', fromDate).lte('record_date', toDate)
       return data ?? []
     },
@@ -1640,39 +1640,54 @@ export const VHLEggStockRegisterPage: React.FC = () => {
     enabled: !!flockId
   })
 
+  type EggRow = { he_prod: number; je_prod: number; te_prod: number; be_prod: number; le_prod: number; wastage: number; he_disp: number; te_disp: number }
   const rows = React.useMemo(() => {
-    const byDate: Record<string, { he_prod: number; nhe_prod: number; he_disp: number; nhe_disp: number }> = {}
+    const byDate: Record<string, EggRow> = {}
+    const blank = (): EggRow => ({ he_prod: 0, je_prod: 0, te_prod: 0, be_prod: 0, le_prod: 0, wastage: 0, he_disp: 0, te_disp: 0 })
     for (const r of (production ?? [])) {
       const d = r.record_date
-      if (!byDate[d]) byDate[d] = { he_prod: 0, nhe_prod: 0, he_disp: 0, nhe_disp: 0 }
+      if (!byDate[d]) byDate[d] = blank()
       byDate[d].he_prod += r.he_eggs ?? 0
-      byDate[d].nhe_prod += (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0) + (r.le_eggs ?? 0)
+      byDate[d].je_prod += r.je_eggs ?? 0
+      byDate[d].te_prod += r.te_eggs ?? 0
+      byDate[d].be_prod += r.be_eggs ?? 0
+      byDate[d].le_prod += r.le_eggs ?? 0
+      byDate[d].wastage  += (r.wastage_he ?? 0) + (r.wastage_je ?? 0) + (r.wastage_te ?? 0) + (r.wastage_be ?? 0)
     }
     for (const r of (dispatched ?? [])) {
       const d = r.production_date
-      if (!byDate[d]) byDate[d] = { he_prod: 0, nhe_prod: 0, he_disp: 0, nhe_disp: 0 }
+      if (!byDate[d]) byDate[d] = blank()
       byDate[d].he_disp += r.he_qty ?? 0
-      byDate[d].nhe_disp += r.te_qty ?? 0
+      byDate[d].te_disp += r.te_qty ?? 0
     }
-    let heBal = 0, nheBal = 0
+    // Only HE and TE have a dispatch side to net against (vhl_egg_production
+    // only tracks he_qty/te_qty) — JE/BE/LE balances are cumulative
+    // production only, since there's no dispatch data to subtract for them.
+    let heBal = 0, teBal = 0, jeBal = 0, beBal = 0, leBal = 0
     return Object.keys(byDate).sort().map(d => {
       const r = byDate[d]
       heBal += r.he_prod - r.he_disp
-      nheBal += r.nhe_prod - r.nhe_disp
-      return { date: d, ...r, heBal, nheBal }
+      teBal += r.te_prod - r.te_disp
+      jeBal += r.je_prod
+      beBal += r.be_prod
+      leBal += r.le_prod
+      return { date: d, ...r, heBal, teBal, jeBal, beBal, leBal }
     })
   }, [production, dispatched])
 
   const totals = rows.reduce((acc, r) => ({
-    he_prod: acc.he_prod + r.he_prod, nhe_prod: acc.nhe_prod + r.nhe_prod,
-    he_disp: acc.he_disp + r.he_disp, nhe_disp: acc.nhe_disp + r.nhe_disp,
-  }), { he_prod: 0, nhe_prod: 0, he_disp: 0, nhe_disp: 0 })
+    he_prod: acc.he_prod + r.he_prod, je_prod: acc.je_prod + r.je_prod, te_prod: acc.te_prod + r.te_prod,
+    be_prod: acc.be_prod + r.be_prod, le_prod: acc.le_prod + r.le_prod, wastage: acc.wastage + r.wastage,
+    he_disp: acc.he_disp + r.he_disp, te_disp: acc.te_disp + r.te_disp,
+  }), { he_prod: 0, je_prod: 0, te_prod: 0, be_prod: 0, le_prod: 0, wastage: 0, he_disp: 0, te_disp: 0 })
 
   const handleExport = () => {
     if (!rows.length) return
     const wb = XLSX.utils.book_new()
-    const data = [['Date','HE Produced','NHE Produced','HE Dispatched','NHE Dispatched','HE Balance','NHE Balance'],
-      ...rows.map(r => [r.date, r.he_prod, r.nhe_prod, r.he_disp, r.nhe_disp, r.heBal, r.nheBal])]
+    const data = [
+      ['Date','HE Prod','JE Prod','TE Prod','BE Prod','LE Prod','Wastage','HE Dispatched','TE Dispatched','HE Balance','JE Balance','TE Balance','BE Balance','LE Balance'],
+      ...rows.map(r => [r.date, r.he_prod, r.je_prod, r.te_prod, r.be_prod, r.le_prod, r.wastage, r.he_disp, r.te_disp, r.heBal, r.jeBal, r.teBal, r.beBal, r.leBal]),
+    ]
     const ws = XLSX.utils.aoa_to_sheet(data)
     XLSX.utils.book_append_sheet(wb, ws, 'Egg Stock Register')
     XLSX.writeFile(wb, `VHL_EggStockRegister_${fromDate}_${toDate}.xlsx`)
@@ -1681,7 +1696,7 @@ export const VHLEggStockRegisterPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="VHL Egg Stock Register" subtitle="Running HE/NHE production vs dispatched balance — computed live, no formulas"
+      <SectionHeader title="VHL Egg Stock Register" subtitle="HE/JE/TE/BE/LE production, wastage, and dispatched running balance — computed live, no formulas. Dispatch data only exists for HE/TE, so JE/BE/LE balances are cumulative production only."
         action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>} />
       <Card className="flex flex-wrap gap-3 items-end">
         <Select label="VHL Flock" placeholder="— Choose flock —" value={flockId} onChange={e => setFlockId(e.target.value)}
@@ -1694,36 +1709,55 @@ export const VHLEggStockRegisterPage: React.FC = () => {
       ) : !rows.length ? (
         <EmptyState icon={<Egg size={32}/>} title="No production or dispatch data in this range" />
       ) : (
+        <div className="overflow-x-auto">
         <Card padding={false}>
           <Table>
             <thead><tr>
-              <Th>Date</Th><Th right>HE Produced</Th><Th right>NHE Produced</Th>
-              <Th right>HE Dispatched</Th><Th right>NHE Dispatched</Th><Th right>HE Balance</Th><Th right>NHE Balance</Th>
+              <Th>Date</Th>
+              <Th right>HE Prod</Th><Th right>JE Prod</Th><Th right>TE Prod</Th><Th right>BE Prod</Th><Th right>LE Prod</Th>
+              <Th right>Wastage</Th>
+              <Th right>HE Disp.</Th><Th right>TE Disp.</Th>
+              <Th right>HE Bal</Th><Th right>JE Bal</Th><Th right>TE Bal</Th><Th right>BE Bal</Th><Th right>LE Bal</Th>
             </tr></thead>
             <tbody>
               {rows.map(r => (
                 <tr key={r.date} className="hover:bg-gray-50">
-                  <Td className="text-sm font-medium">{fmtDate(r.date)}</Td>
+                  <Td className="text-sm font-medium whitespace-nowrap">{fmtDate(r.date)}</Td>
                   <Td right className="text-sm">{r.he_prod.toLocaleString('en-IN')}</Td>
-                  <Td right className="text-sm">{r.nhe_prod.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm">{r.je_prod.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm">{r.te_prod.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm">{r.be_prod.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm">{r.le_prod.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm text-red-500">{r.wastage>0?r.wastage.toLocaleString('en-IN'):'—'}</Td>
                   <Td right className="text-sm text-orange-600">{r.he_disp>0?r.he_disp.toLocaleString('en-IN'):'—'}</Td>
-                  <Td right className="text-sm text-orange-600">{r.nhe_disp>0?r.nhe_disp.toLocaleString('en-IN'):'—'}</Td>
+                  <Td right className="text-sm text-orange-600">{r.te_disp>0?r.te_disp.toLocaleString('en-IN'):'—'}</Td>
                   <Td right className={`text-sm font-semibold ${r.heBal<0?'text-red-600':'text-green-700'}`}>{r.heBal.toLocaleString('en-IN')}</Td>
-                  <Td right className={`text-sm font-semibold ${r.nheBal<0?'text-red-600':'text-green-700'}`}>{r.nheBal.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm font-semibold text-gray-700">{r.jeBal.toLocaleString('en-IN')}</Td>
+                  <Td right className={`text-sm font-semibold ${r.teBal<0?'text-red-600':'text-green-700'}`}>{r.teBal.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm font-semibold text-gray-700">{r.beBal.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-sm font-semibold text-gray-700">{r.leBal.toLocaleString('en-IN')}</Td>
                 </tr>
               ))}
             </tbody>
             <tfoot><tr className="bg-gray-50 font-semibold">
               <Td>TOTAL</Td>
               <Td right>{totals.he_prod.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.nhe_prod.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.je_prod.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.te_prod.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.be_prod.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.le_prod.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.wastage.toLocaleString('en-IN')}</Td>
               <Td right>{totals.he_disp.toLocaleString('en-IN')}</Td>
-              <Td right>{totals.nhe_disp.toLocaleString('en-IN')}</Td>
+              <Td right>{totals.te_disp.toLocaleString('en-IN')}</Td>
               <Td right>{rows[rows.length-1]?.heBal.toLocaleString('en-IN')}</Td>
-              <Td right>{rows[rows.length-1]?.nheBal.toLocaleString('en-IN')}</Td>
+              <Td right>{rows[rows.length-1]?.jeBal.toLocaleString('en-IN')}</Td>
+              <Td right>{rows[rows.length-1]?.teBal.toLocaleString('en-IN')}</Td>
+              <Td right>{rows[rows.length-1]?.beBal.toLocaleString('en-IN')}</Td>
+              <Td right>{rows[rows.length-1]?.leBal.toLocaleString('en-IN')}</Td>
             </tr></tfoot>
           </Table>
         </Card>
+        </div>
       )}
     </div>
   )
