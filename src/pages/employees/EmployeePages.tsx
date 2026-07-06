@@ -12,7 +12,7 @@ const toCbMode = (mode: string) => {
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3, Search } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
@@ -1617,8 +1617,8 @@ export const SalaryEntryPage: React.FC = () => {
             {/* ── Employee & Month ── */}
             <FormRow>
               <Select label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)}/>
-              <Select label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id}
-                onChange={e=>{ s('employee_id',e.target.value); const emp=employees?.find((x:any)=>x.id===e.target.value); if(emp) s('gross_rate', emp.base_salary?.toString()??'') }}/>
+              <SearchableSelect label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id}
+                onChange={v=>{ s('employee_id',v); const emp=employees?.find((x:any)=>x.id===v); if(emp) s('gross_rate', emp.base_salary?.toString()??'') }}/>
             </FormRow>
             <FormRow>
               <Input label="Month" required type="month" value={form.month} onChange={e=>{
@@ -1909,7 +1909,7 @@ export const BonusPage: React.FC = () => {
         <div className="space-y-4">
           <FormRow>
             <Select label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)}/>
-            <Select label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={e=>s('employee_id',e.target.value)} disabled={!!editingId}/>
+            <SearchableSelect label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={v=>s('employee_id',v)} disabled={!!editingId}/>
           </FormRow>
           <FormRow>
             <Input label="Bonus Year" required type="number" value={form.bonus_year} onChange={e=>s('bonus_year',e.target.value)} hint="e.g. 2025" disabled={!!editingId}/>
@@ -3089,7 +3089,7 @@ export const PayslipGeneratorPage: React.FC = () => {
             <div className="flex gap-4 flex-wrap items-end">
               {!manualMode ? (
                 <div className="flex-1 min-w-52">
-                  <Select label="Employee" options={empOptions} value={empId} onChange={e => setEmpId(e.target.value)} placeholder="Select Employee" />
+                  <SearchableSelect label="Employee" options={empOptions} value={empId} onChange={v => setEmpId(v)} placeholder="Select Employee" />
                 </div>
               ) : (
                 <div className="flex-1 min-w-52 text-xs text-gray-500 italic self-center">Manual mode — fill employee details below</div>
@@ -3764,12 +3764,14 @@ export const BulkSalaryPage: React.FC = () => {
                         <Td className="text-xs">{holder?(holder.ifsc??'—'):(emp.ifsc??'—')}</Td>
                         <Td right className="font-semibold text-green-700">{inr(r.net_salary??0)}</Td>
                         <Td>
-                          <Select value={r.override_account_emp_id ?? ''}
-                            onChange={e => setPaymentOverrideMut.mutate({ salaryId: r.id, overrideEmpId: e.target.value || null })}
+                          <SearchableSelect value={r.override_account_emp_id ?? ''}
+                            onChange={v => setPaymentOverrideMut.mutate({ salaryId: r.id, overrideEmpId: v || null })}
+                            placeholder={isShared ? `Default (→ ${(employees as any[]??[]).find((e:any)=>e.id===emp.shared_with_emp_id)?.name ?? 'shared'})` : 'Default (own account)'}
                             options={[
                               { value: '', label: isShared ? `Default (→ ${(employees as any[]??[]).find((e:any)=>e.id===emp.shared_with_emp_id)?.name ?? 'shared'})` : 'Default (own account)' },
                               ...(employees as any[]??[]).filter((e:any)=>e.id!==emp.id).map((e:any)=>({ value: e.id, label: `${e.name} (${e.emp_id??'—'})` })),
-                            ]} />
+                            ]}
+                            className="min-w-[220px]" />
                         </Td>
                       </tr>
                     )

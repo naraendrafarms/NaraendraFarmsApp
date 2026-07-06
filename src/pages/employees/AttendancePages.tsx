@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput, Modal } from '@/components/ui'
+import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput, Modal, SearchableSelect } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
@@ -737,7 +737,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
           <CardHeader title={editing ? 'Edit Advance' : 'New Advance'} />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <Select label="Site Filter" placeholder="All Sites" options={farmOptions} value={farmId} onChange={e => { setFarmId(e.target.value); s('employee_id', '') }} />
-            <Select label="Employee *" placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={e => s('employee_id', e.target.value)} />
+            <SearchableSelect label="Employee *" placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={v => s('employee_id', v)} />
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Date *</label>
               <DateInput value={form.advance_date} onChange={e => s('advance_date', e.target.value)}

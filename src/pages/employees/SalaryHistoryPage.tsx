@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
-import { Card, CardHeader, Button, Select, Spinner, EmptyState } from '@/components/ui'
+import { Card, CardHeader, Button, Select, Spinner, EmptyState, SearchableSelect } from '@/components/ui'
 import { IndianRupee, Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
@@ -91,11 +91,8 @@ export const SalaryHistoryPage: React.FC = () => {
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div className="min-w-[220px]">
           <label className="block text-xs text-gray-500 mb-1">Employee</label>
-          <Select value={empId} onChange={e => setEmpId(e.target.value)}
-            options={[
-              { value: '', label: '— Select Employee —' },
-              ...(employees as any[] ?? []).map((e: any) => ({ value: e.id, label: `${e.name} (${e.emp_id})` }))
-            ]} />
+          <SearchableSelect value={empId} onChange={v => setEmpId(v)} placeholder="— Select Employee —"
+            options={(employees as any[] ?? []).map((e: any) => ({ value: e.id, label: `${e.name} (${e.emp_id})` }))} />
         </div>
       </Card>
 
