@@ -27,6 +27,21 @@ const TABLE_LABELS: Record<string, string> = {
   vhl_medicine_usage:  'VHL Medicine Usage',
   vhl_egg_rate_history:'VHL Egg Rate History',
   vhl_egg_production:  'VHL Egg Production',
+  bag_sales:            'Empty Bags',
+  feed_production:      'Feed Production',
+  medicine_usage:        'Medicine Usage',
+  medicine_purchases:    'Medicine Purchases',
+  hatch_batches:         'Hatch Batches',
+  bonus:                 'Bonus',
+  partners:              'Partners',
+  statutory_liabilities: 'Statutory Liabilities',
+  generator_diesel_purchases: 'Diesel Purchases',
+  generator_maintenance_log:  'Generator Maintenance',
+  supplier_invoices:     'Supplier Invoices',
+  feed_transfers:        'Feed Transfers',
+  egg_conversions:       'Egg Conversions',
+  egg_opening_stock:     'Egg Opening Stock',
+  shed_transfers:        'Shed Transfers',
 }
 
 const ACTION_COLOR: Record<string, string> = {
