@@ -279,36 +279,6 @@ export const FlockDashboard: React.FC = () => {
     return map
   }, [liveStats])
 
-  // Weekly Flock Report — all flocks, last 7 days of daily_records in one table
-  const weeklyReport = React.useMemo(() => {
-    const map: Record<string, { totalEggs: number; totalHE: number; hdPct: number | null; hePct: number | null; mortF: number; mortM: number; feedKg: number; days: number }> = {}
-    if (!liveStats) return map
-    const grouped: Record<string, any[]> = {}
-    for (const r of liveStats) {
-      if (!grouped[r.flock_id]) grouped[r.flock_id] = []
-      grouped[r.flock_id].push(r)
-    }
-    for (const [fid, rows] of Object.entries(grouped)) {
-      let hdSum = 0, hdCount = 0, totalEggs = 0, totalHE = 0, mortF = 0, mortM = 0, feedKg = 0
-      for (const r of rows) {
-        const fc = r.opening_female ?? r.female_count ?? 0
-        const he = (r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0)
-        const eggs = r.total_eggs ?? he
-        if (fc > 0) { hdSum += eggs / fc; hdCount++ }
-        totalEggs += eggs
-        totalHE += he
-        mortF += r.mortality_female ?? 0
-        mortM += r.mortality_male ?? 0
-        feedKg += (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0)
-      }
-      map[fid] = {
-        totalEggs, totalHE, mortF, mortM, feedKg, days: rows.length,
-        hdPct: hdCount > 0 ? hdSum / hdCount : null,
-        hePct: totalEggs > 0 ? totalHE / totalEggs : null,
-      }
-    }
-    return map
-  }, [liveStats])
 
   // FCR per flock
   const fcrByFlock = React.useMemo(() => {
@@ -394,44 +364,6 @@ export const FlockDashboard: React.FC = () => {
 
       {(!flocks || flocks.length === 0) && (
         <EmptyState icon={<Bird size={32} />} title="No flocks found" />
-      )}
-
-      {/* Weekly Flock Report — every flock, one row each, last 7 days */}
-      {flocks && flocks.length > 0 && (
-        <Card padding={false}>
-          <CardHeader title="Weekly Flock Report — All Flocks" subtitle="Last 7 days, one row per flock" />
-          <div className="overflow-x-auto">
-            <Table>
-              <thead><tr>
-                <Th>Flock</Th><Th>Status</Th><Th right>Age (wk)</Th>
-                <Th right>Total Eggs</Th><Th right>HE Eggs</Th><Th right>HD%</Th><Th right>HE%</Th>
-                <Th right>Mort ♀</Th><Th right>Mort ♂</Th><Th right>Feed (kg)</Th><Th right>Days Logged</Th>
-              </tr></thead>
-              <tbody>
-                {flocks.filter((f: any) => f.status !== 'closed').map((f: any) => {
-                  const w = weeklyReport[f.id]
-                  const weeksOfLife = f.placement_date ? Math.floor(daysSince(f.placement_date) / 7) : null
-                  const hdColor = w?.hdPct == null ? 'text-gray-400' : w.hdPct >= 0.80 ? 'text-green-600' : w.hdPct >= 0.65 ? 'text-amber-600' : 'text-red-600'
-                  return (
-                    <tr key={f.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/flock/${encodeURIComponent(f.flock_no)}`)}>
-                      <Td className="font-semibold">F-{f.flock_no}</Td>
-                      <Td><Badge color={statusBadge(f.status)}>{f.status}</Badge></Td>
-                      <Td right className="text-xs">{weeksOfLife ?? '—'}</Td>
-                      <Td right className="text-xs font-medium">{w ? numFmt(w.totalEggs) : '—'}</Td>
-                      <Td right className="text-xs text-green-700">{w ? numFmt(w.totalHE) : '—'}</Td>
-                      <Td right className={`text-xs font-semibold ${hdColor}`}>{w?.hdPct != null ? pctFmt(w.hdPct) : '—'}</Td>
-                      <Td right className="text-xs">{w?.hePct != null ? pctFmt(w.hePct) : '—'}</Td>
-                      <Td right className="text-xs text-red-500">{w ? w.mortF : '—'}</Td>
-                      <Td right className="text-xs text-red-500">{w ? w.mortM : '—'}</Td>
-                      <Td right className="text-xs">{w ? w.feedKg.toFixed(1) : '—'}</Td>
-                      <Td right className="text-xs text-gray-400">{w ? `${w.days}/7` : '0/7'}</Td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </Table>
-          </div>
-        </Card>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -58,7 +58,7 @@ const NHE_LABEL: Record<string, string> = {
 export const FlockDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'overview'|'daily'|'monthly'|'financial'|'transfers'|'placements'|'std'>('overview')
+  const [tab, setTab] = useState<'overview'|'daily'|'weekly'|'monthly'|'financial'|'transfers'|'placements'|'std'>('overview')
   const [placementForm, setPlacementForm] = useState({ allocated_date: '', shed_id: '', female_count: '', male_count: '', notes: '' })
   const [editPlacementId, setEditPlacementId] = useState<string|null>(null)
   const [showPlacementForm, setShowPlacementForm] = useState(false)
@@ -529,6 +529,48 @@ export const FlockDetail: React.FC = () => {
     return Array.from(map.values()) // ascending by date (Map preserves insertion order and daily is ordered asc)
   }, [daily])
 
+  // Weekly Flock Report — dailyAggregated rolled up by week-of-age (this
+  // flock's own week numbering from placement_date), one row per week.
+  const weeklyAgg = useMemo(() => {
+    if (!flock?.placement_date) return []
+    const map = new Map<number, any>()
+    for (const d of dailyAggregated) {
+      const dayAge = Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
+      const weekNum = Math.floor(dayAge / 7) + 1
+      const eggs = d.total_eggs ?? 0
+      const he = d.he_eggs ?? 0
+      const openF = d.opening_female ?? 0
+      const ex = map.get(weekNum)
+      if (!ex) {
+        map.set(weekNum, {
+          weekNum, days: 1, totalEggs: eggs, totalHE: he,
+          mortF: d.mortality_female ?? 0, mortM: d.mortality_male ?? 0,
+          feedF: d.feed_female_kg ?? 0, feedM: d.feed_male_kg ?? 0,
+          hdSum: openF > 0 ? eggs / openF : 0, hdCount: openF > 0 ? 1 : 0,
+          firstDate: d.record_date, lastDate: d.record_date,
+          openF, openM: d.opening_male ?? 0, closeF: d.closing_female ?? 0, closeM: d.closing_male ?? 0,
+        })
+      } else {
+        ex.days += 1
+        ex.totalEggs += eggs
+        ex.totalHE += he
+        ex.mortF += d.mortality_female ?? 0
+        ex.mortM += d.mortality_male ?? 0
+        ex.feedF += d.feed_female_kg ?? 0
+        ex.feedM += d.feed_male_kg ?? 0
+        if (openF > 0) { ex.hdSum += eggs / openF; ex.hdCount += 1 }
+        ex.lastDate = d.record_date
+        ex.closeF = d.closing_female ?? ex.closeF
+        ex.closeM = d.closing_male ?? ex.closeM
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.weekNum - b.weekNum).map(w => ({
+      ...w,
+      hdPct: w.hdCount > 0 ? w.hdSum / w.hdCount : null,
+      hePct: w.totalEggs > 0 ? w.totalHE / w.totalEggs : null,
+    }))
+  }, [dailyAggregated, flock?.placement_date])
+
   // displayDaily: reversed + date filtered (one row per date, aggregated across sheds)
   const displayDaily = useMemo(() => {
     let arr = [...dailyAggregated].reverse()
@@ -722,7 +764,7 @@ export const FlockDetail: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {(['overview','placements','daily','monthly','financial','transfers','std'] as const).map(t => (
+        {(['overview','placements','daily','weekly','monthly','financial','transfers','std'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors -mb-px
               ${tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
@@ -954,6 +996,57 @@ export const FlockDetail: React.FC = () => {
               onConfirm={() => bulkDelMut.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
           )}
         </>
+      )}
+
+      {/* WEEKLY TAB — rolled up by this flock's own week-of-age, from Daily records */}
+      {tab === 'weekly' && (
+        <Card padding={false}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-2 py-2 text-left font-semibold text-gray-600">Week</th>
+                  <th className="px-2 py-2 text-left font-semibold text-gray-600">Date Range</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Days Logged</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Open ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♂</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Total Eggs</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HD%</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HE</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">HE%</th>
+                  <th className="px-2 py-2 text-right font-semibold text-red-500">Mort ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-red-500">Mort ♂</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♂</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weeklyAgg.map((w: any) => (
+                  <tr key={w.weekNum} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="px-2 py-1.5 font-medium">Week {w.weekNum}</td>
+                    <td className="px-2 py-1.5 text-gray-400 whitespace-nowrap">{fmtDate(w.firstDate)} – {fmtDate(w.lastDate)}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-400">{w.days}/7</td>
+                    <td className="px-2 py-1.5 text-right">{w.openF?.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-1.5 text-right">{w.closeF?.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-1.5 text-right">{w.closeM?.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-1.5 text-right font-medium">{w.totalEggs.toLocaleString('en-IN')}</td>
+                    <td className={`px-2 py-1.5 text-right ${(w.hdPct??0)>0.85?'text-green-600':'text-orange-500'}`}>{w.hdPct != null ? pct(w.hdPct, 1) : '—'}</td>
+                    <td className="px-2 py-1.5 text-right font-medium text-blue-600">{w.totalHE.toLocaleString('en-IN')}</td>
+                    <td className={`px-2 py-1.5 text-right ${(w.hePct??0)>0.88?'text-green-600':'text-orange-500'}`}>{w.hePct != null ? pct(w.hePct, 1) : '—'}</td>
+                    <td className="px-2 py-1.5 text-right text-red-500">{w.mortF > 0 ? w.mortF : '—'}</td>
+                    <td className="px-2 py-1.5 text-right text-red-500">{w.mortM > 0 ? w.mortM : '—'}</td>
+                    <td className="px-2 py-1.5 text-right">{w.feedF.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-1.5 text-right">{w.feedM.toLocaleString('en-IN')}</td>
+                  </tr>
+                ))}
+                {weeklyAgg.length === 0 && (
+                  <tr><td colSpan={14} className="text-center text-gray-400 py-6">No daily records yet</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* MONTHLY TAB */}
