@@ -337,7 +337,7 @@ WITH v(record_date,opening_female,opening_male,received_female,received_male,trc
 ),
 target AS (
   SELECT fl.id AS flock_id, COALESCE(fl.laying_farm_id, fl.rearing_farm_id) AS farm_id
-  FROM flocks fl WHERE fl.flock_no = 21 AND fl.is_vhl_contract = true
+  FROM flocks fl WHERE fl.flock_no = '21' AND fl.is_vhl_contract = true
 )
 INSERT INTO vhl_daily_entry (flock_id, shed_id, record_date, opening_female, opening_male,
   received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male,
@@ -348,7 +348,7 @@ SELECT t.flock_id, sh.id, v.record_date, v.opening_female, v.opening_male,
   v.closing_female, v.closing_male, v.feed_female_kg, v.feed_male_kg, v.total_eggs, v.he_eggs,
   v.je_eggs, v.te_eggs, v.be_eggs, v.le_eggs, v.age_weeks, v.lighting_hrs
 FROM v JOIN target t ON true
-JOIN sheds sh ON sh.farm_id = t.farm_id AND sh.shed_no = 1
+JOIN sheds sh ON sh.farm_id = t.farm_id AND sh.shed_no = '1'
 ON CONFLICT (flock_id, record_date, shed_id) WHERE shed_id IS NOT NULL DO UPDATE SET
   opening_female=EXCLUDED.opening_female, opening_male=EXCLUDED.opening_male,
   received_female=EXCLUDED.received_female, received_male=EXCLUDED.received_male,
@@ -694,7 +694,7 @@ WITH v(record_date,opening_female,opening_male,received_female,received_male,trc
 ),
 target AS (
   SELECT fl.id AS flock_id, COALESCE(fl.laying_farm_id, fl.rearing_farm_id) AS farm_id
-  FROM flocks fl WHERE fl.flock_no = 21 AND fl.is_vhl_contract = true
+  FROM flocks fl WHERE fl.flock_no = '21' AND fl.is_vhl_contract = true
 )
 INSERT INTO vhl_daily_entry (flock_id, shed_id, record_date, opening_female, opening_male,
   received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male,
@@ -705,7 +705,7 @@ SELECT t.flock_id, sh.id, v.record_date, v.opening_female, v.opening_male,
   v.closing_female, v.closing_male, v.feed_female_kg, v.feed_male_kg, v.total_eggs, v.he_eggs,
   v.je_eggs, v.te_eggs, v.be_eggs, v.le_eggs, v.age_weeks, v.lighting_hrs
 FROM v JOIN target t ON true
-JOIN sheds sh ON sh.farm_id = t.farm_id AND sh.shed_no = 2
+JOIN sheds sh ON sh.farm_id = t.farm_id AND sh.shed_no = '2'
 ON CONFLICT (flock_id, record_date, shed_id) WHERE shed_id IS NOT NULL DO UPDATE SET
   opening_female=EXCLUDED.opening_female, opening_male=EXCLUDED.opening_male,
   received_female=EXCLUDED.received_female, received_male=EXCLUDED.received_male,
@@ -1051,7 +1051,7 @@ WITH v(record_date,opening_female,opening_male,received_female,received_male,trc
 ),
 target AS (
   SELECT fl.id AS flock_id, COALESCE(fl.laying_farm_id, fl.rearing_farm_id) AS farm_id
-  FROM flocks fl WHERE fl.flock_no = 21 AND fl.is_vhl_contract = true
+  FROM flocks fl WHERE fl.flock_no = '21' AND fl.is_vhl_contract = true
 )
 INSERT INTO vhl_daily_entry (flock_id, shed_id, record_date, opening_female, opening_male,
   received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male,
@@ -1062,7 +1062,7 @@ SELECT t.flock_id, sh.id, v.record_date, v.opening_female, v.opening_male,
   v.closing_female, v.closing_male, v.feed_female_kg, v.feed_male_kg, v.total_eggs, v.he_eggs,
   v.je_eggs, v.te_eggs, v.be_eggs, v.le_eggs, v.age_weeks, v.lighting_hrs
 FROM v JOIN target t ON true
-JOIN sheds sh ON sh.farm_id = t.farm_id AND sh.shed_no = 3
+JOIN sheds sh ON sh.farm_id = t.farm_id AND sh.shed_no = '3'
 ON CONFLICT (flock_id, record_date, shed_id) WHERE shed_id IS NOT NULL DO UPDATE SET
   opening_female=EXCLUDED.opening_female, opening_male=EXCLUDED.opening_male,
   received_female=EXCLUDED.received_female, received_male=EXCLUDED.received_male,
@@ -1408,7 +1408,7 @@ WITH v(record_date,opening_female,opening_male,received_female,received_male,trc
 ),
 target AS (
   SELECT fl.id AS flock_id, COALESCE(fl.laying_farm_id, fl.rearing_farm_id) AS farm_id
-  FROM flocks fl WHERE fl.flock_no = 21 AND fl.is_vhl_contract = true
+  FROM flocks fl WHERE fl.flock_no = '21' AND fl.is_vhl_contract = true
 )
 INSERT INTO vhl_daily_entry (flock_id, shed_id, record_date, opening_female, opening_male,
   received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male,
@@ -1419,7 +1419,7 @@ SELECT t.flock_id, sh.id, v.record_date, v.opening_female, v.opening_male,
   v.closing_female, v.closing_male, v.feed_female_kg, v.feed_male_kg, v.total_eggs, v.he_eggs,
   v.je_eggs, v.te_eggs, v.be_eggs, v.le_eggs, v.age_weeks, v.lighting_hrs
 FROM v JOIN target t ON true
-JOIN sheds sh ON sh.farm_id = t.farm_id AND sh.shed_no = 4
+JOIN sheds sh ON sh.farm_id = t.farm_id AND sh.shed_no = '4'
 ON CONFLICT (flock_id, record_date, shed_id) WHERE shed_id IS NOT NULL DO UPDATE SET
   opening_female=EXCLUDED.opening_female, opening_male=EXCLUDED.opening_male,
   received_female=EXCLUDED.received_female, received_male=EXCLUDED.received_male,
@@ -1702,7 +1702,7 @@ WITH v(record_date,opening_female,opening_male,received_female,received_male,trc
     ('2026-05-31'::date,0,0,0,0,0,0,0,0,0,0,0.0,0.0,0,0,0,0,0,0,0,0)
 ),
 target AS (
-  SELECT fl.id AS flock_id FROM flocks fl WHERE fl.flock_no = 21 AND fl.is_vhl_contract = true
+  SELECT fl.id AS flock_id FROM flocks fl WHERE fl.flock_no = '21' AND fl.is_vhl_contract = true
 )
 INSERT INTO vhl_daily_entry (flock_id, shed_id, record_date, opening_female, opening_male,
   received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male,
@@ -1727,4 +1727,4 @@ ON CONFLICT (flock_id, record_date) WHERE shed_id IS NULL DO UPDATE SET
 -- Verify
 SELECT shed_id IS NULL AS is_nhb, count(*) AS rows, min(record_date) AS from_date, max(record_date) AS to_date
 FROM vhl_daily_entry v JOIN flocks fl ON fl.id = v.flock_id
-WHERE fl.flock_no = 21 AND fl.is_vhl_contract = true GROUP BY 1;
+WHERE fl.flock_no = '21' AND fl.is_vhl_contract = true GROUP BY 1;
