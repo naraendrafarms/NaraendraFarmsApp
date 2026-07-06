@@ -6,10 +6,18 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-06-26'
+const LAST_UPDATED = '2026-07-06'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-06', tag: 'Fix',      text: 'Audit Log: VHL module tables and Employee Advances were missing the audit trigger entirely, so no activity was being recorded for them. Trigger now attached — all VHL and advance activity is logged.' },
+  { date: '2026-07-06', tag: 'New',      text: 'HR & Payroll → Bulk Salary → Attendance tab: Export Excel button added — downloads the current month\'s attendance grid (absent days, TDS, advances, flock deductions) before you save & calculate.' },
+  { date: '2026-07-06', tag: 'Improved', text: 'Employees: Account No. and IFSC Code fields now validate as you type — IFSC must match the RBI 11-character format, Account No. must be 9–18 digits. Same validation added to Bank Ledger → Manage Bank Accounts and Purchase → Suppliers (Parties) bank details.' },
+  { date: '2026-07-06', tag: 'New',      text: 'Purchase → GRN: Print button added to each GRN row — prints with company letterhead/logo, matching the format used elsewhere in the app.' },
+  { date: '2026-07-06', tag: 'New',      text: 'Employees → Salary History and Salary Register: "Deposited Into" column added, showing which account each month\'s salary was actually paid to (Own / Shared / Override) with account number and IFSC.' },
+  { date: '2026-07-06', tag: 'Improved', text: 'Employees: All employee-picker dropdowns (Salary Entry, Bulk Salary, Payslip Generator, Employee Advances, Salary History, "Deposited Into" override) are now searchable — type to filter by name.' },
+  { date: '2026-07-06', tag: 'New',      text: 'Flock Detail → Weekly tab added (between Daily and Monthly) — rolls up daily records into a week-of-age report for that flock: eggs, HD%, HE%, mortality, feed per week since placement.' },
+  { date: '2026-07-06', tag: 'New',      text: 'New VHL module added for the Bodjanampet-2 job-work contract: VHL Flocks, Daily Entry, Bulk (Shed-wise) Daily Entry, Medicine Master & Usage Log, Egg Production with monthly consolidated billing, Dashboard, and Shed-wise Performance — all under a new "VHL" sidebar section, kept fully separate from regular flock tracking.' },
   { date: '2026-06-26', tag: 'New',      text: 'Global Search added to the top header bar — type any page name to instantly find and jump to it from anywhere in the app.' },
   { date: '2026-06-26', tag: 'New',      text: 'Accounts → Buyer Advances: Record advance payments received from buyers (party-wise). Supports Cash and Bank payment modes. Automatically posts to Cash Book or Bank Ledger on save.' },
   { date: '2026-06-26', tag: 'New',      text: 'Accounts → Party Ledger: View a running debit/credit ledger per buyer — shows all HE Dispatch sales, NHE Sales, advance receipts, and payments in one timeline with running balance. Export to Excel.' },

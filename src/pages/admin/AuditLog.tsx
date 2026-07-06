@@ -21,6 +21,12 @@ const TABLE_LABELS: Record<string, string> = {
   farm_expenses:       'Farm Expenses',
   vaccination_records: 'Vaccinations',
   daily_feed:          'Feed Records',
+  employee_advances:   'Employee Advances',
+  vhl_daily_entry:     'VHL Daily Entry',
+  vhl_medicines:       'VHL Medicines',
+  vhl_medicine_usage:  'VHL Medicine Usage',
+  vhl_egg_rate_history:'VHL Egg Rate History',
+  vhl_egg_production:  'VHL Egg Production',
 }
 
 const ACTION_COLOR: Record<string, string> = {
