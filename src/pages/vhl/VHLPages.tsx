@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, SectionHeader, Spinner,
-  EmptyState, Table, Th, Td, DateInput, Badge
+  EmptyState, Table, Th, Td, DateInput, Badge, Modal
 } from '@/components/ui'
 import { Save, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Bird, Download, Printer, Upload, Egg, TrendingUp, Activity, DollarSign } from 'lucide-react'
 import { StatCard } from '@/components/ui'
@@ -23,6 +24,8 @@ const localYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 // VHL Flocks — flocks flagged is_vhl_contract, entry point to the rest
 // ═══════════════════════════════════════════════════════════════
 export const VHLFlocksPage: React.FC = () => {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
   const { data: flocks, isLoading } = useQuery({
     queryKey: ['vhl_flocks'],
     queryFn: async () => {
@@ -33,6 +36,53 @@ export const VHLFlocksPage: React.FC = () => {
     }
   })
 
+  // Latest shed-wise/daily closing counts, so the list reflects real current
+  // birds instead of the static placement-day numbers on the flocks table.
+  const { data: latestDaily } = useQuery({
+    queryKey: ['vhl_flocks_latest_daily'],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_daily_entry')
+        .select('flock_id,record_date,opening_female,opening_male,closing_female,closing_male')
+        .order('record_date', { ascending: false }).limit(2000)
+      return data ?? []
+    }
+  })
+  const currentByFlock = React.useMemo(() => {
+    const latestDate: Record<string, string> = {}
+    for (const r of (latestDaily ?? [])) if (!latestDate[r.flock_id] || r.record_date > latestDate[r.flock_id]) latestDate[r.flock_id] = r.record_date
+    const out: Record<string, { female: number; male: number; date: string }> = {}
+    for (const r of (latestDaily ?? [])) {
+      if (r.record_date !== latestDate[r.flock_id]) continue
+      if (!out[r.flock_id]) out[r.flock_id] = { female: 0, male: 0, date: r.record_date }
+      out[r.flock_id].female += r.closing_female ?? r.opening_female ?? 0
+      out[r.flock_id].male += r.closing_male ?? r.opening_male ?? 0
+    }
+    return out
+  }, [latestDaily])
+
+  const [editing, setEditing] = useState<any>(null)
+  const [form, setForm] = useState<any>({})
+  const openEdit = (f: any) => {
+    setEditing(f)
+    setForm({ breed: f.breed ?? '', placement_date: f.placement_date ?? '', status: f.status ?? 'rearing',
+      total_placed_f: f.total_placed_f ?? '', total_placed_m: f.total_placed_m ?? '' })
+  }
+  const s = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }))
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('flocks').update({
+        breed: form.breed || null, placement_date: form.placement_date || null, status: form.status,
+        total_placed_f: parseInt(form.total_placed_f) || 0, total_placed_m: parseInt(form.total_placed_m) || 0,
+      }).eq('id', editing.id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Flock updated'); qc.invalidateQueries({ queryKey: ['vhl_flocks'] }); qc.invalidateQueries({ queryKey: ['vhl_dashboard_flocks'] }); setEditing(null) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const goToDailyEntry = (flockId: string) => { localStorage.setItem('vhl_de_flock', flockId); navigate('/vhl/daily-entry') }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="VHL Flocks" subtitle="Contract flocks under VHL regulations — separate from our normal flock operations." />
@@ -41,23 +91,48 @@ export const VHLFlocksPage: React.FC = () => {
       ) : (
         <Card padding={false}>
           <Table>
-            <thead><tr><Th>Flock No</Th><Th>Site</Th><Th>Breed</Th><Th>Status</Th><Th>Placement Date</Th><Th right>Placed F</Th><Th right>Placed M</Th></tr></thead>
+            <thead><tr><Th>Flock No</Th><Th>Site</Th><Th>Breed</Th><Th>Status</Th><Th>Placement Date</Th><Th right>Current ♀</Th><Th right>Current ♂</Th><Th right>As of</Th><Th right>Actions</Th></tr></thead>
             <tbody>
-              {flocks.map((f: any) => (
+              {flocks.map((f: any) => {
+                const c = currentByFlock[f.id]
+                return (
                 <tr key={f.id} className="hover:bg-gray-50 text-sm">
-                  <Td className="font-medium">{f.flock_no}</Td>
+                  <Td className="font-medium">
+                    <button className="text-brand-700 hover:underline" onClick={() => goToDailyEntry(f.id)} title="Open Daily Entry for this flock">{f.flock_no}</button>
+                  </Td>
                   <Td className="text-xs">{f.farms?.name ?? '—'}</Td>
                   <Td className="text-xs">{f.breed ?? '—'}</Td>
                   <Td><Badge color={f.status==='closed'?'gray':'green'}>{f.status}</Badge></Td>
                   <Td className="text-xs">{f.placement_date ? fmtDate(f.placement_date) : '—'}</Td>
-                  <Td right className="text-xs">{f.total_placed_f?.toLocaleString('en-IN') ?? '—'}</Td>
-                  <Td right className="text-xs">{f.total_placed_m?.toLocaleString('en-IN') ?? '—'}</Td>
+                  <Td right className="text-xs">{(c?.female ?? f.total_placed_f)?.toLocaleString('en-IN') ?? '—'}</Td>
+                  <Td right className="text-xs">{(c?.male ?? f.total_placed_m)?.toLocaleString('en-IN') ?? '—'}</Td>
+                  <Td right className="text-xs text-gray-400">{c ? fmtDate(c.date) : 'placement'}</Td>
+                  <Td right><Button size="sm" variant="ghost" onClick={() => openEdit(f)}><Pencil size={13}/></Button></Td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </Table>
         </Card>
       )}
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={`Edit Flock ${editing?.flock_no ?? ''}`}
+        footer={<><Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></>}>
+        <div className="space-y-3">
+          <FormRow>
+            <Input label="Breed" value={form.breed} onChange={e => s('breed', e.target.value)} />
+            <DateInput label="Placement Date" value={form.placement_date} onChange={e => s('placement_date', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Select label="Status" value={form.status} onChange={e => s('status', e.target.value)}
+              options={[{ value: 'rearing', label: 'Rearing' }, { value: 'laying', label: 'Laying' }, { value: 'closed', label: 'Closed' }]} />
+          </FormRow>
+          <FormRow>
+            <Input label="Total Placed F" type="number" value={form.total_placed_f} onChange={e => s('total_placed_f', e.target.value)} />
+            <Input label="Total Placed M" type="number" value={form.total_placed_m} onChange={e => s('total_placed_m', e.target.value)} />
+          </FormRow>
+          <p className="text-xs text-gray-400">These are the flock's original placement numbers. Day-to-day bird counts (Current ♀/♂ above) come from Daily Entry, not from here.</p>
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -976,7 +1051,8 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
       const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
       const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
-      const hasData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || r.lighting_hrs || r.remarks
+      const hasData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm
+        || r.lighting_hrs || r.remarks || r.opening_female || r.opening_male || r.existingId
       if (!hasData) continue
       const intOrNull = (v: string) => v === '' || v == null || isNaN(parseInt(v)) ? null : parseInt(v)
       const payload = {
@@ -1209,6 +1285,8 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
 // regular Dashboard's daily_records/v_flock_summary figures.
 // ═══════════════════════════════════════════════════════════════
 export const VHLDashboardPage: React.FC = () => {
+  const navigate = useNavigate()
+  const goToDailyEntry = (flockId: string) => { localStorage.setItem('vhl_de_flock', flockId); navigate('/vhl/daily-entry') }
   const { data: flocks, isLoading } = useQuery({
     queryKey: ['vhl_dashboard_flocks'],
     queryFn: async () => {
@@ -1299,7 +1377,8 @@ export const VHLDashboardPage: React.FC = () => {
             {activeFlocks.map((f: any) => {
               const c = currentByFlock[f.id]
               return (
-                <div key={f.id} className="p-4 rounded-xl border border-gray-100">
+                <button key={f.id} onClick={() => goToDailyEntry(f.id)} title="Open Daily Entry for this flock"
+                  className="text-left p-4 rounded-xl border border-gray-100 hover:border-brand-300 hover:shadow-sm transition-colors">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-lg font-bold text-gray-900">F-{f.flock_no}</span>
                     <Badge color={f.status === 'laying' ? 'green' : f.status === 'rearing' ? 'yellow' : 'gray'}>{f.status}</Badge>
@@ -1310,7 +1389,7 @@ export const VHLDashboardPage: React.FC = () => {
                     <div className="flex justify-between"><span>Birds ♂</span><span className="font-medium text-gray-900">{(c?.male ?? f.total_placed_m ?? 0).toLocaleString('en-IN')}</span></div>
                   </div>
                   <div className="mt-3 pt-2 border-t border-gray-100 text-xs text-gray-400">Placed: {fmtDate(f.placement_date)}</div>
-                </div>
+                </button>
               )
             })}
           </div>
