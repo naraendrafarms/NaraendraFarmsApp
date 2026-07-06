@@ -171,10 +171,14 @@ export const VHLDailyEntryPage: React.FC = () => {
   const flock = flocks?.find((f: any) => f.id === flockId)
   const isLayingPhase = flock?.status === 'laying' || !!(flock?.laying_start_date && date >= flock.laying_start_date)
 
+  // This screen only ever writes/reads the no-shed (whole-flock) row for a
+  // date — shed-wise rows are Bulk Daily Entry's. Without this filter,
+  // .maybeSingle() throws once any shed-wise rows exist for the same
+  // flock+date (more than one row would match).
   const { data: existing } = useQuery({
     queryKey: ['vhl_daily_record', flockId, date],
     queryFn: async () => {
-      const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).eq('record_date', date).maybeSingle()
+      const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).eq('record_date', date).is('shed_id', null).maybeSingle()
       return data
     },
     enabled: !!flockId && !!date
@@ -184,7 +188,7 @@ export const VHLDailyEntryPage: React.FC = () => {
     queryKey: ['vhl_prev_daily', flockId, date],
     queryFn: async () => {
       const { data } = await supabase.from('vhl_daily_entry').select('closing_female,closing_male,record_date')
-        .eq('flock_id', flockId).lt('record_date', date).order('record_date', { ascending: false }).limit(1).maybeSingle()
+        .eq('flock_id', flockId).is('shed_id', null).lt('record_date', date).order('record_date', { ascending: false }).limit(1).maybeSingle()
       return data
     },
     enabled: !!flockId && !!date
@@ -287,7 +291,7 @@ export const VHLDailyEntryPage: React.FC = () => {
   const { data: recentRecords } = useQuery({
     queryKey: ['vhl_recent_records', flockId, fourteenDaysAgo],
     queryFn: async () => {
-      const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).gte('record_date', fourteenDaysAgo).order('record_date', { ascending: false })
+      const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).is('shed_id', null).gte('record_date', fourteenDaysAgo).order('record_date', { ascending: false })
       return data ?? []
     },
     enabled: !!flockId
@@ -1159,6 +1163,19 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
       className={`${w} text-center border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white`} />
   )
 
+  const fourteenDaysAgo = (() => { const d = new Date(); d.setDate(d.getDate() - 14); return localYMD(d) })()
+  const { data: recentBulkRows } = useQuery({
+    queryKey: ['vhl_bulk_recent', flockId, fourteenDaysAgo],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_daily_entry')
+        .select('id,record_date,shed_id,opening_female,opening_male,closing_female,closing_male,total_eggs,he_eggs,mortality_female,mortality_male,sheds(shed_no,shed_name)')
+        .eq('flock_id', flockId).not('shed_id', 'is', null).gte('record_date', fourteenDaysAgo)
+        .order('record_date', { ascending: false }).order('shed_id')
+      return data ?? []
+    },
+    enabled: !!flockId
+  })
+
   return (
     <div className="space-y-5">
       <SectionHeader title="VHL Bulk Daily Entry (Shed-wise)" subtitle="Enter each shed separately — combines into the VHL flock's daily record."
@@ -1270,6 +1287,36 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
                     </tr>
                   )
                 })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {flockId && recentBulkRows && recentBulkRows.length > 0 && (
+        <Card>
+          <p className="font-semibold text-gray-800 text-sm mb-3">Recent Shed-wise Entries (Last 14 Days)</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="border-b border-gray-100">
+                {['Date','Shed','Open ♀','Open ♂','Close ♀','Close ♂','Total Eggs','HE','Death ♀','Death ♂',''].map((h,i) => <th key={i} className="py-2 px-2 text-left font-semibold text-gray-500">{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {recentBulkRows.map((r: any) => (
+                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-1.5 px-2 font-medium">{r.record_date}</td>
+                    <td className="py-1.5 px-2">{r.sheds?.shed_name ?? r.sheds?.shed_no ?? '—'}</td>
+                    <td className="py-1.5 px-2">{r.opening_female ?? 0}</td>
+                    <td className="py-1.5 px-2">{r.opening_male ?? 0}</td>
+                    <td className="py-1.5 px-2">{r.closing_female ?? 0}</td>
+                    <td className="py-1.5 px-2">{r.closing_male ?? 0}</td>
+                    <td className="py-1.5 px-2">{r.total_eggs ?? 0}</td>
+                    <td className="py-1.5 px-2">{r.he_eggs ?? 0}</td>
+                    <td className="py-1.5 px-2">{r.mortality_female ?? 0}</td>
+                    <td className="py-1.5 px-2">{r.mortality_male ?? 0}</td>
+                    <td className="py-1.5 px-2"><button onClick={() => setDate(r.record_date)} className="text-brand-600 text-xs font-medium">Load</button></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
