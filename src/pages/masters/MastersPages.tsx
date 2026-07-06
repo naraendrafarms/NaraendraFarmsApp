@@ -9,6 +9,7 @@ import {
 import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
+import { ifscError, accountNoError } from '@/lib/validators'
 import { parseGstin, GST_TYPE_OPTIONS, GST_RATE_OPTIONS } from '@/lib/gst'
 import { useConfigValues } from '@/hooks/useConfigOptions'
 
@@ -491,6 +492,8 @@ export const PartiesMaster: React.FC = () => {
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.name)throw new Error('Name required')
+      const ifscErr=ifscError(form.ifsc);if(ifscErr)throw new Error(ifscErr)
+      const acctErr=accountNoError(form.account_no);if(acctErr)throw new Error(acctErr)
       const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null,gst_type:form.gst_type,state_code:form.state_code||null,is_rcm_default:form.is_rcm_default,tds_pct_default:parseFloat(form.tds_pct_default)||0,bank_name:form.bank_name||null,branch:form.branch||null,account_no:form.account_no||null,ifsc:form.ifsc||null}
       if(editing){const{error}=await supabase.from('parties').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('parties').insert(p);if(error)throw error}
@@ -771,8 +774,8 @@ export const PartiesMaster: React.FC = () => {
             <Input label="Branch" value={form.branch} onChange={e=>s('branch',e.target.value)} />
           </FormRow>
           <FormRow>
-            <Input label="Account No" value={form.account_no} onChange={e=>s('account_no',e.target.value)} />
-            <Input label="IFSC Code" value={form.ifsc} onChange={e=>s('ifsc',e.target.value)} hint="e.g. SBIN0001234" />
+            <Input label="Account No" value={form.account_no} onChange={e=>s('account_no',e.target.value)} error={accountNoError(form.account_no) ?? undefined} />
+            <Input label="IFSC Code" value={form.ifsc} onChange={e=>s('ifsc',e.target.value.toUpperCase())} error={ifscError(form.ifsc) ?? undefined} hint="e.g. SBIN0001234" />
           </FormRow>
         </div>
       </Modal>
