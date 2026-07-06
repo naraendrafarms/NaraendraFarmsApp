@@ -2744,7 +2744,7 @@ export const PayslipGeneratorPage: React.FC = () => {
         ot_bonus: (data?.ot_bonus ?? 0).toString(),
         arrears: (data?.arrears ?? 0).toString(),
         pf_employee: pfOn ? Math.round(basic * 0.12).toString() : '0',
-        esi_employee: esiOn ? Math.round(basic * 0.0075).toString() : '0',
+        esi_employee: esiOn ? Math.ceil(basic * 0.0075).toString() : '0', // ESIC rounds both shares UP
         pt: ptOn ? calcPT(g).toString() : '0',
         tds: (data?.tds ?? 0).toString(),
         advance: (data?.advance ?? 0).toString(),
@@ -2773,7 +2773,7 @@ export const PayslipGeneratorPage: React.FC = () => {
     setSlip(prev => ({
       ...prev,
       pf_employee: autoCalcPF ? Math.round(parseFloat(prev.basic_salary||'0') * 0.12).toString() : prev.pf_employee,
-      esi_employee: autoCalcESI ? Math.round(parseFloat(prev.basic_salary||'0') * 0.0075).toString() : prev.esi_employee,
+      esi_employee: autoCalcESI ? Math.ceil(parseFloat(prev.basic_salary||'0') * 0.0075).toString() : prev.esi_employee, // ESIC rounds both shares UP
       pt: autoCalcPT ? calcPT(gross).toString() : prev.pt,
     }))
   }, [gross, slip.basic_salary, autoCalcPF, autoCalcESI, autoCalcPT])
@@ -2781,7 +2781,7 @@ export const PayslipGeneratorPage: React.FC = () => {
   const totalDed = n('pf_employee') + n('esi_employee') + n('pt') + n('tds') + n('advance') + n('hold') + n('other_deduction')
   const netSalary = gross - totalDed
   const pfEmployer = autoCalcPF ? Math.round(n('basic_salary') * 0.12) : 0
-  const esiEmployer = autoCalcESI ? Math.round(n('basic_salary') * 0.0325) : 0
+  const esiEmployer = autoCalcESI ? Math.ceil(n('basic_salary') * 0.0325) : 0 // ESIC rounds both shares UP
 
   const sv = (k: keyof typeof EMPTY_SLIP) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setSlip(prev => ({ ...prev, [k]: e.target.value }))
