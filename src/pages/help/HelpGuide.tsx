@@ -10,6 +10,9 @@ const LAST_UPDATED = '2026-07-06'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-06', tag: 'New',      text: 'Help Guide: Full "VHL Module" section added — setup, Daily Entry vs Bulk (Shed-wise) Entry, Medicine, Egg Production billing, and Dashboard.' },
+  { date: '2026-07-06', tag: 'Fix',      text: 'VHL Bulk (Shed-wise) Daily Entry was silently skipping any shed row where only Opening was entered (e.g. a first-day placement with no eggs/feed yet) — it never saved. Fixed.' },
+  { date: '2026-07-06', tag: 'New',      text: 'VHL Flocks and VHL Dashboard had no Edit option and no links anywhere. Added an Edit button on VHL Flocks (breed/status/placement/placed counts), and flock rows/cards now link straight through to Daily Entry. VHL Flocks also now shows live Current F/M birds from the latest Daily Entry.' },
   { date: '2026-07-06', tag: 'Fix',      text: 'Audit Log: VHL module tables and Employee Advances were missing the audit trigger entirely, so no activity was being recorded for them. Trigger now attached — all VHL and advance activity is logged.' },
   { date: '2026-07-06', tag: 'New',      text: 'HR & Payroll → Bulk Salary → Attendance tab: Export Excel button added — downloads the current month\'s attendance grid (absent days, TDS, advances, flock deductions) before you save & calculate.' },
   { date: '2026-07-06', tag: 'Improved', text: 'Employees: Account No. and IFSC Code fields now validate as you type — IFSC must match the RBI 11-character format, Account No. must be 9–18 digits. Same validation added to Bank Ledger → Manage Bank Accounts and Purchase → Suppliers (Parties) bank details.' },
@@ -1023,6 +1026,78 @@ const SECTIONS: Section[] = [
       'Existing attendance records for the month pre-fill automatically when you open the grid — you can make changes and re-save without losing previous entries.',
       'The grid calculates Absent Days for salary: A = 1 day, H = 0.5 day, P/WO/OT = 0 absent days.',
       'After saving, you can still use Daily Attendance page for single-day corrections if needed.',
+    ]
+  },
+
+  // ── VHL MODULE ────────────────────────────────────────────────────────────────
+  {
+    id: 'vhl',
+    icon: <Egg size={20}/>,
+    label: 'VHL Module',
+    color: 'bg-amber-600',
+    intro: 'The VHL sidebar section is for the Bodjanampet-2 job-work contract — VHL pays a fixed rate per egg, we handle manpower/medicine/feed under their regulations. VHL flocks, birds, feed, medicine, and egg production are tracked entirely separately from regular flock data — they never mix.',
+    workflows: [
+      {
+        title: 'Set up a VHL contract flock',
+        path: 'Flock Management → Flock List → click Flock No → Edit (or VHL → VHL Flocks → ✏ Edit)',
+        steps: [
+          { text: 'A VHL flock is just a normal flock with "VHL Contract" ticked — create/edit it the same way as any other flock.' },
+          { text: 'Set Rearing Farm / Laying Farm to Bodjanampet-2 (or wherever the contract site is).' },
+          { text: 'Tick the "VHL Contract" checkbox and save. It now disappears from regular Flock List/Dashboard/Compare/Medicine Entry/HE Dispatch pickers and appears under VHL → VHL Flocks instead.', note: 'It still appears in NHE Sales and Farm Expenses/Electricity/Salary screens, since broken eggs/feed bags/litter income and site running costs are genuinely ours.' },
+          { text: 'Allocate sheds to the site in Masters → Sheds (same as any farm), then link flock-to-shed in Admin Centre → Flock–Shed Assignment if needed.' },
+        ]
+      },
+      {
+        title: 'Enter daily data — single shed',
+        path: 'VHL → Daily Entry',
+        steps: [
+          { text: 'Select Flock and Date.' },
+          { text: 'On the very first entry for a flock (no prior record, no prior day), type Received Female/Male — Opening auto-fills from it.' },
+          { text: 'On later days, Opening auto-fills from the previous day\'s Closing.' },
+          { text: 'Enter Mortality, Transfer/Cull, Feed, and Egg Collection (once in laying phase). Closing is auto-computed.' },
+        ]
+      },
+      {
+        title: 'Enter daily data — multiple sheds (Bulk / Shed-wise)',
+        path: 'VHL → Bulk (Shed-wise) Daily Entry',
+        steps: [
+          { text: 'Select Flock and Date — every active shed for that flock\'s site shows as its own row.' },
+          { text: 'This screen only has an Opening field per shed (no separate Received field) — Opening is simply "total birds present in that shed at the start of the day."', note: 'If more birds arrive into the same shed later the same day, don\'t enter two rows — just set Opening to the combined total (e.g. 1,490 + 3,000 = 4,490).' },
+          { text: 'On the next day, that shed\'s Opening auto-fills from today\'s Closing, so you only need to adjust it again if another batch physically arrives.' },
+          { text: 'Fill Feed, Mortality, Transfer/Cull, and Eggs per shed. Closing is auto-computed per shed as you type.' },
+          { text: 'Click Save — only sheds with data (including a shed where you only entered Opening) are saved.' },
+        ]
+      },
+      {
+        title: 'Medicine Master & Usage Log',
+        path: 'VHL → Medicine Master / Medicine Usage Log',
+        steps: [
+          { text: 'Medicine Master: add medicine names once — used as the dropdown source for Usage Log.' },
+          { text: 'Medicine Usage Log: record which medicine, quantity, and cost was used per flock/date.', note: 'VHL medicine cost is tracked here only — it does not touch the regular Medicine Entry / Inventory stock.' },
+        ]
+      },
+      {
+        title: 'Egg Production & monthly billing',
+        path: 'VHL → Egg Production',
+        steps: [
+          { text: 'Record HE/TE quantity supplied to VHL per date. The rate applied is looked up from the effective-dated VHL Egg Rate History (currently ₹4.30/egg from 10-Apr-2025).' },
+          { text: 'At month end, select all rows for the month and use the consolidated billing action to apply one invoice number across them.' },
+        ]
+      },
+      {
+        title: 'VHL Dashboard & Shed-wise Performance',
+        path: 'VHL → Dashboard / Shed-wise Performance',
+        steps: [
+          { text: 'Dashboard shows total birds (from the latest Daily Entry across all sheds), eggs and revenue this month, and a 14-day production chart. Click any flock card to jump straight to Daily Entry for that flock.' },
+          { text: 'VHL Flocks list shows the flock\'s live Current F/M bird count (from the latest Daily Entry) next to its original Placement numbers, and an ✏ Edit button to change breed/status/placement date.' },
+          { text: 'Shed-wise Performance breaks down eggs, feed, and mortality per shed over a chosen date range.' },
+        ]
+      },
+    ],
+    tips: [
+      'VHL flocks are excluded from regular Flock Dashboard, Flock List, Compare Flocks, Medicine Entry, and HE Dispatch — look under the VHL sidebar section instead.',
+      'Bulk (Shed-wise) Daily Entry has no "Received" field — Opening is the total birds in that shed right now. Combine multiple same-day receipts into one Opening number.',
+      'If VHL Dashboard or VHL Flocks still shows old/placement-day numbers after entering Daily Entry data, check that you actually clicked Save on the shed row — Opening-only rows with no eggs/feed yet are now saved correctly (fixed in the July 2026 update).',
     ]
   },
 
