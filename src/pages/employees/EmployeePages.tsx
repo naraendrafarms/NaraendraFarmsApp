@@ -3464,6 +3464,21 @@ export const BulkSalaryPage: React.FC = () => {
     finally { setSaving(false) }
   }
 
+  const exportAttendanceExcel = () => {
+    if (!employees?.length) { toast.error('No employees loaded'); return }
+    const headers = ['Emp Code','Name','Site','Designation','Base Salary','Advances','Flock Deduction','From Daily Attendance','Absent Days','TDS']
+    const rows = (employees as any[]).map(emp => [
+      emp.emp_id??'', emp.name??'', emp.farms?.name??'', emp.designation??'',
+      emp.base_salary??0, ((advances as any)||{})[emp.id]??0, ((deductions as any)||{})[emp.id]??0,
+      (dailyAtt as any)?.[emp.id] ?? '', parseFloat(absentMap[emp.id]??'0')||0, parseFloat(tdsMap[emp.id]??'0')||0,
+    ])
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance')
+    XLSX.writeFile(wb, `Attendance_${month}.xlsx`)
+    toast.success(`Attendance_${month}.xlsx downloaded`)
+  }
+
   const exportPayrollExcel = () => {
     if (!salaries?.length) { toast.error('No salary data — save attendance first'); return }
     const headers = [
@@ -3612,6 +3627,7 @@ export const BulkSalaryPage: React.FC = () => {
             </div>
             <div className="flex gap-2 flex-wrap">
               <Button variant="outline" onClick={autoFillFromDaily}>📋 Auto-fill from Daily Attendance</Button>
+              <Button variant="outline" onClick={exportAttendanceExcel}><Download size={14} className="mr-1"/>Export Excel</Button>
               <Button onClick={saveAttendance} loading={saving}>Save & Calculate Salaries</Button>
             </div>
           </div>
