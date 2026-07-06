@@ -1617,7 +1617,6 @@ export const VHLEggStockRegisterPage: React.FC = () => {
   const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate()-n); return localYMD(d) }
   const [fromDate, setFromDate] = useState(daysAgo(30))
   const [toDate, setToDate] = useState(today())
-  const [grade, setGrade] = useState<EggGrade>('he')
 
   const { data: flocks } = useQuery({
     queryKey: ['vhl_flocks_egg_register'],
@@ -1706,70 +1705,70 @@ export const VHLEggStockRegisterPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="VHL Egg Stock Register" subtitle="Opening / Production / Wastage / Dispatch / Closing per grade — computed live, no formulas. Dispatch data only exists for HE/TE, so JE/BE/LE Dispatch is always 0."
+      <SectionHeader title="VHL Egg Stock Register" subtitle="Opening / Received / Dispatch / Closing for every grade (HE/JE/TE/BE/LE), side by side — computed live, no formulas. Dispatch data only exists for HE/TE, so JE/BE/LE Dispatch is always 0."
         action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>} />
       <Card className="flex flex-wrap gap-3 items-end">
         <Select label="VHL Flock" placeholder="— Choose flock —" value={flockId} onChange={e => setFlockId(e.target.value)}
           options={(flocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))} />
         <DateInput label="From" value={fromDate} onChange={e => setFromDate(e.target.value)} />
         <DateInput label="To" value={toDate} onChange={e => setToDate(e.target.value)} />
-        <Select label="Grade (detail view)" value={grade} onChange={e => setGrade(e.target.value as EggGrade)}
-          options={EGG_GRADES.map(g => ({ value: g, label: EGG_GRADE_LABEL[g] }))} />
       </Card>
       {!flockId ? (
         <EmptyState icon={<Egg size={32}/>} title="Select a VHL flock" />
       ) : !rows.length ? (
         <EmptyState icon={<Egg size={32}/>} title="No production or dispatch data in this range" />
       ) : (
-        <>
-          <Card padding={false}>
-            <div className="px-4 py-2 border-b border-gray-100"><h3 className="font-semibold text-gray-800 text-sm">{EGG_GRADE_LABEL[grade]} Ledger (Opening → Closing)</h3></div>
-            <div className="overflow-x-auto">
-              <Table>
-                <thead><tr>
-                  <Th>Date</Th><Th right>Opening</Th><Th right>Production</Th><Th right>Wastage</Th><Th right>Dispatch</Th><Th right>Closing</Th>
-                </tr></thead>
-                <tbody>
-                  {rows.map((r: any) => (
-                    <tr key={r.date} className="hover:bg-gray-50">
-                      <Td className="text-sm font-medium whitespace-nowrap">{fmtDate(r.date)}</Td>
-                      <Td right className="text-sm text-gray-500">{r[grade].opening.toLocaleString('en-IN')}</Td>
-                      <Td right className="text-sm text-green-700">{r[grade].prod>0?r[grade].prod.toLocaleString('en-IN'):'—'}</Td>
-                      <Td right className="text-sm text-red-500">{r[grade].wastage>0?r[grade].wastage.toLocaleString('en-IN'):'—'}</Td>
-                      <Td right className="text-sm text-orange-600">{r[grade].disp>0?r[grade].disp.toLocaleString('en-IN'):'—'}</Td>
-                      <Td right className={`text-sm font-semibold ${r[grade].closing<0?'text-red-600':'text-green-800'}`}>{r[grade].closing.toLocaleString('en-IN')}</Td>
-                    </tr>
+        <Card padding={false}>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead>
+                <tr>
+                  <Th className="text-center">&nbsp;</Th>
+                  {EGG_GRADES.map(g => <Th key={g} colSpan={4} className="text-center border-l border-gray-200">{EGG_GRADE_LABEL[g]}</Th>)}
+                </tr>
+                <tr>
+                  <Th>Date</Th>
+                  {EGG_GRADES.map(g => (
+                    <React.Fragment key={g}>
+                      <Th right className="border-l border-gray-200">Opening</Th>
+                      <Th right>Received</Th>
+                      <Th right>Dispatch</Th>
+                      <Th right>Closing</Th>
+                    </React.Fragment>
                   ))}
-                </tbody>
-                <tfoot><tr className="bg-gray-50 font-semibold">
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r: any) => (
+                  <tr key={r.date} className="hover:bg-gray-50">
+                    <Td className="text-sm font-medium whitespace-nowrap">{fmtDate(r.date)}</Td>
+                    {EGG_GRADES.map(g => (
+                      <React.Fragment key={g}>
+                        <Td right className="text-sm text-gray-500 border-l border-gray-100">{r[g].opening.toLocaleString('en-IN')}</Td>
+                        <Td right className="text-sm text-green-700">{r[g].prod>0?r[g].prod.toLocaleString('en-IN'):'—'}</Td>
+                        <Td right className="text-sm text-orange-600">{r[g].disp>0?r[g].disp.toLocaleString('en-IN'):'—'}</Td>
+                        <Td right className={`text-sm font-semibold ${r[g].closing<0?'text-red-600':'text-green-800'}`}>{r[g].closing.toLocaleString('en-IN')}</Td>
+                      </React.Fragment>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-gray-50 font-semibold">
                   <Td>TOTAL</Td>
-                  <Td right>{rows[0]?.[grade].opening.toLocaleString('en-IN')}</Td>
-                  <Td right>{totals[grade].prod.toLocaleString('en-IN')}</Td>
-                  <Td right>{totals[grade].wastage.toLocaleString('en-IN')}</Td>
-                  <Td right>{totals[grade].disp.toLocaleString('en-IN')}</Td>
-                  <Td right>{rows[rows.length-1]?.[grade].closing.toLocaleString('en-IN')}</Td>
-                </tr></tfoot>
-              </Table>
-            </div>
-          </Card>
-
-          <Card padding={false}>
-            <div className="px-4 py-2 border-b border-gray-100"><h3 className="font-semibold text-gray-800 text-sm">All Grades — Closing Balance</h3></div>
-            <div className="overflow-x-auto">
-              <Table>
-                <thead><tr><Th>Date</Th>{EGG_GRADES.map(g => <Th key={g} right>{EGG_GRADE_LABEL[g]}</Th>)}</tr></thead>
-                <tbody>
-                  {rows.map((r: any) => (
-                    <tr key={r.date} className="hover:bg-gray-50">
-                      <Td className="text-sm font-medium whitespace-nowrap">{fmtDate(r.date)}</Td>
-                      {EGG_GRADES.map(g => <Td key={g} right className={`text-sm ${r[g].closing<0?'text-red-600 font-semibold':''}`}>{r[g].closing.toLocaleString('en-IN')}</Td>)}
-                    </tr>
+                  {EGG_GRADES.map(g => (
+                    <React.Fragment key={g}>
+                      <Td right className="border-l border-gray-100">{rows[0]?.[g].opening.toLocaleString('en-IN')}</Td>
+                      <Td right>{totals[g].prod.toLocaleString('en-IN')}</Td>
+                      <Td right>{totals[g].disp.toLocaleString('en-IN')}</Td>
+                      <Td right>{rows[rows.length-1]?.[g].closing.toLocaleString('en-IN')}</Td>
+                    </React.Fragment>
                   ))}
-                </tbody>
-              </Table>
-            </div>
-          </Card>
-        </>
+                </tr>
+              </tfoot>
+            </Table>
+          </div>
+        </Card>
       )}
     </div>
   )
