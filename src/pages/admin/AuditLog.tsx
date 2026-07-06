@@ -42,6 +42,16 @@ const TABLE_LABELS: Record<string, string> = {
   egg_conversions:       'Egg Conversions',
   egg_opening_stock:     'Egg Opening Stock',
   shed_transfers:        'Shed Transfers',
+  bank_transactions:     'Bank Ledger',
+  parties:               'Suppliers / Parties',
+  employee_deductions:   'Employee Deductions',
+  generators:            'Generators',
+  generator_usage_log:   'Generator Usage',
+  feedmill_expenses:     'Feed Mill Expenses',
+  po_receipts:           'PO Receipts',
+  hatchery_advances:     'Hatchery Advances',
+  vendor_bank_details:   'Vendor Bank Details',
+  company_settings:      'Company Settings',
 }
 
 const ACTION_COLOR: Record<string, string> = {
