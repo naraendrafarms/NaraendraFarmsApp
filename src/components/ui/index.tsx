@@ -536,8 +536,8 @@ export const Table: React.FC<{ children: React.ReactNode; className?: string }> 
     <table className="w-full text-sm">{children}</table>
   </div>
 )
-export const Th: React.FC<{ children?: React.ReactNode; className?: string; right?: boolean; colSpan?: number }> = ({ children, className='', right, colSpan }) => (
-  <th colSpan={colSpan} className={`sticky top-0 z-10 px-3 py-2.5 text-xs font-semibold text-gray-600 uppercase tracking-wide bg-gray-50
+export const Th: React.FC<{ children?: React.ReactNode; className?: string; right?: boolean; colSpan?: number; rowSpan?: number }> = ({ children, className='', right, colSpan, rowSpan }) => (
+  <th colSpan={colSpan} rowSpan={rowSpan} className={`sticky top-0 z-10 px-3 py-2.5 text-xs font-semibold text-gray-600 uppercase tracking-wide bg-gray-50
     border-b border-gray-100 ${right?'text-right':'text-left'} ${className}`}>
     {children}
   </th>
