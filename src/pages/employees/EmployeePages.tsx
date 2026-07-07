@@ -2223,7 +2223,10 @@ export const ESIPFReportPage: React.FC = () => {
     onError: (e:any) => toast.error(e.message),
   })
 
-  const totals = (rows??[]).reduce((acc:any,r:any)=>{
+  // Print/Export skip zero-salary rows (e.g. no paid days that month).
+  const payableRows = (rows??[]).filter((r:any)=>(r.gross_salary??0)>0)
+
+  const totals = payableRows.reduce((acc:any,r:any)=>{
     acc.esi_emp   += r.esi_employee??0
     acc.esi_er    += r.esi_employer??0
     acc.pf_emp    += r.pf_employee??0
@@ -2236,10 +2239,10 @@ export const ESIPFReportPage: React.FC = () => {
   }, {esi_emp:0,esi_er:0,pf_emp:0,eps:0,epf:0,admin:0,edli:0,pt:0})
 
   const handleExport = () => {
-    if (!rows?.length) return
+    if (!payableRows.length) return
     exportCSV(`esipf_${filterMonth}.csv`,
       ['Emp ID','Name','Site','Gross','ESI Employee','ESI Employer','PF Employee','Empr EPS','Empr EPF','Admin','EDLI','PT'],
-      (rows??[]).map((r:any)=>[
+      payableRows.map((r:any)=>[
         r.employees?.emp_id, r.employees?.name, r.employees?.farms?.name,
         r.gross_salary, r.esi_employee, r.esi_employer, r.pf_employee,
         r.employer_eps, r.employer_epf_diff, r.admin_charges, r.edli_charge, r.pt
@@ -2248,18 +2251,18 @@ export const ESIPFReportPage: React.FC = () => {
   }
 
   const handlePrint = () => {
-    if (!rows?.length) return
+    if (!payableRows.length) return
     printReport({
       title: 'ESI / PF Report', subtitle: filterMonth || undefined,
       headers: ['Emp ID','Name','Site','Gross','ESI Emp','ESI Empr','PF Emp','Empr EPS','Empr EPF','Admin','EDLI','PT'],
-      rows: (rows??[]).map((r:any)=>[
+      rows: payableRows.map((r:any)=>[
         r.employees?.emp_id, r.employees?.name, r.employees?.farms?.name,
         r.gross_salary, r.esi_employee, r.esi_employer, r.pf_employee,
         r.employer_eps, r.employer_epf_diff, r.admin_charges, r.edli_charge, r.pt
       ]),
       rightAlignFrom: 3,
       footerRow: ['TOTAL','','',
-        (rows??[]).reduce((s:number,r:any)=>s+(r.gross_salary??0),0),
+        payableRows.reduce((s:number,r:any)=>s+(r.gross_salary??0),0),
         totals.esi_emp, totals.esi_er, totals.pf_emp, totals.eps, totals.epf, totals.admin, totals.edli, totals.pt],
     })
   }
@@ -3743,7 +3746,9 @@ export const BulkSalaryPage: React.FC = () => {
   }
 
   const exportPayrollExcel = () => {
-    if (!salaries?.length) { toast.error('No salary data — save attendance first'); return }
+    // Skip zero-salary rows (e.g. no paid days that month) from export/print.
+    const payableSalaries = (salaries as any[] ?? []).filter(r => (r.net_salary ?? 0) > 0)
+    if (!payableSalaries.length) { toast.error('No salary data — save attendance first'); return }
     const headers = [
       'Emp Code','Name','Zone/Area','Category','Designation','Location/Branch',
       'Month Days','Absent Days','Paid Days','Extra Days',
@@ -3754,7 +3759,7 @@ export const BulkSalaryPage: React.FC = () => {
       'PT','LWF','TDS','Other Deduction','Advance Adjusted','Net Payable',
       'Adv Opening','Further Advance','Adv Closing','Monthly CTC'
     ]
-    const rows = (salaries as any[]).map(r => {
+    const rows = payableSalaries.map(r => {
       const e = r.employees ?? {}
       return [
         e.emp_id??'', e.name??'', e.zone_area??'', e.emp_category??'', e.designation??'', e.location_branch??'',
@@ -3774,7 +3779,7 @@ export const BulkSalaryPage: React.FC = () => {
            'employer_eps','employer_epf_diff','admin_charges','edli_charge',
            'pt','lwf','tds','other_deduction','advance','net_salary',
            'advance_opening','further_advance','advance_closing','monthly_ctc'] as string[])
-        .map(k=>(salaries as any[]).reduce((s,r)=>s+(r[k]??0),0))
+        .map(k=>payableSalaries.reduce((s,r)=>s+(r[k]??0),0))
     ]
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows, totRow])
     const wb = XLSX.utils.book_new()
@@ -3784,16 +3789,18 @@ export const BulkSalaryPage: React.FC = () => {
   }
 
   const printPayroll = () => {
-    if (!salaries?.length) { toast.error('No salary data — save attendance first'); return }
+    // Skip zero-salary rows (e.g. no paid days that month) from export/print.
+    const payableSalaries = (salaries as any[] ?? []).filter(r => (r.net_salary ?? 0) > 0)
+    if (!payableSalaries.length) { toast.error('No salary data — save attendance first'); return }
     const headers = ['Emp Code','Name','Designation','Paid Days','Gross Earned','ESI Emp','PF Emp','PT','TDS','Advance','Net Payable']
-    const rows = (salaries as any[]).map(r => {
+    const rows = payableSalaries.map(r => {
       const e = r.employees ?? {}
       return [e.emp_id??'', e.name??'', e.designation??'', r.total_paid_days??30, r.gross_salary??0,
         r.esi_employee??0, r.pf_employee??0, r.pt??0, r.tds??0, r.advance??0, r.net_salary??0]
     })
     const totRow = ['', 'TOTAL', '', '',
       ...(['gross_salary','esi_employee','pf_employee','pt','tds','advance','net_salary'] as string[])
-        .map(k => (salaries as any[]).reduce((s, r) => s + (r[k] ?? 0), 0))]
+        .map(k => payableSalaries.reduce((s, r) => s + (r[k] ?? 0), 0))]
     printReport({ title: 'Bulk Salary — Payroll', subtitle: month, headers, rows, rightAlignFrom: 3, footerRow: totRow })
   }
 

@@ -125,8 +125,12 @@ export const SalaryRegisterPage: React.FC = () => {
     }
   })
 
+  // Print/Export skip zero-salary rows (e.g. someone with no paid days that
+  // month) — they'd just be blank/zero lines on the sheet otherwise.
+  const payableRows = (rows as any[] ?? []).filter(r => (r.net_salary ?? 0) > 0)
+
   const exportXLSX = () => {
-    if (!rows?.length) { toast.error('No data to export'); return }
+    if (!payableRows.length) { toast.error('No data to export'); return }
     const headers = [
       'Emp Code','Name','Category','Designation','Farm',
       'Month Days','Absent Days','Paid Days','Extra Days',
@@ -138,7 +142,7 @@ export const SalaryRegisterPage: React.FC = () => {
       'Deposited Into','Account No','IFSC'
     ]
     const R = (v: any) => Math.round(Number(v) || 0)  // whole rupees, matches voucher
-    const data = (rows as any[]).map(r => {
+    const data = payableRows.map(r => {
       const emp = r.employees ?? {}
       const dep = depositHolder(r)
       return [
@@ -160,7 +164,7 @@ export const SalaryRegisterPage: React.FC = () => {
   }
 
   const printRegister = () => {
-    if (!rows?.length) { toast.error('No data to print'); return }
+    if (!payableRows.length) { toast.error('No data to print'); return }
     const R = (v: any) => Math.round(Number(v) || 0)
     const empDed = (r: any) => R(r.pf_employee) + R(r.esi_employee) + R(r.pt)
     const employerAmt = (r: any) => R(r.esi_employer) + R(r.employer_eps) + R(r.employer_epf_diff)
@@ -172,7 +176,7 @@ export const SalaryRegisterPage: React.FC = () => {
       title: 'Salary Register', subtitle: monthLabel(month),
       headers: ['Emp Code','Name','Designation','Farm','Days','Absent','Paid','Extra','Total Earning',
         'Employee Deductions (PF,ESI,PT)','Advance','Other Deductions','Net Salary','Employer Amount (ESI,PF)','CTC','Deposited Into'],
-      rows: (rows as any[]).map(r => {
+      rows: payableRows.map(r => {
         const emp = r.employees ?? {}
         return [emp.emp_id??'', emp.name??'', emp.designation??'', emp.farms?.name??'',
           r.month_days??'', r.absent_days??0, r.days_worked??0, r.extra_days??0, R(r.total_earning),
@@ -180,12 +184,12 @@ export const SalaryRegisterPage: React.FC = () => {
       }),
       rightAlignFrom: 4,
       footerRow: ['', 'TOTAL', '', '',
-        (rows as any[]).reduce((s,r)=>s+(r.month_days??0),0), (rows as any[]).reduce((s,r)=>s+(r.absent_days??0),0),
-        (rows as any[]).reduce((s,r)=>s+(r.days_worked??0),0), (rows as any[]).reduce((s,r)=>s+(r.extra_days??0),0),
-        (rows as any[]).reduce((s,r)=>s+R(r.total_earning),0),
-        (rows as any[]).reduce((s,r)=>s+empDed(r),0), (rows as any[]).reduce((s,r)=>s+R(r.advance),0),
-        (rows as any[]).reduce((s,r)=>s+R(r.other_deduction),0), (rows as any[]).reduce((s,r)=>s+R(r.net_salary),0),
-        (rows as any[]).reduce((s,r)=>s+employerAmt(r),0), (rows as any[]).reduce((s,r)=>s+R(r.monthly_ctc),0), ''],
+        payableRows.reduce((s,r)=>s+(r.month_days??0),0), payableRows.reduce((s,r)=>s+(r.absent_days??0),0),
+        payableRows.reduce((s,r)=>s+(r.days_worked??0),0), payableRows.reduce((s,r)=>s+(r.extra_days??0),0),
+        payableRows.reduce((s,r)=>s+R(r.total_earning),0),
+        payableRows.reduce((s,r)=>s+empDed(r),0), payableRows.reduce((s,r)=>s+R(r.advance),0),
+        payableRows.reduce((s,r)=>s+R(r.other_deduction),0), payableRows.reduce((s,r)=>s+R(r.net_salary),0),
+        payableRows.reduce((s,r)=>s+employerAmt(r),0), payableRows.reduce((s,r)=>s+R(r.monthly_ctc),0), ''],
     })
   }
 

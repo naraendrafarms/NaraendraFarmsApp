@@ -75,6 +75,7 @@ export const SalaryCMSExportPage: React.FC = () => {
     return (salaries as any[] ?? [])
       .map(s => ({ salary: s, holder: depositHolder(s, employeesById), emp: employeesById[s.employee_id] }))
       .filter(r => r.emp)
+      .filter(r => (r.salary.net_salary ?? 0) > 0)
       .filter(r => !farmFilter.length || farmFilter.includes(r.emp.farm_id))
       .sort((a, b) =>
         (a.emp?.farms?.name ?? '').localeCompare(b.emp?.farms?.name ?? '') ||
