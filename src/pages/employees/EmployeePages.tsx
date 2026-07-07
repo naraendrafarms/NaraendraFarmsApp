@@ -715,11 +715,11 @@ export const SalaryAbstractPage: React.FC = () => {
   const handleExport = () => {
     if (!rows?.length) return
     exportCSV('salary_abstract.csv',
-      ['Month','Site','Site Code','E.Sal','PF','ESI','PT','Hold','Arrears','OT','Advance','Net Salary',
+      ['Month','Site','Site Code','E.Sal','PF','ESI','PT','Hold','Arrears','OT','Advance','Other Deduction','Net Salary',
        'No Of Employees','Ave Pres Emp/Month','Prior Year Same Month Amount','Prior Year Same Month No Of Emp'],
       rows.map(r => [fmtMonth(r.month), r.farm, r.farmCode,
         Math.round(r.earned), Math.round(r.pf), Math.round(r.esi), Math.round(r.pt), Math.round(r.hold), Math.round(r.arrears), Math.round(r.ot),
-        Math.round(r.advance), Math.round(r.net), r.count, r.avgPresent.toFixed(1),
+        Math.round(r.advance), Math.round(r.deduction), Math.round(r.net), r.count, r.avgPresent.toFixed(1),
         r.priorNet != null ? Math.round(r.priorNet) : '', r.priorCount ?? ''])
     )
   }
@@ -729,11 +729,11 @@ export const SalaryAbstractPage: React.FC = () => {
     printReport({
       title: 'Salary Abstract',
       subtitle: filterMonth ? fmtMonth(filterMonth+'-01') : 'All Months',
-      headers: ['Month','Site','E.Sal','PF','ESI','PT','Hold','Arrears','OT','Advance','Net Salary','No Of Emp','Ave Pres/Month',
+      headers: ['Month','Site','E.Sal','PF','ESI','PT','Hold','Arrears','OT','Advance','Other Ded','Net Salary','No Of Emp','Ave Pres/Month',
         'Prior Yr Amount','Prior Yr No Of Emp'],
       rows: rows.map(r => [fmtMonth(r.month), r.farm,
         Math.round(r.earned), Math.round(r.pf), Math.round(r.esi), Math.round(r.pt), Math.round(r.hold), Math.round(r.arrears), Math.round(r.ot),
-        Math.round(r.advance), Math.round(r.net), r.count, r.avgPresent.toFixed(1),
+        Math.round(r.advance), Math.round(r.deduction), Math.round(r.net), r.count, r.avgPresent.toFixed(1),
         r.priorNet != null ? Math.round(r.priorNet) : '—', r.priorCount ?? '—']),
       rightAlignFrom: 2,
     })
@@ -761,6 +761,7 @@ export const SalaryAbstractPage: React.FC = () => {
           const totArrears= farmRows.reduce((s,r)=>s+r.arrears,0)
           const totOt     = farmRows.reduce((s,r)=>s+r.ot,0)
           const totAdv    = farmRows.reduce((s,r)=>s+r.advance,0)
+          const totDed    = farmRows.reduce((s,r)=>s+r.deduction,0)
           const totNet    = farmRows.reduce((s,r)=>s+r.net,0)
           const totCount  = farmRows.reduce((s,r)=>s+r.count,0)
           const totAvgPres= farmRows.reduce((s,r)=>s+r.avgPresent,0)
@@ -776,7 +777,7 @@ export const SalaryAbstractPage: React.FC = () => {
                 <Table>
                   <thead><tr>
                     <Th>Site</Th><Th right>E.Sal</Th><Th right>PF</Th><Th right>ESI</Th><Th right>PT</Th>
-                    <Th right>Hold</Th><Th right>Arrears</Th><Th right>OT</Th><Th right>Advance</Th>
+                    <Th right>Hold</Th><Th right>Arrears</Th><Th right>OT</Th><Th right>Advance</Th><Th right>Other Ded</Th>
                     <Th right>Net Salary</Th><Th right>No Of Employees</Th><Th right>Ave Pres Emp/Month</Th>
                     <Th right>{priorLabel(monthKey+'-01')} Amount</Th><Th right>{priorLabel(monthKey+'-01')} No Of Emp</Th>
                   </tr></thead>
@@ -792,6 +793,7 @@ export const SalaryAbstractPage: React.FC = () => {
                         <Td right>{r.arrears>0?inr(r.arrears):'—'}</Td>
                         <Td right>{r.ot>0?inr(r.ot):'—'}</Td>
                         <Td right className="text-orange-600">{r.advance>0?inr(r.advance):'—'}</Td>
+                        <Td right className="text-red-500">{r.deduction>0?inr(r.deduction):'—'}</Td>
                         <Td right className="font-semibold text-green-700">{inr(r.net)}</Td>
                         <Td right>{r.count}</Td>
                         <Td right>{r.avgPresent.toFixed(1)}</Td>
@@ -810,6 +812,7 @@ export const SalaryAbstractPage: React.FC = () => {
                     <Td right>{totArrears>0?inr(totArrears):'—'}</Td>
                     <Td right>{totOt>0?inr(totOt):'—'}</Td>
                     <Td right className="text-orange-600">{totAdv>0?inr(totAdv):'—'}</Td>
+                    <Td right className="text-red-500">{totDed>0?inr(totDed):'—'}</Td>
                     <Td right className="text-green-700">{inr(totNet)}</Td>
                     <Td right>{totCount}</Td>
                     <Td right>{totAvgPres.toFixed(1)}</Td>
