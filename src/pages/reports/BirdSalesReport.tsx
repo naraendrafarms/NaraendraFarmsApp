@@ -33,7 +33,7 @@ export const BirdSalesReport: React.FC = () => {
     queryKey: ['bird_sales_report', flockId, partyId, category, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('nhe_sales')
-        .select('id,sale_date,dc_no,vehicle_no,female_qty,male_qty,quantity,gross_weight_kg,tare_weight_kg,net_weight_kg,avg_weight_kg,rate_per_kg,amount,payment_cash,payment_online,payment_mode,payment_status,bird_category,bird_sex,invoice_no,gst_pct,remarks,farm_id,refund_amount,refund_date,flocks(flock_no),parties(name),bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name)')
+        .select('id,sale_date,dc_no,vehicle_no,female_qty,male_qty,quantity,gross_weight_kg,tare_weight_kg,net_weight_kg,avg_weight_kg,rate_per_kg,amount,payment_cash,payment_online,payment_mode,payment_status,bird_category,bird_sex,invoice_no,gst_pct,remarks,refund_amount,refund_date,flocks(flock_no),parties(name),bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name)')
         .in('sale_type', ['bird_sale','bird_cull','bird_lame','bird_weak','bird_sex_error'])
         .eq('is_employee_sale', false)
         .order('sale_date', { ascending: false })
@@ -44,7 +44,16 @@ export const BirdSalesReport: React.FC = () => {
       if (toDate) q = q.lte('sale_date', toDate)
       const { data, error } = await q
       if (error) { toast.error(error.message); return [] }
-      return data ?? []
+
+      // The cash-received location lives on cash_book.farm_id (linked via
+      // nhe_sale_id), NOT on nhe_sales itself — nhe_sales has no farm_id column.
+      const saleIds = (data ?? []).map((r: any) => r.id)
+      const farmByNheSale: Record<string, string | null> = {}
+      if (saleIds.length) {
+        const { data: cbRows } = await supabase.from('cash_book').select('nhe_sale_id,farm_id').in('nhe_sale_id', saleIds)
+        for (const cb of (cbRows ?? [])) farmByNheSale[cb.nhe_sale_id] = cb.farm_id
+      }
+      return (data ?? []).map((r: any) => ({ ...r, farm_id: farmByNheSale[r.id] ?? null }))
     }
   })
 
