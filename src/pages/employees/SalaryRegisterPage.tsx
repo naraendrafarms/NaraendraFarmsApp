@@ -162,19 +162,30 @@ export const SalaryRegisterPage: React.FC = () => {
   const printRegister = () => {
     if (!rows?.length) { toast.error('No data to print'); return }
     const R = (v: any) => Math.round(Number(v) || 0)
+    const empDed = (r: any) => R(r.pf_employee) + R(r.esi_employee) + R(r.pt)
+    const employerAmt = (r: any) => R(r.esi_employer) + R(r.employer_eps) + R(r.employer_epf_diff)
+    const depositedInto = (r: any) => {
+      const dep = depositHolder(r)
+      return dep?.holder ? `${dep.kind} — ${dep.holder.name}` : '—'
+    }
     printReport({
       title: 'Salary Register', subtitle: monthLabel(month),
-      headers: ['Emp Code','Name','Designation','Farm','Paid Days','Gross Earned','PF Emp','ESI Emp','PT','Advance','Net Salary'],
+      headers: ['Emp Code','Name','Designation','Farm','Days','Absent','Paid','Extra','Total Earning',
+        'Employee Deductions (PF,ESI,PT)','Advance','Other Deductions','Net Salary','Employer Amount (ESI,PF)','CTC','Deposited Into'],
       rows: (rows as any[]).map(r => {
         const emp = r.employees ?? {}
-        return [emp.emp_id??'', emp.name??'', emp.designation??'', emp.farms?.name??'', r.days_worked??0,
-          R(r.gross_salary), R(r.pf_employee), R(r.esi_employee), R(r.pt), R(r.advance), R(r.net_salary)]
+        return [emp.emp_id??'', emp.name??'', emp.designation??'', emp.farms?.name??'',
+          r.month_days??'', r.absent_days??0, r.days_worked??0, r.extra_days??0, R(r.total_earning),
+          empDed(r), R(r.advance), R(r.other_deduction), R(r.net_salary), employerAmt(r), R(r.monthly_ctc), depositedInto(r)]
       }),
       rightAlignFrom: 4,
-      footerRow: ['', 'TOTAL', '', '', (rows as any[]).reduce((s,r)=>s+(r.days_worked??0),0),
-        (rows as any[]).reduce((s,r)=>s+R(r.gross_salary),0), (rows as any[]).reduce((s,r)=>s+R(r.pf_employee),0),
-        (rows as any[]).reduce((s,r)=>s+R(r.esi_employee),0), (rows as any[]).reduce((s,r)=>s+R(r.pt),0),
-        (rows as any[]).reduce((s,r)=>s+R(r.advance),0), (rows as any[]).reduce((s,r)=>s+R(r.net_salary),0)],
+      footerRow: ['', 'TOTAL', '', '',
+        (rows as any[]).reduce((s,r)=>s+(r.month_days??0),0), (rows as any[]).reduce((s,r)=>s+(r.absent_days??0),0),
+        (rows as any[]).reduce((s,r)=>s+(r.days_worked??0),0), (rows as any[]).reduce((s,r)=>s+(r.extra_days??0),0),
+        (rows as any[]).reduce((s,r)=>s+R(r.total_earning),0),
+        (rows as any[]).reduce((s,r)=>s+empDed(r),0), (rows as any[]).reduce((s,r)=>s+R(r.advance),0),
+        (rows as any[]).reduce((s,r)=>s+R(r.other_deduction),0), (rows as any[]).reduce((s,r)=>s+R(r.net_salary),0),
+        (rows as any[]).reduce((s,r)=>s+employerAmt(r),0), (rows as any[]).reduce((s,r)=>s+R(r.monthly_ctc),0), ''],
     })
   }
 
