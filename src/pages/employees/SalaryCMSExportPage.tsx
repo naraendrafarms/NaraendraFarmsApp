@@ -83,16 +83,17 @@ export const SalaryCMSExportPage: React.FC = () => {
 
   const exportCMS = () => {
     if (!rows.length) { toast.error('No salary rows for this month'); return }
-    // Build the Date from explicit Y/M/D parts — new Date(isoString) alone has
-    // parsed as epoch 1970 in some browsers when pymtDate momentarily wasn't
-    // a clean YYYY-MM-DD (e.g. mid-typing state), so validate before use.
+    // Written as a plain text DD/MM/YYYY string rather than a JS Date object —
+    // letting XLSX serialize a Date depends on the reading app applying the
+    // right date format, and it was rendering as the 1970 epoch for some
+    // bank-portal/Excel combinations. Plain text sidesteps that entirely.
     const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(pymtDate)
     if (!dateParts) { toast.error('Payment Date is invalid — please re-enter it'); return }
-    const pymtDateObj = new Date(Number(dateParts[1]), Number(dateParts[2]) - 1, Number(dateParts[3]))
+    const dateFmt = `${dateParts[3]}/${dateParts[2]}/${dateParts[1]}`
     const ref = reference || `${monthLabel(month)} Salaries`
     const headers = ['DATE', 'PYMT TYPE', 'NAME OF THE BENEFICIARY', 'BENEFICIARY BANK NAME', 'BRANCH NAME', 'BRANCH IFSC', 'BANK ACC NO', 'AMOUNT RS.', 'UNIT / BRANCH', 'PAYMENT REFERANCES', 'Remarks']
     const dataRows = rows.map(r => [
-      pymtDateObj, 'NEFT', r.holder?.name ?? r.emp?.name ?? '', r.holder?.bank_name ?? '', r.holder?.bank_branch ?? '',
+      dateFmt, 'NEFT', r.holder?.name ?? r.emp?.name ?? '', r.holder?.bank_name ?? '', r.holder?.bank_branch ?? '',
       r.holder?.ifsc ?? '', r.holder?.account_no ?? '', r.salary.net_salary ?? 0, unitBranch, ref, ''
     ])
     const firstData = 3 // 1-indexed row after title(1) + header(2)
@@ -107,10 +108,6 @@ export const SalaryCMSExportPage: React.FC = () => {
     const ws = XLSX.utils.aoa_to_sheet(aoa)
     ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }]
     ws['!cols'] = [{wch:12},{wch:10},{wch:26},{wch:22},{wch:18},{wch:14},{wch:20},{wch:14},{wch:14},{wch:18},{wch:14}]
-    for (let i = 0; i < rows.length; i++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: 2 + i, c: 0 })]
-      if (cell) cell.t = 'd'
-    }
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'NF CMS Sheet')
     const siteTag = farmFilter.length
