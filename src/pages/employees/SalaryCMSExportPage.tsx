@@ -3,9 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, today } from '@/lib/utils'
 import { Card, CardHeader, Button, Input, DateInput, Spinner, EmptyState } from '@/components/ui'
-import { Download, AlertTriangle } from 'lucide-react'
+import { Download, AlertTriangle, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
+import { printReport } from '@/lib/invoicePrint'
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
@@ -83,6 +84,39 @@ export const SalaryCMSExportPage: React.FC = () => {
   const missingBankRows = rows.filter(r => !r.holder?.account_no || !r.holder?.ifsc || !r.holder?.bank_name)
   const total = rows.reduce((s, r) => s + (r.salary.net_salary ?? 0), 0)
 
+  // Site-wise subtotals — rows are already sorted site-then-name, so grouping
+  // by site name in that order gives the natural per-site blocks.
+  const siteGroups = React.useMemo(() => {
+    const groups: { site: string; rows: typeof rows; subtotal: number }[] = []
+    for (const r of rows) {
+      const site = r.emp?.farms?.name ?? 'Unassigned'
+      const last = groups[groups.length - 1]
+      if (last && last.site === site) { last.rows.push(r); last.subtotal += r.salary.net_salary ?? 0 }
+      else groups.push({ site, rows: [r], subtotal: r.salary.net_salary ?? 0 })
+    }
+    return groups
+  }, [rows])
+
+  const printCMS = () => {
+    if (!rows.length) { toast.error('No salary rows for this month'); return }
+    const printRows: (string | number)[][] = []
+    for (const g of siteGroups) {
+      for (const r of g.rows) {
+        printRows.push([g.site, r.holder?.name ?? r.emp?.name ?? '', r.holder?.bank_name ?? '—',
+          r.holder?.account_no ?? '—', r.holder?.ifsc ?? '—', inr(r.salary.net_salary ?? 0)])
+      }
+      if (siteGroups.length > 1) printRows.push([`${g.site} Subtotal (${g.rows.length})`, '', '', '', '', inr(g.subtotal)])
+    }
+    printReport({
+      title: 'Salary CMS Export',
+      subtitle: `${monthLabel(month)}${farmFilter.length ? ' — ' + siteGroups.map(g=>g.site).join(', ') : ' — All Sites'}`,
+      headers: ['Site', 'Name', 'Bank', 'Account No', 'IFSC', 'Amount'],
+      rows: printRows,
+      rightAlignFrom: 5,
+      footerRow: ['TOTAL', `${rows.length} beneficiaries`, '', '', '', inr(total)],
+    })
+  }
+
   const exportCMS = () => {
     if (!rows.length) { toast.error('No salary rows for this month'); return }
     // Written as a plain text DD/MM/YYYY string rather than a JS Date object —
@@ -156,6 +190,7 @@ export const SalaryCMSExportPage: React.FC = () => {
             Include already-Paid rows
           </label>
           <Button onClick={exportCMS} icon={<Download size={14}/>}>Export CMS Sheet</Button>
+          <Button variant="outline" onClick={printCMS} icon={<Printer size={14}/>}>Print</Button>
         </div>
       </Card>
 
@@ -188,16 +223,26 @@ export const SalaryCMSExportPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
-                <tr key={r.salary.id} className={!r.holder?.account_no ? 'bg-amber-50' : ''}>
-                  <td className="px-3 py-2 text-gray-500">{r.emp?.farms?.name ?? '—'}</td>
-                  <td className="px-3 py-2">{r.holder?.name ?? r.emp?.name}</td>
-                  <td className="px-3 py-2">{r.holder?.bank_name ?? '—'}</td>
-                  <td className="px-3 py-2">{r.holder?.bank_branch ?? '—'}</td>
-                  <td className="px-3 py-2">{r.holder?.ifsc ?? '—'}</td>
-                  <td className="px-3 py-2">{r.holder?.account_no ?? '—'}</td>
-                  <td className="px-3 py-2 text-right">{inr(r.salary.net_salary ?? 0)}</td>
-                </tr>
+              {siteGroups.map(g => (
+                <React.Fragment key={g.site}>
+                  {g.rows.map(r => (
+                    <tr key={r.salary.id} className={!r.holder?.account_no ? 'bg-amber-50' : ''}>
+                      <td className="px-3 py-2 text-gray-500">{r.emp?.farms?.name ?? '—'}</td>
+                      <td className="px-3 py-2">{r.holder?.name ?? r.emp?.name}</td>
+                      <td className="px-3 py-2">{r.holder?.bank_name ?? '—'}</td>
+                      <td className="px-3 py-2">{r.holder?.bank_branch ?? '—'}</td>
+                      <td className="px-3 py-2">{r.holder?.ifsc ?? '—'}</td>
+                      <td className="px-3 py-2">{r.holder?.account_no ?? '—'}</td>
+                      <td className="px-3 py-2 text-right">{inr(r.salary.net_salary ?? 0)}</td>
+                    </tr>
+                  ))}
+                  {siteGroups.length > 1 && (
+                    <tr className="bg-gray-50 font-medium">
+                      <td className="px-3 py-2" colSpan={6}>{g.site} Subtotal ({g.rows.length})</td>
+                      <td className="px-3 py-2 text-right">{inr(g.subtotal)}</td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
             <tfoot>
