@@ -75,7 +75,9 @@ export const SalaryCMSExportPage: React.FC = () => {
       .map(s => ({ salary: s, holder: depositHolder(s, employeesById), emp: employeesById[s.employee_id] }))
       .filter(r => r.emp)
       .filter(r => !farmFilter.length || farmFilter.includes(r.emp.farm_id))
-      .sort((a, b) => (a.emp?.name ?? '').localeCompare(b.emp?.name ?? ''))
+      .sort((a, b) =>
+        (a.emp?.farms?.name ?? '').localeCompare(b.emp?.farms?.name ?? '') ||
+        (a.emp?.name ?? '').localeCompare(b.emp?.name ?? ''))
   }, [salaries, employeesById, farmFilter])
 
   const missingBankRows = rows.filter(r => !r.holder?.account_no || !r.holder?.ifsc || !r.holder?.bank_name)
@@ -176,6 +178,7 @@ export const SalaryCMSExportPage: React.FC = () => {
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
+                <th className="text-left px-3 py-2">Site</th>
                 <th className="text-left px-3 py-2">Name</th>
                 <th className="text-left px-3 py-2">Bank</th>
                 <th className="text-left px-3 py-2">Branch</th>
@@ -187,6 +190,7 @@ export const SalaryCMSExportPage: React.FC = () => {
             <tbody>
               {rows.map(r => (
                 <tr key={r.salary.id} className={!r.holder?.account_no ? 'bg-amber-50' : ''}>
+                  <td className="px-3 py-2 text-gray-500">{r.emp?.farms?.name ?? '—'}</td>
                   <td className="px-3 py-2">{r.holder?.name ?? r.emp?.name}</td>
                   <td className="px-3 py-2">{r.holder?.bank_name ?? '—'}</td>
                   <td className="px-3 py-2">{r.holder?.bank_branch ?? '—'}</td>
@@ -198,7 +202,7 @@ export const SalaryCMSExportPage: React.FC = () => {
             </tbody>
             <tfoot>
               <tr className="font-semibold border-t">
-                <td className="px-3 py-2" colSpan={5}>Total ({rows.length})</td>
+                <td className="px-3 py-2" colSpan={6}>Total ({rows.length})</td>
                 <td className="px-3 py-2 text-right">{inr(total)}</td>
               </tr>
             </tfoot>
