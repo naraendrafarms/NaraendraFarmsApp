@@ -45,6 +45,35 @@ export const TDSPayable: React.FC = () => {
     staleTime: 60_000,
   })
 
+  // Salary TDS is a completely separate source (employees.tds via salary_monthly)
+  // — this report used to only cover vendor bills, so employee TDS never showed.
+  const { data: salaryRows = [], isLoading: loadingSalaryTDS } = useQuery({
+    queryKey: ['salary_tds', dateFrom, dateTo],
+    queryFn: async () => {
+      let q = supabase.from('salary_monthly')
+        .select('id,month,tds,is_paid,employees!employee_id(name,emp_id,farms(name))')
+        .gt('tds', 0)
+        .order('month', { ascending: false })
+      if (dateFrom) q = q.gte('month', dateFrom)
+      if (dateTo) q = q.lte('month', dateTo)
+      const { data, error } = await q
+      if (error) throw error
+      return data ?? []
+    },
+    staleTime: 60_000,
+  })
+
+  const filteredSalary = useMemo(() => {
+    return (salaryRows as any[]).filter(r => {
+      if (statusFilter === 'Pending' && r.is_paid) return false
+      if (statusFilter === 'Paid' && !r.is_paid) return false
+      return true
+    })
+  }, [salaryRows, statusFilter])
+
+  const totalSalaryTDS = filteredSalary.reduce((s: number, r: any) => s + (r.tds ?? 0), 0)
+  const pendingSalaryTDS = filteredSalary.filter((r: any) => !r.is_paid).reduce((s: number, r: any) => s + (r.tds ?? 0), 0)
+
   // Effective TDS % — use the stored rate; else derive from the TAXABLE base
   // (basic_amount, or invoice minus GST), not the GST-inclusive gross — a 2%
   // TDS bill with 18% GST used to derive as ~1.69% and fall outside the rate
@@ -104,13 +133,25 @@ export const TDSPayable: React.FC = () => {
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'TDS Payable')
+    XLSX.utils.book_append_sheet(wb, ws, 'Vendor TDS')
+    if (filteredSalary.length) {
+      const salData = filteredSalary.map((r: any) => ({
+        Month: r.month ? fmtDate(r.month) : '',
+        Employee: r.employees?.name ?? '',
+        'Emp ID': r.employees?.emp_id ?? '',
+        Site: r.employees?.farms?.name ?? '',
+        'TDS Amount': r.tds ?? 0,
+        Status: r.is_paid ? 'Paid' : 'Pending',
+      }))
+      const wsSal = XLSX.utils.json_to_sheet(salData)
+      XLSX.utils.book_append_sheet(wb, wsSal, 'Salary TDS')
+    }
     XLSX.writeFile(wb, 'TDS_Payable.xlsx')
   }
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="TDS Payable" subtitle="Tax deducted at source on vendor payments" />
+      <SectionHeader title="TDS Payable" subtitle="Tax deducted at source — vendor payments and employee salaries" />
 
       {/* Filters */}
       <Card>
@@ -152,6 +193,28 @@ export const TDSPayable: React.FC = () => {
               <p className="text-lg font-bold text-orange-600">{inr(pendingTDS)}</p>
             </Card>
           </div>
+
+          {/* Combined total across both sources */}
+          <Card className="bg-gray-50">
+            <div className="flex flex-wrap gap-6 justify-around text-center">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Vendor TDS</p>
+                <p className="text-lg font-bold text-red-600">{inr(totalTDS)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Salary TDS</p>
+                <p className="text-lg font-bold text-red-600">{inr(totalSalaryTDS)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Total TDS (Vendor + Salary)</p>
+                <p className="text-xl font-bold text-gray-900">{inr(totalTDS + totalSalaryTDS)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Total Pending</p>
+                <p className="text-lg font-bold text-orange-600">{inr(pendingTDS + pendingSalaryTDS)}</p>
+              </div>
+            </div>
+          </Card>
 
           {/* Rate-wise summary */}
           {summary.length > 0 && (
@@ -220,6 +283,44 @@ export const TDSPayable: React.FC = () => {
                 </tr></tfoot>
               )}
             </Table>
+          </Card>
+
+          {/* Salary TDS detail table */}
+          <Card>
+            <SectionHeader title="Salary TDS" subtitle="TDS deducted from employee salaries" />
+            {loadingSalaryTDS ? <Spinner /> : (
+              <Table>
+                <thead><tr>
+                  <Th>Month</Th><Th>Employee</Th><Th>Emp ID</Th><Th>Site</Th>
+                  <Th right>TDS Amt</Th><Th>Status</Th>
+                </tr></thead>
+                <tbody>
+                  {filteredSalary.length === 0
+                    ? <tr><td colSpan={6} className="text-center py-8 text-gray-400 text-sm">No salary TDS entries found</td></tr>
+                    : filteredSalary.map((r: any) => (
+                        <tr key={r.id} className="hover:bg-gray-50">
+                          <Td className="text-xs">{r.month ? fmtDate(r.month) : '—'}</Td>
+                          <Td className="text-xs font-medium">{r.employees?.name ?? '—'}</Td>
+                          <Td className="text-xs font-mono">{r.employees?.emp_id ?? '—'}</Td>
+                          <Td className="text-xs">{r.employees?.farms?.name ?? '—'}</Td>
+                          <Td right className="font-semibold text-red-600 text-xs">{inr(r.tds)}</Td>
+                          <Td>
+                            {r.is_paid
+                              ? <Badge color="green">Paid</Badge>
+                              : <Badge color="orange">Pending</Badge>}
+                          </Td>
+                        </tr>
+                      ))}
+                </tbody>
+                {filteredSalary.length > 0 && (
+                  <tfoot><tr className="bg-gray-50 font-semibold">
+                    <Td colSpan={4}>TOTAL ({filteredSalary.length})</Td>
+                    <Td right className="text-red-600">{inr(totalSalaryTDS)}</Td>
+                    <Td></Td>
+                  </tr></tfoot>
+                )}
+              </Table>
+            )}
           </Card>
         </>
       )}
