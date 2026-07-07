@@ -25,6 +25,7 @@ import { FeedMillPage } from '@/pages/feed/FeedMillPages'
 import { ElectricityEntry } from '@/pages/electricity/ElectricityEntry'
 import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFReportPage, PayrollSummaryPage, AttendanceRegisterPage, PayslipGeneratorPage, BulkSalaryPage, SiteDesignationCountPage } from '@/pages/employees/EmployeePages'
 import { SalaryRegisterPage } from '@/pages/employees/SalaryRegisterPage'
+import { SalaryCMSExportPage } from '@/pages/employees/SalaryCMSExportPage'
 import { SalaryHistoryPage } from '@/pages/employees/SalaryHistoryPage'
 import { PartnerRemunerationPage } from '@/pages/employees/PartnerRemunerationPage'
 import { DailyAttendancePage, MonthAttendancePage, EmployeeAdvancesPage, MonthlyAttendanceGridPage } from '@/pages/employees/AttendancePages'
@@ -182,6 +183,7 @@ export const App: React.FC = () => {
             <Route path="employees/bulk-salary" element={<BulkSalaryPage />} />
             <Route path="employees/statutory" element={<StatutoryFilingPage />} />
             <Route path="employees/salary-register" element={<SalaryRegisterPage />} />
+            <Route path="employees/cms-export" element={<SalaryCMSExportPage />} />
             <Route path="employees/salary-history" element={<SalaryHistoryPage />} />
             <Route path="employees/partner-remuneration" element={<PartnerRemunerationPage />} />
 
