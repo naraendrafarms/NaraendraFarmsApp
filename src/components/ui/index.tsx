@@ -198,6 +198,67 @@ export const Select: React.FC<SelectProps> = ({
   )
 }
 
+// ── MULTI SELECT (checkbox dropdown) ──────────────────────────
+interface MultiSelectProps {
+  label?: string
+  placeholder?: string
+  options: Array<{ value: string; label: string }>
+  value: string[]
+  onChange: (value: string[]) => void
+  className?: string
+}
+export const MultiSelect: React.FC<MultiSelectProps> = ({
+  label, placeholder = 'All', options, value, onChange, className = '',
+}) => {
+  const [open, setOpen] = React.useState(false)
+  const rootRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
+  const toggle = (v: string) => {
+    onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v])
+  }
+
+  const summary = value.length === 0 ? placeholder
+    : value.length === 1 ? (options.find(o => o.value === value[0])?.label ?? '1 selected')
+    : `${value.length} selected`
+
+  return (
+    <div className={`flex flex-col gap-1 relative ${className}`} ref={rootRef}>
+      {label && <label className="text-sm font-medium text-gray-700">{label}</label>}
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between rounded-lg border px-3 py-2 text-sm text-gray-900
+          shadow-sm transition-colors bg-white border-gray-300 hover:border-gray-400
+          focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500">
+        <span className={value.length ? '' : 'text-gray-400'}>{summary}</span>
+        <ChevronDown size={14} className="text-gray-400 shrink-0 ml-1" />
+      </button>
+      {open && (
+        <div className="absolute z-20 top-full mt-1 left-0 min-w-full w-max max-h-64 overflow-y-auto
+          bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+          <label className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" checked={value.length === 0} onChange={() => onChange([])} />
+            {placeholder}
+          </label>
+          <div className="border-t border-gray-100 my-1" />
+          {options.map(o => (
+            <label key={o.value} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50 cursor-pointer whitespace-nowrap">
+              <input type="checkbox" checked={value.includes(o.value)} onChange={() => toggle(o.value)} />
+              {o.label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── SEARCHABLE SELECT ────────────────────────────────────────
 interface SearchableSelectProps {
   label?: string

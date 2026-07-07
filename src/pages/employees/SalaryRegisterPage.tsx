@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
-import { Card, CardHeader, Button, Select, Table, Th, Td, Spinner, EmptyState, Modal, Badge } from '@/components/ui'
+import { Card, CardHeader, Button, Select, MultiSelect, Table, Th, Td, Spinner, EmptyState, Modal, Badge } from '@/components/ui'
 import { IndianRupee, Download, ExternalLink, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useNavigate } from 'react-router-dom'
@@ -33,7 +33,7 @@ function monthOptions() {
 export const SalaryRegisterPage: React.FC = () => {
   const today = new Date()
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
-  const [filterFarm, setFilterFarm] = useState('')
+  const [filterFarm, setFilterFarm] = useState<string[]>([])
   const [filterGender, setFilterGender] = useState('')
   const [filterDesignation, setFilterDesignation] = useState('')
   const navigate = useNavigate()
@@ -109,7 +109,7 @@ export const SalaryRegisterPage: React.FC = () => {
         .eq('month', month + '-01')
       if (error) { toast.error(error.message); throw error }
       let result = data ?? []
-      if (filterFarm) result = result.filter((r: any) => r.employees?.farms?.name === filterFarm)
+      if (filterFarm.length) result = result.filter((r: any) => filterFarm.includes(r.employees?.farms?.name))
       if (filterGender) result = result.filter((r: any) => r.employees?.gender === filterGender)
       if (filterDesignation) result = result.filter((r: any) => r.employees?.designation === filterDesignation)
       // Sort by Employee ID (1 → last, site-wise) — PostgREST referencedTable order
@@ -220,8 +220,8 @@ export const SalaryRegisterPage: React.FC = () => {
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">Farm</label>
-          <Select value={filterFarm} onChange={e => setFilterFarm(e.target.value)}
-            options={[{ value: '', label: 'All Farms' }, ...(farmNames as string[]).map(n => ({ value: n, label: n }))]} />
+          <MultiSelect placeholder="All Farms" value={filterFarm} onChange={setFilterFarm}
+            options={(farmNames as string[]).map(n => ({ value: n, label: n }))} />
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">Gender</label>

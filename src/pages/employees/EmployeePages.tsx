@@ -12,7 +12,7 @@ const toCbMode = (mode: string) => {
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
-, DateInput, SearchableSelect } from '@/components/ui'
+, DateInput, SearchableSelect, MultiSelect } from '@/components/ui'
 import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3, Search } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
@@ -75,7 +75,7 @@ export const EmployeeList: React.FC = () => {
   const { profile } = useAuth()
   const [showForm,    setShowForm]    = useState(false)
   const [editing,     setEditing]     = useState<any>(null)
-  const [farmFilter,  setFarmFilter]  = useState('')
+  const [farmFilter,  setFarmFilter]  = useState<string[]>([])
   const [search,      setSearch]      = useState('')
   const [genderFilter,setGenderFilter]= useState('')
   const [desigFilter, setDesigFilter] = useState('')
@@ -102,7 +102,7 @@ export const EmployeeList: React.FC = () => {
       let q = supabase.from('employees')
         .select('*, farms(name,code)')
         .order('emp_id', { ascending: true, nullsFirst: false })
-      if (farmFilter) q = q.eq('farm_id', farmFilter)
+      if (farmFilter.length) q = q.in('farm_id', farmFilter)
       const { data } = await q
       return data ?? []
     }
@@ -380,16 +380,16 @@ export const EmployeeList: React.FC = () => {
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, ID, mobile…"
             className="pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg w-60 focus:outline-none focus:ring-1 focus:ring-brand-400"/>
         </div>
-        <Select label="" placeholder="All Sites" options={farmOptions} value={farmFilter}
-          onChange={e=>setFarmFilter(e.target.value)} className="w-44" />
+        <MultiSelect placeholder="All Sites" options={farmOptions} value={farmFilter}
+          onChange={setFarmFilter} className="w-44" />
         <Select label="" placeholder="All Genders" options={[{value:'Male',label:'Male'},{value:'Female',label:'Female'},{value:'Other',label:'Other'}]}
           value={genderFilter} onChange={e=>setGenderFilter(e.target.value)} className="w-36" />
         <Select label="" placeholder="All Designations" options={designationsInData.map(d=>({value:d,label:d}))}
           value={desigFilter} onChange={e=>setDesigFilter(e.target.value)} className="w-44" />
         <Select label="" placeholder="All Status" options={[{value:'active',label:'Active'},{value:'left',label:'Left / Inactive'}]}
           value={statusFilter} onChange={e=>setStatusFilter(e.target.value)} className="w-36" />
-        {(farmFilter||search||genderFilter||desigFilter||statusFilter||statutoryFilter) &&
-          <Button variant="ghost" size="sm" onClick={()=>{setFarmFilter('');setSearch('');setGenderFilter('');setDesigFilter('');setStatusFilter('');setStatutoryFilter('')}}>Clear</Button>}
+        {(farmFilter.length||search||genderFilter||desigFilter||statusFilter||statutoryFilter) &&
+          <Button variant="ghost" size="sm" onClick={()=>{setFarmFilter([]);setSearch('');setGenderFilter('');setDesigFilter('');setStatusFilter('');setStatutoryFilter('')}}>Clear</Button>}
         <span className="text-xs text-gray-400 ml-auto self-center">{filteredEmps.length} shown</span>
       </div>
       {/* Statutory filter chips */}
@@ -1108,7 +1108,7 @@ export const SalaryEntryPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string|null>(null)
   const [origIsPaid, setOrigIsPaid] = useState(false)
-  const [filterFarm, setFilterFarm] = useState('')
+  const [filterFarm, setFilterFarm] = useState<string[]>([])
   const [selectedFY, setSelectedFY] = useState(currentFY)
   const [selectedMonth, setSelectedMonth] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
@@ -1147,7 +1147,7 @@ export const SalaryEntryPage: React.FC = () => {
       let q=supabase.from('employees')
         .select('id,name,emp_id,designation,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,restrict_pf,farms(name,code)')
         .eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
-      if(filterFarm)q=q.eq('farm_id',filterFarm)
+      if(filterFarm.length)q=q.in('farm_id',filterFarm)
       const{data}=await q;return data??[]
     }
   })
@@ -1159,7 +1159,7 @@ export const SalaryEntryPage: React.FC = () => {
       let q=supabase.from('salary_monthly')
         .select('month,net_salary,earned_salary,advance,employees!employee_id!inner(farm_id)')
         .gte('month',startM).lte('month',endM)
-      if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
+      if(filterFarm.length)q=q.in('employees.farm_id',filterFarm)
       const{data}=await q
       const agg: Record<string,{net:number,earned:number,advance:number,count:number}> = {}
       for (const r of (data??[])) {
@@ -1181,7 +1181,7 @@ export const SalaryEntryPage: React.FC = () => {
       let q=supabase.from('salary_monthly')
         .select('*, employees!employee_id(name,emp_id,base_salary,designation,esi_applicable,pf_applicable,farms(name,code))')
         .eq('month',selectedMonth).order('net_salary',{ascending:false})
-      if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
+      if(filterFarm.length)q=q.in('employees.farm_id',filterFarm)
       const{data}=await q;return data??[]
     }
   })
@@ -1606,8 +1606,8 @@ export const SalaryEntryPage: React.FC = () => {
 
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="Financial Year" options={FY_OPTIONS} value={selectedFY} onChange={e=>{setSelectedFY(e.target.value);setSelectedMonth('')}} className="w-40"/>
-        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
-        {filterFarm&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
+        <MultiSelect placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={setFilterFarm} className="w-48"/>
+        {filterFarm.length>0&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm([])}>Clear</Button>}
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -1729,7 +1729,7 @@ export const SalaryEntryPage: React.FC = () => {
           <div className="space-y-4">
             {/* ── Employee & Month ── */}
             <FormRow>
-              <Select label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)}/>
+              <MultiSelect label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={setFilterFarm}/>
               <SearchableSelect label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id}
                 onChange={v=>{ s('employee_id',v); const emp=employees?.find((x:any)=>x.id===v); if(emp) s('gross_rate', emp.base_salary?.toString()??'') }}/>
             </FormRow>
@@ -1872,7 +1872,7 @@ export const BonusPage: React.FC = () => {
   const { profile } = useAuth()
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string|null>(null)
-  const [filterFarm, setFilterFarm] = useState('')
+  const [filterFarm, setFilterFarm] = useState<string[]>([])
   const [form, setForm] = useState({employee_id:'',bonus_year:'',amount:'',bonus_type:'festival',paid_date:'',remarks:''})
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
   const importRef = useRef<HTMLInputElement>(null)
@@ -1881,7 +1881,7 @@ export const BonusPage: React.FC = () => {
   // Distinct cache key — this active-only 4-column list previously shared
   // ['employees', farm] with the main employee page's full-column query,
   // poisoning whichever loaded second.
-  const {data:employees}=useQuery({queryKey:['employees_bonus_picker',filterFarm],queryFn:async()=>{let q=supabase.from('employees').select('id,name,emp_id,farms(name,code)').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false });if(filterFarm)q=q.eq('farm_id',filterFarm);const{data}=await q;return data??[]}})
+  const {data:employees}=useQuery({queryKey:['employees_bonus_picker',filterFarm],queryFn:async()=>{let q=supabase.from('employees').select('id,name,emp_id,farms(name,code)').eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false });if(filterFarm.length)q=q.in('farm_id',filterFarm);const{data}=await q;return data??[]}})
   const {data:bonuses,isLoading}=useQuery({queryKey:['bonuses'],queryFn:async()=>{const{data}=await supabase.from('bonus').select('*, employees!employee_id(name,emp_id,farms(name,code))').order('paid_date',{ascending:false});return data??[]}})
 
   const mut=useMutation({
@@ -1992,8 +1992,8 @@ export const BonusPage: React.FC = () => {
         }
       />
       <div className="flex gap-3">
-        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
-        {filterFarm&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
+        <MultiSelect placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={setFilterFarm} className="w-48"/>
+        {filterFarm.length>0&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm([])}>Clear</Button>}
       </div>
       {isLoading?<Spinner/>:(
         <Card padding={false}>
@@ -2031,7 +2031,7 @@ export const BonusPage: React.FC = () => {
         footer={<><Button variant="secondary" onClick={()=>{setShowForm(false);setEditingId(null)}}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <FormRow>
-            <Select label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)}/>
+            <MultiSelect label="Site" placeholder="— Filter —" options={farmOptions} value={filterFarm} onChange={setFilterFarm}/>
             <SearchableSelect label="Employee" required placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={v=>s('employee_id',v)} disabled={!!editingId}/>
           </FormRow>
           <FormRow>
@@ -2055,7 +2055,7 @@ export const ESIPFReportPage: React.FC = () => {
   const now = new Date()
   const defaultMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
   const [filterMonth, setFilterMonth] = useState(defaultMonth)
-  const [filterFarm, setFilterFarm] = useState('')
+  const [filterFarm, setFilterFarm] = useState<string[]>([])
   const [editRec, setEditRec] = useState<any>(null)
   const [editForm, setEditForm] = useState<any>({})
   const [editOrigIsPaid, setEditOrigIsPaid] = useState(false)
@@ -2071,7 +2071,7 @@ export const ESIPFReportPage: React.FC = () => {
       let q=supabase.from('salary_monthly')
         .select('*, employees!employee_id!inner(name,emp_id,esi_applicable,pf_applicable,pt_applicable,farm_id,farms(name,code))')
         .eq('month',filterMonth+'-01')
-      if(filterFarm)q=q.eq('employees.farm_id',filterFarm)
+      if(filterFarm.length)q=q.in('employees.farm_id',filterFarm)
       const{data,error}=await q
       if(error)throw error
       return data??[]
@@ -2204,8 +2204,8 @@ export const ESIPFReportPage: React.FC = () => {
       />
       <div className="flex gap-3 flex-wrap items-end">
         <Input label="Month" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-48"/>
-        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
-        {filterFarm&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
+        <MultiSelect placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={setFilterFarm} className="w-48"/>
+        {filterFarm.length>0&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm([])}>Clear</Button>}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -2494,7 +2494,7 @@ export const PayrollSummaryPage: React.FC = () => {
 export const AttendanceRegisterPage: React.FC = () => {
   const qc = useQueryClient()
   const [selectedFY, setSelectedFY] = useState(currentFY)
-  const [filterFarm, setFilterFarm] = useState('')
+  const [filterFarm, setFilterFarm] = useState<string[]>([])
   const months = fyMonths(selectedFY)
 
   // inline edit state: { empId, month, currentDays }
@@ -2510,7 +2510,7 @@ export const AttendanceRegisterPage: React.FC = () => {
       let q = supabase.from('salary_monthly')
         .select('id,employee_id,month,days_worked,employees!employee_id!inner(name,emp_id,farm_id,farms(name,code))')
         .gte('month',startM).lte('month',endM)
-      if (filterFarm) q = q.eq('employees.farm_id', filterFarm)
+      if (filterFarm.length) q = q.in('employees.farm_id', filterFarm)
       const {data} = await q
       return data ?? []
     }
@@ -2580,8 +2580,8 @@ export const AttendanceRegisterPage: React.FC = () => {
       />
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="Financial Year" options={FY_OPTIONS} value={selectedFY} onChange={e=>setSelectedFY(e.target.value)} className="w-40"/>
-        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
-        {filterFarm&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
+        <MultiSelect placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={setFilterFarm} className="w-48"/>
+        {filterFarm.length>0&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm([])}>Clear</Button>}
       </div>
       {isLoading ? <Spinner/> : (
         <div className="overflow-x-auto">
@@ -3475,7 +3475,7 @@ export const BulkSalaryPage: React.FC = () => {
   const today = new Date()
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
   const [tab, setTab] = useState<'attendance'|'salary'|'payment'>('attendance')
-  const [filterFarm, setFilterFarm] = useState('')
+  const [filterFarm, setFilterFarm] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const extraDaysConfig = useExtraDaysConfig()
   const { map: skillWages } = useSkillWages()
@@ -3494,7 +3494,7 @@ export const BulkSalaryPage: React.FC = () => {
       let q = supabase.from('employees')
         .select('id,emp_id,name,designation,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name,code)')
         .eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
-      if (filterFarm) q = q.eq('farm_id', filterFarm)
+      if (filterFarm.length) q = q.in('farm_id', filterFarm)
       const { data } = await q; return data ?? []
     }
   })
@@ -3504,7 +3504,7 @@ export const BulkSalaryPage: React.FC = () => {
       let q = supabase.from('salary_monthly')
         .select('*, override_account_emp_id, employees!employee_id!inner(id,name,emp_id,farm_id,designation,esi_applicable,pf_applicable,pt_applicable,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name))')
         .eq('month', monthDate)
-      if (filterFarm) q = q.eq('employees.farm_id', filterFarm)
+      if (filterFarm.length) q = q.in('employees.farm_id', filterFarm)
       const { data } = await q; return data ?? []
     }
   })
@@ -3807,8 +3807,8 @@ export const BulkSalaryPage: React.FC = () => {
           <input type="month" value={month} onChange={e=>setMonth(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"/>
         </div>
-        <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>setFilterFarm(e.target.value)} className="w-48"/>
-        {filterFarm && <Button variant="ghost" size="sm" onClick={()=>setFilterFarm('')}>Clear</Button>}
+        <MultiSelect placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={setFilterFarm} className="w-48"/>
+        {filterFarm.length > 0 && <Button variant="ghost" size="sm" onClick={()=>setFilterFarm([])}>Clear</Button>}
       </div>
 
       <div className="flex gap-1 border-b border-gray-200">
