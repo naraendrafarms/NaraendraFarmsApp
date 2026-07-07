@@ -73,13 +73,35 @@ const BillsTab: React.FC = () => {
     queryKey: ['elec_bills', filterMonth, filterMeter],
     queryFn: async () => {
       let q = supabase.from('electricity_bills')
-        .select('*, electricity_meters(meter_name,usc_no,farms(name,code))')
+        .select('*, electricity_meters(meter_name,usc_no,service_no,farms(name,code))')
         .order('bill_month', { ascending: false }).limit(500)
       if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
       if (filterMeter) q = q.eq('meter_id', filterMeter)
       const { data } = await q; return data ?? []
     }
   })
+
+  // Only meaningful when a single month is selected — "last month" per meter
+  // is the calendar month immediately before whatever's being printed.
+  const priorMonth = filterMonth ? (() => {
+    const [y, m] = filterMonth.split('-').map(Number)
+    const d = new Date(y, m - 2, 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })() : ''
+
+  const { data: priorBills } = useQuery({
+    queryKey: ['elec_bills_prior', priorMonth],
+    enabled: !!priorMonth,
+    queryFn: async () => {
+      const { data } = await supabase.from('electricity_bills').select('meter_id,units_consumed,amount').eq('bill_month', priorMonth + '-01')
+      return data ?? []
+    }
+  })
+  const priorByMeter = useMemo(() => {
+    const m: Record<string, { units: number; amount: number }> = {}
+    for (const b of (priorBills ?? [])) m[(b as any).meter_id] = { units: (b as any).units_consumed ?? 0, amount: (b as any).amount ?? 0 }
+    return m
+  }, [priorBills])
 
   const blank = () => ({ meter_id:'', bill_month:'', units_consumed:'', amount:'', acd_dc_due:'0', deposit_amount:'0', deposit_interest:'0', meter_rent:'0', paid_date:'', remarks:'' })
   const [form, setForm] = useState(blank())
@@ -215,27 +237,41 @@ const BillsTab: React.FC = () => {
             Export
           </Button>
           <Button variant="outline" size="sm" icon={<Printer size={14}/>}
-            onClick={()=>printReport({
-              title: 'Electricity Bills',
-              subtitle: filterMonth ? fmtMonth(filterMonth+'-01') : 'All Months',
-              headers: ['Meter / Site','USC No','Month','Units','Amount','ACD/DC','Deposit','Int. Credit','Net Payable'],
-              rows: (bills??[]).map((b:any)=>[
-                `${b.electricity_meters?.meter_name ?? ''} / ${b.electricity_meters?.farms?.name ?? ''}`,
-                b.electricity_meters?.usc_no,
-                b.bill_month?fmtMonth(b.bill_month):'',
-                b.units_consumed,
-                b.amount?inr(b.amount):'',
-                b.acd_dc_due?inr(b.acd_dc_due):'',
-                b.deposit_amount?inr(b.deposit_amount):'',
-                b.deposit_interest?inr(b.deposit_interest):'',
-                inr((b.amount??0)-(b.deposit_interest??0)),
-              ]),
-              rightAlignFrom: 3,
-              footerRow: ['TOTAL', '', '', totals.units, inr(totals.amount),
+            onClick={()=>{
+              const showPrior = !!priorMonth
+              const headers = ['Meter / Site','USC No','Service No','Month','Units','Amount',
+                ...(showPrior ? ['Last Month Units','Last Month Amount'] : []),
+                'ACD/DC','Deposit','Int. Credit','Net Payable']
+              const rows = (bills??[]).map((b:any)=>{
+                const prior = priorByMeter[b.meter_id]
+                return [
+                  `${b.electricity_meters?.meter_name ?? ''} / ${b.electricity_meters?.farms?.name ?? ''}`,
+                  b.electricity_meters?.usc_no,
+                  b.electricity_meters?.service_no ?? '—',
+                  b.bill_month?fmtMonth(b.bill_month):'',
+                  b.units_consumed,
+                  b.amount?inr(b.amount):'',
+                  ...(showPrior ? [prior?.units ?? '—', prior?prior.amount?inr(prior.amount):'—':'—'] : []),
+                  b.acd_dc_due?inr(b.acd_dc_due):'',
+                  b.deposit_amount?inr(b.deposit_amount):'',
+                  b.deposit_interest?inr(b.deposit_interest):'',
+                  inr((b.amount??0)-(b.deposit_interest??0)),
+                ]
+              })
+              const footerRow = ['TOTAL', '', '', '', totals.units, inr(totals.amount),
+                ...(showPrior ? [
+                  Object.values(priorByMeter).reduce((s,p)=>s+p.units,0),
+                  inr(Object.values(priorByMeter).reduce((s,p)=>s+p.amount,0)),
+                ] : []),
                 inr((bills??[]).reduce((s:number,b:any)=>s+(b.acd_dc_due??0),0)),
                 inr((bills??[]).reduce((s:number,b:any)=>s+(b.deposit_amount??0),0)),
-                inr(totals.depositInterest), inr(totals.netPayable)],
-            })}>
+                inr(totals.depositInterest), inr(totals.netPayable)]
+              printReport({
+                title: 'Electricity Bills',
+                subtitle: filterMonth ? fmtMonth(filterMonth+'-01') : 'All Months',
+                headers, rows, rightAlignFrom: 4, footerRow,
+              })
+            }}>
             Print
           </Button>
           <Button icon={<Plus size={16}/>} onClick={()=>openForm()}>Add Bill</Button>
