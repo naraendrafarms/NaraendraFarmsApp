@@ -18,12 +18,16 @@ export const DailySummaryPage: React.FC = () => {
   const { data: flocks, isLoading } = useQuery({
     queryKey: ['active_flocks_summary'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('flocks')
-        .select('id, flock_no, breed, status, farms(name, code)')
+        .select('id, flock_no, breed, status, rearing_farm:farms!rearing_farm_id(name, code), laying_farm:farms!laying_farm_id(name, code)')
         .in('status', ['rearing', 'laying'])
         .order('flock_no')
-      return data ?? []
+      if (error) { toast.error(error.message); return [] }
+      return (data ?? []).map((f: any) => ({
+        ...f,
+        farms: f.status === 'rearing' ? f.rearing_farm : f.laying_farm,
+      }))
     }
   })
 
