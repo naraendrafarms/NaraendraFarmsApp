@@ -13,12 +13,12 @@ import { printGRN } from '@/lib/invoicePrint'
 // Amounts (basic / gst / total) are computed in code on import, never imported.
 const GRN_TEMPLATE_HEADERS = [
   'grn_no', 'grn_date', 'farm', 'supplier', 'category', 'item',
-  'qty', 'unit', 'bags', 'price_per_unit', 'gst_pct',
+  'qty', 'unit', 'bags', 'bag_type', 'price_per_unit', 'gst_pct',
   'invoice_no', 'invoice_date', 'batch_no', 'expiry_date', 'vehicle_no', 'remarks',
 ]
 const GRN_TEMPLATE_EXAMPLE = [
   'GRN-20250601-001', '2025-06-01', 'Farm A', 'Vendor ABC', 'Feed Ingredient', 'Maize',
-  '1000', 'kg', '20', '25', '0',
+  '1000', 'kg', '20', 'Maize 50kg', '25', '0',
   'INV-001', '2025-06-01', '', '', 'AP01AB1234', '',
 ]
 
@@ -38,7 +38,7 @@ const emptyForm = () => ({
   grn_no: '', grn_date: today(), farm_id: '', party_id: '',
   invoice_no: '', invoice_date: today(), category: 'Feed Ingredient',
   item_id: '', item_name: '', flock_id: '',
-  qty: '', unit: '', bags: '', price_per_unit: '',
+  qty: '', unit: '', bags: '', bag_type: '', price_per_unit: '',
   basic_amount: '', gst_pct: '0', gst_amount: '', other_charges: '', total_amount: '',
   free_qty: '', batch_no: '', expiry_date: '', vehicle_no: '', remarks: ''
 })
@@ -49,6 +49,7 @@ export const GRNPage: React.FC = () => {
   const CATEGORIES = categoryOptions.map(o => o.value)
   const gstOptions  = useConfigOptions('gst_rate')
   const unitOptions = useConfigOptions('unit')
+  const bagTypeOptions = useConfigOptions('bag_type')
 
   const [fFrom, setFFrom] = useState('')
   const [fTo, setFTo] = useState('')
@@ -181,6 +182,7 @@ export const GRNPage: React.FC = () => {
       qty: g.qty?.toString() ?? '',
       unit: g.unit ?? '',
       bags: g.bags?.toString() ?? '',
+      bag_type: g.bag_type ?? '',
       price_per_unit: g.price_per_unit?.toString() ?? '',
       basic_amount: g.basic_amount?.toString() ?? '',
       gst_pct: g.gst_pct?.toString() ?? '0',
@@ -209,6 +211,7 @@ export const GRNPage: React.FC = () => {
     qty: parseFloat(form.qty) || null,
     unit: form.unit || null,
     bags: parseInt(form.bags) || null,
+    bag_type: form.bag_type || null,
     price_per_unit: parseFloat(form.price_per_unit) || null,
     // The live qty×rate calculation now wins over the stored/manually-typed
     // value whenever it's available — previously the stored value (which
@@ -330,6 +333,7 @@ export const GRNPage: React.FC = () => {
           qty: qty || null,
           unit: get(r, 'unit') || matchedItem?.unit || null,
           bags: parseInt(get(r, 'bags')) || null,
+          bag_type: get(r, 'bag_type') || null,
           price_per_unit: rate || null,
           basic_amount: basic || null,
           gst_pct: gstPct || 0,
@@ -369,11 +373,11 @@ export const GRNPage: React.FC = () => {
   }
 
   const handleExport = () => {
-    const headers = ['GRN No', 'Date', 'Farm', 'Supplier', 'Category', 'Item', 'Qty', 'Unit', 'Bags', 'Rate', 'Basic', 'GST%', 'GST Amt', 'Total', 'Batch', 'Expiry', 'Vehicle', 'Remarks']
+    const headers = ['GRN No', 'Date', 'Farm', 'Supplier', 'Category', 'Item', 'Qty', 'Unit', 'Bags', 'Bag Type', 'Rate', 'Basic', 'GST%', 'GST Amt', 'Total', 'Batch', 'Expiry', 'Vehicle', 'Remarks']
     const rows = filtered.map((g: any) => [
       g.grn_no, fmtDate(g.grn_date), g.farms?.name ?? '', g.parties?.name ?? '',
       g.category ?? '', g.item_name ?? '',
-      g.qty?.toString() ?? '', g.unit ?? '', g.bags?.toString() ?? '',
+      g.qty?.toString() ?? '', g.unit ?? '', g.bags?.toString() ?? '', g.bag_type ?? '',
       g.price_per_unit?.toString() ?? '', g.basic_amount?.toString() ?? '',
       g.gst_pct?.toString() ?? '', g.gst_amount?.toString() ?? '',
       g.total_amount?.toString() ?? '', g.batch_no ?? '', g.expiry_date ? fmtDate(g.expiry_date) : '',
@@ -503,6 +507,7 @@ export const GRNPage: React.FC = () => {
                   <Th>Qty</Th>
                   <Th>Unit</Th>
                   <Th>Bags</Th>
+                  <Th>Bag Type</Th>
                   <Th>Rate</Th>
                   <Th>Basic</Th>
                   <Th>GST%</Th>
@@ -529,6 +534,7 @@ export const GRNPage: React.FC = () => {
                     <Td className="text-right">{g.qty?.toLocaleString('en-IN') ?? '-'}</Td>
                     <Td>{g.unit ?? '-'}</Td>
                     <Td className="text-right">{g.bags ?? '-'}</Td>
+                    <Td className="text-xs">{g.bag_type ?? '-'}</Td>
                     <Td className="text-right">{g.price_per_unit != null ? inr(g.price_per_unit) : '-'}</Td>
                     <Td className="text-right">{g.basic_amount != null ? inr(g.basic_amount) : '-'}</Td>
                     <Td className="text-right">{g.gst_pct != null ? `${g.gst_pct}%` : '-'}</Td>
@@ -671,6 +677,13 @@ export const GRNPage: React.FC = () => {
               value={form.bags}
               onChange={e => s('bags', e.target.value)}
               hint={(() => { const q = parseFloat(form.qty) || 0, b = parseInt(form.bags) || 0; return q > 0 && b > 0 ? `Avg Bag Weight: ${(q / b).toFixed(2)} ${form.unit || ''}` : undefined })()}
+            />
+            <Select
+              label="Bag Type"
+              value={form.bag_type}
+              onChange={e => s('bag_type', e.target.value)}
+              placeholder="— Select —"
+              options={bagTypeOptions}
             />
             <Select
               label="GST %"
