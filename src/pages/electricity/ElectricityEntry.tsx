@@ -218,11 +218,19 @@ const BillsTab: React.FC = () => {
             onClick={()=>printReport({
               title: 'Electricity Bills',
               subtitle: filterMonth ? fmtMonth(filterMonth+'-01') : 'All Months',
-              headers: ['Meter','USC No','Site','Month','Units','Amount','ACD/DC Due','Deposit Amt','Paid Date','Remarks'],
-              rows: (bills??[]).map((b:any)=>[b.electricity_meters?.meter_name, b.electricity_meters?.usc_no, b.electricity_meters?.farms?.name,
-                b.bill_month?fmtMonth(b.bill_month):'', b.units_consumed, b.amount?inr(b.amount):'', b.acd_dc_due?inr(b.acd_dc_due):'',
-                b.deposit_amount?inr(b.deposit_amount):'', b.paid_date??'—', b.remarks??'']),
-              rightAlignFrom: 4,
+              headers: ['Meter / Site','USC No','Month','Units','Amount','ACD/DC','Deposit','Int. Credit','Net Payable'],
+              rows: (bills??[]).map((b:any)=>[
+                `${b.electricity_meters?.meter_name ?? ''} / ${b.electricity_meters?.farms?.name ?? ''}`,
+                b.electricity_meters?.usc_no,
+                b.bill_month?fmtMonth(b.bill_month):'',
+                b.units_consumed,
+                b.amount?inr(b.amount):'',
+                b.acd_dc_due?inr(b.acd_dc_due):'',
+                b.deposit_amount?inr(b.deposit_amount):'',
+                b.deposit_interest?inr(b.deposit_interest):'',
+                inr((b.amount??0)-(b.deposit_interest??0)),
+              ]),
+              rightAlignFrom: 3,
             })}>
             Print
           </Button>

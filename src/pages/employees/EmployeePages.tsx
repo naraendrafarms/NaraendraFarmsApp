@@ -635,12 +635,23 @@ const priorMonthOf = (monthDate: string) => {
 
 export const SalaryAbstractPage: React.FC = () => {
   const [filterMonth, setFilterMonth] = useState('')
+  const [filterFarm, setFilterFarm] = useState<string[]>([])
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name')
+      return data ?? []
+    }
+  })
+  const farmOptions = (farms??[]).map((f:any)=>({value:f.id,label:f.name}))
 
   const { data: rows, isLoading } = useQuery({
-    queryKey: ['salary_abstract_computed', filterMonth],
+    queryKey: ['salary_abstract_computed', filterMonth, filterFarm],
     queryFn: async () => {
       let q = supabase.from('salary_monthly').select(SAL_ABSTRACT_SELECT).order('month', { ascending: false })
       if (filterMonth) q = q.eq('month', filterMonth + '-01')
+      if (filterFarm.length) q = q.in('employees.farm_id', filterFarm)
       const { data, error } = await q
       if (error) throw error
 
@@ -763,9 +774,10 @@ export const SalaryAbstractPage: React.FC = () => {
           <Button variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
         </div>}
       />
-      <div className="flex gap-3">
+      <div className="flex gap-3 items-end">
         <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-48" />
-        {filterMonth&&<Button variant="ghost" size="sm" onClick={()=>setFilterMonth('')}>Clear</Button>}
+        <MultiSelect placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={setFilterFarm} className="w-48" />
+        {(filterMonth||filterFarm.length>0)&&<Button variant="ghost" size="sm" onClick={()=>{setFilterMonth('');setFilterFarm([])}}>Clear</Button>}
       </div>
       {isLoading?<Spinner/>:(
         Object.entries(byMonth).map(([monthKey, farmRows]) => {
@@ -873,16 +885,28 @@ export const SiteDesignationCountPage: React.FC = () => {
   const today_ = new Date()
   const [month, setMonth] = useState(`${today_.getFullYear()}-${String(today_.getMonth()+1).padStart(2,'0')}`)
   const monthDate = month + '-01'
+  const [filterFarm, setFilterFarm] = useState<string[]>([])
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name')
+      return data ?? []
+    }
+  })
+  const farmOptions = (farms??[]).map((f:any)=>({value:f.id,label:f.name}))
 
   // Month-wise: who actually had a salary/attendance record that month —
   // not just whoever is flagged active right now. A static is_active count
   // doesn't change month to month and doesn't reflect who joined/left.
   const { data: rows, isLoading } = useQuery({
-    queryKey: ['emp_site_designation_count', monthDate],
+    queryKey: ['emp_site_designation_count', monthDate, filterFarm],
     queryFn: async () => {
-      const { data } = await supabase.from('salary_monthly')
+      let q = supabase.from('salary_monthly')
         .select('employee_id, employees!employee_id!inner(id,designation,farm_id,farms(name,code))')
         .eq('month', monthDate)
+      if (filterFarm.length) q = q.in('employees.farm_id', filterFarm)
+      const { data } = await q
       return data ?? []
     }
   })
@@ -943,7 +967,11 @@ export const SiteDesignationCountPage: React.FC = () => {
           <Button variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
         </div>}
       />
-      <Input label="" type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-48" />
+      <div className="flex gap-3 items-end">
+        <Input label="" type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-48" />
+        <MultiSelect placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={setFilterFarm} className="w-48" />
+        {filterFarm.length>0&&<Button variant="ghost" size="sm" onClick={()=>setFilterFarm([])}>Clear</Button>}
+      </div>
       {isLoading ? <Spinner /> : !bySite.length ? (
         <EmptyState icon={<Users size={32}/>} title="No salary records for this month" subtitle="Run Bulk Salary -> Save & Calculate Salaries for this month first" />
       ) : (
