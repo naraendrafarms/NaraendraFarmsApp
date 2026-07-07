@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, today } from '@/lib/utils'
-import { Card, CardHeader, Button, Input, DateInput, Select, Spinner, EmptyState } from '@/components/ui'
+import { Card, CardHeader, Button, Input, DateInput, Spinner, EmptyState } from '@/components/ui'
 import { Download, AlertTriangle } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
@@ -33,7 +33,7 @@ export const SalaryCMSExportPage: React.FC = () => {
   const [pymtDate, setPymtDate] = useState(today())
   const [unitBranch, setUnitBranch] = useState('Hyderabad')
   const [reference, setReference] = useState('')
-  const [farmFilter, setFarmFilter] = useState('')
+  const [farmFilter, setFarmFilter] = useState<string[]>([])
 
   const { data: farms } = useQuery({
     queryKey: ['farms_for_cms'],
@@ -74,7 +74,7 @@ export const SalaryCMSExportPage: React.FC = () => {
     return (salaries as any[] ?? [])
       .map(s => ({ salary: s, holder: depositHolder(s, employeesById), emp: employeesById[s.employee_id] }))
       .filter(r => r.emp)
-      .filter(r => !farmFilter || r.emp.farm_id === farmFilter)
+      .filter(r => !farmFilter.length || farmFilter.includes(r.emp.farm_id))
       .sort((a, b) => (a.emp?.name ?? '').localeCompare(b.emp?.name ?? ''))
   }, [salaries, employeesById, farmFilter])
 
@@ -113,7 +113,9 @@ export const SalaryCMSExportPage: React.FC = () => {
     }
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'NF CMS Sheet')
-    const siteTag = farmFilter ? `_${(farms as any[] ?? []).find(f => f.id === farmFilter)?.code ?? 'site'}` : ''
+    const siteTag = farmFilter.length
+      ? `_${farmFilter.map(id => (farms as any[] ?? []).find(f => f.id === id)?.code ?? 'site').join('-')}`
+      : ''
     XLSX.writeFile(wb, `NF_CMS_Salary_${month}${siteTag}.xlsx`)
     toast.success(`Exported ${rows.length} beneficiaries`)
   }
@@ -130,8 +132,23 @@ export const SalaryCMSExportPage: React.FC = () => {
               className="border border-gray-300 rounded-lg px-3 py-2 text-sm"/>
           </div>
           <DateInput label="Payment Date" value={pymtDate} onChange={e => setPymtDate(e.target.value)} />
-          <Select label="Site" value={farmFilter} onChange={e => setFarmFilter(e.target.value)}
-            options={[{ value: '', label: 'All Sites' }, ...((farms as any[] ?? []).map(f => ({ value: f.id, label: f.name })))]} />
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Sites</label>
+            <div className="border border-gray-300 rounded-lg px-3 py-2 flex flex-wrap gap-x-3 gap-y-1 max-w-md">
+              <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                <input type="checkbox" checked={farmFilter.length === 0}
+                  onChange={() => setFarmFilter([])} />
+                All Sites
+              </label>
+              {(farms as any[] ?? []).map(f => (
+                <label key={f.id} className="flex items-center gap-1.5 text-sm text-gray-700">
+                  <input type="checkbox" checked={farmFilter.includes(f.id)}
+                    onChange={e => setFarmFilter(prev => e.target.checked ? [...prev, f.id] : prev.filter(id => id !== f.id))} />
+                  {f.name}
+                </label>
+              ))}
+            </div>
+          </div>
           <Input label="Unit / Branch" value={unitBranch} onChange={e => setUnitBranch(e.target.value)} />
           <Input label="Payment Reference" placeholder={`${monthLabel(month)} Salaries`}
             value={reference} onChange={e => setReference(e.target.value)} />
