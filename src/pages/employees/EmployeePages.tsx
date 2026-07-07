@@ -763,6 +763,12 @@ export const SalaryAbstractPage: React.FC = () => {
         Math.round(r.advance), Math.round(r.deduction), Math.round(r.reimbursement), Math.round(r.net), r.count,
         r.priorNet != null ? Math.round(r.priorNet) : '—', r.priorCount ?? '—']),
       rightAlignFrom: 1,
+      footerRow: ['TOTAL',
+        Math.round(rows.reduce((s,r)=>s+r.ctc,0)), Math.round(rows.reduce((s,r)=>s+r.eps,0)), Math.round(rows.reduce((s,r)=>s+r.epfDiff,0)),
+        Math.round(rows.reduce((s,r)=>s+r.adminCharges,0)), Math.round(rows.reduce((s,r)=>s+r.edli,0)), Math.round(rows.reduce((s,r)=>s+r.esiEmployer,0)),
+        Math.round(rows.reduce((s,r)=>s+r.earned,0)), Math.round(rows.reduce((s,r)=>s+r.pf,0)), Math.round(rows.reduce((s,r)=>s+r.esi,0)), Math.round(rows.reduce((s,r)=>s+r.pt,0)),
+        Math.round(rows.reduce((s,r)=>s+r.advance,0)), Math.round(rows.reduce((s,r)=>s+r.deduction,0)), Math.round(rows.reduce((s,r)=>s+r.reimbursement,0)),
+        Math.round(rows.reduce((s,r)=>s+r.net,0)), rows.reduce((s,r)=>s+r.count,0), '', ''],
     })
   }
 
@@ -2032,6 +2038,7 @@ export const BonusPage: React.FC = () => {
       title: 'Bonus', headers: ['Emp ID','Name','Site','Year','Amount','Type','Paid Date','Remarks'],
       rows: bonuses.map((b:any)=>[b.employees?.emp_id,b.employees?.name,b.employees?.farms?.name,b.bonus_year,b.amount,b.bonus_type,b.paid_date,b.remarks]),
       rightAlignFrom: 4,
+      footerRow: ['TOTAL','','','', bonuses.reduce((s:number,b:any)=>s+(b.amount??0),0), '', '', ''],
     })
   }
 
@@ -2251,6 +2258,9 @@ export const ESIPFReportPage: React.FC = () => {
         r.employer_eps, r.employer_epf_diff, r.admin_charges, r.edli_charge, r.pt
       ]),
       rightAlignFrom: 3,
+      footerRow: ['TOTAL','','',
+        (rows??[]).reduce((s:number,r:any)=>s+(r.gross_salary??0),0),
+        totals.esi_emp, totals.esi_er, totals.pf_emp, totals.eps, totals.epf, totals.admin, totals.edli, totals.pt],
     })
   }
 
@@ -2450,6 +2460,8 @@ export const PayrollSummaryPage: React.FC = () => {
       headers: ['Month','Employees','Gross','Net','Advance','ESI (Total)','PF (Total)','Empr EPS','Empr EPF','Admin','EDLI','PT'],
       rows: Object.entries(byMonth).map(([,m])=>[m.label,m.count,m.gross,m.net,m.advance,m.esi,m.pf,m.eps,m.epf,m.admin,m.edli,m.pt]),
       rightAlignFrom: 1,
+      footerRow: ['TOTAL', Object.values(byMonth).reduce((s,m)=>s+m.count,0),
+        totals.gross, totals.net, totals.advance, totals.esi, totals.pf, totals.eps, totals.epf, totals.admin, totals.edli, totals.pt],
     })
   }
 
@@ -3782,7 +3794,7 @@ export const BulkSalaryPage: React.FC = () => {
     const totRow = ['', 'TOTAL', '', '',
       ...(['gross_salary','esi_employee','pf_employee','pt','tds','advance','net_salary'] as string[])
         .map(k => (salaries as any[]).reduce((s, r) => s + (r[k] ?? 0), 0))]
-    printReport({ title: 'Bulk Salary — Payroll', subtitle: month, headers, rows: [...rows, totRow], rightAlignFrom: 3 })
+    printReport({ title: 'Bulk Salary — Payroll', subtitle: month, headers, rows, rightAlignFrom: 3, footerRow: totRow })
   }
 
   const exportKotakCMS = () => {
