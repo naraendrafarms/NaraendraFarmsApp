@@ -231,6 +231,10 @@ const BillsTab: React.FC = () => {
                 inr((b.amount??0)-(b.deposit_interest??0)),
               ]),
               rightAlignFrom: 3,
+              footerRow: ['TOTAL', '', '', totals.units, inr(totals.amount),
+                inr((bills??[]).reduce((s:number,b:any)=>s+(b.acd_dc_due??0),0)),
+                inr((bills??[]).reduce((s:number,b:any)=>s+(b.deposit_amount??0),0)),
+                inr(totals.depositInterest), inr(totals.netPayable)],
             })}>
             Print
           </Button>

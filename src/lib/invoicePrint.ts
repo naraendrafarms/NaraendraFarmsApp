@@ -69,12 +69,16 @@ export function printReport(opts: {
   headers: string[]
   rows: (string | number | null | undefined)[][]
   rightAlignFrom?: number   // column index from which cells right-align (numbers); default: none
+  footerRow?: (string | number | null | undefined)[]   // optional bold TOTAL row
 }) {
-  const { title, subtitle, headers, rows, rightAlignFrom } = opts
+  const { title, subtitle, headers, rows, rightAlignFrom, footerRow } = opts
   const thead = headers.map(h => `<th>${h}</th>`).join('')
   const tbody = rows.map(r => `<tr>${r.map((c, i) =>
     `<td${rightAlignFrom != null && i >= rightAlignFrom ? ' style="text-align:right"' : ''}>${c ?? ''}</td>`
   ).join('')}</tr>`).join('')
+  const tfoot = footerRow ? `<tfoot><tr class="total-row">${footerRow.map((c, i) =>
+    `<td${rightAlignFrom != null && i >= rightAlignFrom ? ' style="text-align:right"' : ''}>${c ?? ''}</td>`
+  ).join('')}</tr></tfoot>` : ''
   const html = `<!doctype html><html><head><title>${title}</title>
   <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
     <div class="header">
@@ -90,7 +94,7 @@ export function printReport(opts: {
         <div class="sub">Printed: ${new Date().toLocaleString('en-IN')}</div>
       </div>
     </div>
-    <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+    <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody>${tfoot}</table>
   </body></html>`
   openPrint(html)
 }
