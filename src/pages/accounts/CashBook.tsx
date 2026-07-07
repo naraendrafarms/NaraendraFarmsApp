@@ -29,6 +29,7 @@ const CATEGORIES_FB = [
   { value: 'be_sale',          label: 'Broken/Crack Egg Sale (BE)' },
   { value: 'bird_sale',        label: 'Bird Sale' },
   { value: 'litter_sale',      label: 'Litter / Manure Sale' },
+  { value: 'bag_sale',         label: 'Empty Bag Sale' },
   { value: 'expense',          label: 'Expense' },
   { value: 'salary',           label: 'Salary' },
   { value: 'advance',          label: 'Advance' },

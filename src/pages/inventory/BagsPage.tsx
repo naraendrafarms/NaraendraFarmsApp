@@ -82,7 +82,7 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
     const description = `Empty bags sold${buyerName ? ` to ${buyerName}` : ''} (${qty} ${typeLabel}bags)`
     if (amt > 0 && paymentMode === 'Cash') {
       const { error } = await supabase.from('cash_book').insert({
-        txn_date: saleDate, txn_type: 'receipt', category: 'other',
+        txn_date: saleDate, txn_type: 'receipt', category: 'bag_sale',
         description, party_name: buyerName, farm_id: farmId,
         amount_in: amt, amount_out: 0, payment_mode: 'cash', bag_sale_id: saleId,
       })

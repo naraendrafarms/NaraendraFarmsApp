@@ -1784,7 +1784,6 @@ const NHE_TYPES = [
   { value: 'bird_sale',  label: 'Bird Sales' },
   { value: 'gas',        label: 'Gas Cylinders' },
   { value: 'manure',     label: 'Manure / Litter' },
-  { value: 'gunny_bags', label: 'Gunny Bags' },
   { value: 'other',      label: 'Other Income' },
 ]
 // Legacy types kept for display backward-compat
