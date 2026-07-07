@@ -22,7 +22,7 @@ import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { LogoChip } from '@/components/Logo'
 import { ifscError, accountNoError } from '@/lib/validators'
-import { printReport } from '@/lib/invoicePrint'
+import { printReport, printColumnGrid } from '@/lib/invoicePrint'
 import { Printer } from 'lucide-react'
 
 // ── CSV export helper ─────────────────────────────────────────────
@@ -833,19 +833,28 @@ export const SalaryAbstractPage: React.FC = () => {
 // No.Of Employees" register kept outside the app.
 // ═══════════════════════════════════════════════════════════════
 export const SiteDesignationCountPage: React.FC = () => {
-  const { data: employees, isLoading } = useQuery({
-    queryKey: ['emp_site_designation_count'],
+  const today_ = new Date()
+  const [month, setMonth] = useState(`${today_.getFullYear()}-${String(today_.getMonth()+1).padStart(2,'0')}`)
+  const monthDate = month + '-01'
+
+  // Month-wise: who actually had a salary/attendance record that month —
+  // not just whoever is flagged active right now. A static is_active count
+  // doesn't change month to month and doesn't reflect who joined/left.
+  const { data: rows, isLoading } = useQuery({
+    queryKey: ['emp_site_designation_count', monthDate],
     queryFn: async () => {
-      const { data } = await supabase.from('employees')
-        .select('id,designation,farm_id,farms(name,code)')
-        .eq('is_active', true)
+      const { data } = await supabase.from('salary_monthly')
+        .select('employee_id, employees!employee_id!inner(id,designation,farm_id,farms(name,code))')
+        .eq('month', monthDate)
       return data ?? []
     }
   })
 
   const bySite = React.useMemo(() => {
     const sites: Record<string, { name: string; code: string; byDesig: Record<string, number>; total: number }> = {}
-    for (const e of (employees as any[] ?? [])) {
+    for (const r of (rows as any[] ?? [])) {
+      const e = r.employees
+      if (!e) continue
       const siteId = e.farm_id ?? 'unassigned'
       const siteName = e.farms?.name ?? 'Unassigned'
       if (!sites[siteId]) sites[siteId] = { name: siteName, code: e.farms?.code ?? '', byDesig: {}, total: 0 }
@@ -854,9 +863,10 @@ export const SiteDesignationCountPage: React.FC = () => {
       sites[siteId].total++
     }
     return Object.values(sites).sort((a, b) => b.total - a.total)
-  }, [employees])
+  }, [rows])
 
   const grandTotal = bySite.reduce((s, site) => s + site.total, 0)
+  const monthLabel = `${MONTH_NAMES[parseInt(month.split('-')[1])-1]} ${month.split('-')[0]}`
 
   const handleExport = () => {
     if (!bySite.length) { toast.error('No data'); return }
@@ -871,31 +881,34 @@ export const SiteDesignationCountPage: React.FC = () => {
     rows.push(['GRAND TOTAL', '', grandTotal])
     const ws = XLSX.utils.aoa_to_sheet(rows)
     XLSX.utils.book_append_sheet(wb, ws, 'Site-Designation Count')
-    XLSX.writeFile(wb, `Site_Designation_Employee_Count_${today()}.xlsx`)
+    XLSX.writeFile(wb, `Site_Designation_Employee_Count_${month}.xlsx`)
     toast.success('Downloaded')
   }
 
   const handlePrint = () => {
     if (!bySite.length) return
-    const rows: (string|number)[][] = []
-    for (const site of bySite) {
-      for (const [desig, count] of Object.entries(site.byDesig).sort((a, b) => b[1] - a[1])) rows.push([site.name, desig, count])
-      rows.push([site.name, 'TOTAL', site.total])
-    }
-    rows.push(['GRAND TOTAL', '', grandTotal])
-    printReport({ title: 'Site-wise Designation-wise Employee Count', headers: ['Site','Designation','Count'], rows, rightAlignFrom: 2 })
+    printColumnGrid({
+      title: `Site Wise No.Of Employees ${monthLabel}`,
+      grandTotal,
+      columns: bySite.map(site => ({
+        header: site.name,
+        rows: Object.entries(site.byDesig).sort((a, b) => b[1] - a[1]),
+        total: site.total,
+      })),
+    })
   }
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Site-wise Designation-wise Employee Count" subtitle="Active employees only, grouped by site then designation"
+      <SectionHeader title="Site-wise Designation-wise Employee Count" subtitle="Who had a salary record that month, grouped by site then designation"
         action={<div className="flex gap-2">
           <Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>
           <Button variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>Print</Button>
         </div>}
       />
+      <Input label="" type="month" value={month} onChange={e => setMonth(e.target.value)} className="w-48" />
       {isLoading ? <Spinner /> : !bySite.length ? (
-        <EmptyState icon={<Users size={32}/>} title="No active employees found" />
+        <EmptyState icon={<Users size={32}/>} title="No salary records for this month" subtitle="Run Bulk Salary -> Save & Calculate Salaries for this month first" />
       ) : (
         <>
           <div className="flex justify-end">

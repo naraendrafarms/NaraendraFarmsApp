@@ -95,6 +95,52 @@ export function printReport(opts: {
   openPrint(html)
 }
 
+// ── Side-by-side column grid print (Site-wise Designation Count, etc.) ─────────
+export function printColumnGrid(opts: {
+  title: string
+  subtitle?: string
+  grandTotal?: number
+  columns: { header: string; rows: [string, string | number][]; total: number }[]
+}) {
+  const { title, subtitle, grandTotal, columns } = opts
+  const colHtml = columns.map(col => `
+    <div class="col">
+      <div class="col-head">${col.header}</div>
+      <table class="col-table">
+        <thead><tr><th>Designation</th><th style="text-align:right">NOS</th></tr></thead>
+        <tbody>${col.rows.map(([label, n]) => `<tr><td>${label}</td><td style="text-align:right">${n}</td></tr>`).join('')}</tbody>
+        <tfoot><tr class="col-total"><td>Total</td><td style="text-align:right">${col.total}</td></tr></tfoot>
+      </table>
+    </div>`).join('')
+  const html = `<!doctype html><html><head><title>${title}</title>
+  <style>
+    ${CSS}
+    .grid { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+    .col { flex: 1 1 200px; min-width: 180px; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; }
+    .col-head { background: #14532d; color: #f7f1e4; font-weight: 700; font-size: 11px; text-align: center; padding: 6px; text-transform: uppercase; }
+    .col-table { width: 100%; border-collapse: collapse; margin: 0; }
+    .col-table th, .col-table td { border: 1px solid #ddd; padding: 4px 6px; font-size: 10px; }
+    .col-table thead th { background: #f0f0f0; }
+    .col-total { font-weight: 700; background: #f7f7f7; }
+  </style>${LOGO_ROW_CSS}</head><body>
+    <div class="header">
+      <div>
+        <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+        <div class="sub">${CO.addr1}</div>
+        <div class="sub">${CO.addr2}, ${CO.state} — ${CO.stateCode}</div>
+      </div>
+      <div class="header-right">
+        <h2>${title}</h2>
+        ${subtitle ? `<div class="sub">${subtitle}</div>` : ''}
+        ${grandTotal != null ? `<div style="font-size:20px;font-weight:700;color:#14532d">${grandTotal}</div>` : ''}
+        <div class="sub">Printed: ${new Date().toLocaleString('en-IN')}</div>
+      </div>
+    </div>
+    <div class="grid">${colHtml}</div>
+  </body></html>`
+  openPrint(html)
+}
+
 // ── HE Dispatch Invoice ───────────────────────────────────────────────────────
 export interface HEPrintOpts {
   companyAddr?: boolean    // seller header (default true)
