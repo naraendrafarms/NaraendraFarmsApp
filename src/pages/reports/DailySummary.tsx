@@ -37,34 +37,43 @@ export const DailySummaryPage: React.FC = () => {
     queryKey: ['daily_summary_records', date, flockIds.join(',')],
     queryFn: async () => {
       if (!flockIds.length) return []
-      const { data } = await supabase
+      // These column names must match daily_records exactly (001_schema.sql) —
+      // an earlier version referenced he_eggs_a/nhe_je/female_deaths/feed_kg/
+      // female_alive, none of which exist, so PostgREST errored on every call
+      // and the error was silently swallowed, always showing "No data".
+      const { data, error } = await supabase
         .from('daily_records')
-        .select('flock_id, he_eggs_a, he_eggs_b, he_eggs_c, nhe_je, nhe_te, nhe_be, female_deaths, male_deaths, feed_kg, female_alive')
+        .select('flock_id, he_eggs, je_eggs, te_eggs, be_eggs, mortality_female, mortality_male, feed_female_kg, feed_male_kg, opening_female, closing_female')
         .in('flock_id', flockIds)
         .eq('record_date', date)
+      if (error) { toast.error(error.message); return [] }
       return data ?? []
     },
     enabled: flockIds.length > 0
   })
 
-  const recordByFlock = React.useMemo(() => {
-    const m: Record<string, any> = {}
-    for (const r of (records ?? [])) m[r.flock_id] = r
+  // A flock can have multiple daily_records rows for one date — one per shed —
+  // so sum across all of a flock's rows instead of keeping only the last one.
+  const recordsByFlock = React.useMemo(() => {
+    const m: Record<string, any[]> = {}
+    for (const r of (records ?? [])) (m[r.flock_id] ??= []).push(r)
     return m
   }, [records])
 
   const rows = React.useMemo(() => {
     return (flocks ?? []).map((f: any) => {
-      const r = recordByFlock[f.id]
-      if (!r) return { flock: f, hasData: false, he: 0, nhe: 0, total: 0, hd: null, deaths: 0, feed: 0 }
-      const he = (r.he_eggs_a ?? 0) + (r.he_eggs_b ?? 0) + (r.he_eggs_c ?? 0)
-      const nhe = (r.nhe_je ?? 0) + (r.nhe_te ?? 0) + (r.nhe_be ?? 0)
+      const shedRows = recordsByFlock[f.id]
+      if (!shedRows?.length) return { flock: f, hasData: false, he: 0, nhe: 0, total: 0, hd: null, deaths: 0, feed: 0 }
+      const he = shedRows.reduce((s, r) => s + (r.he_eggs ?? 0), 0)
+      const nhe = shedRows.reduce((s, r) => s + (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0), 0)
       const total = he + nhe
-      const hd = r.female_alive > 0 ? (total / r.female_alive) * 100 : null
-      const deaths = (r.female_deaths ?? 0) + (r.male_deaths ?? 0)
-      return { flock: f, hasData: true, he, nhe, total, hd, deaths, feed: r.feed_kg ?? 0 }
+      const currentFemale = shedRows.reduce((s, r) => s + (r.closing_female || r.opening_female || 0), 0)
+      const hd = currentFemale > 0 ? (total / currentFemale) * 100 : null
+      const deaths = shedRows.reduce((s, r) => s + (r.mortality_female ?? 0) + (r.mortality_male ?? 0), 0)
+      const feed = shedRows.reduce((s, r) => s + (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0), 0)
+      return { flock: f, hasData: true, he, nhe, total, hd, deaths, feed }
     })
-  }, [flocks, recordByFlock])
+  }, [flocks, recordsByFlock])
 
   const totals = React.useMemo(() => ({
     he: rows.reduce((s, r) => s + r.he, 0),
