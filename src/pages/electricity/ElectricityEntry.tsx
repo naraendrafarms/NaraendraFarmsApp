@@ -7,8 +7,9 @@ import {
   Card, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, Zap, Edit2, Trash2, Download, Upload, BarChart2, Settings } from 'lucide-react'
+import { Plus, Zap, Edit2, Trash2, Download, Upload, BarChart2, Settings, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { printReport } from '@/lib/invoicePrint'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const escape = (v: string|number|null|undefined) => `"${String(v??'').replace(/"/g,'""')}"`
@@ -212,6 +213,18 @@ const BillsTab: React.FC = () => {
           <Button variant="outline" size="sm" icon={<Download size={14}/>}
             onClick={()=>exportCSV('electricity_bills.csv',['meter_name','usc_no','site','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','paid_date','remarks'],(bills??[]).map((b:any)=>[b.electricity_meters?.meter_name,b.electricity_meters?.usc_no,b.electricity_meters?.farms?.name,b.bill_month?.slice(0,7),b.units_consumed,b.amount,b.acd_dc_due,b.deposit_amount,b.paid_date,b.remarks]))}>
             Export
+          </Button>
+          <Button variant="outline" size="sm" icon={<Printer size={14}/>}
+            onClick={()=>printReport({
+              title: 'Electricity Bills',
+              subtitle: filterMonth ? fmtMonth(filterMonth+'-01') : 'All Months',
+              headers: ['Meter','USC No','Site','Month','Units','Amount','ACD/DC Due','Deposit Amt','Paid Date','Remarks'],
+              rows: (bills??[]).map((b:any)=>[b.electricity_meters?.meter_name, b.electricity_meters?.usc_no, b.electricity_meters?.farms?.name,
+                b.bill_month?fmtMonth(b.bill_month):'', b.units_consumed, b.amount?inr(b.amount):'', b.acd_dc_due?inr(b.acd_dc_due):'',
+                b.deposit_amount?inr(b.deposit_amount):'', b.paid_date??'—', b.remarks??'']),
+              rightAlignFrom: 4,
+            })}>
+            Print
           </Button>
           <Button icon={<Plus size={16}/>} onClick={()=>openForm()}>Add Bill</Button>
         </div>
