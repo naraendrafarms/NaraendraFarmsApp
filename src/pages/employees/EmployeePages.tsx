@@ -1113,99 +1113,7 @@ export const SalaryEntryPage: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
 
-  // ⚡ Quick Generate state
-  const [genOpen, setGenOpen] = useState(false)
-  const [genMonth, setGenMonth] = useState(() => {
-    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-  })
-  const [genLoading, setGenLoading] = useState(false)
-  const [genResult, setGenResult] = useState<{generated:number;skipped:number}|null>(null)
-
-  const handleGenerate = async () => {
-    if (!genMonth) { toast.error('Pick a month first'); return }
-    setGenLoading(true); setGenResult(null)
-    try {
-      const monthStr = genMonth + '-01'
-      const { data: empsRaw, error: empErr } = await supabase.from('employees')
-        .select('id,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,restrict_pf,leaving_date').eq('is_active', true)
-      if (empErr) throw empErr
-      // Skip anyone who left before this salary month (leaving_date < 1st of month)
-      const emps = (empsRaw ?? []).filter((e: any) => !e.leaving_date || e.leaving_date >= monthStr)
-      if (!emps.length) { toast.error('No active employees found for this month'); return }
-      const { data: existing, error: exErr } = await supabase.from('salary_monthly')
-        .select('employee_id').eq('month', monthStr)
-      if (exErr) throw exErr
-      const existingIds = new Set((existing ?? []).map((r: any) => r.employee_id))
-      // Match the single-entry form exactly to avoid double counting:
-      //  - salary advances = employee_advances with advance_type <> 'other'
-      //  - other deductions = pending employee_deductions (flock egg/bird sales)
-      const { data: advRows } = await supabase.from('employee_advances')
-        .select('employee_id,amount').eq('salary_month', genMonth).neq('advance_type', 'other')
-      const { data: dedRows } = await supabase.from('employee_deductions')
-        .select('employee_id,amount').eq('deduction_month', monthStr).eq('status', 'pending')
-      const advByEmp: Record<string, number> = {}
-      const otherDedByEmp: Record<string, number> = {}
-      for (const a of (advRows ?? [])) advByEmp[a.employee_id] = (advByEmp[a.employee_id] ?? 0) + (a.amount ?? 0)
-      for (const d of (dedRows ?? [])) otherDedByEmp[d.employee_id] = (otherDedByEmp[d.employee_id] ?? 0) + (d.amount ?? 0)
-      const [yG, mG] = monthStr.split('-').map(Number)
-      const daysInGenMonth = new Date(yG, mG, 0).getDate()
-      const toInsert = (emps ?? []).filter((e: any) => !existingIds.has(e.id)).map((e: any) => {
-        // Shared split (overrides → PF-not-applicable whole-to-employee → floor split)
-        const comp    = splitSalary(e, skillWages)
-        // Pro-rate for an employee leaving mid-month — they used to get a
-        // full month's salary as long as leaving_date was on/after the 1st.
-        const leavesMidMonth = e.leaving_date && e.leaving_date >= monthStr && e.leaving_date.slice(0, 7) === monthStr.slice(0, 7)
-        const workedDays = leavesMidMonth ? parseInt(e.leaving_date.slice(8, 10)) : daysInGenMonth
-        const prorate = workedDays / daysInGenMonth
-        const basicC  = Math.round(comp.basic * prorate)
-        const hraC    = Math.round(comp.hra * prorate)
-        const gross   = Math.round(comp.gross * prorate)
-        // ESI on BASIC (farm practice), matching computeSalaryForEmp
-        const esi_emp = e.esi_applicable ? Math.ceil(basicC * 0.0075) : 0
-        const esi_er  = e.esi_applicable ? Math.ceil(basicC * 0.0325) : 0
-        // PF on Basic, capped at the ₹15,000 wage ceiling when restrict_pf is set
-        const pfBase  = e.pf_applicable ? (e.restrict_pf ? Math.min(basicC, 15000) : basicC) : 0
-        const pf_emp  = Math.round(pfBase * 0.12)
-        const pf_er   = Math.round(pfBase * 0.12)
-        const pt      = e.pt_applicable ? (gross <= 15000 ? 0 : gross <= 20000 ? 150 : 200) : 0
-        const advance = advByEmp[e.id] ?? 0
-        const otherDed = otherDedByEmp[e.id] ?? 0
-        const net     = Math.max(0, gross - esi_emp - pf_emp - pt - advance - otherDed)
-        return {
-          employee_id: e.id,
-          month: monthStr,
-          days_worked: workedDays,
-          month_days: daysInGenMonth,
-          basic_salary: basicC,
-          earned_salary: gross,
-          gross_salary: gross,
-          advance,
-          further_advance: advance,
-          other_deduction: otherDed,
-          net_salary: net,
-          esi_employee: esi_emp, esi_employer: esi_er,
-          pf_employee: pf_emp, pf_employer: pf_er,
-          hra: hraC, tds: 0, hold: 0, arrears: 0, ot_bonus: 0, pt,
-          payment_mode: 'Cash', is_paid: false,
-        }
-      })
-      const skipped = existingIds.size
-      if (toInsert.length === 0) {
-        setGenResult({ generated: 0, skipped })
-        toast.success(`All ${skipped} records already exist`)
-        return
-      }
-      const { error: insErr } = await supabase.from('salary_monthly').insert(toInsert)
-      if (insErr) throw insErr
-      setGenResult({ generated: toInsert.length, skipped })
-      toast.success(`Generated ${toInsert.length} records`)
-      qc.invalidateQueries({ queryKey: ['salary_monthly_detail'] })
-      qc.invalidateQueries({ queryKey: ['salary_fy_summary'] })
-    } catch (e: any) { toast.error(e.message) }
-    finally { setGenLoading(false) }
-  }
-
-  // Uses the editable DB config (Admin Centre) — same source as bulk generation,
+  // Uses the editable DB config (Admin Centre) — same source as the salary form,
   // so removing a designation there removes its extra day here too.
   const calcExtraDays = (designation: string|null|undefined, paidDays: number): number =>
     calcExtraDaysM(designation, paidDays, extraDaysConfig)
@@ -1695,34 +1603,6 @@ export const SalaryEntryPage: React.FC = () => {
           </div>
         }
       />
-
-      {/* ⚡ Quick Generate Panel */}
-      <div className="border border-green-200 rounded-lg overflow-hidden">
-        <button onClick={()=>{setGenOpen(o=>!o);setGenResult(null)}}
-          className="w-full flex items-center justify-between px-4 py-3 bg-green-50 hover:bg-green-100 transition-colors text-left">
-          <span className="font-semibold text-green-800 text-sm">⚡ Quick Generate — Month-End Salaries</span>
-          <span className="text-green-600 text-xs">{genOpen ? '▲ Collapse' : '▼ Expand'}</span>
-        </button>
-        {genOpen && (
-          <div className="px-4 py-4 bg-white flex flex-wrap gap-3 items-end">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
-              <input type="month" value={genMonth} onChange={e=>setGenMonth(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"/>
-            </div>
-            <Button onClick={handleGenerate} loading={genLoading}
-              className="!bg-green-600 hover:!bg-green-700 !text-white">
-              Generate All Salaries
-            </Button>
-            {genResult && (
-              <div className="text-sm text-gray-700 bg-green-50 border border-green-200 rounded px-3 py-2">
-                Generated <strong>{genResult.generated}</strong> records,{' '}
-                <strong>{genResult.skipped}</strong> already existed (skipped)
-              </div>
-            )}
-          </div>
-        )}
-      </div>
 
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="Financial Year" options={FY_OPTIONS} value={selectedFY} onChange={e=>{setSelectedFY(e.target.value);setSelectedMonth('')}} className="w-40"/>
