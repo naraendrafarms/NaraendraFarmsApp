@@ -171,6 +171,10 @@ export const SalaryRegisterPage: React.FC = () => {
           R(r.gross_salary), R(r.pf_employee), R(r.esi_employee), R(r.pt), R(r.advance), R(r.net_salary)]
       }),
       rightAlignFrom: 4,
+      footerRow: ['', 'TOTAL', '', '', (rows as any[]).reduce((s,r)=>s+(r.days_worked??0),0),
+        (rows as any[]).reduce((s,r)=>s+R(r.gross_salary),0), (rows as any[]).reduce((s,r)=>s+R(r.pf_employee),0),
+        (rows as any[]).reduce((s,r)=>s+R(r.esi_employee),0), (rows as any[]).reduce((s,r)=>s+R(r.pt),0),
+        (rows as any[]).reduce((s,r)=>s+R(r.advance),0), (rows as any[]).reduce((s,r)=>s+R(r.net_salary),0)],
     })
   }
 
