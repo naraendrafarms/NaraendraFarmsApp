@@ -3733,15 +3733,22 @@ export const BulkSalaryPage: React.FC = () => {
 
   const printAttendance = () => {
     if (!employees?.length) { toast.error('No employees loaded'); return }
+    const emps = employees as any[]
     printReport({
       title: 'Bulk Salary — Attendance', subtitle: month,
       headers: ['Emp Code','Name','Site','Designation','Base Salary','Advances','Flock Ded.','Absent Days','TDS'],
-      rows: (employees as any[]).map(emp => [
+      rows: emps.map(emp => [
         emp.emp_id??'', emp.name??'', emp.farms?.name??'', emp.designation??'', emp.base_salary??0,
         ((advances as any)||{})[emp.id]??0, ((deductions as any)||{})[emp.id]??0,
         parseFloat(absentMap[emp.id]??'0')||0, parseFloat(tdsMap[emp.id]??'0')||0,
       ]),
       rightAlignFrom: 4,
+      footerRow: ['', 'TOTAL', '', '',
+        emps.reduce((s,emp)=>s+(emp.base_salary??0),0),
+        emps.reduce((s,emp)=>s+(((advances as any)||{})[emp.id]??0),0),
+        emps.reduce((s,emp)=>s+(((deductions as any)||{})[emp.id]??0),0),
+        emps.reduce((s,emp)=>s+(parseFloat(absentMap[emp.id]??'0')||0),0),
+        emps.reduce((s,emp)=>s+(parseFloat(tdsMap[emp.id]??'0')||0),0)],
     })
   }
 
