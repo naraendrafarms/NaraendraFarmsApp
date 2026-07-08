@@ -719,6 +719,7 @@ export const VHLEggProductionPage: React.FC = () => {
   const [month, setMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` })
   const [invoiceNo, setInvoiceNo] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
+  const importRef = React.useRef<HTMLInputElement>(null)
 
   const { data: flocks } = useQuery({
     queryKey: ['vhl_flocks_active_eggprod'],
@@ -811,10 +812,61 @@ export const VHLEggProductionPage: React.FC = () => {
       rows.map((r: any) => [fmtDate(r.production_date), r.flocks?.flock_no ?? '', r.he_qty, r.te_qty, (r.he_qty??0)+(r.te_qty??0), r.rate_per_egg, r.amount, r.dc_no ?? '', r.vehicle_no ?? '', r.invoice_no ?? '']))
   }
 
+  const rateForDate = (date: string) => {
+    const applicable = (rateHistory ?? []).filter((r: any) => r.effective_date <= date)
+    return applicable.length ? Number(applicable[0].rate_per_egg) : 0
+  }
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    const { headers: hdrs, rows: fileRows } = await parseFile(file)
+    if (!fileRows.length) { toast.error('Empty file'); return }
+    const flockMap: Record<string,string> = {}
+    for (const f of (flocks ?? [])) flockMap[String(f.flock_no).toLowerCase()] = f.id
+    const toInsert = fileRows.map(vals => {
+      const obj: Record<string,string> = {}; hdrs.forEach((h,i) => obj[h.toLowerCase().replace(/\s+/g,'_')] = vals[i]??'')
+      const flock_id = flockMap[obj.flock?.toLowerCase()]
+      const production_date = obj.date
+      const he_qty = parseInt(obj.he_qty) || 0
+      const te_qty = parseInt(obj.te_qty) || 0
+      if (!flock_id || !production_date || (!he_qty && !te_qty)) return null
+      const rate = rateForDate(production_date)
+      return {
+        flock_id, production_date, he_qty, te_qty, rate_per_egg: rate,
+        amount: Math.round((he_qty + te_qty) * rate * 100) / 100,
+        dc_no: obj.dc_no || null, vehicle_no: obj.vehicle_no || null,
+      }
+    }).filter(Boolean) as any[]
+    if (!toInsert.length) { toast.error('No valid rows (flock not matched, or missing date/qty)'); return }
+    // Never overwrite an existing entry for the same flock+date — matches the
+    // manual-entry duplicate guard above ("edit it instead").
+    const { data: existing } = await supabase.from('vhl_egg_production')
+      .select('flock_id,production_date').in('flock_id', [...new Set(toInsert.map(r => r.flock_id))])
+    const existingKeys = new Set((existing ?? []).map((r: any) => `${r.flock_id}|${r.production_date}`))
+    const newRows = toInsert.filter(r => !existingKeys.has(`${r.flock_id}|${r.production_date}`))
+    const skipped = toInsert.length - newRows.length
+    if (!newRows.length) { toast.error(`All ${skipped} row(s) already exist — nothing imported`); if (importRef.current) importRef.current.value = ''; return }
+    const { error } = await supabase.from('vhl_egg_production').insert(newRows)
+    if (error) { toast.error(error.message); return }
+    toast.success(`Imported ${newRows.length} row(s)${skipped ? ` (${skipped} already existed, skipped)` : ''}`)
+    qc.invalidateQueries({ queryKey: ['vhl_egg_production'] })
+    if (importRef.current) importRef.current.value = ''
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="VHL Egg Production" subtitle="Daily HE+TE production dispatched to VHL — billed monthly at the effective ₹/egg rate."
-        action={<Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport} disabled={!rows?.length}>Export CSV</Button>} />
+        action={<div className="flex gap-2">
+          <Button variant="outline" size="sm" icon={<Download size={14}/>}
+            onClick={()=>downloadXlsxTemplate('vhl_egg_production_template.xlsx',
+              ['date','flock','he_qty','te_qty','dc_no','vehicle_no'],
+              [today(), (flocks?.[0] as any)?.flock_no ?? '16', '500', '200', '', ''])}>
+            Template
+          </Button>
+          <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
+          <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport}/>
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport} disabled={!rows?.length}>Export CSV</Button>
+        </div>} />
 
       <Card className="space-y-3">
         <p className="text-xs font-semibold text-gray-600 uppercase">Record Today's Dispatch</p>
