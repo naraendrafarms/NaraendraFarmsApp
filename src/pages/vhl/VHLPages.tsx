@@ -1539,10 +1539,23 @@ export const VHLShedPerformancePage: React.FC = () => {
   const { data: records, isLoading } = useQuery({
     queryKey: ['vhl_shed_perf', fromDate, toDate],
     queryFn: async () => {
-      const { data } = await supabase.from('vhl_daily_entry')
-        .select('record_date,shed_id,flock_id,opening_female,closing_female,mortality_female,mortality_male,total_eggs,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,feed_female_kg,feed_male_kg,sheds(shed_no,shed_name),flocks(flock_no)')
-        .gte('record_date', fromDate).lte('record_date', toDate)
-      return data ?? []
+      // PostgREST caps a single response at 1000 rows — a wide date range
+      // easily exceeds that (silently, with no error), undercounting every
+      // total on this page. Page through with .range() until exhausted.
+      const all: any[] = []
+      let from = 0
+      const PAGE = 1000
+      while (true) {
+        const { data, error } = await supabase.from('vhl_daily_entry')
+          .select('record_date,shed_id,flock_id,opening_female,closing_female,mortality_female,mortality_male,total_eggs,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,feed_female_kg,feed_male_kg,sheds(shed_no,shed_name),flocks(flock_no)')
+          .gte('record_date', fromDate).lte('record_date', toDate)
+          .order('record_date').range(from, from + PAGE - 1)
+        if (error) throw error
+        all.push(...(data ?? []))
+        if (!data || data.length < PAGE) break
+        from += PAGE
+      }
+      return all
     }
   })
 
