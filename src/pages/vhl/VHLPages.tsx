@@ -1673,9 +1673,14 @@ export const VHLShedPerformancePage: React.FC = () => {
 // vhl_egg_production (dispatched/billed) — no derived/formula sheet
 // involved, unlike the source Excel's "Egg" tab which this replaces.
 // ═══════════════════════════════════════════════════════════════
-const EGG_GRADES = ['he', 'je', 'te', 'be', 'le'] as const
+// JE and TE are merged into one combined grade — vhl_egg_production only
+// ever records a single combined "TE Qty (JE+TE)" dispatch number, so
+// keeping JE and TE as separate balances left JE dispatch permanently at
+// zero (nothing was ever there to subtract it from). Since dispatch can't
+// be split back into JE vs TE, the two must share one running balance.
+const EGG_GRADES = ['he', 'jete', 'be', 'le'] as const
 type EggGrade = typeof EGG_GRADES[number]
-const EGG_GRADE_LABEL: Record<EggGrade, string> = { he: 'HE', je: 'JE', te: 'TE', be: 'BE', le: 'LE' }
+const EGG_GRADE_LABEL: Record<EggGrade, string> = { he: 'HE', jete: 'JE+TE', be: 'BE', le: 'LE' }
 
 export const VHLEggStockRegisterPage: React.FC = () => {
   const [flockId, setFlockId] = useState('')
@@ -1714,13 +1719,13 @@ export const VHLEggStockRegisterPage: React.FC = () => {
   type DayTotals = Record<EggGrade, { prod: number; wastage: number; disp: number }>
   const rows = React.useMemo(() => {
     const byDate: Record<string, DayTotals> = {}
-    const blank = (): DayTotals => ({ he: { prod: 0, wastage: 0, disp: 0 }, je: { prod: 0, wastage: 0, disp: 0 }, te: { prod: 0, wastage: 0, disp: 0 }, be: { prod: 0, wastage: 0, disp: 0 }, le: { prod: 0, wastage: 0, disp: 0 } })
+    const blank = (): DayTotals => ({ he: { prod: 0, wastage: 0, disp: 0 }, jete: { prod: 0, wastage: 0, disp: 0 }, be: { prod: 0, wastage: 0, disp: 0 }, le: { prod: 0, wastage: 0, disp: 0 } })
     for (const r of (production ?? [])) {
       const d = r.record_date
       if (!byDate[d]) byDate[d] = blank()
       byDate[d].he.prod += r.he_eggs ?? 0; byDate[d].he.wastage += r.wastage_he ?? 0
-      byDate[d].je.prod += r.je_eggs ?? 0; byDate[d].je.wastage += r.wastage_je ?? 0
-      byDate[d].te.prod += r.te_eggs ?? 0; byDate[d].te.wastage += r.wastage_te ?? 0
+      byDate[d].jete.prod += (r.je_eggs ?? 0) + (r.te_eggs ?? 0)
+      byDate[d].jete.wastage += (r.wastage_je ?? 0) + (r.wastage_te ?? 0)
       byDate[d].be.prod += r.be_eggs ?? 0; byDate[d].be.wastage += r.wastage_be ?? 0
       byDate[d].le.prod += r.le_eggs ?? 0
     }
@@ -1728,12 +1733,12 @@ export const VHLEggStockRegisterPage: React.FC = () => {
       const d = r.production_date
       if (!byDate[d]) byDate[d] = blank()
       byDate[d].he.disp += r.he_qty ?? 0
-      byDate[d].te.disp += r.te_qty ?? 0
+      byDate[d].jete.disp += r.te_qty ?? 0
     }
     // Running Opening -> Closing per grade, same ledger shape as the source
-    // Excel. JE/BE/LE have no dispatch data (vhl_egg_production only tracks
+    // Excel. BE/LE have no dispatch data (vhl_egg_production only tracks
     // he_qty/te_qty), so their Dispatch column is always 0 for those grades.
-    const bal: Record<EggGrade, number> = { he: 0, je: 0, te: 0, be: 0, le: 0 }
+    const bal: Record<EggGrade, number> = { he: 0, jete: 0, be: 0, le: 0 }
     const all = Object.keys(byDate).sort().map(d => {
       const day = byDate[d]
       const out: any = { date: d }
@@ -1755,8 +1760,6 @@ export const VHLEggStockRegisterPage: React.FC = () => {
     return acc
   }, Object.fromEntries(EGG_GRADES.map(g => [g, { prod: 0, wastage: 0, disp: 0 }])) as Record<EggGrade, { prod: number; wastage: number; disp: number }>)
 
-  const GRADE_LABEL: Record<EggGrade, string> = { he: 'HE', je: 'JE', te: 'TE', be: 'BE', le: 'LE' }
-
   const handleExport = () => {
     if (!rows.length) return
     const wb = XLSX.utils.book_new()
@@ -1770,7 +1773,7 @@ export const VHLEggStockRegisterPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="VHL Egg Stock Register" subtitle="Opening / Received / Dispatch / Closing for every grade (HE/JE/TE/BE/LE), side by side — computed live, no formulas. Dispatch data only exists for HE/TE, so JE/BE/LE Dispatch is always 0."
+      <SectionHeader title="VHL Egg Stock Register" subtitle="Opening / Received / Dispatch / Closing for HE, JE+TE (combined — dispatch is only ever recorded as one JE+TE number), BE, LE, side by side — computed live, no formulas. BE/LE have no dispatch data, so their Dispatch is always 0."
         action={<Button variant="outline" icon={<Download size={14}/>} onClick={handleExport}>Export Excel</Button>} />
       <Card className="flex flex-wrap gap-3 items-end">
         <Select label="VHL Flock" placeholder="— Choose flock —" value={flockId} onChange={e => setFlockId(e.target.value)}
