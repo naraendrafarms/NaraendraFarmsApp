@@ -3568,6 +3568,13 @@ export const BulkSalaryPage: React.FC = () => {
   const [cashSel, setCashSel] = useState<Set<string>>(new Set())
   const [cashBulkRef, setCashBulkRef] = useState('')
   const [cashBulkDate, setCashBulkDate] = useState(todayStr())
+  const [paymentSearch, setPaymentSearch] = useState('')
+  const matchesPaymentSearch = (r: any) => {
+    if (!paymentSearch.trim()) return true
+    const q = paymentSearch.trim().toLowerCase()
+    const emp = r.employees ?? {}
+    return (emp.name ?? '').toLowerCase().includes(q) || (emp.emp_id ?? '').toLowerCase().includes(q)
+  }
 
   const monthDate = month + '-01'
 
@@ -3674,6 +3681,27 @@ export const BulkSalaryPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['cash_book'] })
       qc.invalidateQueries({ queryKey: ['bank_transactions'] })
       setPaidSel(new Set()); setBulkRef(''); setCashSel(new Set()); setCashBulkRef('')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  // Revert a single row from Paid back to Pending — e.g. a bounced/wrong
+  // account transfer that needs to be redone after fixing the employee's
+  // bank details. Removes the cash_book/bank_transactions entries it created.
+  const undoPaidMut = useMutation({
+    mutationFn: async (salaryId: string) => {
+      const { error } = await supabase.from('salary_monthly').update({
+        is_paid: false, payment_ref: null, bank_account_id: null, paid_date: null,
+      }).eq('id', salaryId)
+      if (error) throw error
+      await supabase.from('cash_book').delete().eq('salary_monthly_id', salaryId)
+      await supabase.from('bank_transactions').delete().eq('salary_monthly_id', salaryId)
+    },
+    onSuccess: () => {
+      toast.success('Reverted to Pending')
+      qc.invalidateQueries({ queryKey: ['bulk_salary', monthDate, filterFarm] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
     },
     onError: (e: any) => toast.error(e.message),
   })
@@ -4110,8 +4138,13 @@ export const BulkSalaryPage: React.FC = () => {
       {/* ── Tab 3: Payment / CMS ── */}
       {tab==='payment' && (
         <div className="space-y-5">
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap items-end">
             <Button icon={<Download size={14}/>} onClick={exportKotakCMS}>Export Kotak CMS File</Button>
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={paymentSearch} onChange={e=>setPaymentSearch(e.target.value)} placeholder="Search name or emp code…"
+                className="pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg w-60 focus:outline-none focus:ring-1 focus:ring-brand-400"/>
+            </div>
           </div>
 
           <div>
@@ -4141,9 +4174,9 @@ export const BulkSalaryPage: React.FC = () => {
               <Table>
                 <thead><tr>
                   <Th><input type="checkbox"
-                    checked={paidSel.size>0 && paidSel.size===(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0 && !r.is_paid).length}
+                    checked={paidSel.size>0 && paidSel.size===(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0 && !r.is_paid && matchesPaymentSearch(r)).length}
                     onChange={()=>{
-                      const ids=(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0 && !r.is_paid).map(r=>r.id)
+                      const ids=(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0 && !r.is_paid && matchesPaymentSearch(r)).map(r=>r.id)
                       setPaidSel(paidSel.size===ids.length ? new Set() : new Set(ids))
                     }} className="rounded" /></Th>
                   <Th>Code</Th><Th>Name</Th><Th>Payment Mode</Th>
@@ -4151,7 +4184,7 @@ export const BulkSalaryPage: React.FC = () => {
                   <Th>This Month — Deposit Into</Th><Th>Status</Th>
                 </tr></thead>
                 <tbody>
-                  {(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0).map((r:any)=>{
+                  {(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0 && matchesPaymentSearch(r)).map((r:any)=>{
                     const emp=r.employees??{}
                     const isShared=(emp.payment_mode??'own_account')==='shared_account'
                     const overrideHolder=r.override_account_emp_id?(employees as any[]??[]).find((e:any)=>e.id===r.override_account_emp_id):null
@@ -4176,7 +4209,15 @@ export const BulkSalaryPage: React.FC = () => {
                             ]}
                             className="min-w-[220px]" />
                         </Td>
-                        <Td><Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge></Td>
+                        <Td>
+                          <div className="flex items-center gap-1.5">
+                            <Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge>
+                            {r.is_paid && (
+                              <button title="Revert to Pending" onClick={()=>{ if(window.confirm('Revert this employee to Pending? This removes the cash book / bank ledger entry it created.')) undoPaidMut.mutate(r.id) }}
+                                className="p-1 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                            )}
+                          </div>
+                        </Td>
                       </tr>
                     )
                   })}
@@ -4210,15 +4251,15 @@ export const BulkSalaryPage: React.FC = () => {
                 <Table>
                   <thead><tr>
                     <Th><input type="checkbox"
-                      checked={cashSel.size>0 && cashSel.size===(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash' && !r.is_paid).length}
+                      checked={cashSel.size>0 && cashSel.size===(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash' && !r.is_paid && matchesPaymentSearch(r)).length}
                       onChange={()=>{
-                        const ids=(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash' && !r.is_paid).map(r=>r.id)
+                        const ids=(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash' && !r.is_paid && matchesPaymentSearch(r)).map(r=>r.id)
                         setCashSel(cashSel.size===ids.length ? new Set() : new Set(ids))
                       }} className="rounded" /></Th>
                     <Th>Code</Th><Th>Name</Th><Th>Site</Th><Th right>Net Payable</Th><Th>Status</Th>
                   </tr></thead>
                   <tbody>
-                    {(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash').map((r:any)=>{
+                    {(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash' && matchesPaymentSearch(r)).map((r:any)=>{
                       const emp=r.employees??{}
                       return (
                         <tr key={r.id} className={`hover:bg-gray-50 ${cashSel.has(r.id)?'bg-brand-50':''}`}>
@@ -4228,7 +4269,15 @@ export const BulkSalaryPage: React.FC = () => {
                           <Td className="font-medium">{emp.name}</Td>
                           <Td className="text-xs text-gray-500">{emp.farms?.name??'—'}</Td>
                           <Td right className="font-semibold text-green-700">{inr(r.net_salary??0)}</Td>
-                          <Td><Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge></Td>
+                          <Td>
+                            <div className="flex items-center gap-1.5">
+                              <Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge>
+                              {r.is_paid && (
+                                <button title="Revert to Pending" onClick={()=>{ if(window.confirm('Revert this employee to Pending? This removes the cash book / bank ledger entry it created.')) undoPaidMut.mutate(r.id) }}
+                                  className="p-1 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                              )}
+                            </div>
+                          </Td>
                         </tr>
                       )
                     })}
