@@ -11,7 +11,7 @@ DECLARE
   v_total NUMERIC;
   v_count INT;
 BEGIN
-  SELECT bank_account_id, sum(amount), count(*)
+  SELECT max(bank_account_id), sum(amount), count(*)
     INTO v_bank_account_id, v_total, v_count
   FROM public.bank_transactions
   WHERE reference_no = v_ref AND txn_date = v_date AND salary_monthly_id IS NOT NULL;
