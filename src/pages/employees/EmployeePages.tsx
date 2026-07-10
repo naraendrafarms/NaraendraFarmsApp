@@ -3644,13 +3644,33 @@ export const BulkSalaryPage: React.FC = () => {
   const bulkMarkPaidMut = useMutation({
     mutationFn: async ({ ids, mode, ref, date, bankAccountId }: { ids: string[]; mode: string; ref: string; date: string; bankAccountId: string | null }) => {
       const rows = (salaries as any[] ?? []).filter(r => ids.includes(r.id))
+      const isBank = mode.toLowerCase() !== 'cash'
+      const txnDate = date || todayStr()
+
+      // One shared bank_transactions row for the WHOLE batch — matching the
+      // real bank statement (one debit line), not one row per employee. The
+      // vendor side already does this (many pending_payments tagged to one
+      // real bank txn via transaction_ref); this mirrors that via a direct FK.
+      let sharedBankTxnId: string | null = null
+      if (isBank && bankAccountId) {
+        const totalAmt = rows.reduce((s, r) => s + (r.net_salary ?? 0), 0)
+        const { data: txn, error: txnErr } = await supabase.from('bank_transactions').insert({
+          bank_account_id: bankAccountId, txn_date: txnDate, txn_type: 'Debit', category: 'Salary Payment',
+          reference_no: ref || null, description: `Salary batch — ${rows.length} employee(s) (${month})`,
+          amount: totalAmt,
+        }).select('id').single()
+        if (txnErr) throw txnErr
+        sharedBankTxnId = txn.id
+      }
+
       for (const r of rows) {
         const netAmt = r.net_salary ?? 0
         const empName = r.employees?.name ?? ''
         const { error } = await supabase.from('salary_monthly').update({
           is_paid: true, payment_mode: mode, payment_ref: ref || null,
-          bank_account_id: mode.toLowerCase() !== 'cash' ? bankAccountId : null,
-          paid_date: date || todayStr(),
+          bank_account_id: isBank ? bankAccountId : null,
+          bank_txn_id: sharedBankTxnId,
+          paid_date: txnDate,
         }).eq('id', r.id)
         if (error) throw new Error(`${empName}: ${error.message}`)
         if (r.is_paid) {
@@ -3659,19 +3679,11 @@ export const BulkSalaryPage: React.FC = () => {
         }
         if (netAmt > 0) {
           await supabase.from('cash_book').insert({
-            txn_date: date || todayStr(), txn_type: 'payment', category: 'salary',
+            txn_date: txnDate, txn_type: 'payment', category: 'salary',
             description: `Salary — ${empName} (${month})`,
             party_name: empName || null, amount_in: 0, amount_out: netAmt,
             payment_mode: toCbMode(mode), salary_monthly_id: r.id, reference_no: ref || null,
           })
-          if (mode.toLowerCase() !== 'cash' && bankAccountId) {
-            await supabase.from('bank_transactions').insert({
-              bank_account_id: bankAccountId,
-              txn_date: date || todayStr(), txn_type: 'Debit', category: 'Salary Payment',
-              reference_no: ref || null, description: `Salary — ${empName} (${month})`,
-              amount: netAmt, salary_monthly_id: r.id,
-            })
-          }
         }
       }
     },
@@ -3691,10 +3703,14 @@ export const BulkSalaryPage: React.FC = () => {
   const undoPaidMut = useMutation({
     mutationFn: async (salaryId: string) => {
       const { error } = await supabase.from('salary_monthly').update({
-        is_paid: false, payment_ref: null, bank_account_id: null, paid_date: null,
+        is_paid: false, payment_ref: null, bank_account_id: null, paid_date: null, bank_txn_id: null,
       }).eq('id', salaryId)
       if (error) throw error
       await supabase.from('cash_book').delete().eq('salary_monthly_id', salaryId)
+      // Only delete a bank_transactions row that was created directly for this
+      // one employee (the older individual-payment path). A shared batch row
+      // (tagged via bank_txn_id, just unset above) may still cover other
+      // employees, so it's left alone rather than deleted here.
       await supabase.from('bank_transactions').delete().eq('salary_monthly_id', salaryId)
     },
     onSuccess: () => {
