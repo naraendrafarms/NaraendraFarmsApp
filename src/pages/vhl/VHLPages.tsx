@@ -20,6 +20,36 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
 }
 const localYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
+const MONTH_ABBR: Record<string, string> = {
+  jan:'01', feb:'02', mar:'03', apr:'04', may:'05', jun:'06',
+  jul:'07', aug:'08', sep:'09', oct:'10', nov:'11', dec:'12',
+}
+// Accepts whatever date text an imported CSV/Excel row happens to contain —
+// ISO (2026-07-08), DD-Mon-YY(YY) (26-Aug-25 / 26-Aug-2025), or DD/MM/YYYY —
+// and normalizes to YYYY-MM-DD. Returns '' if the text can't be parsed, so
+// the caller can reject that row instead of silently sending a bad string
+// to a DATE column.
+function parseAnyDate(raw: string): string {
+  const s = (raw ?? '').trim()
+  if (!s) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  const monMatch = /^(\d{1,2})[-\/ ]([a-zA-Z]{3,})[-\/ ](\d{2,4})$/.exec(s)
+  if (monMatch) {
+    const [, dd, monName, yy] = monMatch
+    const mm = MONTH_ABBR[monName.slice(0,3).toLowerCase()]
+    if (!mm) return ''
+    const year = yy.length === 2 ? `20${yy}` : yy
+    return `${year}-${mm}-${dd.padStart(2,'0')}`
+  }
+  const slashMatch = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/.exec(s)
+  if (slashMatch) {
+    const [, dd, mm, yy] = slashMatch
+    const year = yy.length === 2 ? `20${yy}` : yy
+    return `${year}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`
+  }
+  return ''
+}
+
 // ═══════════════════════════════════════════════════════════════
 // VHL Flocks — flocks flagged is_vhl_contract, entry point to the rest
 // ═══════════════════════════════════════════════════════════════
@@ -823,12 +853,14 @@ export const VHLEggProductionPage: React.FC = () => {
     if (!fileRows.length) { toast.error('Empty file'); return }
     const flockMap: Record<string,string> = {}
     for (const f of (flocks ?? [])) flockMap[String(f.flock_no).toLowerCase()] = f.id
+    let badDates = 0
     const toInsert = fileRows.map(vals => {
       const obj: Record<string,string> = {}; hdrs.forEach((h,i) => obj[h.toLowerCase().replace(/\s+/g,'_')] = vals[i]??'')
       const flock_id = flockMap[obj.flock?.toLowerCase()]
-      const production_date = obj.date
+      const production_date = parseAnyDate(obj.date)
       const he_qty = parseInt(obj.he_qty) || 0
       const te_qty = parseInt(obj.te_qty) || 0
+      if (obj.date && !production_date) badDates++
       if (!flock_id || !production_date || (!he_qty && !te_qty)) return null
       const rate = rateForDate(production_date)
       return {
@@ -837,7 +869,11 @@ export const VHLEggProductionPage: React.FC = () => {
         dc_no: obj.dc_no || null, vehicle_no: obj.vehicle_no || null,
       }
     }).filter(Boolean) as any[]
-    if (!toInsert.length) { toast.error('No valid rows (flock not matched, or missing date/qty)'); return }
+    if (!toInsert.length) {
+      toast.error(badDates ? `${badDates} row(s) had an unrecognized date format` : 'No valid rows (flock not matched, or missing date/qty)')
+      return
+    }
+    if (badDates) toast.error(`${badDates} row(s) skipped — unrecognized date format`)
     // Never overwrite an existing entry for the same flock+date — matches the
     // manual-entry duplicate guard above ("edit it instead").
     const { data: existing } = await supabase.from('vhl_egg_production')
