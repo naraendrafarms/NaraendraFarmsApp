@@ -4119,7 +4119,9 @@ export const BulkSalaryPage: React.FC = () => {
             {paidSel.size > 0 && (
               <Card className="mb-3 !bg-brand-50 !border-brand-200">
                 <div className="flex flex-wrap gap-3 items-end">
-                  <span className="text-sm font-medium text-brand-800 self-center">{paidSel.size} selected</span>
+                  <span className="text-sm font-medium text-brand-800 self-center">
+                    {paidSel.size} selected · Total {inr((salaries as any[]??[]).filter(r=>paidSel.has(r.id)).reduce((s,r)=>s+(r.net_salary??0),0))}
+                  </span>
                   <Input label="UTR / CMS Reference" value={bulkRef} onChange={e=>setBulkRef(e.target.value)} className="w-56" />
                   <DateInput label="Payment Date" value={bulkDate} onChange={e=>setBulkDate(e.target.value)} />
                   <Select label="Paid From Bank Account" value={bulkBankAccountId} onChange={e=>setBulkBankAccountId(e.target.value)}
@@ -4191,7 +4193,9 @@ export const BulkSalaryPage: React.FC = () => {
               {cashSel.size > 0 && (
                 <Card className="mb-3 !bg-brand-50 !border-brand-200">
                   <div className="flex flex-wrap gap-3 items-end">
-                    <span className="text-sm font-medium text-brand-800 self-center">{cashSel.size} selected</span>
+                    <span className="text-sm font-medium text-brand-800 self-center">
+                      {cashSel.size} selected · Total {inr((salaries as any[]??[]).filter(r=>cashSel.has(r.id)).reduce((s,r)=>s+(r.net_salary??0),0))}
+                    </span>
                     <Input label="Voucher / Reference (optional)" value={cashBulkRef} onChange={e=>setCashBulkRef(e.target.value)} className="w-56" />
                     <DateInput label="Payment Date" value={cashBulkDate} onChange={e=>setCashBulkDate(e.target.value)} />
                     <Button loading={bulkMarkPaidMut.isPending}
