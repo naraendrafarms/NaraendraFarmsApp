@@ -3550,6 +3550,9 @@ export const PayslipGeneratorPage: React.FC = () => {
 export const BulkSalaryPage: React.FC = () => {
   const qc = useQueryClient()
   const today = new Date()
+  // The imported `today()` util (IST-aware) is shadowed by the `today` Date
+  // above throughout this component — use this alias where a date string default is needed.
+  const todayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
   const [tab, setTab] = useState<'attendance'|'salary'|'payment'>('attendance')
   const [filterFarm, setFilterFarm] = useState<string[]>([])
@@ -3558,12 +3561,23 @@ export const BulkSalaryPage: React.FC = () => {
   const { map: skillWages } = useSkillWages()
   const [absentMap, setAbsentMap] = useState<Record<string,string>>({})
   const [tdsMap, setTdsMap] = useState<Record<string,string>>({})
+  const [paidSel, setPaidSel] = useState<Set<string>>(new Set())
+  const [bulkRef, setBulkRef] = useState('')
+  const [bulkDate, setBulkDate] = useState(todayStr())
+  const [bulkBankAccountId, setBulkBankAccountId] = useState('')
+  const [cashSel, setCashSel] = useState<Set<string>>(new Set())
+  const [cashBulkRef, setCashBulkRef] = useState('')
+  const [cashBulkDate, setCashBulkDate] = useState(todayStr())
 
   const monthDate = month + '-01'
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] }
+  })
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts_list'],
+    queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,account_name,bank_name').order('account_name'); return data ?? [] }
   })
   const { data: employees } = useQuery({
     queryKey: ['employees_bulk', filterFarm],
@@ -3613,6 +3627,54 @@ export const BulkSalaryPage: React.FC = () => {
       if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['bulk_salary', monthDate, filterFarm] }); toast.success('Payment account updated for this month') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  // Mark many employees Paid at once with one shared reference/date — e.g. a
+  // single CMS/NEFT batch transaction that settled N employees' salaries in
+  // one go. Mirrors the vendor-side "Link N Bill(s)" bank-reconciliation
+  // pattern, but as a standalone action instead of requiring a bank import.
+  const bulkMarkPaidMut = useMutation({
+    mutationFn: async ({ ids, mode, ref, date, bankAccountId }: { ids: string[]; mode: string; ref: string; date: string; bankAccountId: string | null }) => {
+      const rows = (salaries as any[] ?? []).filter(r => ids.includes(r.id))
+      for (const r of rows) {
+        const netAmt = r.net_salary ?? 0
+        const empName = r.employees?.name ?? ''
+        const { error } = await supabase.from('salary_monthly').update({
+          is_paid: true, payment_mode: mode, payment_ref: ref || null,
+          bank_account_id: mode.toLowerCase() !== 'cash' ? bankAccountId : null,
+          paid_date: date || todayStr(),
+        }).eq('id', r.id)
+        if (error) throw new Error(`${empName}: ${error.message}`)
+        if (r.is_paid) {
+          await supabase.from('cash_book').delete().eq('salary_monthly_id', r.id)
+          await supabase.from('bank_transactions').delete().eq('salary_monthly_id', r.id)
+        }
+        if (netAmt > 0) {
+          await supabase.from('cash_book').insert({
+            txn_date: date || todayStr(), txn_type: 'payment', category: 'salary',
+            description: `Salary — ${empName} (${month})`,
+            party_name: empName || null, amount_in: 0, amount_out: netAmt,
+            payment_mode: toCbMode(mode), salary_monthly_id: r.id, reference_no: ref || null,
+          })
+          if (mode.toLowerCase() !== 'cash' && bankAccountId) {
+            await supabase.from('bank_transactions').insert({
+              bank_account_id: bankAccountId,
+              txn_date: date || todayStr(), txn_type: 'Debit', category: 'Salary Payment',
+              reference_no: ref || null, description: `Salary — ${empName} (${month})`,
+              amount: netAmt, salary_monthly_id: r.id,
+            })
+          }
+        }
+      }
+    },
+    onSuccess: (_d, vars) => {
+      toast.success(`Marked ${vars.ids.length} employee(s) Paid`)
+      qc.invalidateQueries({ queryKey: ['bulk_salary', monthDate, filterFarm] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      setPaidSel(new Set()); setBulkRef(''); setCashSel(new Set()); setCashBulkRef('')
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -4054,12 +4116,37 @@ export const BulkSalaryPage: React.FC = () => {
 
           <div>
             <h3 className="font-semibold text-gray-800 mb-3">Bank Transfers</h3>
+            {paidSel.size > 0 && (
+              <Card className="mb-3 !bg-brand-50 !border-brand-200">
+                <div className="flex flex-wrap gap-3 items-end">
+                  <span className="text-sm font-medium text-brand-800 self-center">{paidSel.size} selected</span>
+                  <Input label="UTR / CMS Reference" value={bulkRef} onChange={e=>setBulkRef(e.target.value)} className="w-56" />
+                  <DateInput label="Payment Date" value={bulkDate} onChange={e=>setBulkDate(e.target.value)} />
+                  <Select label="Paid From Bank Account" value={bulkBankAccountId} onChange={e=>setBulkBankAccountId(e.target.value)}
+                    placeholder="— Select —" options={(bankAccounts??[]).map((b:any)=>({value:b.id,label:`${b.bank_name} — ${b.account_name}`}))} className="w-64" />
+                  <Button loading={bulkMarkPaidMut.isPending}
+                    onClick={()=>{
+                      if(!bulkBankAccountId){ toast.error('Select which bank account this was paid from'); return }
+                      bulkMarkPaidMut.mutate({ ids:[...paidSel], mode:'Bank Transfer', ref:bulkRef, date:bulkDate, bankAccountId:bulkBankAccountId })
+                    }}>
+                    Mark {paidSel.size} as Paid
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={()=>setPaidSel(new Set())}>Clear</Button>
+                </div>
+              </Card>
+            )}
             <Card padding={false}>
               <Table>
                 <thead><tr>
+                  <Th><input type="checkbox"
+                    checked={paidSel.size>0 && paidSel.size===(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0 && !r.is_paid).length}
+                    onChange={()=>{
+                      const ids=(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0 && !r.is_paid).map(r=>r.id)
+                      setPaidSel(paidSel.size===ids.length ? new Set() : new Set(ids))
+                    }} className="rounded" /></Th>
                   <Th>Code</Th><Th>Name</Th><Th>Payment Mode</Th>
                   <Th>Account No</Th><Th>IFSC</Th><Th right>Net Payable</Th>
-                  <Th>This Month — Deposit Into</Th>
+                  <Th>This Month — Deposit Into</Th><Th>Status</Th>
                 </tr></thead>
                 <tbody>
                   {(salaries as any[]??[]).filter(r=>((r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&(r.net_salary??0)>0).map((r:any)=>{
@@ -4068,7 +4155,9 @@ export const BulkSalaryPage: React.FC = () => {
                     const overrideHolder=r.override_account_emp_id?(employees as any[]??[]).find((e:any)=>e.id===r.override_account_emp_id):null
                     const holder=overrideHolder??(isShared?(employees as any[]??[]).find((e:any)=>e.id===emp.shared_with_emp_id):null)
                     return (
-                      <tr key={r.id} className="hover:bg-gray-50">
+                      <tr key={r.id} className={`hover:bg-gray-50 ${paidSel.has(r.id)?'bg-brand-50':''}`}>
+                        <Td>{!r.is_paid && <input type="checkbox" checked={paidSel.has(r.id)}
+                          onChange={()=>setPaidSel(s=>{const n=new Set(s); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})} className="rounded" />}</Td>
                         <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
                         <Td className="font-medium">{emp.name}</Td>
                         <Td><Badge color={holder?'yellow':'green'}>{holder?'Shared':'Own Account'}</Badge></Td>
@@ -4085,11 +4174,12 @@ export const BulkSalaryPage: React.FC = () => {
                             ]}
                             className="min-w-[220px]" />
                         </Td>
+                        <Td><Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge></Td>
                       </tr>
                     )
                   })}
                   {!(salaries as any[]??[]).some((r:any)=>(r.employees?.payment_mode??'own_account')!=='cash'||r.override_account_emp_id)&&
-                    <tr><Td colSpan={7} className="text-center text-gray-400 py-4">No bank transfer employees</Td></tr>}
+                    <tr><Td colSpan={9} className="text-center text-gray-400 py-4">No bank transfer employees</Td></tr>}
                 </tbody>
               </Table>
             </Card>
@@ -4098,18 +4188,43 @@ export const BulkSalaryPage: React.FC = () => {
           {(salaries as any[]??[]).some(r=>(r.employees?.payment_mode??'own_account')==='cash') && (
             <div>
               <h3 className="font-semibold text-gray-800 mb-3">Cash Payments</h3>
+              {cashSel.size > 0 && (
+                <Card className="mb-3 !bg-brand-50 !border-brand-200">
+                  <div className="flex flex-wrap gap-3 items-end">
+                    <span className="text-sm font-medium text-brand-800 self-center">{cashSel.size} selected</span>
+                    <Input label="Voucher / Reference (optional)" value={cashBulkRef} onChange={e=>setCashBulkRef(e.target.value)} className="w-56" />
+                    <DateInput label="Payment Date" value={cashBulkDate} onChange={e=>setCashBulkDate(e.target.value)} />
+                    <Button loading={bulkMarkPaidMut.isPending}
+                      onClick={()=>bulkMarkPaidMut.mutate({ ids:[...cashSel], mode:'Cash', ref:cashBulkRef, date:cashBulkDate, bankAccountId:null })}>
+                      Mark {cashSel.size} as Paid
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={()=>setCashSel(new Set())}>Clear</Button>
+                  </div>
+                </Card>
+              )}
               <Card padding={false}>
                 <Table>
-                  <thead><tr><Th>Code</Th><Th>Name</Th><Th>Site</Th><Th right>Net Payable</Th></tr></thead>
+                  <thead><tr>
+                    <Th><input type="checkbox"
+                      checked={cashSel.size>0 && cashSel.size===(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash' && !r.is_paid).length}
+                      onChange={()=>{
+                        const ids=(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash' && !r.is_paid).map(r=>r.id)
+                        setCashSel(cashSel.size===ids.length ? new Set() : new Set(ids))
+                      }} className="rounded" /></Th>
+                    <Th>Code</Th><Th>Name</Th><Th>Site</Th><Th right>Net Payable</Th><Th>Status</Th>
+                  </tr></thead>
                   <tbody>
                     {(salaries as any[]??[]).filter(r=>(r.employees?.payment_mode??'own_account')==='cash').map((r:any)=>{
                       const emp=r.employees??{}
                       return (
-                        <tr key={r.id} className="hover:bg-gray-50">
+                        <tr key={r.id} className={`hover:bg-gray-50 ${cashSel.has(r.id)?'bg-brand-50':''}`}>
+                          <Td>{!r.is_paid && <input type="checkbox" checked={cashSel.has(r.id)}
+                            onChange={()=>setCashSel(s=>{const n=new Set(s); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})} className="rounded" />}</Td>
                           <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
                           <Td className="font-medium">{emp.name}</Td>
                           <Td className="text-xs text-gray-500">{emp.farms?.name??'—'}</Td>
                           <Td right className="font-semibold text-green-700">{inr(r.net_salary??0)}</Td>
+                          <Td><Badge color={r.is_paid?'green':'gray'}>{r.is_paid?'Paid':'Pending'}</Badge></Td>
                         </tr>
                       )
                     })}
