@@ -946,6 +946,33 @@ const SECTIONS: Section[] = [
           { text: 'Each GRN row has a Print option (with letterhead/logo) matching invoice formatting used elsewhere.' },
         ]
       },
+      {
+        title: 'Pay multiple bills at once (Bulk Pay)',
+        path: 'Pending Payments → tick bill checkboxes',
+        steps: [
+          { text: 'Tick the checkboxes on several unpaid bills — a blue toolbar appears with Mode, Bank Account, Reference, and Date.' },
+          { text: 'It shows the live total for the selected bills. Click "Mark N as Paid" to settle them all as ONE real payment.' },
+          { text: 'This creates a single Bank Ledger entry for the whole batch (matching your real bank statement), not one row per bill.' },
+        ]
+      },
+      {
+        title: 'Vendor Advances — pay a supplier ahead of a bill',
+        path: 'Accounts → Vendor Advances / Pending Payments → Pay',
+        steps: [
+          { text: 'Accounts → Vendor Advances → Add Advance: record money paid to a supplier before any specific bill exists (cash or bank transfer). This posts once to Cash Book / Bank Ledger.' },
+          { text: 'When you later Pay a bill for that same vendor in Pending Payments, "Advance" appears as a payment mode (only when that vendor has an available advance balance).' },
+          { text: 'Selecting Advance and picking which advance to use adjusts the bill against it — no new cash/bank entry is created, since the money already moved when the advance was recorded.' },
+        ]
+      },
+      {
+        title: 'Recording miscellaneous bank transactions (bank charges, one-off advances)',
+        path: 'Accounts → Bank Ledger → Add Transaction',
+        steps: [
+          { text: 'Not everything has a voucher — bank charges, interest, or a one-off advance can be entered directly in Bank Ledger.' },
+          { text: 'Select the account, click Add Transaction, choose Debit/Credit, pick a Category (e.g. "Bank Charges"), optionally link a Party, enter amount and reference.' },
+          { text: 'For an advance TO an employee, use Employees → Advances instead (it tracks recovery against future salary). For a vendor advance, use Vendor Advances instead (it tracks recovery against future bills) — Bank Ledger direct entry is the fallback for things that don\'t fit any tracked category.' },
+        ]
+      },
     ],
     tips: [
       'Always record stock receipt before recording payment — the receipt confirms goods arrived.',
