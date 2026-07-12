@@ -3,7 +3,7 @@ import { Link, useLocation, Outlet, Navigate, useSearchParams, useNavigate } fro
 import {
   LayoutDashboard, Bird, Factory, Zap, Users, Settings,
   ChevronDown, ChevronRight, LogOut, Menu, X,
-  BarChart2, Database, Shield, ShoppingCart, BookOpen, Search, MessageCircle
+  BarChart2, Database, Shield, ShoppingCart, BookOpen, Search, MessageCircle, ListTodo
 } from 'lucide-react'
 import { useAuth, can, type Role } from '@/lib/auth'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -22,6 +22,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { label: 'Dashboard', icon: <LayoutDashboard size={18}/>, to: '/' },
+  { label: 'Tasks', icon: <ListTodo size={18}/>, to: '/tasks' },
   {
     label: 'Flock Management', icon: <Bird size={18}/>,
     children: [

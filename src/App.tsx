@@ -77,6 +77,7 @@ import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
 import { HelpGuidePage } from '@/pages/help/HelpGuide'
 import { ItemsMasterPage } from '@/pages/purchase/ItemsMaster'
 import { GRNPage } from '@/pages/purchase/GRNPage'
+import { TasksPage } from '@/pages/tasks/TasksPage'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -254,6 +255,7 @@ export const App: React.FC = () => {
             <Route path="import/mapper" element={<ExcelMapperPage />} />
             <Route path="help" element={<HelpGuidePage />} />
             <Route path="chat" element={<ChatPage />} />
+            <Route path="tasks" element={<TasksPage />} />
             <Route path="generators" element={<GeneratorsPage />} />
             <Route path="flocks/he-rate-register" element={<HERateRegisterPage />} />
             <Route path="bags" element={<BagsPage />} />

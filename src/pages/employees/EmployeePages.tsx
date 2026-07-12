@@ -18,6 +18,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } fro
 import toast from 'react-hot-toast'
 import { useAuth, can } from '@/lib/auth'
 import { parseFile } from '@/lib/parseFile'
+import { AssignTaskButton } from '@/components/tasks/AssignTaskButton'
+import { TaskBadge } from '@/components/tasks/TaskBadge'
 import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { LogoChip } from '@/components/Logo'
@@ -452,6 +454,12 @@ export const EmployeeList: React.FC = () => {
                     <div className="flex gap-1">
                       <button onClick={()=>openEdit(e)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
                       <button onClick={()=>{setSel(new Set([e.id]));setBulkConfirm(true)}} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                      <AssignTaskButton small label="Task"
+                        linkedTable="employees" linkedId={e.id}
+                        linkedLabel={`Employee: ${e.name}`}
+                        defaultTitle={`Task for ${e.name}`}
+                      />
+                      <TaskBadge linkedTable="employees" linkedId={e.id} />
                     </div>
                   </Td>
                 </tr>

@@ -6,6 +6,8 @@ import {
   Card, SectionHeader, Spinner, Badge, Select, DateInput
 } from '@/components/ui'
 import { AlertCircle, Search, Link2, X, CheckCircle2, Trash2, Pencil, Plus } from 'lucide-react'
+import { AssignTaskButton } from '@/components/tasks/AssignTaskButton'
+import { TaskBadge } from '@/components/tasks/TaskBadge'
 import * as XLSX from 'xlsx'
 import { Download } from 'lucide-react'
 
@@ -914,7 +916,12 @@ export const PendingPaymentsPage: React.FC = () => {
                         onChange={() => toggleSelect(r.id)}
                       />
                     </td>
-                    <td className="px-3 py-2 font-medium text-gray-800 max-w-[160px] truncate">{r.vendor_name}</td>
+                    <td className="px-3 py-2 font-medium text-gray-800 max-w-[160px] truncate">
+                      <div className="flex items-center gap-1.5">
+                        {r.vendor_name}
+                        <TaskBadge linkedTable="pending_payments" linkedId={r.id} />
+                      </div>
+                    </td>
                     <td className="px-2 py-2 text-gray-500">{r.category ?? '—'}</td>
                     <td className="px-2 py-2 text-gray-700">{r.invoice_no ?? '—'}</td>
                     <td className="px-2 py-2 text-gray-600">{r.invoice_date ? fmtDate(r.invoice_date) : '—'}</td>
@@ -942,6 +949,11 @@ export const PendingPaymentsPage: React.FC = () => {
                           className="p-1 text-gray-400 hover:text-blue-600">
                           <Pencil size={13} />
                         </button>
+                        <AssignTaskButton small label="Task"
+                          linkedTable="pending_payments" linkedId={r.id}
+                          linkedLabel={`Bill: ${r.vendor_name} — ${r.invoice_no ?? r.grn_no ?? ''}`}
+                          defaultTitle={`Follow up: ${r.vendor_name} — ${r.invoice_no ?? r.grn_no ?? ''}`}
+                        />
                       </div>
                     </td>
                   </tr>
