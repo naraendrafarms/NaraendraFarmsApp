@@ -34,7 +34,16 @@ export const ChatBody: React.FC<{ onClose?: () => void; active: boolean; initial
   })
   const userMap = useMemo(() => Object.fromEntries(users.map(u => [u.id, u])), [users])
 
-  const { data: groups = [] } = useQuery({
+  // Raw group rows — deliberately NOT resolving the DM counterpart's name
+  // here. `users` (and the userMap it builds) loads as a separate query, and
+  // if this query resolved first, baking `title` into the cached result
+  // would freeze it at the "User" fallback forever: the queryKey doesn't
+  // depend on `users`, so nothing would ever refetch it once userMap filled
+  // in (only the 8s poll or a full remount happened to paper over it before,
+  // which is why a manual refresh "fixed" it). Keep the raw otherId and
+  // resolve the title at render time instead — see `groupsWithTitles` below,
+  // which recomputes automatically the instant userMap is ready.
+  const { data: rawGroups = [] } = useQuery({
     queryKey: ['chat_groups', myId],
     enabled: active && !!myId,
     refetchInterval: active ? 8000 : false,
@@ -53,13 +62,17 @@ export const ChatBody: React.FC<{ onClose?: () => void; active: boolean; initial
       return (groupRows as ChatGroupRow[] ?? []).map(g => {
         const memberIds = (members ?? []).filter(m => m.group_id === g.id).map(m => m.user_id)
         const otherId = memberIds.find(id => id !== myId)
-        const title = g.is_dm ? (userMap[otherId ?? '']?.full_name ?? 'User') : (g.name ?? 'Group')
         const last = lastByGroup[g.id]
         const unread = last && last.created_at > (readMap[g.id] ?? '') && last.sender_id !== myId
-        return { id: g.id, title, is_dm: g.is_dm, last, unread }
+        return { id: g.id, name: g.name, is_dm: g.is_dm, otherId, last, unread }
       }).sort((a, b) => (b.last?.created_at ?? '').localeCompare(a.last?.created_at ?? ''))
     }
   })
+
+  const groups = useMemo(() => rawGroups.map((g: any) => ({
+    ...g,
+    title: g.is_dm ? (userMap[g.otherId ?? '']?.full_name ?? 'User') : (g.name ?? 'Group'),
+  })), [rawGroups, userMap])
 
   // Jumping here from a popup reply toast (clicked instead of replied inline)
   // — select that specific conversation once its title is known from `groups`.
