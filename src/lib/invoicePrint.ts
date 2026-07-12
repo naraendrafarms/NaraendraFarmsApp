@@ -48,6 +48,8 @@ const CSS = `
   .label{font-weight:700;font-size:10px;color:#555;text-transform:uppercase}
   .box{border:1px solid #bbb;padding:6px;border-radius:3px;margin-top:3px}
   .sign-row{display:flex;justify-content:space-between;margin-top:30px;padding-top:8px;border-top:1px solid #aaa}
+  .sign-row-4{display:flex;justify-content:space-between;gap:12px;margin-top:40px;padding-top:8px;border-top:1px solid #aaa}
+  .sign-row-4 > div{flex:1;text-align:center;padding-top:30px;border-top:1px solid #aaa;font-weight:700;font-size:10px}
   .note{font-size:9px;color:#666;margin-top:4px}
   @media print{body{padding:10px}button{display:none!important}}
 `
@@ -733,6 +735,100 @@ export function printPurchaseIntent(d: PurchaseIntentRecord, lines: PurchaseInte
     <div style="text-align:right"><div class="label">Approved By</div><div class="box" style="min-width:160px">${d.approved_by ?? ''}</div></div>
   </div>
   ${d.remarks ? `<div class="note section">Remarks: ${d.remarks}</div>` : ''}
+  </body></html>`
+
+  openPrint(html)
+}
+
+// ── Daily Payment Planning — company letterhead + payment table + summary
+// boxes + 4-way signature row, matching the "Daily Payment Details" format. ─
+export interface PaymentPlanningRow {
+  sno: number
+  vendor_name: string
+  credit_limit_days: number | null
+  invoice_amount: number
+  payable_amount: number
+  disc_tds: number
+  grn_date: string | null
+  invoice_date: string | null
+  days: number | string
+}
+
+export function printPaymentPlanning(opts: {
+  planDate: string
+  rows: PaymentPlanningRow[]
+  totals: { invoice: number; payable: number; discTds: number }
+  bankBalance: number
+  bankBalanceAfter: number
+  needToReceive: number
+}) {
+  const { planDate, rows, totals, bankBalance, bankBalanceAfter, needToReceive } = opts
+
+  const bodyRows = rows.map(r => `<tr>
+    <td class="tc">${r.sno}</td>
+    <td>${r.vendor_name}</td>
+    <td class="tc">${r.credit_limit_days ?? 0}</td>
+    <td class="tr">${inr(r.invoice_amount)}</td>
+    <td class="tr">${inr(r.payable_amount)}</td>
+    <td class="tr" style="color:#c00">${inr(r.disc_tds)}</td>
+    <td class="tc">${r.grn_date ? fmt(r.grn_date) : '—'}</td>
+    <td class="tc">${r.invoice_date ? fmt(r.invoice_date) : '—'}</td>
+    <td class="tc">${r.days}</td>
+  </tr>`).join('')
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>Daily Payment Details ${fmt(planDate)}</title>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+  <div class="header">
+    <div>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+      <div class="sub">${CO.addr1}</div>
+      <div class="sub">${CO.addr2}</div>
+      <div class="sub">GSTIN: ${CO.gstin} | State: ${CO.state} (${CO.stateCode})</div>
+      <div class="sub">Ph: ${CO.phone}</div>
+    </div>
+    <div class="header-right">
+      <h2>Daily Payment Details</h2>
+      <table style="margin:0;font-size:10px;width:auto;float:right">
+        <tr><td class="label" style="border:none;padding:2px 4px">Date</td><td style="border:none;padding:2px 4px;font-weight:700">${fmt(planDate)}</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <table>
+      <thead><tr>
+        <th>S.No</th><th>Vendor Name</th><th>Credit Limit</th>
+        <th>Invoice Amount</th><th>Payable Amount</th><th>Discount / TDS</th>
+        <th>GRN Date</th><th>Invoice Date</th><th>No.Of days</th>
+      </tr></thead>
+      <tbody>
+        ${bodyRows}
+        <tr class="total-row">
+          <td colspan="3" class="tr">Total Payments</td>
+          <td class="tr">${inr(totals.invoice)}</td>
+          <td class="tr">${inr(totals.payable)}</td>
+          <td class="tr">${inr(totals.discTds)}</td>
+          <td colspan="3"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section" style="width:60%;margin:16px auto 0">
+    <table style="margin:0">
+      <tr><td class="bold">Bank Balance</td><td class="tr bold">${inr(bankBalance)}</td></tr>
+      <tr><td class="bold">Bank Balance After Payments</td><td class="tr bold">${inr(bankBalanceAfter)}</td></tr>
+      <tr><td class="bold">Need to Receive Amount</td><td class="tr bold">${inr(needToReceive)}</td></tr>
+    </table>
+  </div>
+
+  <div class="sign-row-4">
+    <div>Prepared By</div>
+    <div>Checked By</div>
+    <div>Verified By</div>
+    <div>Authorized Signatory</div>
+  </div>
   </body></html>`
 
   openPrint(html)

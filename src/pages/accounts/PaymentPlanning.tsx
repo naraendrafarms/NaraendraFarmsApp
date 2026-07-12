@@ -6,6 +6,7 @@ import { Card, CardHeader, Button, DateInput, Input, Modal, Spinner, Table, Th, 
 import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
+import { printPaymentPlanning } from '@/lib/invoicePrint'
 
 const COMPANY_NAME = 'Naraendra Farms'
 const COMPANY_ADDR1 = '5-9-22/21 , JVR Amrit Enclave, Roshanlal Residency ,'
@@ -326,78 +327,28 @@ export const PaymentPlanningPage: React.FC = () => {
       const code = party.account_no ? String(party.account_no).slice(-4) : ''
       const invoice = p.invoice_amount ?? 0
       const payable = p.net_payable ?? invoice
-      const discTds = invoice - payable
-      const days = p.grn_date ? daysBetween(p.grn_date, planDate) : ''
-      return `<tr>
-        <td class="tc">${i + 1}</td>
-        <td>${p.vendor_name}${code ? ' - ' + code : ''}</td>
-        <td class="tc">${p.credit_limit_days ?? 0}</td>
-        <td class="tr">₹${inrNum(invoice)}</td>
-        <td class="tr">₹${inrNum(payable)}</td>
-        <td class="tr" style="color:#c00">₹${inrNum(discTds)}</td>
-        <td class="tc">${p.grn_date ? fmtDate(p.grn_date) : '-'}</td>
-        <td class="tc">${p.invoice_date ? fmtDate(p.invoice_date) : '-'}</td>
-        <td class="tc">${days}</td>
-      </tr>`
-    }).join('')
+      return {
+        sno: i + 1,
+        vendor_name: `${p.vendor_name}${code ? ' - ' + code : ''}`,
+        credit_limit_days: p.credit_limit_days ?? 0,
+        invoice_amount: invoice,
+        payable_amount: payable,
+        disc_tds: invoice - payable,
+        grn_date: p.grn_date ?? null,
+        invoice_date: p.invoice_date ?? null,
+        days: p.grn_date ? daysBetween(p.grn_date, planDate) : '',
+      }
+    })
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Daily Payment Details</title>
-      <style>
-        *{box-sizing:border-box;margin:0;padding:0}
-        body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;padding:20px}
-        table{width:100%;border-collapse:collapse}
-        th,td{border:1px solid #333;padding:6px 8px}
-        th{background:#f5f5f5;font-weight:700;text-align:center}
-        .tc{text-align:center}
-        .tr{text-align:right}
-        .title{text-align:center;font-size:20px;font-weight:700;padding:10px;border:1px solid #333}
-        .subtitle{text-align:center;font-size:15px;font-weight:700}
-        .totalrow td{font-weight:700;background:#fafafa}
-        .summary{width:60%;margin:24px auto 0}
-        .summary td{border:1px solid #333;padding:10px 14px;font-weight:700;text-align:center}
-        @media print{button{display:none!important}}
-      </style></head><body>
-      <table style="margin-bottom:0">
-        <tr><td colspan="6" class="title">M/S Naraendra Farms ${currentFY()}</td></tr>
-        <tr>
-          <td colspan="4" class="subtitle" style="border:1px solid #333">Daily Payment Details</td>
-          <td class="tc" style="font-weight:700">Date :</td>
-          <td class="tc" style="font-weight:700">${fmtDate(planDate)}</td>
-        </tr>
-      </table>
-      <table style="margin-top:0">
-        <thead><tr>
-          <th>S.No</th><th>Vendor Name</th><th>Credit Limit</th>
-          <th>Invoice Amount</th><th>Payable Amount</th><th>Discount / TDS /</th>
-          <th>GRN Date</th><th>Invoice Date</th><th>No.Of days</th>
-        </tr></thead>
-        <tbody>
-          ${rows}
-          <tr class="totalrow">
-            <td colspan="3" class="tr">Total Payments</td>
-            <td class="tr">₹${inrNum(totals.invoice)}</td>
-            <td class="tr">₹${inrNum(totals.payable)}</td>
-            <td class="tr">₹${inrNum(totals.discTds)}</td>
-            <td colspan="3"></td>
-          </tr>
-        </tbody>
-      </table>
-      <table class="summary">
-        <tr><td>Bank Balance</td><td>₹${inrNum(kotakBal)}</td></tr>
-        <tr><td>Bank Balance After Payments</td><td>₹${inrNum(kotakBal - totals.payable)}</td></tr>
-        <tr><td>Need to Receive Amount</td><td>₹${inrNum(totalReceivable)}</td></tr>
-      </table>
-      </body></html>`
-
-    const win = window.open('', '_blank', 'width=1000,height=750')
-    if (!win) { toast.error('Allow pop-ups to print'); return }
-    win.document.write(html)
-    win.document.close()
-    win.focus()
-    setTimeout(() => win.print(), 400)
+    printPaymentPlanning({
+      planDate,
+      rows,
+      totals,
+      bankBalance: kotakBal,
+      bankBalanceAfter: kotakBal - totals.payable,
+      needToReceive: totalReceivable,
+    })
   }
-
-  const inrNum = (n: number) => (n ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   const overdue = (payments ?? []).filter((p: any) => p.pay_before_date && p.pay_before_date < today())
   const dueToday = (payments ?? []).filter((p: any) => p.pay_before_date === today())
