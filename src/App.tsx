@@ -78,6 +78,7 @@ import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
 import { HelpGuidePage } from '@/pages/help/HelpGuide'
 import { ItemsMasterPage } from '@/pages/purchase/ItemsMaster'
 import { GRNPage } from '@/pages/purchase/GRNPage'
+import { PurchaseIntentPage } from '@/pages/purchase/PurchaseIntentPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
 import { Spinner } from '@/components/ui'
 
@@ -154,6 +155,7 @@ export const App: React.FC = () => {
             <Route path="feed/transfer" element={<FeedTransfer />} />
 
             {/* Purchase */}
+            <Route path="purchase/intent" element={<PurchaseIntentPage />} />
             <Route path="purchase/items" element={<ItemsMasterPage />} />
             <Route path="purchase/orders" element={<PurchaseOrdersPage />} />
             <Route path="purchase/grn" element={<GRNPage />} />

@@ -144,6 +144,7 @@ const NAV: NavItem[] = [
   {
     label: 'Purchase', icon: <ShoppingCart size={18}/>,
     children: [
+      { label: 'Purchase Intent', to: '/purchase/intent' },
       { label: 'Items Master',    to: '/purchase/items' },
       { label: 'Suppliers',       to: '/masters/parties' },
       { label: 'Purchase Orders', to: '/purchase/orders' },
