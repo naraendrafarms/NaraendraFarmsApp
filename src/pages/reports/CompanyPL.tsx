@@ -215,6 +215,19 @@ export const CompanyPL: React.FC = () => {
     }
   })
 
+  // Bank charges — recorded directly in Bank Ledger (no GRN/salary/farm-expense
+  // voucher), so unless pulled in here they never affected P&L at all.
+  const { data: bankChargesData } = useQuery({
+    queryKey: ['cpl_bank_charges', fy],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_transactions')
+        .select('txn_date,amount')
+        .eq('category', 'Bank Charges').eq('txn_type', 'Debit')
+        .gte('txn_date', start).lte('txn_date', end)
+      return data ?? []
+    }
+  })
+
   // Closing stock: all-time GRN, production usage, adjustments (cumulative up to FY end)
   const { data: allGrnStock } = useQuery({
     queryKey: ['cpl_stock_grn'],
@@ -296,6 +309,7 @@ export const CompanyPL: React.FC = () => {
     return map
   }, [salaryData])
   const farmExpByMonth = useMemo(() => sumByMonth(farmExpData ?? [], 'expense_date', 'amount'), [farmExpData])
+  const bankChargesByMonth = useMemo(() => sumByMonth(bankChargesData ?? [], 'txn_date', 'amount'), [bankChargesData])
 
   // Stock value as of a cutoff date (used for both FY-end closing and FY-start opening)
   const stockValueAsOf = useMemo(() => (cutoff: string) => {
@@ -352,11 +366,12 @@ export const CompanyPL: React.FC = () => {
     const elec       = elecByMonth[m] ?? 0
     const salary     = salaryByMonth[m] ?? 0
     const farmExp    = farmExpByMonth[m] ?? 0
-    const totalCost  = chickCost + feed + med + elec + salary + farmExp
+    const bankCharges = bankChargesByMonth[m] ?? 0
+    const totalCost  = chickCost + feed + med + elec + salary + farmExp + bankCharges
     const net        = totalRev - totalCost
 
-    return { m, label: monthLabel(m), heAmt, nheEgg, chickSale, cull, otherInc, totalRev, chickCost, feed, med, elec, salary, farmExp, totalCost, net, closingStock: 0 }
-  }), [months, heByMonth, nheEggByMonth, chickByMonth, cullByMonth, otherIncByMonth, chickCostByMonth, feedByMonth, medByMonth, elecByMonth, salaryByMonth, farmExpByMonth])
+    return { m, label: monthLabel(m), heAmt, nheEgg, chickSale, cull, otherInc, totalRev, chickCost, feed, med, elec, salary, farmExp, bankCharges, totalCost, net, closingStock: 0 }
+  }), [months, heByMonth, nheEggByMonth, chickByMonth, cullByMonth, otherIncByMonth, chickCostByMonth, feedByMonth, medByMonth, elecByMonth, salaryByMonth, farmExpByMonth, bankChargesByMonth])
 
   // ── ANNUAL TOTALS ─────────────────────────────────────────────────────────
   const totals = useMemo(() => {
@@ -373,9 +388,10 @@ export const CompanyPL: React.FC = () => {
       elec: acc.elec + r.elec,
       salary: acc.salary + r.salary,
       farmExp: acc.farmExp + r.farmExp,
+      bankCharges: acc.bankCharges + r.bankCharges,
       totalCost: acc.totalCost + r.totalCost,
       net: acc.net + r.net,
-    }), { heAmt: 0, nheEgg: 0, chickSale: 0, cull: 0, otherInc: 0, totalRev: 0, chickCost: 0, feed: 0, med: 0, elec: 0, salary: 0, farmExp: 0, totalCost: 0, net: 0 })
+    }), { heAmt: 0, nheEgg: 0, chickSale: 0, cull: 0, otherInc: 0, totalRev: 0, chickCost: 0, feed: 0, med: 0, elec: 0, salary: 0, farmExp: 0, bankCharges: 0, totalCost: 0, net: 0 })
     // Stock adjustment: add closing stock (asset) and deduct opening stock
     // (prior FY's closing) so profit reflects only this year's stock movement.
     return {
@@ -404,6 +420,7 @@ export const CompanyPL: React.FC = () => {
       { label: 'Electricity', ...Object.fromEntries(rows.map(r => [r.label, r.elec])) },
       { label: 'Salary', ...Object.fromEntries(rows.map(r => [r.label, r.salary])) },
       { label: 'Farm Expenses', ...Object.fromEntries(rows.map(r => [r.label, r.farmExp])) },
+      { label: 'Bank Charges', ...Object.fromEntries(rows.map(r => [r.label, r.bankCharges])) },
       { label: 'TOTAL COST', ...Object.fromEntries(rows.map(r => [r.label, r.totalCost])) },
       { label: 'NET PROFIT / LOSS', ...Object.fromEntries(rows.map(r => [r.label, r.net])) },
       // Stock-adjustment lines shown on screen — the export used to omit
@@ -441,6 +458,7 @@ export const CompanyPL: React.FC = () => {
     { label: 'Electricity',    key: 'elec',      style: 'cost' },
     { label: 'Salary',         key: 'salary',    style: 'cost' },
     { label: 'Farm Expenses',  key: 'farmExp',   style: 'cost' },
+    { label: 'Bank Charges',   key: 'bankCharges', style: 'cost' },
     { label: 'TOTAL COST',     key: 'totalCost', style: 'total-cost' },
     { label: 'Add: Closing Stock (Asset)', key: 'closingStock', style: 'stock', annualOnly: true },
     { label: 'Less: Opening Stock', key: 'openingStock', style: 'stock', annualOnly: true },
@@ -490,6 +508,7 @@ export const CompanyPL: React.FC = () => {
     { label: 'Electricity',     value: totals.elec },
     { label: 'Salary',          value: totals.salary },
     { label: 'Farm Expenses',   value: totals.farmExp },
+    { label: 'Bank Charges',    value: totals.bankCharges },
     { label: 'Less: Closing Stock', value: -closingStockValue },
   ]
 
