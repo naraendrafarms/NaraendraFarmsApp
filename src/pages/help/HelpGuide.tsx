@@ -3,13 +3,18 @@ import {
   BookOpen, Bird, Calendar, ArrowRightLeft, ShoppingCart, Users, Zap,
   Package, FileSpreadsheet, BarChart2, Settings, ChevronRight, ChevronDown,
   AlertCircle, CheckCircle, Info, ArrowRight, Hash, MapPin, CreditCard,
-  Sparkles, Clock, Receipt, FileText, Egg, Search, X
+  Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-07-06'
+const LAST_UPDATED = '2026-07-12'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-12', tag: 'New',      text: 'Tasks module added (new "Tasks" tab in the sidebar) — admin tasks, monthly compliance deadlines (GST/TDS/PF/ESI) with auto-recurrence, and daily team task assignment. Assign a task directly from Pending Payments or Employee List with an "Assign Task" button; a "My Tasks" toggle and a Dashboard widget show what is assigned to you. Assigning/reassigning a task now pops up a live notification for the person it is assigned to.' },
+  { date: '2026-07-12', tag: 'Improved', text: 'Discussions (Chat): new messages now show a real popup card with the sender and message text and an inline reply box — reply without opening the chat panel, or tap the message to jump into that conversation. Previously only a small red dot appeared on the chat icon.' },
+  { date: '2026-07-12', tag: 'Fix',      text: 'Discussions (Chat): a conversation could show "User" instead of the real person\'s name the first time you opened it (only correcting itself on refresh). Fixed a data-loading race condition — names now resolve correctly every time.' },
+  { date: '2026-07-12', tag: 'Improved', text: 'Header search is now much more powerful — in addition to finding pages, it searches live records: employees, flocks, parties/suppliers, bills/GRN, tasks, and sites. Results are grouped "Pages" vs "Records" and jump straight to the right place.' },
+  { date: '2026-07-12', tag: 'Fix',      text: 'Audit Log: 12 tables that were missing the audit trigger entirely now have it attached — chat messages, salary abstract/allocation, feed stock adjustments, stock ledger, bank accounts, invoice series, opening balances, CMS uploads, HE dispatch line items, NHE sale line items, and HE rate register.' },
   { date: '2026-07-06', tag: 'New',      text: 'Help Guide: Full "VHL Module" section added — setup, Daily Entry vs Bulk (Shed-wise) Entry, Medicine, Egg Production billing, and Dashboard.' },
   { date: '2026-07-06', tag: 'Fix',      text: 'VHL Bulk (Shed-wise) Daily Entry was silently skipping any shed row where only Opening was entered (e.g. a first-day placement with no eggs/feed yet) — it never saved. Fixed.' },
   { date: '2026-07-06', tag: 'New',      text: 'VHL Flocks and VHL Dashboard had no Edit option and no links anywhere. Added an Edit button on VHL Flocks (breed/status/placement/placed counts), and flock rows/cards now link straight through to Daily Entry. VHL Flocks also now shows live Current F/M birds from the latest Daily Entry.' },
@@ -611,11 +616,21 @@ const SECTIONS: Section[] = [
           { text: 'Filter by date range and category.' },
         ]
       },
+      {
+        title: 'Bank Ledger',
+        path: 'Accounts → Bank Ledger',
+        steps: [
+          { text: 'Shows every real bank movement — vendor bill payments, salary batches, and other transfers — per bank account.' },
+          { text: 'Import Statement tab lets you import your real bank CSV; imported rows can be "linked" to one or more pending vendor bills so the app matches your actual statement instead of fabricating separate lines.' },
+          { text: 'Manage Bank Accounts lets you add/edit the accounts this ledger tracks.' },
+        ]
+      },
     ],
     tips: [
       'Sales Invoice Register = outward (what you issued). Purchase Invoice Register = inward (what you received from suppliers).',
       'Cash Book entries from sales are created automatically — do not enter them again manually.',
       'To fix an invoice counter (e.g. HHF got ahead), go to Accounts → Invoice Series / Counters.',
+      'Bank Ledger should always show one row per real bank transaction — if a batch payment (like Bulk Salary) ever shows multiple rows for what was one real transfer, use Bulk Salary Payment (not one-by-one marking) to avoid that.',
     ]
   },
 
@@ -661,11 +676,40 @@ const SECTIONS: Section[] = [
           { text: 'Save.' },
         ]
       },
+      {
+        title: 'Pay many employees at once (Bulk Salary Payment)',
+        path: 'HR & Payroll → Bulk Salary → Payment tab',
+        steps: [
+          { text: 'Select the month. Bank Transfer and Cash Payment sections each list unpaid employees with a checkbox.' },
+          { text: 'Tick the employees you are paying in this batch (or use "select all"), enter one shared UTR/reference and date, and for bank transfers pick the bank account.' },
+          { text: 'The toolbar shows a live total of the selected employees\' net salary before you confirm.' },
+          { text: 'Click "Mark N as Paid" — one shared bank_transactions entry is created for the whole batch (matching how your real bank statement shows one line), and every selected employee is linked to it.' },
+          { text: 'Use the search box above the tables to find an employee quickly, and the small pencil icon on a Paid row to revert it back to Pending if you made a mistake.' },
+        ]
+      },
+      {
+        title: 'Statutory Compliance (TDS/GST/PF/ESI/PT)',
+        path: 'HR & Payroll → Statutory Compliance',
+        steps: [
+          { text: 'One page rolling up all statutory deductions/liabilities across employees for a selected month — PF, ESI, PT, and TDS.' },
+          { text: 'Use this before filing monthly PF/ESI returns or making the statutory payment.' },
+        ]
+      },
+      {
+        title: 'Salary CMS Export',
+        path: 'HR & Payroll → Salary CMS Export',
+        steps: [
+          { text: 'Generates the bank\'s CMS (bulk-payment) file for a month\'s salary, grouped by site with subtotals.' },
+          { text: 'Print option is also available with the same per-site subtotal + grand total layout.' },
+          { text: 'Rows with zero net salary are automatically excluded.' },
+        ]
+      },
     ],
     tips: [
       'PT (Professional Tax) is auto-calculated based on gross salary slabs — do not enter it manually.',
       'ESI is not deducted if gross salary exceeds ₹21,000.',
       'Use "Quick Generate All" to create salary for all employees of a farm in one step.',
+      'Prefer Bulk Salary Payment over marking employees Paid one at a time — it keeps Bank Ledger showing one real transaction per batch instead of one row per employee.',
     ]
   },
 
@@ -891,6 +935,15 @@ const SECTIONS: Section[] = [
           { text: 'The Vendors Master tab lists every unique vendor name from Purchase Orders, Payments, and Vendor Bank Details.' },
           { text: 'Click the trash icon on a row to delete ALL data for that vendor — POs, payments, and bank details are permanently removed.', warning: 'This cannot be undone. Use only when you want to completely remove a vendor and all their history.' },
           { text: 'To delete multiple vendors at once, tick checkboxes and click "Delete All Data for Selected".' },
+        ]
+      },
+      {
+        title: 'Items Master, GRN and Pending Payments (Purchase sidebar)',
+        path: 'Purchase → Items Master / GRN / Payments',
+        steps: [
+          { text: 'Items Master is the master list of purchasable items (feed ingredients, medicines, etc.) with reorder levels.' },
+          { text: 'GRN records goods actually received — from here a GRN can auto-create a linked entry in Pending Payments (Purchase → Payments), which is where you record and track vendor bill payments and see overdue bills.' },
+          { text: 'Each GRN row has a Print option (with letterhead/logo) matching invoice formatting used elsewhere.' },
         ]
       },
     ],
@@ -1142,6 +1195,116 @@ const SECTIONS: Section[] = [
     tips: [
       'Most reports have date range filters. Start with a broad range and narrow down.',
       'GST Reports → GSTR-1 and GSTR-3B tabs give you the exact figures needed for filing. Export and share with your CA.',
+    ]
+  },
+
+  // ── TASKS ─────────────────────────────────────────────────────────────────────
+  {
+    id: 'tasks',
+    icon: <ListTodo size={20}/>,
+    label: 'Tasks',
+    color: 'bg-orange-600',
+    intro: 'One module covers three needs: admin to-dos, monthly compliance deadlines (GST/TDS/PF/ESI) that repeat automatically, and daily team task assignment. Tasks can be created from the Tasks tab itself, or directly from other pages (Pending Payments, Employee List) so follow-ups stay linked to the record they are about.',
+    workflows: [
+      {
+        title: 'Create and assign a task',
+        path: 'Tasks → New Task (or "Assign Task" on Pending Payments / Employee List)',
+        steps: [
+          { text: 'Enter a Title and optional Description, pick a Type — Daily/Team, Compliance, or Admin.' },
+          { text: 'Assign to a specific app user (not the full employee list — only people who actually log into the app appear here), and/or a Team label and Site/Farm.' },
+          { text: 'Set a Due Date and Priority.' },
+          { text: 'For Compliance tasks, pick a Recurrence (e.g. "Monthly — 20th" for GSTR-3B, "Monthly — 7th" for TDS payment) — the next occurrence is created automatically the moment this one is marked Done.' },
+          { text: 'When assigned from Pending Payments or Employee List, the task is automatically linked back to that bill/employee — an open-task count badge appears next to that record.' },
+          { text: 'The person it is assigned to gets a live popup notification the instant it is assigned.' },
+        ]
+      },
+      {
+        title: 'Track your own daily work',
+        path: 'Tasks (defaults to "My Tasks") / Dashboard "My Tasks" widget',
+        steps: [
+          { text: 'The Tasks tab opens on "My Tasks" by default — your own open items, sorted by due date. Switch to "All Tasks" to see everyone\'s (e.g. for a manager reviewing the team).' },
+          { text: 'The Dashboard also shows a "My Tasks" widget the moment you log in, so you don\'t need to open the Tasks tab to see what\'s pending.' },
+          { text: 'Mark a task In Progress, Done, or Cancelled with one click. Overdue items are flagged in red.' },
+        ]
+      },
+    ],
+    tips: [
+      'Compliance tasks with a recurrence rule keep recreating themselves — you never need to manually re-add "GSTR-3B every month".',
+      'Filter by Type / Status / Site / Assigned-to on the Tasks tab to find anything quickly.',
+      'The same "Assign Task" + open-task badge pattern can be added to any other page on request (Flocks, GRN, etc.) — it is not limited to Pending Payments and Employee List.',
+    ]
+  },
+
+  // ── DISCUSSIONS (CHAT) ──────────────────────────────────────────────────────────
+  {
+    id: 'discussions',
+    icon: <MessageCircle size={20}/>,
+    label: 'Discussions (Chat)',
+    color: 'bg-green-700',
+    intro: 'Simple in-app chat for direct messages and group discussions between app users — no need for a separate messaging app.',
+    workflows: [
+      {
+        title: 'Start a conversation',
+        path: 'Header chat icon, or Discussions (full page)',
+        steps: [
+          { text: 'Click the chat icon in the top header (or Discussions in the sidebar), then the + button.' },
+          { text: 'Pick one person for a direct message, or a name + several people for a group.' },
+          { text: 'Type a message and Send. Attachments (files/images) are supported via the paperclip icon.' },
+        ]
+      },
+      {
+        title: 'Getting notified of new messages',
+        path: 'Anywhere in the app',
+        steps: [
+          { text: 'A new message shows a popup card with the sender\'s name and the message text, wherever you currently are in the app.' },
+          { text: 'Reply directly from that popup without opening the chat panel, or tap the message to jump straight into that conversation.' },
+          { text: 'The chat icon also shows a red dot when there are unread conversations.' },
+        ]
+      },
+    ],
+    tips: [
+      'Chat is per-account, not per-device — messages are the same wherever you log in.',
+      'Use a group chat (not repeated DMs) when more than one person needs to see the same conversation.',
+    ]
+  },
+
+  // ── ADMIN CENTRE ──────────────────────────────────────────────────────────────
+  {
+    id: 'admin-centre',
+    icon: <Shield size={20}/>,
+    label: 'Admin Centre',
+    color: 'bg-slate-700',
+    intro: 'Admin-only setup and configuration hub — company profile, master data shortcuts, allocations, user management, and the Audit Log. Visible only to the admin role.',
+    workflows: [
+      {
+        title: 'Setup Overview & configuration tabs',
+        path: 'Admin Centre → Setup Overview',
+        steps: [
+          { text: 'Company Profile — company name, address, GSTIN, bank details used on invoice prints.' },
+          { text: 'Masters — quick links to Farms/Sites, Feed Types, and other master data.' },
+          { text: 'Flock–Shed Assignment, Electricity Allocation, Salary Allocation — set up which sheds/meters/costs belong to which flock or farm.' },
+        ]
+      },
+      {
+        title: 'User Management',
+        path: 'Admin Centre → User Management',
+        steps: [
+          { text: 'Create app logins for staff, assign a role (admin / management / accounts / site_manager / site_incharge / viewer), and a home Farm/Site for site-level roles.' },
+          { text: 'Deactivate a user instead of deleting them if they leave, so historical records (who created what) stay meaningful.' },
+        ]
+      },
+      {
+        title: 'Audit Log — every data change, by whom',
+        path: 'Admin Centre → 🔍 Audit Log',
+        steps: [
+          { text: 'Every create/update/delete across the app\'s real data tables (sales, payroll, purchases, tasks, chat, bank ledger, etc.) is recorded here automatically — table, record, action, user, and timestamp.' },
+          { text: 'Filter by table, action, user, or date range to investigate a specific change.' },
+        ]
+      },
+    ],
+    tips: [
+      'Only the admin role can see Admin Centre — other roles will not see it in the sidebar.',
+      'If someone reports "data changed unexpectedly", the Audit Log is the first place to check.',
     ]
   },
 ]
