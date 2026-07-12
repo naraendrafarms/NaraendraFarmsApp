@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth'
-import { fmtDate, today, exportCSV } from '@/lib/utils'
+import { fmtDate, today } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, SearchableSelect, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, DateInput, FormRow,
@@ -11,6 +11,7 @@ import { Plus, Trash2, Pencil, ClipboardList, Printer, Download, Upload } from '
 import toast from 'react-hot-toast'
 import { printPurchaseIntent } from '@/lib/invoicePrint'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
+import * as XLSX from 'xlsx'
 
 // Purchase Intent (indent) — optional stage before a Purchase Order, matching
 // the paper/Excel "INDENT FOR NARAENDRA BREEDING FARMS" format already in
@@ -207,23 +208,49 @@ export const PurchaseIntentPage: React.FC = () => {
     )
   }
 
+  // Matches the original uploaded Excel format — one sheet per intent, with
+  // the company letterhead block and Prepared By / Approved By footer, not
+  // just a flat table of columns. A plain CSV can't carry that layout,
+  // hence a real multi-sheet .xlsx here instead of exportCSV().
   const handleExport = async () => {
     const rowsToExport = intents ?? []
     if (rowsToExport.length === 0) { toast.error('Nothing to export'); return }
     const { data: allLines } = await supabase.from('purchase_intent_lines')
-      .select('*, parties(name), purchase_intents(intent_no,intent_date,prepared_by,approved_by)')
+      .select('*, parties(name)')
       .in('intent_id', rowsToExport.map((r: any) => r.id))
       .order('intent_id').order('sl_no')
-    const headers = ['Intent No', 'Date', 'Site', 'Require For', 'Item', 'Qty', 'Pack Size', 'UOM', 'Total', 'Best Delivery By', 'Supplier', 'Prepared By', 'Approved By']
-    const farmById = new Map((intents ?? []).map((r: any) => [r.id, r.farms?.name ?? '']))
-    const csvRows = (allLines ?? []).map((l: any) => [
-      l.purchase_intents?.intent_no ?? '', l.purchase_intents?.intent_date ? fmtDate(l.purchase_intents.intent_date) : '',
-      farmById.get(l.intent_id) ?? '', l.require_for ?? '', l.item_name ?? '',
-      l.require_qty ?? '', l.pack_size ?? '', l.uom ?? '', l.total_qty ?? '',
-      l.best_delivery_by ? fmtDate(l.best_delivery_by) : '', l.parties?.name ?? '',
-      l.purchase_intents?.prepared_by ?? '', l.purchase_intents?.approved_by ?? '',
-    ])
-    exportCSV(`purchase-intents-${today()}.csv`, headers, csvRows)
+    const linesByIntent = new Map<string, any[]>()
+    for (const l of allLines ?? []) {
+      if (!linesByIntent.has(l.intent_id)) linesByIntent.set(l.intent_id, [])
+      linesByIntent.get(l.intent_id)!.push(l)
+    }
+
+    const wb = XLSX.utils.book_new()
+    for (const intent of rowsToExport) {
+      const lines = linesByIntent.get(intent.id) ?? []
+      const aoa: (string | number)[][] = [
+        ['INDENT FOR NARAENDRA BREEDING FARMS'],
+        ['Naraendra Farms', '', '', '5-9-22/21, 1st Floor, JVR Amrit Enclave, Adarsh Nagar, Hyderabad', '', 'GSTIN: 36ABJFM1393C1ZC'],
+        ['Intent No', intent.intent_no, '', 'Date of Indent', fmtDate(intent.intent_date), '', 'Site', intent.farms?.name ?? ''],
+        [],
+        ['SL No', 'Require For', 'Item', 'Require Qty', 'Pack Size', 'UOM', 'Total', 'Best Delivery By', 'Supplier'],
+        ...lines.map((l: any) => [
+          l.sl_no, l.require_for ?? '', l.item_name ?? '', l.require_qty ?? '', l.pack_size ?? '',
+          l.uom ?? '', l.total_qty ?? '', l.best_delivery_by ? fmtDate(l.best_delivery_by) : '', l.parties?.name ?? '',
+        ]),
+        [],
+        ['Prepared By', intent.prepared_by ?? '', '', '', '', '', 'Approved By', intent.approved_by ?? ''],
+      ]
+      if (intent.remarks) aoa.push(['Remarks', intent.remarks])
+      const ws = XLSX.utils.aoa_to_sheet(aoa)
+      ws['!cols'] = [{ wch: 8 }, { wch: 14 }, { wch: 26 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 14 }, { wch: 20 }]
+      // Sheet names are capped at 31 chars and can't contain \/?*[] — strip
+      // and truncate the intent_no so a slash-heavy number like
+      // "PI/NBF/2026/001" doesn't silently break the export.
+      const sheetName = (intent.intent_no || intent.id).replace(/[\\/?*[\]]/g, '-').slice(0, 31) || 'Intent'
+      XLSX.utils.book_append_sheet(wb, ws, sheetName)
+    }
+    XLSX.writeFile(wb, `purchase-intents-${today()}.xlsx`)
   }
 
   const IMPORT_HEADERS = ['intent_no', 'intent_date', 'site', 'prepared_by', 'approved_by', 'require_for', 'item', 'qty', 'pack_size', 'uom', 'best_delivery_by', 'supplier', 'remarks']
