@@ -1,14 +1,16 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth'
-import { fmtDate, today } from '@/lib/utils'
+import { fmtDate, today, exportCSV } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, SearchableSelect, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, DateInput, FormRow,
 } from '@/components/ui'
-import { Plus, Trash2, Pencil, ClipboardList } from 'lucide-react'
+import { Plus, Trash2, Pencil, ClipboardList, Printer, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { printPurchaseIntent } from '@/lib/invoicePrint'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 
 // Purchase Intent (indent) — optional stage before a Purchase Order, matching
 // the paper/Excel "INDENT FOR NARAENDRA BREEDING FARMS" format already in
@@ -45,6 +47,9 @@ export const PurchaseIntentPage: React.FC = () => {
   const [header, setHeader] = useState(emptyHeader())
   const [lines, setLines] = useState<LineForm[]>([emptyLine()])
   const [saving, setSaving] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -166,6 +171,139 @@ export const PurchaseIntentPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const bulkDeleteMut = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('purchase_intents').delete().in('id', Array.from(selectedIds))
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success(`${selectedIds.size} intent(s) deleted`)
+      setSelectedIds(new Set())
+      qc.invalidateQueries({ queryKey: ['purchase_intents'] })
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const toggleSel = (id: string) => setSelectedIds(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const toggleAllSel = () => {
+    if (selectedIds.size === (intents ?? []).length) setSelectedIds(new Set())
+    else setSelectedIds(new Set((intents ?? []).map((r: any) => r.id)))
+  }
+
+  const handlePrint = async (intent: any) => {
+    const { data: fullLines, error } = await supabase.from('purchase_intent_lines')
+      .select('*, parties(name)').eq('intent_id', intent.id).order('sl_no')
+    if (error) { toast.error(error.message); return }
+    printPurchaseIntent(
+      { intent_no: intent.intent_no, intent_date: intent.intent_date, farm_name: intent.farms?.name ?? null,
+        prepared_by: intent.prepared_by, approved_by: intent.approved_by, remarks: intent.remarks },
+      (fullLines ?? []).map((l: any) => ({
+        sl_no: l.sl_no, require_for: l.require_for, item_name: l.item_name,
+        require_qty: l.require_qty, pack_size: l.pack_size, uom: l.uom, total_qty: l.total_qty,
+        best_delivery_by: l.best_delivery_by, supplier_name: l.parties?.name ?? null,
+      }))
+    )
+  }
+
+  const handleExport = async () => {
+    const rowsToExport = intents ?? []
+    if (rowsToExport.length === 0) { toast.error('Nothing to export'); return }
+    const { data: allLines } = await supabase.from('purchase_intent_lines')
+      .select('*, parties(name), purchase_intents(intent_no,intent_date,prepared_by,approved_by)')
+      .in('intent_id', rowsToExport.map((r: any) => r.id))
+      .order('intent_id').order('sl_no')
+    const headers = ['Intent No', 'Date', 'Site', 'Require For', 'Item', 'Qty', 'Pack Size', 'UOM', 'Total', 'Best Delivery By', 'Supplier', 'Prepared By', 'Approved By']
+    const farmById = new Map((intents ?? []).map((r: any) => [r.id, r.farms?.name ?? '']))
+    const csvRows = (allLines ?? []).map((l: any) => [
+      l.purchase_intents?.intent_no ?? '', l.purchase_intents?.intent_date ? fmtDate(l.purchase_intents.intent_date) : '',
+      farmById.get(l.intent_id) ?? '', l.require_for ?? '', l.item_name ?? '',
+      l.require_qty ?? '', l.pack_size ?? '', l.uom ?? '', l.total_qty ?? '',
+      l.best_delivery_by ? fmtDate(l.best_delivery_by) : '', l.parties?.name ?? '',
+      l.purchase_intents?.prepared_by ?? '', l.purchase_intents?.approved_by ?? '',
+    ])
+    exportCSV(`purchase-intents-${today()}.csv`, headers, csvRows)
+  }
+
+  const IMPORT_HEADERS = ['intent_no', 'intent_date', 'site', 'prepared_by', 'approved_by', 'require_for', 'item', 'qty', 'pack_size', 'uom', 'best_delivery_by', 'supplier', 'remarks']
+  const downloadTemplate = () => downloadXlsxTemplate('purchase_intent_import_template.xlsx', IMPORT_HEADERS,
+    ['PI/NBF/2026/001', '2026-07-12', 'Hitech Breeding Farms', 'Sourav', 'Ajay', 'ALL FLOCK', 'AQUAMAX', '30', '5', 'LTR', '2026-07-20', 'ABC Traders', ''])
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const { headers, rows } = await parseFile(file)
+      const col = (name: string) => headers.indexOf(name)
+      const get = (r: string[], name: string) => { const c = col(name); return c >= 0 ? (r[c] ?? '').toString().trim() : '' }
+      const dataRows = rows.filter(r => r.some(c => (c ?? '').toString().trim() !== ''))
+      if (!dataRows.length) { toast.error('No data rows found'); return }
+
+      const farmByName = new Map((farms ?? []).map((f: any) => [f.name.toLowerCase().trim(), f.id]))
+      const partyByName = new Map((parties ?? []).map((p: any) => [p.name.toLowerCase().trim(), p.id]))
+      const itemByName = new Map((items ?? []).map((it: any) => [it.name.toLowerCase().trim(), it]))
+
+      // Group rows by intent_no — one Excel file can contain multiple
+      // intents, each with several line items, just like the multi-line
+      // form above.
+      const byIntent = new Map<string, string[][]>()
+      for (const r of dataRows) {
+        const no = get(r, 'intent_no')
+        if (!no) continue
+        if (!byIntent.has(no)) byIntent.set(no, [])
+        byIntent.get(no)!.push(r)
+      }
+      if (byIntent.size === 0) { toast.error('Rows must have intent_no'); return }
+
+      let intentCount = 0, lineCount = 0
+      for (const [intentNo, groupRows] of byIntent) {
+        const first = groupRows[0]
+        const { data: intentRow, error: intentErr } = await supabase.from('purchase_intents').insert({
+          intent_no: intentNo,
+          intent_date: get(first, 'intent_date') || today(),
+          farm_id: farmByName.get(get(first, 'site').toLowerCase()) ?? null,
+          prepared_by: get(first, 'prepared_by') || null,
+          approved_by: get(first, 'approved_by') || null,
+          remarks: get(first, 'remarks') || null,
+          created_by: profile?.id || null,
+        }).select('id').single()
+        if (intentErr) throw new Error(`${intentNo}: ${intentErr.message}`)
+        intentCount++
+
+        const lineRows = groupRows.map((r, idx) => {
+          const itemName = get(r, 'item')
+          const matchedItem = itemByName.get(itemName.toLowerCase())
+          const qty = parseFloat(get(r, 'qty')) || 0
+          const pack = parseFloat(get(r, 'pack_size')) || 0
+          return {
+            intent_id: intentRow.id,
+            sl_no: idx + 1,
+            require_for: get(r, 'require_for') || null,
+            item_id: matchedItem?.id ?? null,
+            item_name: itemName,
+            require_qty: qty,
+            pack_size: pack || null,
+            uom: get(r, 'uom') || null,
+            total_qty: pack ? qty * pack : qty,
+            best_delivery_by: get(r, 'best_delivery_by') || null,
+            supplier_party_id: partyByName.get(get(r, 'supplier').toLowerCase()) ?? null,
+          }
+        }).filter(l => l.item_name)
+        if (lineRows.length === 0) continue
+        const { error: lineErr } = await supabase.from('purchase_intent_lines').insert(lineRows)
+        if (lineErr) throw new Error(`${intentNo}: ${lineErr.message}`)
+        lineCount += lineRows.length
+      }
+      qc.invalidateQueries({ queryKey: ['purchase_intents'] })
+      toast.success(`Imported ${intentCount} intent(s) · ${lineCount} line item(s)`)
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      e.target.value = ''
+    }
+  }
+
   const rows = intents ?? []
 
   return (
@@ -173,8 +311,26 @@ export const PurchaseIntentPage: React.FC = () => {
       <SectionHeader
         title="Purchase Intent"
         subtitle="Requirement raised before a Purchase Order — optional, matches your Indent format"
-        action={<Button icon={<Plus size={16} />} onClick={openAdd}>New Intent</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" icon={<Download size={14} />} onClick={downloadTemplate}>Template</Button>
+            <Button variant="outline" icon={<Upload size={14} />} onClick={() => importRef.current?.click()}>Import</Button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
+            <Button variant="outline" icon={<Download size={14} />} onClick={handleExport}>Export</Button>
+            <Button icon={<Plus size={16} />} onClick={openAdd}>New Intent</Button>
+          </div>
+        }
       />
+
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-sm">
+          <span className="text-red-700 font-medium">{selectedIds.size} selected</span>
+          <Button variant="danger" size="sm" loading={bulkDeleteMut.isPending}
+            onClick={() => { if (confirm(`Delete ${selectedIds.size} selected intent(s)?`)) bulkDeleteMut.mutate() }}>
+            <Trash2 size={14} className="mr-1" /> Delete Selected
+          </Button>
+        </div>
+      )}
 
       <Card>
         {isLoading ? (
@@ -186,6 +342,7 @@ export const PurchaseIntentPage: React.FC = () => {
         ) : (
           <Table>
             <thead><tr>
+              <Th><input type="checkbox" checked={rows.length > 0 && selectedIds.size === rows.length} onChange={toggleAllSel} /></Th>
               <Th>Intent No.</Th>
               <Th>Date</Th>
               <Th>Site</Th>
@@ -204,6 +361,7 @@ export const PurchaseIntentPage: React.FC = () => {
                 const statusColor = status === 'ordered' ? 'green' : status === 'partial' ? 'orange' : 'gray'
                 return (
                   <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                    <Td><input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSel(r.id)} /></Td>
                     <Td className="font-medium text-gray-900">{r.intent_no}</Td>
                     <Td>{fmtDate(r.intent_date)}</Td>
                     <Td>{r.farms?.name ?? '—'}</Td>
@@ -213,8 +371,9 @@ export const PurchaseIntentPage: React.FC = () => {
                     <Td><Badge color={statusColor as any}>{status}</Badge></Td>
                     <Td right>
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => openEdit(r)} className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Pencil size={14} /></button>
-                        <button onClick={() => { if (confirm('Delete this Purchase Intent?')) deleteMut.mutate(r.id) }} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+                        <button onClick={() => handlePrint(r)} className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Print"><Printer size={14} /></button>
+                        <button onClick={() => openEdit(r)} className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit"><Pencil size={14} /></button>
+                        <button onClick={() => { if (confirm('Delete this Purchase Intent?')) deleteMut.mutate(r.id) }} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600" title="Delete"><Trash2 size={14} /></button>
                       </div>
                     </Td>
                   </tr>

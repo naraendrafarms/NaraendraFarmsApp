@@ -659,3 +659,81 @@ export function printGRN(d: GRNRecord) {
 
   openPrint(html)
 }
+
+// ── Purchase Intent (indent) — matches the original Excel "INDENT FOR
+// NARAENDRA BREEDING FARMS" layout, with the same company letterhead/GSTIN
+// used everywhere else in the app. ─────────────────────────────────────────
+export interface PurchaseIntentLine {
+  sl_no: number
+  require_for: string | null
+  item_name: string
+  require_qty: number | null
+  pack_size: number | null
+  uom: string | null
+  total_qty: number | null
+  best_delivery_by: string | null
+  supplier_name: string | null
+}
+export interface PurchaseIntentRecord {
+  intent_no: string
+  intent_date: string
+  farm_name: string | null
+  prepared_by: string | null
+  approved_by: string | null
+  remarks: string | null
+}
+
+export function printPurchaseIntent(d: PurchaseIntentRecord, lines: PurchaseIntentLine[]) {
+  const rows = lines.map(l => `
+    <tr>
+      <td class="tc">${l.sl_no}</td>
+      <td>${l.require_for ?? '—'}</td>
+      <td>${l.item_name}</td>
+      <td class="tr">${l.require_qty != null ? l.require_qty.toLocaleString('en-IN') : '—'}</td>
+      <td class="tr">${l.pack_size != null ? l.pack_size.toLocaleString('en-IN') : '—'}</td>
+      <td class="tc">${l.uom ?? '—'}</td>
+      <td class="tr">${l.total_qty != null ? l.total_qty.toLocaleString('en-IN') : '—'}</td>
+      <td class="tc">${l.best_delivery_by ? fmt(l.best_delivery_by) : '—'}</td>
+      <td>${l.supplier_name ?? '—'}</td>
+    </tr>`).join('')
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>Indent ${d.intent_no}</title>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+  <div class="header">
+    <div>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+      <div class="sub">${CO.addr1}</div>
+      <div class="sub">${CO.addr2}</div>
+      <div class="sub">GSTIN: ${CO.gstin} | State: ${CO.state} (${CO.stateCode})</div>
+      <div class="sub">Ph: ${CO.phone}</div>
+    </div>
+    <div class="header-right">
+      <h2>Purchase Intent (Indent)</h2>
+      <table style="margin:0;font-size:10px;width:auto;float:right">
+        <tr><td class="label" style="border:none;padding:2px 4px">Intent No</td><td style="border:none;padding:2px 4px;font-weight:700">${d.intent_no}</td></tr>
+        <tr><td class="label" style="border:none;padding:2px 4px">Date</td><td style="border:none;padding:2px 4px">${fmt(d.intent_date)}</td></tr>
+        ${d.farm_name ? `<tr><td class="label" style="border:none;padding:2px 4px">Site</td><td style="border:none;padding:2px 4px">${d.farm_name}</td></tr>` : ''}
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <table>
+      <thead><tr>
+        <th>#</th><th>Require For</th><th>Item</th><th>Qty</th><th>Pack Size</th>
+        <th>UOM</th><th>Total</th><th>Best Delivery By</th><th>Supplier</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+
+  <div class="sign-row">
+    <div><div class="label">Prepared By</div><div class="box" style="min-width:160px">${d.prepared_by ?? ''}</div></div>
+    <div style="text-align:right"><div class="label">Approved By</div><div class="box" style="min-width:160px">${d.approved_by ?? ''}</div></div>
+  </div>
+  ${d.remarks ? `<div class="note section">Remarks: ${d.remarks}</div>` : ''}
+  </body></html>`
+
+  openPrint(html)
+}
