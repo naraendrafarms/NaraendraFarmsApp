@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, today, FY_OPTIONS, currentFY, fyRange } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState } from '@/components/ui'
-import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil } from 'lucide-react'
+import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { ifscError, accountNoError } from '@/lib/validators'
+import { postLedgerEntry, clearLedgerEntries } from '@/lib/ledgerSync'
 
 const EMPTY_FORM = {
   txn_date: today(),
@@ -133,11 +134,409 @@ function splitCSV(line: string): string[] {
   return result
 }
 
+// ── Link to Bills (bank-statement reconciliation) ───────────────────────────
+// Moved here from Pending Payments so the whole external-payment workflow —
+// import statement, see what's unmatched, link it to the bill(s) it paid —
+// lives on ONE page instead of being split across Bank Ledger (import) and
+// Pending Payments (linking). Pending Payments now only tracks what's owed.
+
+type WaitingTxn = {
+  id: string
+  txn_date: string
+  description: string | null
+  reference_no: string | null
+  amount: number
+  category: string | null
+  statement_balance: number | null
+}
+
+const LinkToBills: React.FC = () => {
+  const qc = useQueryClient()
+  const [linkModal, setLinkModal] = useState<WaitingTxn | null>(null)
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set())
+  const [billSearch, setBillSearch] = useState('')
+  const [linking, setLinking] = useState(false)
+  const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(new Set())
+  const [bulkActing, setBulkActing] = useState(false)
+
+  const { data: waitingTxns, isLoading } = useQuery({
+    queryKey: ['bank_txn_waiting'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('bank_transactions')
+        .select('id,txn_date,description,reference_no,amount,category,statement_balance')
+        .eq('imported', true)
+        .eq('match_status', 'waiting')
+        .eq('txn_type', 'Debit')
+        .order('txn_date', { ascending: false })
+      if (error) throw error
+      return (data ?? []) as WaitingTxn[]
+    }
+  })
+
+  const { data: openPayments } = useQuery({
+    queryKey: ['pending_payments_open'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('pending_payments')
+        .select('id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount')
+        .neq('payment_status', 'Paid')
+        .order('vendor_name')
+      return (data ?? []) as any[]
+    }
+  })
+
+  const getBalance = (p: any) => Math.max(0, (p.net_payable ?? p.invoice_amount ?? 0) - (p.paid_amount ?? 0) - (p.discount_amount ?? 0))
+  const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const paymentOptions = (openPayments ?? []).map((p: any) => ({
+    value: p.id,
+    label: `${p.vendor_name} — ${p.invoice_no ?? p.grn_no ?? ''} — ₹${fmt(getBalance(p))}`,
+  }))
+
+  const handleIgnore = async (id: string) => {
+    await supabase.from('bank_transactions').update({ match_status: 'ignored' }).eq('id', id)
+    qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+    toast.success('Marked as ignored')
+  }
+
+  const toggleTxn = (id: string) => setSelectedTxnIds(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const toggleAllTxns = () => {
+    if (selectedTxnIds.size === (waitingTxns ?? []).length) setSelectedTxnIds(new Set())
+    else setSelectedTxnIds(new Set((waitingTxns ?? []).map((t: any) => t.id)))
+  }
+
+  const handleBulkIgnore = async () => {
+    if (selectedTxnIds.size === 0) return
+    setBulkActing(true)
+    try {
+      const { error } = await supabase.from('bank_transactions')
+        .update({ match_status: 'ignored' }).in('id', Array.from(selectedTxnIds))
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+      toast.success(`Ignored ${selectedTxnIds.size} transaction(s)`)
+      setSelectedTxnIds(new Set())
+    } catch (e: any) { toast.error(e.message) }
+    finally { setBulkActing(false) }
+  }
+
+  const handleBulkDeleteTxns = async () => {
+    if (selectedTxnIds.size === 0) return
+    if (!confirm(`Permanently delete ${selectedTxnIds.size} imported transaction(s)? This cannot be undone.`)) return
+    setBulkActing(true)
+    try {
+      // Still-waiting transactions were never linked to a bill, so there's no
+      // pending_payments/cash_book cleanup needed — this is a straight delete.
+      const { error } = await supabase.from('bank_transactions')
+        .delete().in('id', Array.from(selectedTxnIds))
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+      toast.success(`Deleted ${selectedTxnIds.size} transaction(s)`)
+      setSelectedTxnIds(new Set())
+    } catch (e: any) { toast.error(e.message) }
+    finally { setBulkActing(false) }
+  }
+
+  const toggleBill = (id: string) => setSelectedPaymentIds(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const selectedBills = (openPayments ?? []).filter((p: any) => selectedPaymentIds.has(p.id))
+  const selectedTotal = selectedBills.reduce((s: number, p: any) => s + getBalance(p), 0)
+
+  const handleLink = async () => {
+    if (!linkModal || selectedPaymentIds.size === 0) return
+    setLinking(true)
+    try {
+      const ids = Array.from(selectedPaymentIds)
+      // Tag every paid-off bill with this bank transaction so a multi-bill link can be undone together
+      const tag = `BANKTXN:${linkModal.id}`
+      for (const id of ids) {
+        const payment = (openPayments ?? []).find((p: any) => p.id === id)
+        if (!payment) continue
+        const balance = getBalance(payment)
+        await supabase.from('pending_payments').update({
+          paid_amount: (payment.paid_amount ?? 0) + balance,
+          paid_date: linkModal.txn_date,
+          payment_status: 'Paid',
+          transaction_ref: tag,
+        }).eq('id', id)
+        // Reconciled bank debit = a real payment — post it to Cash Book too, so
+        // this ledger stays the single source of truth regardless of which
+        // action (Pay / Edit / Bank Link) settled the bill.
+        await postLedgerEntry({
+          paymentId: id, vendorName: payment.vendor_name, invoiceNo: payment.invoice_no, grnNo: payment.grn_no,
+          amount: balance, mode: 'NEFT', date: linkModal.txn_date, ref: linkModal.reference_no,
+          remarks: `Bank-reconciled: ${linkModal.description ?? ''}`,
+        })
+      }
+      // Link the bank transaction (linked_payment_id = first bill; tag holds the full set)
+      await supabase.from('bank_transactions').update({
+        match_status: 'manually_matched',
+        linked_payment_id: ids[0],
+      }).eq('id', linkModal.id)
+
+      qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      setLinkModal(null)
+      setSelectedPaymentIds(new Set())
+      setBillSearch('')
+      toast.success(`Linked ${ids.length} bill(s) — marked paid`)
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  // Already-linked (auto or manual) bank transactions — so wrong matches can be undone
+  const { data: matchedTxns } = useQuery({
+    queryKey: ['bank_txn_matched'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('bank_transactions')
+        .select('id,txn_date,description,reference_no,amount,category,match_status,linked_payment_id')
+        .eq('imported', true)
+        .in('match_status', ['auto_matched', 'manually_matched'])
+        .order('txn_date', { ascending: false })
+      return (data ?? []) as any[]
+    }
+  })
+
+  const handleUnlink = async (t: any) => {
+    try {
+      // Find every bill this bank transaction settled — tagged set (multi-bill
+      // link) plus the single linked_payment_id (auto-matched / legacy) — so
+      // their Cash Book entries can be removed together with the payment revert.
+      const { data: tagged } = await supabase.from('pending_payments')
+        .select('id').eq('transaction_ref', `BANKTXN:${t.id}`)
+      const idsToRevert = new Set((tagged ?? []).map((r: any) => r.id))
+      if (t.linked_payment_id) idsToRevert.add(t.linked_payment_id)
+
+      await supabase.from('pending_payments').update({
+        payment_status: 'Pending', paid_amount: 0, paid_date: null, transaction_ref: null,
+      }).eq('transaction_ref', `BANKTXN:${t.id}`)
+      if (t.linked_payment_id) {
+        await supabase.from('pending_payments').update({
+          payment_status: 'Pending', paid_amount: 0, paid_date: null, transaction_ref: null,
+        }).eq('id', t.linked_payment_id)
+      }
+      for (const id of idsToRevert) await clearLedgerEntries(id)
+      // Send the bank transaction back to "waiting" so it can be re-linked or ignored
+      await supabase.from('bank_transactions').update({
+        match_status: 'waiting', linked_payment_id: null,
+      }).eq('id', t.id)
+      qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
+      qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      toast.success('Unlinked — bill set back to Pending')
+    } catch (e: any) { toast.error(e.message) }
+  }
+
+  if (isLoading) return <div className="flex justify-center py-10"><Spinner /></div>
+
+  return (
+    <div className="space-y-4">
+      <div className="text-sm text-gray-500 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
+        <AlertCircle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+        <span>These are bank debit transactions imported from your statement that could not be automatically matched to a vendor payment. Link each one manually or ignore it if not relevant.</span>
+      </div>
+
+      {(waitingTxns ?? []).length === 0 ? (
+        <div className="text-center py-10 text-gray-400">
+          <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
+          <div>No transactions waiting to be linked</div>
+        </div>
+      ) : (
+        <>
+          {selectedTxnIds.size > 0 && (
+            <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm">
+              <span className="text-amber-700 font-medium">{selectedTxnIds.size} selected</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleBulkIgnore}
+                  disabled={bulkActing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50"
+                >
+                  <X size={14} /> Ignore Selected
+                </button>
+                <button
+                  onClick={handleBulkDeleteTxns}
+                  disabled={bulkActing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  <Trash2 size={14} /> Delete Selected
+                </button>
+              </div>
+            </div>
+          )}
+          <Card padding={false}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase text-left">
+                  <th className="px-3 py-2 w-8">
+                    <input type="checkbox" checked={(waitingTxns ?? []).length > 0 && selectedTxnIds.size === (waitingTxns ?? []).length} onChange={toggleAllTxns} />
+                  </th>
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Description</th>
+                  <th className="px-3 py-2">Reference</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2">Category</th>
+                  <th className="px-3 py-2 text-right">Stmt Balance</th>
+                  <th className="px-3 py-2 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(waitingTxns ?? []).map((t, i) => (
+                  <tr key={t.id} className={`border-b border-gray-100 hover:bg-gray-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                    <td className="px-3 py-2">
+                      <input type="checkbox" checked={selectedTxnIds.has(t.id)} onChange={() => toggleTxn(t.id)} />
+                    </td>
+                    <td className="px-3 py-2 text-gray-600">{t.txn_date}</td>
+                    <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate">{t.description || '—'}</td>
+                    <td className="px-3 py-2 text-gray-500">{t.reference_no || '—'}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-red-600">₹{fmt(t.amount)}</td>
+                    <td className="px-3 py-2 text-gray-500">{t.category || '—'}</td>
+                    <td className="px-3 py-2 text-right text-gray-500">{t.statement_balance != null ? `₹${fmt(t.statement_balance)}` : '—'}</td>
+                    <td className="px-3 py-2 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => { setLinkModal(t); setSelectedPaymentIds(new Set()); setBillSearch('') }}
+                          className="flex items-center gap-1 px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                        >
+                          <Link2 size={11} /> Link
+                        </button>
+                        <button
+                          onClick={() => { if (confirm('Mark as ignored?')) handleIgnore(t.id) }}
+                          className="flex items-center gap-1 px-2 py-1 bg-gray-200 text-gray-600 text-xs rounded hover:bg-gray-300"
+                        >
+                          <X size={11} /> Ignore
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          </Card>
+        </>
+      )}
+
+      {/* Already-linked transactions — undo wrong matches here */}
+      {(matchedTxns ?? []).length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-gray-700 mt-4">Linked Transactions ({(matchedTxns ?? []).length})</h3>
+          <p className="text-xs text-gray-400">Auto-matched or manually-linked bank debits. If a link is wrong, click <strong>Unlink</strong> — it sets the vendor bill back to Pending and returns the transaction to the list above.</p>
+          <Card padding={false}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase text-left">
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">Description</th>
+                    <th className="px-3 py-2">Reference</th>
+                    <th className="px-3 py-2 text-right">Amount</th>
+                    <th className="px-3 py-2">Match</th>
+                    <th className="px-3 py-2 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(matchedTxns ?? []).map((t: any, i: number) => (
+                    <tr key={t.id} className={`border-b border-gray-100 hover:bg-gray-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                      <td className="px-3 py-2 text-gray-600">{t.txn_date}</td>
+                      <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate">{t.description || '—'}</td>
+                      <td className="px-3 py-2 text-gray-500">{t.reference_no || '—'}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-red-600">₹{fmt(t.amount)}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] ${t.match_status === 'auto_matched' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                          {t.match_status === 'auto_matched' ? 'Auto' : 'Manual'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={() => { if (confirm('Unlink this transaction and set the bill back to Pending?')) handleUnlink(t) }}
+                          className="flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 text-xs rounded hover:bg-red-200 mx-auto"
+                        >
+                          <X size={11} /> Unlink
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Link modal — multi-select: one bank payment can cover many bills */}
+      {linkModal && (() => {
+        const search = billSearch.trim().toLowerCase()
+        const visibleBills = (openPayments ?? []).filter((p: any) =>
+          !search || `${p.vendor_name} ${p.invoice_no ?? ''} ${p.grn_no ?? ''}`.toLowerCase().includes(search))
+        const diff = Math.round((selectedTotal - linkModal.amount) * 100) / 100
+        return (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-3 max-h-[90vh] flex flex-col">
+            <h3 className="font-bold text-gray-900 text-lg">Link to Vendor Bills</h3>
+            <div className="bg-gray-50 rounded-lg p-3 text-sm flex items-center justify-between">
+              <div className="text-gray-500">{linkModal.txn_date} · {linkModal.reference_no || linkModal.description}</div>
+              <div className="font-semibold text-red-600">Bank ₹{fmt(linkModal.amount)}</div>
+            </div>
+            <p className="text-xs text-gray-500">Tick every bill this one payment covers (e.g. 10 bills paid together). All ticked bills are marked Paid.</p>
+            <input value={billSearch} onChange={e => setBillSearch(e.target.value)} placeholder="Search vendor / invoice / GRN…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+            <div className="border border-gray-200 rounded-lg overflow-y-auto flex-1 min-h-[120px]">
+              {visibleBills.length === 0 ? (
+                <div className="text-center text-gray-400 text-sm py-6">No open bills</div>
+              ) : visibleBills.map((p: any) => (
+                <label key={p.id} className={`flex items-center gap-2 px-3 py-2 text-sm border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${selectedPaymentIds.has(p.id) ? 'bg-blue-50' : ''}`}>
+                  <input type="checkbox" checked={selectedPaymentIds.has(p.id)} onChange={() => toggleBill(p.id)} className="rounded border-gray-300 text-blue-600" />
+                  <span className="flex-1">{p.vendor_name} <span className="text-gray-400 text-xs">{p.invoice_no ?? p.grn_no ?? ''}</span></span>
+                  <span className="font-medium">₹{fmt(getBalance(p))}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
+              <span className="text-gray-600">{selectedPaymentIds.size} bill(s) selected</span>
+              <span className="font-semibold">Selected ₹{fmt(selectedTotal)}</span>
+            </div>
+            {selectedPaymentIds.size > 0 && diff !== 0 && (
+              <div className={`text-xs px-3 py-1.5 rounded-lg ${Math.abs(diff) < 1 ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                {diff > 0 ? `Selected is ₹${fmt(Math.abs(diff))} more than the bank payment` : `Selected is ₹${fmt(Math.abs(diff))} less than the bank payment`} — you can still link (partial / over).
+              </div>
+            )}
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => setLinkModal(null)} className="flex-1 py-2 border border-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50">Cancel</button>
+              <button onClick={handleLink} disabled={selectedPaymentIds.size === 0 || linking} className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                {linking ? 'Linking…' : `Link ${selectedPaymentIds.size || ''} Bill(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
+        )
+      })()}
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export const BankLedgerPage: React.FC = () => {
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'ledger' | 'import'>('ledger')
+  const [tab, setTab] = useState<'ledger' | 'import' | 'reconcile'>('ledger')
   const [selectedAccount, setSelectedAccount] = useState<string>('')
   const [fy, setFy] = useState(currentFY())
   const [fromDate, setFromDate] = useState(fyRange(currentFY()).start)
@@ -756,6 +1155,7 @@ export const BankLedgerPage: React.FC = () => {
         {([
           { key: 'ledger', label: 'Transactions' },
           { key: 'import', label: 'Import Statement' },
+          { key: 'reconcile', label: 'Link to Bills' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -993,7 +1393,7 @@ export const BankLedgerPage: React.FC = () => {
                     <div>{importDone.inserted} transactions imported · {importDone.autoMatched} auto-matched to vendor payments</div>
                     {importDone.inserted - importDone.autoMatched > 0 && (
                       <div className="text-green-700 mt-0.5">
-                        {importDone.inserted - importDone.autoMatched} transactions moved to <strong>Accounts → Pending Payments → Waiting to Link</strong>
+                        {importDone.inserted - importDone.autoMatched} transactions moved to the <strong>Link to Bills</strong> tab
                       </div>
                     )}
                   </div>
@@ -1057,6 +1457,9 @@ export const BankLedgerPage: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* ── Link to Bills tab (bank-statement reconciliation) ── */}
+      {tab === 'reconcile' && <LinkToBills />}
 
       {/* Add Transaction Modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Bank Transaction' : 'Add Bank Transaction'}>

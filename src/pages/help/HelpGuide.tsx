@@ -20,6 +20,7 @@ const CHANGELOG: ChangeEntry[] = [
   { date: '2026-07-12', tag: 'Fix',      text: 'Company P&L: Bank Charges recorded in Bank Ledger were never included as an indirect expense anywhere in P&L. Added as a cost line (monthly table, annual totals, and Excel export).' },
   { date: '2026-07-12', tag: 'New',      text: 'Bank Ledger: search box added (description, reference, category, party) — previously only a date-range filter existed. Search narrows the visible rows only; balance totals stay based on the full date range.' },
   { date: '2026-07-12', tag: 'New',      text: 'Pending Payments → Waiting to Link: checkboxes and bulk Ignore/Delete added — previously each imported bank transaction could only be linked or ignored one at a time.' },
+  { date: '2026-07-12', tag: 'Improved', text: 'Bank-statement reconciliation moved from Pending Payments into Bank Ledger itself, as a new "Link to Bills" tab — the whole workflow (import statement → see what\'s unmatched → link to bill) now happens on one page instead of switching between two. Pending Payments now only tracks what you owe.' },
   { date: '2026-07-06', tag: 'New',      text: 'Help Guide: Full "VHL Module" section added — setup, Daily Entry vs Bulk (Shed-wise) Entry, Medicine, Egg Production billing, and Dashboard.' },
   { date: '2026-07-06', tag: 'Fix',      text: 'VHL Bulk (Shed-wise) Daily Entry was silently skipping any shed row where only Opening was entered (e.g. a first-day placement with no eggs/feed yet) — it never saved. Fixed.' },
   { date: '2026-07-06', tag: 'New',      text: 'VHL Flocks and VHL Dashboard had no Edit option and no links anywhere. Added an Edit button on VHL Flocks (breed/status/placement/placed counts), and flock rows/cards now link straight through to Daily Entry. VHL Flocks also now shows live Current F/M birds from the latest Daily Entry.' },
@@ -622,11 +623,13 @@ const SECTIONS: Section[] = [
         ]
       },
       {
-        title: 'Bank Ledger',
+        title: 'Bank Ledger — the one page for reconciling payments made outside the app',
         path: 'Accounts → Bank Ledger',
         steps: [
           { text: 'Shows every real bank movement — vendor bill payments, salary batches, and other transfers — per bank account.' },
-          { text: 'Import Statement tab lets you import your real bank CSV; imported rows can be "linked" to one or more pending vendor bills so the app matches your actual statement instead of fabricating separate lines.' },
+          { text: 'If you pay vendors directly via your bank\'s netbanking site (not from inside this app), record it here: Import Statement tab → upload your real bank CSV.' },
+          { text: 'Link to Bills tab: shows every imported transaction the app couldn\'t auto-match. Click Link, tick the bill(s) it paid (one payment can cover several bills), and they\'re marked Paid together. Checkboxes let you bulk Ignore or Delete stray/duplicate-imported rows.' },
+          { text: 'Search box (description/reference/category/party) and date-range filter both narrow the Transactions tab.' },
           { text: 'Manage Bank Accounts lets you add/edit the accounts this ledger tracks.' },
         ]
       },
@@ -636,6 +639,7 @@ const SECTIONS: Section[] = [
       'Cash Book entries from sales are created automatically — do not enter them again manually.',
       'To fix an invoice counter (e.g. HHF got ahead), go to Accounts → Invoice Series / Counters.',
       'Bank Ledger should always show one row per real bank transaction — if a batch payment (like Bulk Salary) ever shows multiple rows for what was one real transfer, use Bulk Salary Payment (not one-by-one marking) to avoid that.',
+      'If you always pay vendors from outside the app (netbanking) and reconcile via Import Statement, you can skip Pending Payments\' "Pay"/"Bulk Pay" buttons entirely — just do everything from Bank Ledger.',
     ]
   },
 
