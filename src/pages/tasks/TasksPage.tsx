@@ -28,10 +28,13 @@ export const TasksPage: React.FC = () => {
   const { profile } = useAuth()
   const qc = useQueryClient()
 
+  const [scope, setScope] = useState<'mine' | 'all'>('mine')
   const [filterType, setFilterType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterFarm, setFilterFarm] = useState('')
   const [filterUser, setFilterUser] = useState('')
+
+  const effectiveUserFilter = scope === 'mine' ? (profile?.id ?? '') : filterUser
 
   const { data: farms } = useQuery({
     queryKey: ['tasks_farms_list'],
@@ -43,7 +46,7 @@ export const TasksPage: React.FC = () => {
   })
 
   const { data: tasks, isLoading } = useQuery({
-    queryKey: ['tasks', filterType, filterStatus, filterFarm, filterUser],
+    queryKey: ['tasks', filterType, filterStatus, filterFarm, effectiveUserFilter],
     queryFn: async () => {
       let q = supabase.from('tasks')
         .select('*, assignee:assigned_to_user_id(full_name,role), farms:farm_id(name,code)')
@@ -53,11 +56,12 @@ export const TasksPage: React.FC = () => {
       if (filterType)   q = q.eq('task_type', filterType)
       if (filterStatus) q = q.eq('status', filterStatus)
       if (filterFarm)   q = q.eq('farm_id', filterFarm)
-      if (filterUser)   q = q.eq('assigned_to_user_id', filterUser)
+      if (effectiveUserFilter) q = q.eq('assigned_to_user_id', effectiveUserFilter)
       const { data, error } = await q
       if (error) throw error
       return data ?? []
-    }
+    },
+    enabled: scope === 'all' || !!profile?.id,
   })
 
   const setStatusMut = useMutation({
@@ -119,22 +123,35 @@ export const TasksPage: React.FC = () => {
         action={<AssignTaskButton label="New Task" />}
       />
 
+      <div className="flex gap-2">
+        <button onClick={() => setScope('mine')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${scope === 'mine' ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          My Tasks
+        </button>
+        <button onClick={() => setScope('all')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${scope === 'all' ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          All Tasks
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard title="Open Tasks" value={openCount} icon={<ListTodo size={18}/>} />
+        <StatCard title={scope === 'mine' ? 'My Open Tasks' : 'Open Tasks'} value={openCount} icon={<ListTodo size={18}/>} />
         <StatCard title="Overdue" value={overdueCount} icon={<AlertTriangle size={18}/>} color="text-red-600" />
         <StatCard title="Completed" value={doneCount} icon={<CheckCircle2 size={18}/>} color="text-green-600" />
       </div>
 
       <Card>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
+        <div className={`grid grid-cols-1 gap-3 mb-4 ${scope === 'all' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
           <Select label="Type" placeholder="All types" options={TASK_TYPE_OPTIONS} value={filterType} onChange={e => setFilterType(e.target.value)} />
           <Select label="Status" placeholder="All statuses" options={TASK_STATUS_OPTIONS} value={filterStatus} onChange={e => setFilterStatus(e.target.value)} />
           <Select label="Site / Farm" placeholder="All sites"
             options={(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))}
             value={filterFarm} onChange={e => setFilterFarm(e.target.value)} />
-          <Select label="Assigned to" placeholder="Anyone"
-            options={(users ?? []).map((u: any) => ({ value: u.id, label: u.full_name ?? 'Unnamed' }))}
-            value={filterUser} onChange={e => setFilterUser(e.target.value)} />
+          {scope === 'all' && (
+            <Select label="Assigned to" placeholder="Anyone"
+              options={(users ?? []).map((u: any) => ({ value: u.id, label: u.full_name ?? 'Unnamed' }))}
+              value={filterUser} onChange={e => setFilterUser(e.target.value)} />
+          )}
         </div>
 
         {isLoading ? (

@@ -8,6 +8,7 @@ import {
   ArrowRight, Activity, DollarSign, Package
 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
+import { MyTasksWidget } from '@/components/tasks/MyTasksWidget'
 
 const AlertsWidget: React.FC = () => {
   const navigate = useNavigate()
@@ -197,6 +198,8 @@ export const Dashboard: React.FC = () => {
         title="Dashboard"
         subtitle={`${activeFlocks.length} active flock${activeFlocks.length !== 1 ? 's' : ''} • Last updated today`}
       />
+
+      <MyTasksWidget />
 
       {/* Summary stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
