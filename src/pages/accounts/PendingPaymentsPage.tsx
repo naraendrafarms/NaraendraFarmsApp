@@ -454,6 +454,8 @@ export const PendingPaymentsPage: React.FC = () => {
   const [editErr, setEditErr] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkPayForm, setBulkPayForm] = useState({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '' })
+  const [bulkPaying, setBulkPaying] = useState(false)
 
   const { data: records, isLoading } = useQuery({
     queryKey: ['pending_payments_page'],
@@ -593,6 +595,71 @@ export const PendingPaymentsPage: React.FC = () => {
       setErr(e.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Pay N selected bills together as ONE real payment — mirrors the Bulk
+  // Salary Payment pattern. Creates a SINGLE bank_transactions row for the
+  // whole batch (not one per bill, which used to make Bank Ledger show N
+  // lines for what was really one bank transfer) and tags every bill with
+  // BANKTXN:<id> the same way the "Link N Bill(s)" bank-reconciliation flow
+  // already does, so Unlink-style undo logic keeps working consistently.
+  const handleBulkPay = async () => {
+    const bills = (records ?? []).filter(r => selectedIds.has(r.id) && r.payment_status !== 'Paid')
+    if (bills.length === 0) { toast.error('No unpaid bills selected'); return }
+    if (bulkPayForm.mode.toLowerCase() !== 'cash' && !bulkPayForm.bankAccountId) { toast.error('Select which bank account this is paid from'); return }
+    setBulkPaying(true)
+    try {
+      const totalAmt = bills.reduce((s, r) => s + getBalance(r), 0)
+      let tag: string | null = bulkPayForm.ref || null
+      if (bulkPayForm.mode.toLowerCase() !== 'cash') {
+        const { data: txn, error: txnErr } = await supabase.from('bank_transactions').insert({
+          bank_account_id: bulkPayForm.bankAccountId,
+          txn_date: bulkPayForm.date,
+          txn_type: 'Debit',
+          category: 'Vendor Payment',
+          reference_no: bulkPayForm.ref || null,
+          description: `Vendor payment batch — ${bills.length} bill(s)`,
+          amount: totalAmt,
+          linked_payment_id: bills[0].id,
+        }).select('id').single()
+        if (txnErr) throw txnErr
+        tag = `BANKTXN:${txn.id}`
+      }
+      for (const bill of bills) {
+        const balance = getBalance(bill)
+        const newPaid = (bill.paid_amount ?? 0) + balance
+        const { error } = await supabase.from('pending_payments').update({
+          paid_amount: newPaid,
+          paid_date: bulkPayForm.date,
+          account_type: bulkPayForm.mode,
+          transaction_ref: tag,
+          payment_status: 'Paid',
+          bank_account_id: bulkPayForm.mode.toLowerCase() !== 'cash' ? bulkPayForm.bankAccountId : null,
+        }).eq('id', bill.id)
+        if (error) throw error
+        // bankAccountId intentionally NOT passed here — the one shared
+        // bank_transactions row above already covers the whole batch, so
+        // postLedgerEntry only needs to add each bill's Cash Book line.
+        await postLedgerEntry({
+          paymentId: bill.id, vendorName: bill.vendor_name, invoiceNo: bill.invoice_no, grnNo: bill.grn_no,
+          amount: balance, mode: bulkPayForm.mode, date: bulkPayForm.date, ref: bulkPayForm.ref,
+          remarks: `Bulk payment batch (${bills.length} bills)`,
+        })
+      }
+      qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+      qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      toast.success(`Marked ${bills.length} bill(s) Paid`)
+      setSelectedIds(new Set())
+      setBulkPayForm({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '' })
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setBulkPaying(false)
     }
   }
 
@@ -858,6 +925,53 @@ export const PendingPaymentsPage: React.FC = () => {
             className="text-sm text-gray-500 underline hover:text-gray-700">Clear</button>
         )}
       </div>
+
+      {/* Bulk pay bar — pay N selected bills together as one real payment */}
+      {selectedIds.size > 0 && (() => {
+        const selectedUnpaid = (records ?? []).filter(r => selectedIds.has(r.id) && r.payment_status !== 'Paid')
+        const selectedTotal = selectedUnpaid.reduce((s, r) => s + getBalance(r), 0)
+        if (selectedUnpaid.length === 0) return null
+        return (
+          <div className="flex flex-wrap items-end gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray-500">Mode</span>
+              <select value={bulkPayForm.mode} onChange={e => setBulkPayForm(f => ({ ...f, mode: e.target.value }))}
+                className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                <option>NEFT</option><option>RTGS</option><option>IMPS</option><option>Cheque</option><option>UPI</option><option>Cash</option>
+              </select>
+            </div>
+            {bulkPayForm.mode.toLowerCase() !== 'cash' && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-gray-500">Bank Account</span>
+                <select value={bulkPayForm.bankAccountId} onChange={e => setBulkPayForm(f => ({ ...f, bankAccountId: e.target.value }))}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm min-w-[160px]">
+                  <option value="">Select account…</option>
+                  {(bankAccounts ?? []).map((a: any) => <option key={a.id} value={a.id}>{a.account_name}</option>)}
+                </select>
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray-500">Reference / UTR</span>
+              <input value={bulkPayForm.ref} onChange={e => setBulkPayForm(f => ({ ...f, ref: e.target.value }))}
+                placeholder="Shared reference" className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-gray-500">Date</span>
+              <input type="date" value={bulkPayForm.date} onChange={e => setBulkPayForm(f => ({ ...f, date: e.target.value }))}
+                className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+            </div>
+            <div className="flex-1" />
+            <span className="text-blue-700 font-medium whitespace-nowrap">{selectedUnpaid.length} bill(s) · ₹{fmt(selectedTotal)}</span>
+            <button
+              onClick={handleBulkPay}
+              disabled={bulkPaying}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              <CheckCircle2 size={14} /> {bulkPaying ? 'Paying…' : `Mark ${selectedUnpaid.length} as Paid`}
+            </button>
+          </div>
+        )
+      })()}
 
       {/* Bulk delete bar */}
       {selectedIds.size > 0 && (
