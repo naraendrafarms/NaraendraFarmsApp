@@ -103,6 +103,7 @@ type PayModal = {
   ref: string
   remarks: string
   bankAccountId: string
+  advanceId: string
 }
 
 // ── Waiting to Link ──────────────────────────────────────────────────────────
@@ -553,43 +554,87 @@ export const PendingPaymentsPage: React.FC = () => {
   }
 
   const openPayModal = (r: PayRecord) => {
-    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '' })
+    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '', advanceId: '' })
     setErr('')
   }
+
+  // Available vendor advances for the bill currently open in the Pay modal
+  // — only fetched once the modal is open and its vendor is known.
+  const { data: vendorAdvancesForModal } = useQuery({
+    queryKey: ['vendor_advances_for_pay', modal?.record.party_id],
+    enabled: !!modal?.record.party_id,
+    queryFn: async () => {
+      const { data } = await supabase.from('vendor_advances')
+        .select('id,advance_date,amount,amount_used,reference_no')
+        .eq('party_id', modal!.record.party_id!)
+        .order('advance_date')
+      return (data ?? []).filter((a: any) => (a.amount - a.amount_used) > 0.01)
+    }
+  })
 
   const handlePay = async () => {
     if (!modal) return
     const amt = parseFloat(modal.paidAmt)
     if (!amt || amt <= 0) { setErr('Enter valid amount'); return }
-    if (modal.mode.toLowerCase() !== 'cash' && !modal.bankAccountId) { setErr('Select which bank account this is paid from'); return }
+    const isAdvance = modal.mode === 'Advance'
+    if (!isAdvance && modal.mode.toLowerCase() !== 'cash' && !modal.bankAccountId) { setErr('Select which bank account this is paid from'); return }
+    if (isAdvance && !modal.advanceId) { setErr('Select which advance to adjust against this bill'); return }
     setSaving(true); setErr('')
     try {
       const newPaid = (modal.record.paid_amount ?? 0) + amt
       const bal = getBalance(modal.record) - amt
       const newStatus = bal <= 0.01 ? 'Paid' : modal.record.payment_status
-      const { error } = await supabase.from('pending_payments').update({
-        paid_amount: newPaid,
-        paid_date: modal.paidDate,
-        account_type: modal.mode,
-        transaction_ref: modal.ref || null,
-        remarks: modal.remarks || modal.record.remarks || null,
-        payment_status: newStatus,
-        bank_account_id: modal.mode.toLowerCase() !== 'cash' ? modal.bankAccountId : null,
-      }).eq('id', modal.record.id)
-      if (error) throw error
-      // Every rupee paid here — partial or final — lands in Cash Book immediately.
-      await postLedgerEntry({
-        paymentId: modal.record.id, vendorName: modal.record.vendor_name,
-        invoiceNo: modal.record.invoice_no, grnNo: modal.record.grn_no,
-        amount: amt, mode: modal.mode, date: modal.paidDate, ref: modal.ref, remarks: modal.remarks,
-        bankAccountId: modal.bankAccountId,
-      })
+
+      if (isAdvance) {
+        const advance = (vendorAdvancesForModal ?? []).find((a: any) => a.id === modal.advanceId)
+        if (!advance) throw new Error('Advance not found')
+        const available = advance.amount - advance.amount_used
+        if (amt > available + 0.01) throw new Error(`Only ₹${fmt(available)} available on this advance`)
+        const { error } = await supabase.from('pending_payments').update({
+          paid_amount: newPaid,
+          paid_date: modal.paidDate,
+          account_type: 'Advance',
+          transaction_ref: advance.reference_no || null,
+          remarks: modal.remarks || modal.record.remarks || null,
+          payment_status: newStatus,
+          bank_account_id: null,
+          advance_adjusted: amt,
+          vendor_advance_id: advance.id,
+        }).eq('id', modal.record.id)
+        if (error) throw error
+        // Adjusting an advance against a bill is NOT a new cash movement — the
+        // money already left when the advance itself was paid (VendorAdvancesPage
+        // posted that Cash Book/Bank entry already) — so no postLedgerEntry here.
+        const { error: advErr } = await supabase.from('vendor_advances')
+          .update({ amount_used: advance.amount_used + amt }).eq('id', advance.id)
+        if (advErr) throw advErr
+      } else {
+        const { error } = await supabase.from('pending_payments').update({
+          paid_amount: newPaid,
+          paid_date: modal.paidDate,
+          account_type: modal.mode,
+          transaction_ref: modal.ref || null,
+          remarks: modal.remarks || modal.record.remarks || null,
+          payment_status: newStatus,
+          bank_account_id: modal.mode.toLowerCase() !== 'cash' ? modal.bankAccountId : null,
+        }).eq('id', modal.record.id)
+        if (error) throw error
+        // Every rupee paid here — partial or final — lands in Cash Book immediately.
+        await postLedgerEntry({
+          paymentId: modal.record.id, vendorName: modal.record.vendor_name,
+          invoiceNo: modal.record.invoice_no, grnNo: modal.record.grn_no,
+          amount: amt, mode: modal.mode, date: modal.paidDate, ref: modal.ref, remarks: modal.remarks,
+          bankAccountId: modal.bankAccountId,
+        })
+      }
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['cash_book'] })
       qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+      qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
       setModal(null)
     } catch (e: any) {
       setErr(e.message)
@@ -1118,12 +1163,25 @@ export const PendingPaymentsPage: React.FC = () => {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Payment Mode</label>
-                <select value={modal.mode} onChange={e => setModal(m => m ? { ...m, mode: e.target.value } : m)}
+                <select value={modal.mode} onChange={e => setModal(m => m ? { ...m, mode: e.target.value, advanceId: '' } : m)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
                   {['NEFT', 'RTGS', 'IMPS', 'Cheque', 'Cash', 'UPI'].map(v => <option key={v}>{v}</option>)}
+                  {(vendorAdvancesForModal ?? []).length > 0 && <option value="Advance">Advance (adjust against existing balance)</option>}
                 </select>
               </div>
-              {modal.mode.toLowerCase() !== 'cash' && (
+              {modal.mode === 'Advance' && (
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Which advance to adjust</label>
+                  <select value={modal.advanceId} onChange={e => setModal(m => m ? { ...m, advanceId: e.target.value } : m)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">— Select advance —</option>
+                    {(vendorAdvancesForModal ?? []).map((a: any) => (
+                      <option key={a.id} value={a.id}>{fmtDate(a.advance_date)} — Available ₹{fmt(a.amount - a.amount_used)}{a.reference_no ? ` (${a.reference_no})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {modal.mode !== 'Advance' && modal.mode.toLowerCase() !== 'cash' && (
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Paid From Bank Account</label>
                   <select value={modal.bankAccountId} onChange={e => setModal(m => m ? { ...m, bankAccountId: e.target.value } : m)}

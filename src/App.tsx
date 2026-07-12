@@ -71,6 +71,7 @@ import { InvoiceSeriesPage } from '@/pages/accounts/InvoiceSeries'
 import { PaymentPlanningPage } from '@/pages/accounts/PaymentPlanning'
 import { CMSUploadPage } from '@/pages/accounts/CMSUpload'
 import { BuyerAdvancesPage } from '@/pages/accounts/BuyerAdvancesPage'
+import { VendorAdvancesPage } from '@/pages/accounts/VendorAdvancesPage'
 import { PartyLedgerPage } from '@/pages/accounts/PartyLedgerPage'
 import { OpeningBalancesPage } from '@/pages/accounts/OpeningBalancesPage'
 import { ExcelMapperPage } from '@/pages/import/ExcelMapper'
@@ -237,6 +238,7 @@ export const App: React.FC = () => {
             <Route path="accounts/sales-invoices" element={<SalesInvoiceRegister />} />
             <Route path="accounts/invoice-series" element={<InvoiceSeriesPage />} />
             <Route path="accounts/buyer-advances" element={<BuyerAdvancesPage />} />
+            <Route path="accounts/vendor-advances" element={<VendorAdvancesPage />} />
             <Route path="accounts/party-ledger" element={<PartyLedgerPage />} />
             <Route path="accounts/opening-balances" element={<OpeningBalancesPage />} />
             <Route path="purchases/new" element={<RequireRole check={can.viewPurchase}><PurchaseEntry /></RequireRole>} />

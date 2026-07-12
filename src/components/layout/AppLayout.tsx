@@ -132,6 +132,7 @@ const NAV: NavItem[] = [
       { label: 'Party Ledger', to: '/accounts/party-ledger' },
       { label: 'Opening Balances', to: '/accounts/opening-balances' },
       { label: 'Buyer Advances', to: '/accounts/buyer-advances' },
+      { label: 'Vendor Advances', to: '/accounts/vendor-advances' },
       { label: 'Daily Payment Planning', to: '/accounts/payment-planning' },
       { label: 'Generate CMS File', to: '/accounts/cms-upload' },
       { label: 'Sales Invoice Register', to: '/accounts/sales-invoices' },
