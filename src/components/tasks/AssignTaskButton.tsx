@@ -24,7 +24,7 @@ const emptyForm = (defaultTitle?: string) => ({
   title: defaultTitle ?? '',
   description: '',
   task_type: 'daily' as TaskType,
-  assigned_to_employee_id: '',
+  assigned_to_user_id: '',
   team: '',
   farm_id: '',
   due_date: today(),
@@ -41,10 +41,10 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
   const [form, setForm] = useState(emptyForm(defaultTitle))
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
-  const { data: employees } = useQuery({
-    queryKey: ['tasks_employees_list'],
+  const { data: users } = useQuery({
+    queryKey: ['tasks_users_list'],
     queryFn: async () => {
-      const { data } = await supabase.from('employees').select('id,name').eq('is_active', true).order('name')
+      const { data } = await supabase.from('profiles').select('id,full_name,role').eq('is_active', true).order('full_name')
       return data ?? []
     },
     enabled: open,
@@ -69,7 +69,7 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
         task_type: form.task_type,
         team: form.team || null,
         farm_id: form.farm_id || null,
-        assigned_to_employee_id: form.assigned_to_employee_id || null,
+        assigned_to_user_id: form.assigned_to_user_id || null,
         due_date: form.due_date || null,
         priority: form.priority,
         recurrence_rule: form.task_type === 'compliance' ? (form.recurrence_rule || null) : null,
@@ -116,11 +116,11 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
           </FormRow>
           <FormRow cols={2}>
             <SearchableSelect
-              label="Assign to person (optional)"
+              label="Assign to user (optional)"
               placeholder="Unassigned"
-              options={(employees ?? []).map((e: any) => ({ value: e.id, label: e.name }))}
-              value={form.assigned_to_employee_id}
-              onChange={v => s('assigned_to_employee_id', v)}
+              options={(users ?? []).map((u: any) => ({ value: u.id, label: `${u.full_name ?? 'Unnamed'} (${u.role})` }))}
+              value={form.assigned_to_user_id}
+              onChange={v => s('assigned_to_user_id', v)}
             />
             <Select label="Site / Farm (optional)" placeholder="Any site"
               options={(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))}

@@ -31,29 +31,29 @@ export const TasksPage: React.FC = () => {
   const [filterType, setFilterType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterFarm, setFilterFarm] = useState('')
-  const [filterEmp, setFilterEmp] = useState('')
+  const [filterUser, setFilterUser] = useState('')
 
   const { data: farms } = useQuery({
     queryKey: ['tasks_farms_list'],
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
   })
-  const { data: employees } = useQuery({
-    queryKey: ['tasks_employees_list'],
-    queryFn: async () => { const { data } = await supabase.from('employees').select('id,name').eq('is_active', true).order('name'); return data ?? [] }
+  const { data: users } = useQuery({
+    queryKey: ['tasks_users_list'],
+    queryFn: async () => { const { data } = await supabase.from('profiles').select('id,full_name,role').eq('is_active', true).order('full_name'); return data ?? [] }
   })
 
   const { data: tasks, isLoading } = useQuery({
-    queryKey: ['tasks', filterType, filterStatus, filterFarm, filterEmp],
+    queryKey: ['tasks', filterType, filterStatus, filterFarm, filterUser],
     queryFn: async () => {
       let q = supabase.from('tasks')
-        .select('*, employees:assigned_to_employee_id(name), farms:farm_id(name,code)')
+        .select('*, assignee:assigned_to_user_id(full_name,role), farms:farm_id(name,code)')
         .order('due_date', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(500)
       if (filterType)   q = q.eq('task_type', filterType)
       if (filterStatus) q = q.eq('status', filterStatus)
       if (filterFarm)   q = q.eq('farm_id', filterFarm)
-      if (filterEmp)    q = q.eq('assigned_to_employee_id', filterEmp)
+      if (filterUser)   q = q.eq('assigned_to_user_id', filterUser)
       const { data, error } = await q
       if (error) throw error
       return data ?? []
@@ -81,7 +81,7 @@ export const TasksPage: React.FC = () => {
             task_type: task.task_type,
             team: task.team,
             farm_id: task.farm_id,
-            assigned_to_employee_id: task.assigned_to_employee_id,
+            assigned_to_user_id: task.assigned_to_user_id,
             due_date: next,
             priority: task.priority,
             recurrence_rule: task.recurrence_rule,
@@ -133,8 +133,8 @@ export const TasksPage: React.FC = () => {
             options={(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))}
             value={filterFarm} onChange={e => setFilterFarm(e.target.value)} />
           <Select label="Assigned to" placeholder="Anyone"
-            options={(employees ?? []).map((e: any) => ({ value: e.id, label: e.name }))}
-            value={filterEmp} onChange={e => setFilterEmp(e.target.value)} />
+            options={(users ?? []).map((u: any) => ({ value: u.id, label: u.full_name ?? 'Unnamed' }))}
+            value={filterUser} onChange={e => setFilterUser(e.target.value)} />
         </div>
 
         {isLoading ? (
@@ -165,7 +165,7 @@ export const TasksPage: React.FC = () => {
                     </Td>
                     <Td><Badge color="gray">{TASK_TYPE_OPTIONS.find(o => o.value === t.task_type)?.label ?? t.task_type}</Badge></Td>
                     <Td>{t.farms?.name ?? t.team ?? '—'}</Td>
-                    <Td>{t.employees?.name ?? (t.team ? `Team: ${t.team}` : '—')}</Td>
+                    <Td>{t.assignee?.full_name ?? (t.team ? `Team: ${t.team}` : '—')}</Td>
                     <Td className={overdue ? 'text-red-600 font-medium' : ''}>
                       {t.due_date ? fmtDate(t.due_date) : '—'}{overdue && ' (overdue)'}
                     </Td>
