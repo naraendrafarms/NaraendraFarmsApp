@@ -700,10 +700,16 @@ export const GRNPage: React.FC = () => {
                 <option key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.name}</option>
               ))}
             </select>
-            {form.item_name && (
+            {form.item_name && form.item_id && (
               <div className="flex items-center gap-2 text-xs text-blue-700">
                 <span>Selected: <strong>{form.item_name}</strong></span>
                 <button onClick={() => setForm(f => ({ ...f, item_id: '', item_name: '', unit: '' }))}><X size={12} /></button>
+              </div>
+            )}
+            {form.item_name && !form.item_id && (
+              <div className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5">
+                <span>⚠ "{form.item_name}" is typed text, not picked from the Items Master — stock/consumption reports group by exact item name, so this will show as a separate item unless the spelling exactly matches every other GRN for it.</span>
+                <button onClick={() => setForm(f => ({ ...f, item_id: '', item_name: '', unit: '' }))} className="shrink-0"><X size={12} /></button>
               </div>
             )}
           </div>
