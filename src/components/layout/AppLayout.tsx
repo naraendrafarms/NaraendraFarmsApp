@@ -10,6 +10,8 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { TaskAlerts } from '@/components/tasks/TaskAlerts'
 import { LogoChip } from '@/components/Logo'
+import { useQuery } from '@tanstack/react-query'
+import { searchAppData, type SearchHit } from '@/lib/globalSearch'
 
 interface NavChild { label: string; to: string }
 interface NavItem {
@@ -307,14 +309,30 @@ function buildSearchIndex(nav: NavItem[]): { label: string; parent: string; to: 
 
 const GlobalSearch: React.FC<{ nav: NavItem[] }> = ({ nav }) => {
   const [query, setQuery] = useState('')
+  const [debounced, setDebounced] = useState('')
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
   const index = buildSearchIndex(nav)
 
-  const results = query.trim().length > 0
-    ? index.filter(i => i.label.toLowerCase().includes(query.toLowerCase()) || i.parent.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
+  // Debounce the data search (page-nav search stays instant, it's just an
+  // in-memory filter) so typing doesn't fire a query per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query.trim()), 300)
+    return () => clearTimeout(t)
+  }, [query])
+
+  const pageResults = query.trim().length > 0
+    ? index.filter(i => i.label.toLowerCase().includes(query.toLowerCase()) || i.parent.toLowerCase().includes(query.toLowerCase())).slice(0, 5)
     : []
+
+  const { data: dataResults = [], isFetching } = useQuery({
+    queryKey: ['global_data_search', debounced],
+    queryFn: () => searchAppData(debounced),
+    enabled: debounced.length >= 2,
+  })
+
+  const noResults = query.trim().length > 0 && pageResults.length === 0 && dataResults.length === 0 && !isFetching
 
   useEffect(() => {
     const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
@@ -322,33 +340,56 @@ const GlobalSearch: React.FC<{ nav: NavItem[] }> = ({ nav }) => {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  const goTo = (to: string) => { navigate(to); setQuery(''); setOpen(false) }
+
   return (
-    <div ref={ref} className="relative w-64 hidden sm:block">
+    <div ref={ref} className="relative w-72 hidden sm:block">
       <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-1.5">
         <Search size={14} className="text-gray-400 shrink-0" />
         <input
           value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true) }}
           onFocus={() => setOpen(true)}
-          placeholder="Search pages..."
+          placeholder="Search pages, employees, flocks, bills, tasks..."
           className="bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none w-full"
         />
         {query && <button onClick={() => { setQuery(''); setOpen(false) }}><X size={12} className="text-gray-400 hover:text-gray-600" /></button>}
       </div>
-      {open && results.length > 0 && (
-        <div className="absolute top-full mt-1 left-0 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden">
-          {results.map((r, i) => (
-            <button key={i} onMouseDown={() => { navigate(r.to); setQuery(''); setOpen(false) }}
-              className="w-full text-left px-3 py-2 hover:bg-gray-50 flex flex-col border-b border-gray-100 last:border-0">
+      {open && (pageResults.length > 0 || dataResults.length > 0) && (
+        <div className="absolute top-full mt-1 left-0 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden max-h-96 overflow-y-auto">
+          {pageResults.length > 0 && (
+            <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Pages</div>
+          )}
+          {pageResults.map((r, i) => (
+            <button key={`p${i}`} onMouseDown={() => goTo(r.to)}
+              className="w-full text-left px-3 py-2 hover:bg-gray-50 flex flex-col border-b border-gray-50 last:border-0">
               <span className="text-sm font-medium text-gray-800">{r.label}</span>
               {r.parent && <span className="text-xs text-gray-400">{r.parent}</span>}
             </button>
           ))}
+          {dataResults.length > 0 && (
+            <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 border-t border-gray-100">Records</div>
+          )}
+          {dataResults.map((r: SearchHit, i: number) => (
+            <button key={`d${i}`} onMouseDown={() => goTo(r.to)}
+              className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-start gap-2 border-b border-gray-50 last:border-0">
+              <span className="text-base leading-5 shrink-0">{r.icon}</span>
+              <span className="flex flex-col min-w-0">
+                <span className="text-sm font-medium text-gray-800 truncate">{r.title}</span>
+                <span className="text-xs text-gray-400 truncate">{r.type}{r.subtitle ? ' · ' + r.subtitle : ''}</span>
+              </span>
+            </button>
+          ))}
         </div>
       )}
-      {open && query.trim().length > 0 && results.length === 0 && (
-        <div className="absolute top-full mt-1 left-0 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50 px-3 py-4 text-sm text-gray-400 text-center">
-          No pages found for "{query}"
+      {open && isFetching && debounced.length >= 2 && pageResults.length === 0 && dataResults.length === 0 && (
+        <div className="absolute top-full mt-1 left-0 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50 px-3 py-4 text-sm text-gray-400 text-center">
+          Searching…
+        </div>
+      )}
+      {open && noResults && (
+        <div className="absolute top-full mt-1 left-0 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50 px-3 py-4 text-sm text-gray-400 text-center">
+          No results for "{query}"
         </div>
       )}
     </div>
