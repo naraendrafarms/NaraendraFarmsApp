@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, currentFY, fyRange } from '@/lib/utils'
 import { Card, CardHeader, Button, DateInput, Input, Modal, Spinner, Table, Th, Td, Badge, StatCard } from '@/components/ui'
-import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle } from 'lucide-react'
+import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
@@ -26,7 +26,14 @@ export const PaymentPlanningPage: React.FC = () => {
     }
   })
 
-  // Kotak bank account balance (opening_balance + sum of credits - sum of debits)
+  // Kotak bank account balance — must match Bank Ledger's own calculation:
+  // per-financial-year opening balance (bank_fy_opening, falling back to the
+  // account's single opening_balance) plus only THIS FY's transactions.
+  // The previous version summed every bank_transactions row ever recorded
+  // against a flat all-time opening_balance, which diverges from what Bank
+  // Ledger itself shows as the closing balance. Also sums across every
+  // account with "Kotak" in the name instead of arbitrarily picking the
+  // first match, in case more than one exists.
   const { data: kotakBalance } = useQuery({
     queryKey: ['kotak_balance'],
     queryFn: async () => {
@@ -35,16 +42,27 @@ export const PaymentPlanningPage: React.FC = () => {
         .select('id,bank_name,account_name,opening_balance')
         .ilike('bank_name', '%kotak%')
         .eq('is_active', true)
-      if (!accounts?.length) return { balance: 0, accountId: null, accountNo: '' }
-      const acc = accounts[0]
-      const { data: txns } = await supabase
-        .from('bank_transactions')
-        .select('txn_type,amount')
-        .eq('bank_account_id', acc.id)
-      const credits = (txns ?? []).filter(t => t.txn_type === 'Credit').reduce((s, t) => s + (t.amount ?? 0), 0)
-      const debits  = (txns ?? []).filter(t => t.txn_type === 'Debit').reduce((s, t) => s + (t.amount ?? 0), 0)
-      const balance = (acc.opening_balance ?? 0) + credits - debits
-      return { balance, accountId: acc.id, accountNo: (acc as any).account_no ?? '' }
+      if (!accounts?.length) return { balance: 0 }
+      const fy = currentFY()
+      const { start } = fyRange(fy)
+      let balance = 0
+      for (const acc of accounts) {
+        const { data: fyOpen } = await supabase
+          .from('bank_fy_opening')
+          .select('opening_balance')
+          .eq('bank_account_id', acc.id).eq('fy', fy)
+          .maybeSingle()
+        const opening = fyOpen?.opening_balance != null ? Number(fyOpen.opening_balance) : (acc.opening_balance ?? 0)
+        const { data: txns } = await supabase
+          .from('bank_transactions')
+          .select('txn_type,amount')
+          .eq('bank_account_id', acc.id)
+          .gte('txn_date', start)
+        const credits = (txns ?? []).filter(t => t.txn_type === 'Credit').reduce((s, t) => s + (t.amount ?? 0), 0)
+        const debits  = (txns ?? []).filter(t => t.txn_type === 'Debit').reduce((s, t) => s + (t.amount ?? 0), 0)
+        balance += opening + credits - debits
+      }
+      return { balance }
     }
   })
 
@@ -286,6 +304,101 @@ export const PaymentPlanningPage: React.FC = () => {
     toast.success(`CMS file exported — ${selectedPayments.length} payments`)
   }
 
+  // Days between two YYYY-MM-DD dates
+  const daysBetween = (from: string, to: string) => {
+    const a = new Date(from + 'T00:00:00'), b = new Date(to + 'T00:00:00')
+    return Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000))
+  }
+
+  const handlePrint = () => {
+    if (!selectedPayments.length) { toast.error('Select payments to print'); return }
+    const totals = selectedPayments.reduce((acc: any, p: any) => {
+      const invoice = p.invoice_amount ?? 0
+      const payable = p.net_payable ?? invoice
+      acc.invoice += invoice
+      acc.discTds += invoice - payable
+      acc.payable += payable
+      return acc
+    }, { invoice: 0, discTds: 0, payable: 0 })
+
+    const rows = selectedPayments.map((p: any, i: number) => {
+      const party = partiesMap?.[p.vendor_name] ?? {}
+      const code = party.account_no ? String(party.account_no).slice(-4) : ''
+      const invoice = p.invoice_amount ?? 0
+      const payable = p.net_payable ?? invoice
+      const discTds = invoice - payable
+      const days = p.grn_date ? daysBetween(p.grn_date, planDate) : ''
+      return `<tr>
+        <td class="tc">${i + 1}</td>
+        <td>${p.vendor_name}${code ? ' - ' + code : ''}</td>
+        <td class="tc">${p.credit_limit_days ?? 0}</td>
+        <td class="tr">₹${inrNum(invoice)}</td>
+        <td class="tr">₹${inrNum(payable)}</td>
+        <td class="tr" style="color:#c00">₹${inrNum(discTds)}</td>
+        <td class="tc">${p.grn_date ? fmtDate(p.grn_date) : '-'}</td>
+        <td class="tc">${p.invoice_date ? fmtDate(p.invoice_date) : '-'}</td>
+        <td class="tc">${days}</td>
+      </tr>`
+    }).join('')
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Daily Payment Details</title>
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111;padding:20px}
+        table{width:100%;border-collapse:collapse}
+        th,td{border:1px solid #333;padding:6px 8px}
+        th{background:#f5f5f5;font-weight:700;text-align:center}
+        .tc{text-align:center}
+        .tr{text-align:right}
+        .title{text-align:center;font-size:20px;font-weight:700;padding:10px;border:1px solid #333}
+        .subtitle{text-align:center;font-size:15px;font-weight:700}
+        .totalrow td{font-weight:700;background:#fafafa}
+        .summary{width:60%;margin:24px auto 0}
+        .summary td{border:1px solid #333;padding:10px 14px;font-weight:700;text-align:center}
+        @media print{button{display:none!important}}
+      </style></head><body>
+      <table style="margin-bottom:0">
+        <tr><td colspan="6" class="title">M/S Naraendra Farms ${currentFY()}</td></tr>
+        <tr>
+          <td colspan="4" class="subtitle" style="border:1px solid #333">Daily Payment Details</td>
+          <td class="tc" style="font-weight:700">Date :</td>
+          <td class="tc" style="font-weight:700">${fmtDate(planDate)}</td>
+        </tr>
+      </table>
+      <table style="margin-top:0">
+        <thead><tr>
+          <th>S.No</th><th>Vendor Name</th><th>Credit Limit</th>
+          <th>Invoice Amount</th><th>Payable Amount</th><th>Discount / TDS /</th>
+          <th>GRN Date</th><th>Invoice Date</th><th>No.Of days</th>
+        </tr></thead>
+        <tbody>
+          ${rows}
+          <tr class="totalrow">
+            <td colspan="3" class="tr">Total Payments</td>
+            <td class="tr">₹${inrNum(totals.invoice)}</td>
+            <td class="tr">₹${inrNum(totals.payable)}</td>
+            <td class="tr">₹${inrNum(totals.discTds)}</td>
+            <td colspan="3"></td>
+          </tr>
+        </tbody>
+      </table>
+      <table class="summary">
+        <tr><td>Bank Balance</td><td>₹${inrNum(kotakBal)}</td></tr>
+        <tr><td>Bank Balance After Payments</td><td>₹${inrNum(kotakBal - totals.payable)}</td></tr>
+        <tr><td>Need to Receive Amount</td><td>₹${inrNum(totalReceivable)}</td></tr>
+      </table>
+      </body></html>`
+
+    const win = window.open('', '_blank', 'width=1000,height=750')
+    if (!win) { toast.error('Allow pop-ups to print'); return }
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    setTimeout(() => win.print(), 400)
+  }
+
+  const inrNum = (n: number) => (n ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
   const overdue = (payments ?? []).filter((p: any) => p.pay_before_date && p.pay_before_date < today())
   const dueToday = (payments ?? []).filter((p: any) => p.pay_before_date === today())
 
@@ -302,6 +415,9 @@ export const PaymentPlanningPage: React.FC = () => {
                 Mark Paid ({selected.size})
               </Button>
             )}
+            <Button variant="outline" icon={<Printer size={16} />} onClick={handlePrint} disabled={selected.size === 0}>
+              Print
+            </Button>
             <Button icon={<Download size={16} />} onClick={exportCMS} disabled={selected.size === 0}>
               Export CMS ({selected.size})
             </Button>
