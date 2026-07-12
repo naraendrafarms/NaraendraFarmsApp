@@ -143,6 +143,7 @@ export const BankLedgerPage: React.FC = () => {
   const [fromDate, setFromDate] = useState(fyRange(currentFY()).start)
   const [toDate, setToDate] = useState(fyRange(currentFY()).end)
   const [obInput, setObInput] = useState('')
+  const [search, setSearch] = useState('')
 
   // When the FY changes, reset the displayed date range to that FY's range
   React.useEffect(() => {
@@ -365,16 +366,28 @@ export const BankLedgerPage: React.FC = () => {
     const closing = filtered.length > 0 ? filtered[filtered.length - 1].balance : openingBalance
     // Credits/Debits stat cards previously summed over ALL FY transactions
     // regardless of the From/To date filter, so they never matched the
-    // rows actually visible in the table below. Compute over `filtered`.
+    // rows actually visible in the table below. Compute over `filtered`
+    // (date range only) — search narrows the visible rows below but must
+    // NOT affect balance/summary, or the closing balance would silently
+    // stop being the real running balance for the account.
     const credits = filtered.reduce((s, t) => s + (t.txn_type === 'Credit' ? (t.amount ?? 0) : 0), 0)
     const debits = filtered.reduce((s, t) => s + (t.txn_type === 'Debit' ? (t.amount ?? 0) : 0), 0)
 
+    const q = search.trim().toLowerCase()
+    const searched = q
+      ? filtered.filter((t: any) =>
+          t.description?.toLowerCase().includes(q) ||
+          t.reference_no?.toLowerCase().includes(q) ||
+          t.category?.toLowerCase().includes(q) ||
+          t.parties?.name?.toLowerCase().includes(q))
+      : filtered
+
     return {
       // Balance computed oldest→newest; display newest first (latest date on top)
-      filteredRows: filtered.slice().reverse(),
+      filteredRows: searched.slice().reverse(),
       summary: { credits, debits, closing },
     }
-  }, [transactions, fromDate, toDate, openingBalance])
+  }, [transactions, fromDate, toDate, openingBalance, search])
 
   const saveOpeningMutation = useMutation({
     mutationFn: async (v: number) => {
@@ -807,6 +820,13 @@ export const BankLedgerPage: React.FC = () => {
             </div>
             {(fromDate || toDate) && (
               <Button variant="outline" size="sm" onClick={() => { setFromDate(''); setToDate('') }}>Clear</Button>
+            )}
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
+              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Description, reference, category, party…" />
+            </div>
+            {search && (
+              <Button variant="outline" size="sm" onClick={() => setSearch('')}>Clear Search</Button>
             )}
           </div>
 
