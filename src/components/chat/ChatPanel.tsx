@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth'
 import { MessageCircle, X, Send, Paperclip, Plus, ArrowLeft, Users as UsersIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { ChatReplyToast } from '@/components/chat/ChatReplyToast'
 
 interface ChatUser { id: string; full_name: string | null; email: string | null }
 interface ChatGroupRow { id: string; name: string | null; is_dm: boolean }
@@ -16,7 +17,7 @@ function timeAgo(iso: string) {
 // Shared chat UI (conversation list / thread / composer). Used both inside
 // the header's slide-over panel and the full-page /chat route — `onClose`
 // is only passed by the slide-over, so the page version just omits the X.
-export const ChatBody: React.FC<{ onClose?: () => void; active: boolean }> = ({ onClose, active }) => {
+export const ChatBody: React.FC<{ onClose?: () => void; active: boolean; initialGroupId?: string | null }> = ({ onClose, active, initialGroupId }) => {
   const { profile } = useAuth()
   const qc = useQueryClient()
   const [activeGroup, setActiveGroup] = useState<{ id: string; title: string } | null>(null)
@@ -59,6 +60,14 @@ export const ChatBody: React.FC<{ onClose?: () => void; active: boolean }> = ({ 
       }).sort((a, b) => (b.last?.created_at ?? '').localeCompare(a.last?.created_at ?? ''))
     }
   })
+
+  // Jumping here from a popup reply toast (clicked instead of replied inline)
+  // — select that specific conversation once its title is known from `groups`.
+  useEffect(() => {
+    if (!initialGroupId || !groups.length) return
+    const g = groups.find((g: any) => g.id === initialGroupId)
+    if (g) setActiveGroup({ id: g.id, title: g.title })
+  }, [initialGroupId, groups])
 
   const { data: messages = [] } = useQuery({
     queryKey: ['chat_messages', activeGroup?.id],
@@ -267,6 +276,7 @@ export const ChatPanel: React.FC = () => {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [hasUnread, setHasUnread] = useState(false)
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null)
   const myId = profile?.id
 
   const { data: myGroupIds = [] } = useQuery({
@@ -286,7 +296,16 @@ export const ChatPanel: React.FC = () => {
         const msg = payload.new
         if (msg.sender_id === myId || !myGroupIds.includes(msg.group_id)) return
         const { data: sender } = await supabase.from('profiles').select('full_name').eq('id', msg.sender_id).single()
-        toast(`${sender?.full_name ?? 'Someone'}: ${msg.body ?? '📎 sent a file'}`, { icon: '💬' })
+        toast.custom((t) => (
+          <ChatReplyToast
+            toastId={t.id}
+            senderName={sender?.full_name ?? 'Someone'}
+            body={msg.body}
+            groupId={msg.group_id}
+            myId={myId!}
+            onOpenChat={(gid) => { setOpenGroupId(gid); setOpen(true) }}
+          />
+        ), { duration: 15000 })
         setHasUnread(true)
         qc.invalidateQueries({ queryKey: ['chat_groups', myId] })
         qc.invalidateQueries({ queryKey: ['chat_messages', msg.group_id] })
@@ -305,7 +324,7 @@ export const ChatPanel: React.FC = () => {
         <div className="fixed inset-0 z-50 flex justify-end no-print" onClick={() => setOpen(false)}>
           <div className="absolute inset-0 bg-black/30" />
           <div className="w-full max-w-sm h-full" onClick={e => e.stopPropagation()}>
-            <ChatBody active={open} onClose={() => setOpen(false)} />
+            <ChatBody active={open} onClose={() => setOpen(false)} initialGroupId={openGroupId} />
           </div>
         </div>
       )}
