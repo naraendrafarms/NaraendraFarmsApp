@@ -8,6 +8,7 @@ import {
 import { useAuth, can, type Role } from '@/lib/auth'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ChatPanel } from '@/components/chat/ChatPanel'
+import { TaskAlerts } from '@/components/tasks/TaskAlerts'
 import { LogoChip } from '@/components/Logo'
 
 interface NavChild { label: string; to: string }
@@ -486,6 +487,7 @@ export const AppLayout: React.FC = () => {
           <GlobalSearch nav={visibleNav} />
           <div className="flex-1" />
           <ChatPanel />
+          <TaskAlerts />
           <span className="text-xs text-gray-400 hidden sm:block">
             {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday:'long', day:'2-digit', month:'long', year:'numeric' })}
           </span>
