@@ -124,6 +124,8 @@ const WaitingToLink: React.FC = () => {
   const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set())
   const [billSearch, setBillSearch] = useState('')
   const [linking, setLinking] = useState(false)
+  const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(new Set())
+  const [bulkActing, setBulkActing] = useState(false)
 
   const { data: waitingTxns, isLoading } = useQuery({
     queryKey: ['bank_txn_waiting'],
@@ -164,6 +166,45 @@ const WaitingToLink: React.FC = () => {
     await supabase.from('bank_transactions').update({ match_status: 'ignored' }).eq('id', id)
     qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
     toast.success('Marked as ignored')
+  }
+
+  const toggleTxn = (id: string) => setSelectedTxnIds(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const toggleAllTxns = () => {
+    if (selectedTxnIds.size === (waitingTxns ?? []).length) setSelectedTxnIds(new Set())
+    else setSelectedTxnIds(new Set((waitingTxns ?? []).map((t: any) => t.id)))
+  }
+
+  const handleBulkIgnore = async () => {
+    if (selectedTxnIds.size === 0) return
+    setBulkActing(true)
+    try {
+      const { error } = await supabase.from('bank_transactions')
+        .update({ match_status: 'ignored' }).in('id', Array.from(selectedTxnIds))
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+      toast.success(`Ignored ${selectedTxnIds.size} transaction(s)`)
+      setSelectedTxnIds(new Set())
+    } catch (e: any) { toast.error(e.message) }
+    finally { setBulkActing(false) }
+  }
+
+  const handleBulkDeleteTxns = async () => {
+    if (selectedTxnIds.size === 0) return
+    if (!confirm(`Permanently delete ${selectedTxnIds.size} imported transaction(s)? This cannot be undone.`)) return
+    setBulkActing(true)
+    try {
+      // Still-waiting transactions were never linked to a bill, so there's no
+      // pending_payments/cash_book cleanup needed — this is a straight delete.
+      const { error } = await supabase.from('bank_transactions')
+        .delete().in('id', Array.from(selectedTxnIds))
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
+      toast.success(`Deleted ${selectedTxnIds.size} transaction(s)`)
+      setSelectedTxnIds(new Set())
+    } catch (e: any) { toast.error(e.message) }
+    finally { setBulkActing(false) }
   }
 
   const toggleBill = (id: string) => setSelectedPaymentIds(prev => {
@@ -285,11 +326,36 @@ const WaitingToLink: React.FC = () => {
           <div>No transactions waiting to be linked</div>
         </div>
       ) : (
-        <Card padding={false}>
+        <>
+          {selectedTxnIds.size > 0 && (
+            <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm">
+              <span className="text-amber-700 font-medium">{selectedTxnIds.size} selected</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleBulkIgnore}
+                  disabled={bulkActing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50"
+                >
+                  <X size={14} /> Ignore Selected
+                </button>
+                <button
+                  onClick={handleBulkDeleteTxns}
+                  disabled={bulkActing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  <Trash2 size={14} /> Delete Selected
+                </button>
+              </div>
+            </div>
+          )}
+          <Card padding={false}>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase text-left">
+                  <th className="px-3 py-2 w-8">
+                    <input type="checkbox" checked={(waitingTxns ?? []).length > 0 && selectedTxnIds.size === (waitingTxns ?? []).length} onChange={toggleAllTxns} />
+                  </th>
                   <th className="px-3 py-2">Date</th>
                   <th className="px-3 py-2">Description</th>
                   <th className="px-3 py-2">Reference</th>
@@ -302,6 +368,9 @@ const WaitingToLink: React.FC = () => {
               <tbody>
                 {(waitingTxns ?? []).map((t, i) => (
                   <tr key={t.id} className={`border-b border-gray-100 hover:bg-gray-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                    <td className="px-3 py-2">
+                      <input type="checkbox" checked={selectedTxnIds.has(t.id)} onChange={() => toggleTxn(t.id)} />
+                    </td>
                     <td className="px-3 py-2 text-gray-600">{t.txn_date}</td>
                     <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate">{t.description || '—'}</td>
                     <td className="px-3 py-2 text-gray-500">{t.reference_no || '—'}</td>
@@ -329,7 +398,8 @@ const WaitingToLink: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </Card>
+          </Card>
+        </>
       )}
 
       {/* Already-linked transactions — undo wrong matches here */}
