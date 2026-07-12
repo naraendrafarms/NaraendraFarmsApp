@@ -37,7 +37,7 @@ function exportCSV(filename: string, headers: string[], rows: string[][]) {
 const emptyForm = () => ({
   grn_no: '', grn_date: today(), farm_id: '', party_id: '',
   invoice_no: '', invoice_date: today(), category: 'Feed Ingredient',
-  item_id: '', item_name: '', flock_id: '',
+  item_id: '', item_name: '', flock_id: '', po_id: '',
   qty: '', unit: '', bags: '', bag_type: '', price_per_unit: '',
   basic_amount: '', gst_pct: '0', gst_amount: '', other_charges: '', total_amount: '',
   free_qty: '', batch_no: '', expiry_date: '', vehicle_no: '', remarks: ''
@@ -115,6 +115,20 @@ export const GRNPage: React.FC = () => {
     }
   })
 
+  // Purchase Orders available to link this GRN against — the item/vendor
+  // name is only a pre-fill convenience; GRN keeps its own independent
+  // item_name (e.g. the full formal invoice name) once selected.
+  const { data: openPOs } = useQuery({
+    queryKey: ['pos_for_grn_link'],
+    queryFn: async () => {
+      const { data } = await supabase.from('purchase_orders')
+        .select('id,po_no,item_name,quantity,unit,vendor_name,party_id,dose,material_status')
+        .order('po_date', { ascending: false })
+        .limit(500)
+      return data ?? []
+    }
+  })
+
   const { data: grns, isLoading } = useQuery({
     queryKey: ['grns'],
     queryFn: async () => {
@@ -179,6 +193,7 @@ export const GRNPage: React.FC = () => {
       item_id: g.item_id ?? '',
       item_name: g.item_name ?? '',
       flock_id: g.flock_id ?? '',
+      po_id: g.po_id ?? '',
       qty: g.qty?.toString() ?? '',
       unit: g.unit ?? '',
       bags: g.bags?.toString() ?? '',
@@ -208,6 +223,7 @@ export const GRNPage: React.FC = () => {
     category: form.category,
     item_id: form.item_id || null,
     item_name: form.item_name || null,
+    po_id: form.po_id || null,
     qty: parseFloat(form.qty) || null,
     unit: form.unit || null,
     bags: parseInt(form.bags) || null,
@@ -627,6 +643,39 @@ export const GRNPage: React.FC = () => {
               onChange={e => s('vehicle_no', e.target.value)}
             />
           </FormRow>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-gray-700">Link to Purchase Order (optional)</label>
+            <select
+              className="w-full border rounded px-2 py-1.5 text-sm"
+              value={form.po_id}
+              onChange={e => {
+                const po = (openPOs ?? []).find((p: any) => p.id === e.target.value)
+                if (po) {
+                  // Pre-fill as a convenience only — GRN's item_name stays a
+                  // separate, independently-editable field from here on. This
+                  // just sets a starting point (e.g. PO says "IBH Killed VAC
+                  // 1000 Dose"; you can still change it to the exact invoice
+                  // wording once you have the vendor's bill in hand).
+                  setForm(f => ({
+                    ...f, po_id: po.id,
+                    item_name: po.item_name ? `${po.item_name}${po.dose ? ' ' + po.dose + ' Dose' : ''}` : f.item_name,
+                    unit: po.unit || f.unit,
+                    party_id: po.party_id || f.party_id,
+                    qty: f.qty || (po.quantity != null ? String(po.quantity) : f.qty),
+                  }))
+                } else {
+                  setForm(f => ({ ...f, po_id: '' }))
+                }
+              }}
+            >
+              <option value="">— Not linked to a PO —</option>
+              {(openPOs ?? []).map((p: any) => (
+                <option key={p.id} value={p.id}>{p.po_no} — {p.item_name ?? '—'} — {p.vendor_name}{p.material_status ? ` (${p.material_status})` : ''}</option>
+              ))}
+            </select>
+            {form.po_id && <p className="text-xs text-blue-600">Linked — this GRN will be traceable back to that PO.</p>}
+          </div>
 
           <div className="space-y-1">
             <label className="block text-xs font-medium text-gray-700">Item</label>

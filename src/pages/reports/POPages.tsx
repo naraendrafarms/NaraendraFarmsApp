@@ -260,6 +260,7 @@ const EMPTY_PO = {
   po_no:'', po_date:'', fiscal_year:currentFY(), vendor_name:'', party_id:'', item_name:'',
   material_type:'', quantity:'', unit:'', rate:'', gst_pct:'', total_amount:'',
   grn_no:'', grn_date:'', material_status:'Pending', credit_limit_days:'',
+  dose:'', intent_line_id:'',
 }
 
 const POTab: React.FC = () => {
@@ -324,7 +325,7 @@ const POTab: React.FC = () => {
   const f = (k: string) => (e: any) => setForm((p: any) => ({...p,[k]:e.target.value}))
 
   // Multi-line items for New PO
-  const emptyLine = () => ({ item_name:'', material_type:'', quantity:'', unit:'', rate:'', gst_pct:'', total_amount:'' })
+  const emptyLine = () => ({ item_name:'', material_type:'', quantity:'', unit:'', rate:'', gst_pct:'', total_amount:'', dose:'', intent_line_id:'' })
   const [newLines, setNewLines] = useState<any[]>([emptyLine()])
   const setLine = (i: number, k: string, v: string) => setNewLines(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l))
   const calcLineTotal = (i: number, k: string, v: string) => {
@@ -338,6 +339,35 @@ const POTab: React.FC = () => {
       next.total_amount = (basic + basic * gst / 100).toFixed(2)
       return next
     }))
+  }
+
+  // Open Purchase Intent lines available to raise a PO against — optional.
+  // One intent line can be linked from MULTIPLE POs (ordered_qty tracks the
+  // running total), which is how a single requirement splits across
+  // several purchase orders over time.
+  const { data: openIntentLines=[] } = useQuery({
+    queryKey: ['purchase_intent_lines_open'],
+    queryFn: async () => {
+      const { data } = await supabase.from('purchase_intent_lines')
+        .select('id,item_name,require_qty,ordered_qty,uom,require_for,status,purchase_intents(intent_no)')
+        .in('status', ['open','partial'])
+        .order('created_at', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  // After a PO line is saved with an intent link, bump that intent line's
+  // ordered_qty and flip its status once fully covered — best-effort, never
+  // blocks the PO save itself if it fails.
+  const bumpIntentLine = async (intentLineId: string, qty: number) => {
+    try {
+      const { data: line } = await supabase.from('purchase_intent_lines')
+        .select('require_qty,ordered_qty').eq('id', intentLineId).single()
+      if (!line) return
+      const newOrdered = (line.ordered_qty ?? 0) + qty
+      const status = newOrdered >= (line.require_qty ?? 0) ? 'ordered' : 'partial'
+      await supabase.from('purchase_intent_lines').update({ ordered_qty: newOrdered, status }).eq('id', intentLineId)
+    } catch { /* non-critical, don't block the PO save */ }
   }
 
   const { data: orders=[], isLoading } = useQuery({
@@ -387,6 +417,7 @@ const POTab: React.FC = () => {
             total_amount: l.total_amount ? Number(l.total_amount) : null,
             material_status: form.material_status,
             credit_limit_days: form.credit_limit_days ? Number(form.credit_limit_days) : null,
+            dose: l.dose || null, intent_line_id: l.intent_line_id || null,
           }
           if (l.id) {
             const { error } = await supabase.from('purchase_orders').update(payload).eq('id', l.id)
@@ -394,6 +425,7 @@ const POTab: React.FC = () => {
           } else {
             const { error } = await supabase.from('purchase_orders').insert(payload)
             if (error) throw error
+            if (l.intent_line_id) await bumpIntentLine(l.intent_line_id, Number(l.quantity) || 0)
           }
         }
       } else if (editing) {
@@ -410,9 +442,15 @@ const POTab: React.FC = () => {
           grn_no: form.grn_no || null, grn_date: form.grn_date || null,
           material_status: form.material_status,
           credit_limit_days: form.credit_limit_days ? Number(form.credit_limit_days) : null,
+          dose: form.dose || null, intent_line_id: form.intent_line_id || null,
         }
+        // Only bump the intent line's ordered_qty if this edit newly attaches
+        // a link that wasn't there before — avoids double-counting on
+        // every subsequent save of the same PO line.
+        const linkIsNew = form.intent_line_id && form.intent_line_id !== (editing.intent_line_id ?? '')
         const { error } = await supabase.from('purchase_orders').update(payload).eq('id', editing.id)
         if (error) throw error
+        if (linkIsNew) await bumpIntentLine(form.intent_line_id, Number(form.quantity) || 0)
       } else {
         // Multi-line insert — one row per item in newLines
         const validLines = newLines.filter(l => l.item_name || l.total_amount)
@@ -429,14 +467,20 @@ const POTab: React.FC = () => {
           total_amount: l.total_amount ? Number(l.total_amount) : null,
           material_status: form.material_status,
           credit_limit_days: form.credit_limit_days ? Number(form.credit_limit_days) : null,
+          dose: l.dose || null, intent_line_id: l.intent_line_id || null,
         }))
         const { error } = await supabase.from('purchase_orders').insert(rows)
         if (error) throw error
+        for (const l of validLines) {
+          if (l.intent_line_id) await bumpIntentLine(l.intent_line_id, Number(l.quantity) || 0)
+        }
       }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase_orders'] })
       qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
+      qc.invalidateQueries({ queryKey: ['purchase_intent_lines_open'] })
+      qc.invalidateQueries({ queryKey: ['purchase_intents'] })
       setOpen(false)
       setNewLines([emptyLine()])
       setMultiEditMode(false)
@@ -854,6 +898,14 @@ const POTab: React.FC = () => {
                 <Input label="Rate (₹)" type="number" value={form.rate} onChange={f('rate')} />
                 <Input label="GST %" type="number" value={form.gst_pct} onChange={f('gst_pct')} />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Dose (optional, e.g. vaccine)" value={form.dose} onChange={f('dose')} placeholder="1000 / 2500" />
+                <Sel label="Link to Purchase Intent (optional)" value={form.intent_line_id} onChange={f('intent_line_id')}
+                  options={[{ value: '', label: '— Not linked —' }, ...openIntentLines.map((l: any) => ({
+                    value: l.id,
+                    label: `${l.purchase_intents?.intent_no ?? '?'} — ${l.item_name} — ${(l.require_qty - (l.ordered_qty ?? 0)).toLocaleString('en-IN')} ${l.uom ?? ''} left`,
+                  }))]} />
+              </div>
               <div className="grid grid-cols-3 gap-3">
                 <Input label="Total Amount (₹)" type="number" value={form.total_amount} onChange={f('total_amount')} />
                 <Input label="GRN No" value={form.grn_no} onChange={f('grn_no')} />
@@ -874,6 +926,8 @@ const POTab: React.FC = () => {
                     <th className="px-2 py-1 text-xs font-medium text-gray-600">Rate</th>
                     <th className="px-2 py-1 text-xs font-medium text-gray-600">GST%</th>
                     <th className="px-2 py-1 text-xs font-medium text-gray-600">Total</th>
+                    <th className="text-left px-2 py-1 text-xs font-medium text-gray-600">Dose</th>
+                    <th className="text-left px-2 py-1 text-xs font-medium text-gray-600">Intent Line</th>
                     <th className="w-6"></th>
                   </tr></thead>
                   <tbody>
@@ -891,6 +945,15 @@ const POTab: React.FC = () => {
                         <td className="px-1 py-1"><input className="w-20 border border-gray-300 rounded px-2 py-1 text-xs text-right" type="number" placeholder="0" value={l.rate} onChange={e => calcLineTotal(i,'rate',e.target.value)} /></td>
                         <td className="px-1 py-1"><input className="w-16 border border-gray-300 rounded px-2 py-1 text-xs text-right" type="number" placeholder="0" value={l.gst_pct} onChange={e => calcLineTotal(i,'gst_pct',e.target.value)} /></td>
                         <td className="px-1 py-1"><input className="w-24 border border-gray-300 rounded px-2 py-1 text-xs text-right bg-gray-50" type="number" placeholder="0" value={l.total_amount} onChange={e => setLine(i,'total_amount',e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className="w-16 border border-gray-300 rounded px-2 py-1 text-xs" placeholder="1000" value={l.dose} onChange={e => setLine(i,'dose',e.target.value)} /></td>
+                        <td className="px-1 py-1">
+                          <select className="w-28 border border-gray-300 rounded px-1 py-1 text-xs" value={l.intent_line_id} onChange={e => setLine(i,'intent_line_id',e.target.value)}>
+                            <option value="">—</option>
+                            {openIntentLines.map((il: any) => (
+                              <option key={il.id} value={il.id}>{il.purchase_intents?.intent_no ?? '?'} — {il.item_name}</option>
+                            ))}
+                          </select>
+                        </td>
                         <td className="px-1 py-1">
                           {newLines.length > 1 && <button onClick={() => setNewLines(ls => ls.filter((_,idx)=>idx!==i))} className="text-red-400 hover:text-red-600 text-xs">✕</button>}
                         </td>
