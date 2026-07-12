@@ -330,7 +330,7 @@ export const PaymentPlanningPage: React.FC = () => {
       return {
         sno: i + 1,
         vendor_name: `${p.vendor_name}${code ? ' - ' + code : ''}`,
-        credit_limit_days: p.credit_limit_days ?? 0,
+        credit_limit_days: p.credit_limit ?? 0,
         invoice_amount: invoice,
         payable_amount: payable,
         disc_tds: invoice - payable,
