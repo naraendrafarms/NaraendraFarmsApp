@@ -5,12 +5,13 @@ import { useAuth } from '@/lib/auth'
 import { fmtDate, today } from '@/lib/utils'
 import {
   Card, SectionHeader, Select, Table, Th, Td, Badge, Spinner, EmptyState, StatCard,
+  Modal, Input, Textarea, DateInput, FormRow, SearchableSelect,
 } from '@/components/ui'
 import { AssignTaskButton } from '@/components/tasks/AssignTaskButton'
-import { CheckCircle2, Circle, Clock, XCircle, Trash2, ListTodo, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, Circle, Clock, XCircle, Trash2, ListTodo, AlertTriangle, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
-  TASK_TYPE_OPTIONS, TASK_STATUS_OPTIONS, type TaskStatus, nextDueDate,
+  TASK_TYPE_OPTIONS, TASK_STATUS_OPTIONS, TASK_PRIORITY_OPTIONS, type TaskStatus, nextDueDate,
 } from '@/lib/tasks'
 
 const STATUS_BADGE: Record<TaskStatus, { color: any; label: string }> = {
@@ -33,6 +34,8 @@ export const TasksPage: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState('')
   const [filterFarm, setFilterFarm] = useState('')
   const [filterUser, setFilterUser] = useState('')
+  const [editTask, setEditTask] = useState<any>(null)
+  const [editForm, setEditForm] = useState<any>(null)
 
   const effectiveUserFilter = scope === 'mine' ? (profile?.id ?? '') : filterUser
 
@@ -107,6 +110,41 @@ export const TasksPage: React.FC = () => {
       if (error) throw error
     },
     onSuccess: () => { toast.success('Task deleted'); qc.invalidateQueries({ queryKey: ['tasks'] }) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const openEdit = (t: any) => {
+    setEditTask(t)
+    setEditForm({
+      title: t.title ?? '', description: t.description ?? '', task_type: t.task_type,
+      assigned_to_user_id: t.assigned_to_user_id ?? '', farm_id: t.farm_id ?? '',
+      team: t.team ?? '', due_date: t.due_date ?? '', priority: t.priority ?? 'normal',
+    })
+  }
+
+  const editMut = useMutation({
+    mutationFn: async () => {
+      if (!editTask) return
+      if (!editForm.title.trim()) throw new Error('Title is required')
+      const { error } = await supabase.from('tasks').update({
+        title: editForm.title.trim(),
+        description: editForm.description || null,
+        task_type: editForm.task_type,
+        assigned_to_user_id: editForm.assigned_to_user_id || null,
+        farm_id: editForm.farm_id || null,
+        team: editForm.team || null,
+        due_date: editForm.due_date || null,
+        priority: editForm.priority,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editTask.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Task updated')
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['my_tasks_widget'] })
+      setEditTask(null)
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -204,6 +242,8 @@ export const TasksPage: React.FC = () => {
                           </>
                         )}
                         {t.status === 'done' && <Circle size={0} />}
+                        <button title="Edit" onClick={() => openEdit(t)}
+                          className="p-1.5 rounded-lg hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Pencil size={15} /></button>
                         <button title="Delete" onClick={() => { if (confirm('Delete this task?')) deleteMut.mutate(t.id) }}
                           className="p-1.5 rounded-lg hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
                       </div>
@@ -215,6 +255,45 @@ export const TasksPage: React.FC = () => {
           </Table>
         )}
       </Card>
+
+      {editTask && editForm && (
+        <Modal open={!!editTask} onClose={() => setEditTask(null)} title="Edit Task" size="lg"
+          footer={<>
+            <button onClick={() => setEditTask(null)} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50">
+              Cancel
+            </button>
+            <button onClick={() => editMut.mutate()} disabled={editMut.isPending}
+              className="px-4 py-2 text-sm font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
+              {editMut.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </>}
+        >
+          <div className="flex flex-col gap-3">
+            <Input label="Title" required value={editForm.title} onChange={e => setEditForm((f: any) => ({ ...f, title: e.target.value }))} />
+            <Textarea label="Description" value={editForm.description} onChange={e => setEditForm((f: any) => ({ ...f, description: e.target.value }))} />
+            <FormRow cols={2}>
+              <Select label="Type" options={TASK_TYPE_OPTIONS} value={editForm.task_type} onChange={e => setEditForm((f: any) => ({ ...f, task_type: e.target.value }))} />
+              <Select label="Priority" options={TASK_PRIORITY_OPTIONS} value={editForm.priority} onChange={e => setEditForm((f: any) => ({ ...f, priority: e.target.value }))} />
+            </FormRow>
+            <FormRow cols={2}>
+              <SearchableSelect
+                label="Assign to person — this is who sees it in My Tasks"
+                placeholder="Unassigned"
+                options={(users ?? []).map((u: any) => ({ value: u.id, label: u.full_name ?? 'Unnamed' }))}
+                value={editForm.assigned_to_user_id}
+                onChange={v => setEditForm((f: any) => ({ ...f, assigned_to_user_id: v }))}
+              />
+              <Select label="Site / Farm (optional)" placeholder="Any site"
+                options={(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))}
+                value={editForm.farm_id} onChange={e => setEditForm((f: any) => ({ ...f, farm_id: e.target.value }))} />
+            </FormRow>
+            <FormRow cols={2}>
+              <Input label="Team label (optional, just a tag)" value={editForm.team} onChange={e => setEditForm((f: any) => ({ ...f, team: e.target.value }))} />
+              <DateInput label="Due Date" value={editForm.due_date} onChange={e => setEditForm((f: any) => ({ ...f, due_date: e.target.value }))} />
+            </FormRow>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

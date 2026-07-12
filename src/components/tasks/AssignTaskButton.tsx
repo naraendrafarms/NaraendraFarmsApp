@@ -116,7 +116,7 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
           </FormRow>
           <FormRow cols={2}>
             <SearchableSelect
-              label="Assign to user (optional)"
+              label="Assign to person — this is who sees it in My Tasks"
               placeholder="Unassigned"
               options={(users ?? []).map((u: any) => ({ value: u.id, label: `${u.full_name ?? 'Unnamed'} (${u.role})` }))}
               value={form.assigned_to_user_id}
@@ -126,8 +126,13 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
               options={(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))}
               value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
           </FormRow>
+          {!form.assigned_to_user_id && (
+            <div className="text-xs bg-amber-50 text-amber-700 rounded-lg px-3 py-2">
+              No person selected above — this task will only show under "All Tasks", never in anyone's "My Tasks". Pick a person if you want someone to see it as theirs.
+            </div>
+          )}
           <FormRow cols={2}>
-            <Input label="Team (optional, e.g. Accounts / Admin / Site)" value={form.team} onChange={e => s('team', e.target.value)} />
+            <Input label="Team label (optional, just a tag — not an assignment)" value={form.team} onChange={e => s('team', e.target.value)} placeholder="e.g. Accounts / Site" />
             <DateInput label="Due Date" value={form.due_date} onChange={e => s('due_date', e.target.value)} />
           </FormRow>
           {form.task_type === 'compliance' && (
