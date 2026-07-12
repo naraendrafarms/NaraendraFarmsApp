@@ -67,6 +67,16 @@ from `src/components/ui/index.tsx` — displays DD/MM/YYYY, stores YYYY-MM-DD.
 - Category mapping: je→je_sale, te→te_sale, be→be_sale, manure→litter_sale, bird→bird_sale
 - On edit: delete old cash_book entry first to avoid duplicates
 
+### 6a. Help Guide + changelog — update EVERY time, not just when asked
+Whenever a change ships that a user would notice (new page/feature, changed
+workflow, meaningful bug fix), update `src/pages/help/HelpGuide.tsx` in the
+SAME session: add/adjust the relevant section's `workflows`/`tips`, add a
+`CHANGELOG` entry (today's date, correct tag: New/Fix/Improved), and bump
+`LAST_UPDATED`. Do this before ending the turn, without waiting to be asked —
+treat it as part of "done", the same way pushing to main is part of "done".
+A migration-only change with no user-facing behavior difference doesn't need
+an entry; a new page, new button, changed flow, or real bug fix does.
+
 ### 6. Flock bird count logic (v_flock_summary)
 ```sql
 COALESCE(NULLIF(closing_female, 0), opening_female, total_placed_f) AS current_female
