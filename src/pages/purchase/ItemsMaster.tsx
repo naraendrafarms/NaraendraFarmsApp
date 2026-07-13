@@ -194,6 +194,19 @@ export const ItemsMasterPage: React.FC = () => {
           .in('item_id', dupeIds)
         if (error && !error.message.includes('does not exist')) throw error
       }
+      // grn and feed_production_ingredients also still carry a legacy
+      // ingredient_id column from before items unified feed_ingredients +
+      // medicines_master + general_items (migration 151) — Feed Mill's
+      // stock summary reads THIS column directly, not item_id, so without
+      // remapping it too a merge would leave Feed Mill's numbers split
+      // across the old and new ids even though item_id is now correct.
+      for (const table of ['grn', 'feed_production_ingredients']) {
+        const { error } = await supabase
+          .from(table)
+          .update({ ingredient_id: keepId })
+          .in('ingredient_id', dupeIds)
+        if (error && !error.message.includes('does not exist') && !error.message.includes('column')) throw error
+      }
       // item_aliases.item_id cascades on delete, so without remapping first
       // every alias the duplicate items were known by would be silently
       // lost instead of carried over to the kept item. Its alias text is
@@ -213,11 +226,15 @@ export const ItemsMasterPage: React.FC = () => {
           keptNorm.add(norm)
         }
       }
-      // Also rewrite the denormalized item_name text columns — name-keyed
-      // aggregations (Feed Mill stock, ledger fallbacks) still split the
-      // merged item across names otherwise.
+      // Also rewrite the denormalized item_name/ingredient_name text
+      // columns — item_id now correctly points at the kept item on every
+      // table, but several pages display this text column directly rather
+      // than joining through item_id (PO list, Purchase Intent list, Feed
+      // Mill), so without this they'd keep showing the OLD item's name
+      // even though the link underneath is now correct.
       const { data: keptItem } = await supabase.from('items').select('name').eq('id', keepId).single()
       const { data: dropped } = await supabase.from('items').select('name').in('id', dupeIds)
+      let renameWarnings = 0
       if (keptItem?.name) {
         for (const d of (dropped ?? [])) {
           if (!d.name || d.name === keptItem.name) continue
@@ -225,13 +242,24 @@ export const ItemsMasterPage: React.FC = () => {
           if (e1) throw new Error(`grn rename failed: ${e1.message}`)
           const { error: e2 } = await supabase.from('stock_ledger').update({ item_name: keptItem.name }).eq('item_name', d.name)
           if (e2) throw new Error(`stock_ledger rename failed: ${e2.message}`)
+          const { error: e3 } = await supabase.from('purchase_intent_lines').update({ item_name: keptItem.name }).eq('item_name', d.name)
+          if (e3) throw new Error(`Purchase Intent rename failed: ${e3.message}`)
+          const { error: e4 } = await supabase.from('feed_production_ingredients').update({ ingredient_name: keptItem.name }).eq('ingredient_name', d.name)
+          if (e4 && !e4.message.includes('does not exist')) throw new Error(`Feed Mill rename failed: ${e4.message}`)
+          // purchase_orders has UNIQUE(po_no, item_name) — a blanket rename
+          // could collide with another PO under the same po_no that already
+          // uses the kept item's name. Non-fatal: skip that row rather than
+          // aborting the whole merge; surfaced as a warning afterward.
+          const { error: e5 } = await supabase.from('purchase_orders').update({ item_name: keptItem.name }).eq('item_name', d.name)
+          if (e5) renameWarnings++
         }
       }
       // Delete the duplicates
       const { error: delErr } = await supabase.from('items').delete().in('id', dupeIds)
       if (delErr) throw delErr
 
-      toast.success(`Merged ${dupeIds.length} item${dupeIds.length > 1 ? 's' : ''} into the selected item`)
+      toast.success(`Merged ${dupeIds.length} item${dupeIds.length > 1 ? 's' : ''} into the selected item`
+        + (renameWarnings ? ` — ${renameWarnings} PO row(s) kept their old item name (name clash on that PO number); item link is still correct, edit those manually if needed` : ''))
       setSelected(new Set())
       setMergeModal(false)
       setKeepId('')
