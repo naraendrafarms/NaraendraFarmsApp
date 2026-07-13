@@ -430,6 +430,15 @@ const LinkToBills: React.FC = () => {
                   </tr>
                 ))}
               </tbody>
+              {(waitingTxns ?? []).length > 0 && (
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                    <td className="px-3 py-2" colSpan={4}>TOTAL ({(waitingTxns ?? []).length})</td>
+                    <td className="px-3 py-2 text-right text-red-600">₹{fmt((waitingTxns ?? []).reduce((s: number, t: any) => s + (t.amount ?? 0), 0))}</td>
+                    <td className="px-3 py-2" colSpan={2}></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
           </Card>
@@ -477,6 +486,15 @@ const LinkToBills: React.FC = () => {
                     </tr>
                   ))}
                 </tbody>
+                {(matchedTxns ?? []).length > 0 && (
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                      <td className="px-3 py-2" colSpan={3}>TOTAL ({(matchedTxns ?? []).length})</td>
+                      <td className="px-3 py-2 text-right text-red-600">₹{fmt((matchedTxns ?? []).reduce((s: number, t: any) => s + (t.amount ?? 0), 0))}</td>
+                      <td className="px-3 py-2" colSpan={2}></td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </Card>

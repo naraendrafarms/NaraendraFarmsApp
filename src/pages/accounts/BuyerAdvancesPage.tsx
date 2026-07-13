@@ -383,6 +383,15 @@ export const BuyerAdvancesPage: React.FC = () => {
                 )
               })}
             </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 font-bold">
+                <Td colSpan={6}>TOTAL ({advances.length})</Td>
+                <Td className="text-right text-green-700">{inr(advances.reduce((s: number, a: any) => s + (a.amount ?? 0), 0))}</Td>
+                <Td className="text-right text-red-600">{inr(advances.reduce((s: number, a: any) => s + (a.amount_used ?? 0), 0))}</Td>
+                <Td className="text-right text-blue-700">{inr(advances.reduce((s: number, a: any) => s + ((a.amount ?? 0) - (a.amount_used ?? 0)), 0))}</Td>
+                <Td></Td>
+              </tr>
+            </tfoot>
           </Table>
         )}
       </Card>

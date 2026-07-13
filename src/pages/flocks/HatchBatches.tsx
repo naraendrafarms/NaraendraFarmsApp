@@ -590,6 +590,41 @@ export const HatchBatches: React.FC = () => {
                   )
                 })}
               </tbody>
+              {displayed.length > 0 && (() => {
+                // % totals are recomputed from the summed underlying counts
+                // (broken/received etc.), not an average of each row's own
+                // %, so a mix of small and large batches doesn't skew it.
+                const t = displayed.reduce((s: any, b: any) => {
+                  const r = rowCalc(b)
+                  s.received += r.received; s.setting += r.setting; s.broken += r.broken
+                  s.inf += r.inf; s.blst += r.blst; s.saleChk += r.saleChk
+                  s.std += r.std; s.unhatch += r.unhatch; s.reject += r.reject
+                  return s
+                }, { received: 0, setting: 0, broken: 0, inf: 0, blst: 0, saleChk: 0, std: 0, unhatch: 0, reject: 0 })
+                return (
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-300 bg-gray-50 font-bold">
+                      <td className="px-3 py-2" colSpan={11}>TOTAL ({displayed.length})</td>
+                      <td className="px-3 py-2 text-xs text-right">{t.received.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right">{t.setting.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right">{t.broken.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right text-orange-600">{pctCell(pct2(t.broken, t.received))}</td>
+                      <td className="px-3 py-2 text-xs text-right">{t.inf.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right text-orange-600">{pctCell(pct2(t.inf, t.setting))}</td>
+                      <td className="px-3 py-2 text-xs text-right">{t.blst.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right text-orange-600">{pctCell(pct2(t.blst, t.setting))}</td>
+                      <td className="px-3 py-2 text-xs text-right">{t.saleChk.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right">{pctCell(pct2(t.std, t.setting - t.inf - t.blst))}</td>
+                      <td className="px-3 py-2 text-xs text-right text-green-700">{t.std.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right">{t.unhatch.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right text-orange-600">{pctCell(pct2(t.unhatch, t.setting))}</td>
+                      <td className="px-3 py-2 text-xs text-right">{t.reject.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-2 text-xs text-right text-red-500">{pctCell(pct2(t.reject, t.setting))}</td>
+                      <td className="px-3 py-2" colSpan={3}></td>
+                    </tr>
+                  </tfoot>
+                )
+              })()}
             </table>
           </div>
           {displayed.length === 0 && (

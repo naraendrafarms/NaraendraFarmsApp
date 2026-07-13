@@ -291,6 +291,24 @@ export const ShedPerformancePage: React.FC = () => {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 font-bold">
+                    <Td colSpan={5} className="text-right text-xs">TOTAL (range selected)</Td>
+                    <Td right className="text-xs">{totals.days}</Td>
+                    <Td right className="text-xs">{numFmt(totals.eggs)}</Td>
+                    <Td right className="text-xs text-green-700">{numFmt(totals.he)}</Td>
+                    <Td right className={`text-xs ${colorPct(totals.hdPct)}`}>{totals.hdPct != null ? totals.hdPct.toFixed(1)+'%' : '—'}</Td>
+                    <Td right className={`text-xs ${colorPct(totals.hePct, 90, 75)}`}>{totals.hePct != null ? totals.hePct.toFixed(1)+'%' : '—'}</Td>
+                    <Td right className="text-xs text-emerald-600">{numFmt(totals.grA)}</Td>
+                    <Td right className="text-xs text-yellow-600">{numFmt(totals.grB)}</Td>
+                    <Td right className="text-xs text-orange-600">{numFmt(totals.grC)}</Td>
+                    <Td right className="text-xs">{numFmt(totals.je)}</Td>
+                    <Td right className="text-xs">{numFmt(totals.te)}</Td>
+                    <Td right className="text-xs">{numFmt(totals.be + totals.le)}</Td>
+                    <Td right className="text-xs text-red-400">{numFmt(totals.waste)}</Td>
+                    <Td right className="text-xs text-red-600">{numFmt(totals.mortF)}</Td>
+                  </tr>
+                </tfoot>
               </Table>
             </Card>
           )}
@@ -330,6 +348,24 @@ export const ShedPerformancePage: React.FC = () => {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 font-bold">
+                    <Td colSpan={4} className="text-right text-xs">TOTAL (range selected)</Td>
+                    <Td right className="text-xs">{totals.days}</Td>
+                    <Td right className="text-xs">{numFmt(totals.eggs)}</Td>
+                    <Td right className="text-xs text-green-700">{numFmt(totals.he)}</Td>
+                    <Td right className={`text-xs ${colorPct(totals.hdPct)}`}>{totals.hdPct != null ? totals.hdPct.toFixed(1)+'%' : '—'}</Td>
+                    <Td right className={`text-xs ${colorPct(totals.hePct, 90, 75)}`}>{totals.hePct != null ? totals.hePct.toFixed(1)+'%' : '—'}</Td>
+                    <Td right className="text-xs text-emerald-600">{numFmt(totals.grA)}</Td>
+                    <Td right className="text-xs text-yellow-600">{numFmt(totals.grB)}</Td>
+                    <Td right className="text-xs text-orange-600">{numFmt(totals.grC)}</Td>
+                    <Td right className="text-xs">{numFmt(totals.je)}</Td>
+                    <Td right className="text-xs">{numFmt(totals.te)}</Td>
+                    <Td right className="text-xs text-red-400">{numFmt(totals.waste)}</Td>
+                    <Td right className="text-xs text-red-600">{numFmt(totals.mortF)}</Td>
+                    <Td right className="text-xs">{totals.feedF > 0 ? totals.feedF.toFixed(0)+' kg' : '—'}</Td>
+                  </tr>
+                </tfoot>
               </Table>
             </Card>
           )}

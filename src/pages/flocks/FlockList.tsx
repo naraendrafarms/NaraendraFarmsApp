@@ -518,6 +518,23 @@ export const FlockList: React.FC = () => {
                 </tr>
               ))}
             </tbody>
+            {filtered.length > 0 && (
+              <tfoot>
+                <tr className="bg-gray-50 font-bold text-xs">
+                  <Td colSpan={5} className="text-right">TOTAL ({filtered.length} flock{filtered.length > 1 ? 's' : ''}{filter !== 'all' ? ` — ${filter}` : ''})</Td>
+                  <Td right className="text-xs">
+                    {filtered.reduce((s: number, f: any) => s + (f.total_placed_f ?? 0), 0).toLocaleString('en-IN')} + {filtered.reduce((s: number, f: any) => s + (f.total_placed_m ?? 0), 0).toLocaleString('en-IN')}
+                  </Td>
+                  <Td right>{filtered.reduce((s: number, f: any) => s + (f.current_female ?? 0), 0).toLocaleString('en-IN')}</Td>
+                  <Td right className="text-xs">{(filtered.reduce((s: number, f: any) => s + (f.total_eggs ?? 0), 0) / 100000).toFixed(2)}L</Td>
+                  <Td right className="text-xs">{(filtered.reduce((s: number, f: any) => s + (f.total_he ?? 0), 0) / 100000).toFixed(2)}L</Td>
+                  <Td right></Td>
+                  <Td right className="text-xs text-green-700">{inr(filtered.reduce((s: number, f: any) => s + (f.he_revenue ?? 0) + (f.nhe_revenue ?? 0), 0))}</Td>
+                  <Td></Td>
+                  <Td></Td>
+                </tr>
+              </tfoot>
+            )}
           </Table>
           {filtered.length === 0 && (
             <EmptyState icon={<Bird size={32}/>} title="No flocks found"

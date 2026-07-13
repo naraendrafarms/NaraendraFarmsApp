@@ -910,6 +910,24 @@ export const DailyEntry: React.FC = () => {
                       )
                     })}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-200 font-bold">
+                      <td className="py-2 px-2" colSpan={2}>TOTAL ({recentRecords.length})</td>
+                      <td className="py-2 px-2 text-center">{recentRecords.reduce((s: number, r: any) => s + (r.mortality_female ?? 0), 0)}</td>
+                      <td className="py-2 px-2 text-center">{recentRecords.reduce((s: number, r: any) => s + (r.mortality_male ?? 0), 0)}</td>
+                      <td className="py-2 px-2 text-center">
+                        {recentRecords.reduce((s: number, r: any) => s + (r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0), 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-2 px-2 text-center">
+                        {recentRecords.reduce((s: number, r: any) => s + (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0), 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-2 px-2 text-center">
+                        {recentRecords.reduce((s: number, r: any) => s + (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0), 0).toFixed(1)}
+                      </td>
+                      <td className="py-2 px-2"></td>
+                      <td className="py-2 px-2"></td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </Card>

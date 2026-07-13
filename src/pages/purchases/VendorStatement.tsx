@@ -94,6 +94,16 @@ export const VendorStatement: React.FC = () => {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                <Td>TOTAL ({filtered.length}{q ? ' — filtered' : ''})</Td>
+                <Td>{filtered.reduce((s: number, v: any) => s + (v.bill_count ?? 0), 0)}</Td>
+                <Td>{inr(filtered.reduce((s: number, v: any) => s + Number(v.total_billed || 0), 0))}</Td>
+                <Td className="text-green-600">{inr(filtered.reduce((s: number, v: any) => s + Number(v.total_paid || 0), 0))}</Td>
+                <Td className="text-red-600">{inr(filtered.reduce((s: number, v: any) => s + Number(v.outstanding || 0), 0))}</Td>
+                <Td></Td>
+              </tr>
+            </tfoot>
           </Table>
         )}
       </Card>
@@ -116,6 +126,15 @@ export const VendorStatement: React.FC = () => {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                  <Td colSpan={2}>TOTAL ({filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''}{(from || to) ? ' in range' : ''})</Td>
+                  <Td>{inr(filteredBills.reduce((s: number, b: any) => s + (b.invoice_amount ?? 0), 0))}</Td>
+                  <Td></Td>
+                  <Td></Td>
+                  <Td></Td>
+                </tr>
+              </tfoot>
             </Table>
           )}
         </Card>

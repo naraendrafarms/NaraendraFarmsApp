@@ -577,6 +577,22 @@ export const GRNPage: React.FC = () => {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                  <Td colSpan={7} className="text-right text-xs">TOTAL ({filtered.length}{(fFrom || fTo) ? ' in range' : ''})</Td>
+                  <Td className="text-right text-xs">{filtered.reduce((s: number, g: any) => s + (g.qty ?? 0), 0).toLocaleString('en-IN')}</Td>
+                  <Td></Td>
+                  <Td className="text-right text-xs">{filtered.reduce((s: number, g: any) => s + (g.bags ?? 0), 0).toLocaleString('en-IN')}</Td>
+                  <Td></Td>
+                  <Td></Td>
+                  <Td className="text-right text-xs">{inr(filtered.reduce((s: number, g: any) => s + (g.basic_amount ?? 0), 0))}</Td>
+                  <Td></Td>
+                  <Td className="text-right text-xs">{inr(filtered.reduce((s: number, g: any) => s + (g.total_amount ?? 0), 0))}</Td>
+                  <Td></Td>
+                  <Td></Td>
+                  <Td></Td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
