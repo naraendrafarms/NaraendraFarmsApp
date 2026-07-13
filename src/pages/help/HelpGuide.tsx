@@ -10,6 +10,8 @@ const LAST_UPDATED = '2026-07-13'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-13', tag: 'Fix',      text: 'Masters → Medicines: merging duplicate medicines (or adding/editing/deleting/importing one) only refreshed the Medicines master list itself — Daily Entry, Bulk Daily Entry, and Flock Sales\' own medicine dropdowns kept showing stale cached data (including already-merged duplicates) until a hard refresh. Now every medicine dropdown across the app refreshes immediately.' },
+  { date: '2026-07-13', tag: 'Improved', text: 'VHL → Medicine Usage Log: the Medicine field was a plain dropdown with no search, unlike the equivalent field everywhere else (Daily Entry, Bulk Daily Entry, Flock Sales). Now searchable, same as those.' },
   { date: '2026-07-13', tag: 'Fix',      text: 'Purchase Intent → Add/Edit dialog: the Line Items table is wider than a phone screen, so the delete (trash) button in the last column required scrolling all the way right to reach — easy to miss, looking like the option didn\'t exist. It now stays pinned to the right edge while you scroll the row horizontally.' },
   { date: '2026-07-13', tag: 'Improved', text: 'Flock List, Flock Detail, and Dashboard now show Total Eggs / HE Eggs as exact numbers (e.g. 7,06,432) instead of the abbreviated "7.06L" lakh format.' },
   { date: '2026-07-13', tag: 'Fix',      text: 'HE Dispatch list: the TOTAL row at the bottom was misaligned — it spanned 11 columns instead of 7, so every total number landed under the wrong header (e.g. the Dispatched total showed up under Amount), and it was missing a TDS total entirely. Fixed the column span and added the missing TDS total.' },

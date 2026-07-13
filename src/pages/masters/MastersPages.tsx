@@ -820,13 +820,13 @@ export const MedicinesMaster: React.FC = () => {
         const{error}=await supabase.from('medicines_master').insert(p);if(error)throw error
       }
     },
-    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['medicines']});setShowForm(false)},
+    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['medicines']});qc.invalidateQueries({queryKey:['medicines_master']});qc.invalidateQueries({queryKey:['medicines_master_list']});qc.invalidateQueries({queryKey:['medicines_active']});qc.invalidateQueries({queryKey:['medicines_all']});setShowForm(false)},
     onError:(e:any)=>toast.error(e.message)
   })
 
   const delMut=useMutation({
     mutationFn:async(id:string)=>{const{error}=await supabase.from('medicines_master').delete().eq('id',id);if(error)throw error},
-    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['medicines']});setDeleteRow(null)},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['medicines']});qc.invalidateQueries({queryKey:['medicines_master']});qc.invalidateQueries({queryKey:['medicines_master_list']});qc.invalidateQueries({queryKey:['medicines_active']});qc.invalidateQueries({queryKey:['medicines_all']});setDeleteRow(null)},
     onError:(e:any)=>{
       if(e.message?.includes('foreign key')||e.code==='23503')
         toast.error('Cannot delete — medicine has linked usage records')
@@ -837,7 +837,7 @@ export const MedicinesMaster: React.FC = () => {
 
   const bulkDelMut=useMutation({
     mutationFn:async(ids:string[])=>{const{error}=await supabase.from('medicines_master').delete().in('id',ids);if(error)throw error},
-    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['medicines']});setSel(new Set());setBulkConfirm(false)},
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['medicines']});qc.invalidateQueries({queryKey:['medicines_master']});qc.invalidateQueries({queryKey:['medicines_master_list']});qc.invalidateQueries({queryKey:['medicines_active']});qc.invalidateQueries({queryKey:['medicines_all']});setSel(new Set());setBulkConfirm(false)},
     onError:(e:any)=>{
       if(e.message?.includes('foreign key')||e.code==='23503')
         toast.error('Some medicines could not be deleted — they have linked usage records')
@@ -860,7 +860,7 @@ export const MedicinesMaster: React.FC = () => {
         if(error)throw error
       }
     },
-    onSuccess:()=>{toast.success('Merged — history remapped, duplicates deleted');qc.invalidateQueries({queryKey:['medicines']});setSel(new Set());setMergeOpen(false)},
+    onSuccess:()=>{toast.success('Merged — history remapped, duplicates deleted');qc.invalidateQueries({queryKey:['medicines']});qc.invalidateQueries({queryKey:['medicines_master']});qc.invalidateQueries({queryKey:['medicines_master_list']});qc.invalidateQueries({queryKey:['medicines_active']});qc.invalidateQueries({queryKey:['medicines_all']});setSel(new Set());setMergeOpen(false)},
     onError:(e:any)=>toast.error(e.message)
   })
 
@@ -910,6 +910,10 @@ export const MedicinesMaster: React.FC = () => {
     }
     toast.success(`Imported ${newRows.length} new medicines${toUpsert.length - newRows.length ? ` (${toUpsert.length - newRows.length} already existed, skipped)` : ''}`)
     qc.invalidateQueries({ queryKey: ['medicines'] })
+    qc.invalidateQueries({ queryKey: ['medicines_master'] })
+    qc.invalidateQueries({ queryKey: ['medicines_master_list'] })
+    qc.invalidateQueries({ queryKey: ['medicines_active'] })
+    qc.invalidateQueries({ queryKey: ['medicines_all'] })
     if (medImportRef.current) medImportRef.current.value = ''
   }
 

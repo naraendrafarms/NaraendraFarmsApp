@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, SectionHeader, Spinner,
-  EmptyState, Table, Th, Td, DateInput, Badge, Modal
+  EmptyState, Table, Th, Td, DateInput, Badge, Modal, SearchableSelect
 } from '@/components/ui'
 import { Save, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Bird, Download, Printer, Upload, Egg, TrendingUp, Activity, DollarSign } from 'lucide-react'
 import { StatCard } from '@/components/ui'
@@ -692,8 +692,8 @@ export const VHLMedicineUsagePage: React.FC = () => {
         </FormRow>
         <FormRow cols={4}>
           <div><label className="text-sm font-medium text-gray-700">Date</label><DateInput value={form.usage_date} onChange={e => setForm(f => ({ ...f, usage_date: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" /></div>
-          <Select label="Medicine" placeholder="— Select —" value={form.vhl_medicine_id}
-            onChange={e => { const m = (meds ?? []).find((x: any) => x.id === e.target.value); setForm(f => ({ ...f, vhl_medicine_id: e.target.value, unit: m?.unit ?? f.unit })) }}
+          <SearchableSelect label="Medicine" placeholder="Search medicine…" value={form.vhl_medicine_id}
+            onChange={v => { const m = (meds ?? []).find((x: any) => x.id === v); setForm(f => ({ ...f, vhl_medicine_id: v, unit: m?.unit ?? f.unit })) }}
             options={(meds ?? []).map((m: any) => ({ value: m.id, label: m.name }))} />
           <Input label="Quantity" type="number" step="0.001" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} />
           <Input label="Unit" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
