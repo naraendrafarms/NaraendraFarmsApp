@@ -12,6 +12,7 @@ import toast from 'react-hot-toast'
 import { printPurchaseIntent } from '@/lib/invoicePrint'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
+import { useItemOptionsWithAliases, registerItemAlias, resolveItemIdByName } from '@/lib/itemAliases'
 
 // Purchase Intent (indent) — optional stage before a Purchase Order, matching
 // the paper/Excel "INDENT FOR NARAENDRA BREEDING FARMS" format already in
@@ -60,6 +61,14 @@ export const PurchaseIntentPage: React.FC = () => {
     queryKey: ['items_active'],
     queryFn: async () => { const { data } = await supabase.from('items').select('id,name,unit').eq('is_active', true).order('name'); return data ?? [] }
   })
+  // Alias-aware item search — the Intent line's item name stays free text
+  // (an intent name legitimately differs from the PO/GRN name for the same
+  // real item), but typing an already-known alias (this item's Items
+  // Master name, or a name it was linked under from a past PO/GRN/Intent)
+  // auto-resolves item_id silently; a "Link to Item" picker handles a
+  // genuinely new name.
+  const { options: itemOptionsAlias } = useItemOptionsWithAliases()
+  const [linkingLine, setLinkingLine] = useState<number | null>(null)
   const { data: parties } = useQuery({
     queryKey: ['parties_suppliers_intent'],
     queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type', ['supplier', 'both']).order('name'); return data ?? [] }
@@ -454,12 +463,44 @@ export const PurchaseIntentPage: React.FC = () => {
                       <td className="px-2 py-1.5"><input value={l.require_for} onChange={e => setLine(i, { require_for: e.target.value })}
                         className="w-24 border border-gray-200 rounded px-1.5 py-1 text-xs" placeholder="Site/Flock" /></td>
                       <td className="px-2 py-1.5">
-                        <input value={l.item_name} onChange={e => setLine(i, { item_name: e.target.value, item_id: '' })}
+                        <input value={l.item_name}
+                          onChange={e => setLine(i, { item_name: e.target.value, item_id: '' })}
+                          onBlur={async e => {
+                            const name = e.target.value.trim()
+                            if (!name || l.item_id) return
+                            const resolved = await resolveItemIdByName(name).catch(() => null)
+                            if (resolved) setLine(i, { item_id: resolved })
+                          }}
                           list={`items-list-${i}`}
                           className="w-32 border border-gray-200 rounded px-1.5 py-1 text-xs" placeholder="Item name" />
                         <datalist id={`items-list-${i}`}>
-                          {(items ?? []).map((it: any) => <option key={it.id} value={it.name} />)}
+                          {itemOptionsAlias.map((it: any) => <option key={it.value} value={it.label} />)}
                         </datalist>
+                        {l.item_name && (
+                          l.item_id ? (
+                            <div className="text-[10px] text-blue-600 mt-0.5">✓ linked to Items Master</div>
+                          ) : (
+                            <button type="button" onClick={() => setLinkingLine(i)}
+                              className="text-[10px] text-amber-600 hover:text-amber-800 underline mt-0.5">
+                              Not linked — Link to Item
+                            </button>
+                          )
+                        )}
+                        {linkingLine === i && (
+                          <div className="mt-1 w-56">
+                            <SearchableSelect
+                              placeholder="Search Items Master…"
+                              options={itemOptionsAlias}
+                              value=""
+                              onChange={async v => {
+                                if (!v) { setLinkingLine(null); return }
+                                await registerItemAlias(v, l.item_name, 'intent').catch(() => {})
+                                setLine(i, { item_id: v })
+                                setLinkingLine(null)
+                              }}
+                            />
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-1.5"><input type="number" value={l.require_qty} onChange={e => setLine(i, { require_qty: e.target.value })}
                         className="w-16 border border-gray-200 rounded px-1.5 py-1 text-xs text-right" /></td>

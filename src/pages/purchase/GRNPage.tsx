@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import { Plus, Trash2, Edit2, Download, Upload, X, Printer } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { printGRN } from '@/lib/invoicePrint'
+import { registerItemAlias } from '@/lib/itemAliases'
 
 // Raw GRN input columns for the import template — only fields the user types.
 // Amounts (basic / gst / total) are computed in code on import, never imported.
@@ -106,6 +107,14 @@ export const GRNPage: React.FC = () => {
       return data ?? []
     }
   })
+  // Every name an item is known by (Intent/PO/GRN/Medicine name) — lets the
+  // item search below find an item by ANY of its names, not just its
+  // canonical Items Master name.
+  const { data: itemAliasesGrn } = useQuery({
+    queryKey: ['item_aliases_all'],
+    queryFn: async () => { const { data } = await supabase.from('item_aliases').select('item_id,alias'); return data ?? [] },
+    staleTime: 60 * 1000,
+  })
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks-active'],
@@ -162,15 +171,22 @@ export const GRNPage: React.FC = () => {
     return { avg, min: Math.min(...rates), max: Math.max(...rates) }
   }, [fItem, filtered])
 
+  const itemAliasMapGrn = useMemo(() => {
+    const m: Record<string, string[]> = {}
+    for (const a of itemAliasesGrn ?? []) (m[a.item_id] ??= []).push(a.alias)
+    return m
+  }, [itemAliasesGrn])
+
   const filteredItems = useMemo(() => {
     if (!items) return []
     return items.filter((i: any) => {
       const catMatch = !form.category || i.category === form.category
       const search = itemSearch.toLowerCase()
-      const nameMatch = !search || i.name.toLowerCase().includes(search) || (i.code ?? '').toLowerCase().includes(search)
+      const haystack = `${i.name} ${i.code ?? ''} ${(itemAliasMapGrn[i.id] ?? []).join(' ')}`.toLowerCase()
+      const nameMatch = !search || haystack.includes(search)
       return catMatch && nameMatch
     })
-  }, [items, form.category, itemSearch])
+  }, [items, form.category, itemSearch, itemAliasMapGrn])
 
   const openAdd = () => {
     setEditing(null)

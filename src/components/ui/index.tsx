@@ -266,7 +266,10 @@ interface SearchableSelectProps {
   hint?: string
   required?: boolean
   placeholder?: string
-  options: Array<{ value: string; label: string }>
+  // searchText: extra text (e.g. every alias an item is known by) matched
+  // against the typed query but never shown — lets "search finds the item
+  // no matter which of its names you type" without cluttering the label.
+  options: Array<{ value: string; label: string; searchText?: string }>
   value: string
   onChange: (value: string) => void
   disabled?: boolean
@@ -283,7 +286,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
   const selected = options.find(o => o.value === value)
   const filtered = query.trim() === ''
     ? options
-    : options.filter(o => o.label.toLowerCase().includes(query.toLowerCase()))
+    : options.filter(o => `${o.label} ${o.searchText ?? ''}`.toLowerCase().includes(query.toLowerCase()))
 
   React.useEffect(() => {
     const handler = (e: MouseEvent) => {

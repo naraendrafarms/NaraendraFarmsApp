@@ -5,6 +5,7 @@ import { today } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
 import { useFeedRates } from '@/hooks/useFeedRates'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
+import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Divider,
   SectionHeader, Spinner, Badge
@@ -141,6 +142,10 @@ export const DailyEntry: React.FC = () => {
     queryKey: ['medicines_active'],
     queryFn: async () => { const{data}=await supabase.from('medicines_master').select('id,name,unit,rate').eq('is_active',true).order('name'); return data??[] }
   })
+  // Alias-aware options — same dropdown, but searchable by any name this
+  // medicine's linked item is known by (Intent/PO/GRN name, not just its
+  // own medicines_master.name).
+  const { options: medOptionsAlias } = useMedicineOptionsWithAliases()
 
   // Real weighted-average purchase cost from GRN, keyed by medicine_id — prefer
   // this over medicines_master.rate (a manually-set price that drifts from
@@ -818,7 +823,7 @@ export const DailyEntry: React.FC = () => {
                             const rate = realRate != null ? realRate.toFixed(2) : (med?.rate?.toString() ?? row.rate)
                             setMedRows(rows => rows.map((r, j) => j===i ? { ...r, medicine_id: v, unit: med?.unit??r.unit, rate } : r))
                           }}
-                          options={(medicines??[]).map((m: any) => ({ value: m.id, label: m.name }))}
+                          options={medOptionsAlias}
                           placeholder="Search medicine…" />
                       </div>
                       <div className="w-20">

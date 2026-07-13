@@ -92,7 +92,15 @@ export const GRNEntry: React.FC = () => {
   const { data: farms } = useQuery({ queryKey: ['farms'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
   const { data: parties } = useQuery({ queryKey: ['parties_supp'], queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type',['supplier','both']).order('name'); return data ?? [] } })
   const { data: ingredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,code,name').eq('is_active',true).order('name'); return data ?? [] } })
-  const { data: medicines } = useQuery({ queryKey: ['medicines_master'], queryFn: async () => { const { data } = await supabase.from('medicines_master').select('id,name,type,unit').eq('is_active',true).order('name'); return data ?? [] } })
+  const { data: medicines } = useQuery({ queryKey: ['medicines_master'], queryFn: async () => { const { data } = await supabase.from('medicines_master').select('id,name,type,unit,item_id').eq('is_active',true).order('name'); return data ?? [] } })
+  // Alias search text — lets typing any name this medicine's linked item is
+  // known by (Intent/PO/GRN name) find it here too, not just its own
+  // medicines_master.name.
+  const { data: itemAliasesForMed } = useQuery({
+    queryKey: ['item_aliases_all'],
+    queryFn: async () => { const { data } = await supabase.from('item_aliases').select('item_id,alias'); return data ?? [] },
+    staleTime: 60 * 1000,
+  })
   const { data: allFlocks } = useQuery({ queryKey: ['flocks_all_grn'], queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no,status').order('flock_no',{ascending:false}); return data ?? [] } })
 
   const { data: allGrns, isLoading } = useQuery({
@@ -294,7 +302,13 @@ export const GRNEntry: React.FC = () => {
   const farmOptions = farms?.map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
   const ingrOptions = ingredients?.map((i: any) => ({ value: i.id, label: i.code ? `${i.code} — ${i.name}` : i.name })) ?? []
-  const medOptions  = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.type})` })) ?? []
+  const medAliasMap = (itemAliasesForMed ?? []).reduce((m: Record<string, string[]>, a: any) => {
+    (m[a.item_id] ??= []).push(a.alias); return m
+  }, {})
+  const medOptions  = medicines?.map((m: any) => ({
+    value: m.id, label: `${m.name} (${m.type})`,
+    searchText: m.item_id ? (medAliasMap[m.item_id] ?? [m.name]).join(' ') : m.name,
+  })) ?? []
   const categoryOptions = useConfigOptions('grn_category', [
     { value: 'Feed Ingredient', label: 'Feed / Raw Material' },
     { value: 'Chicks',    label: 'Chicks (Day-Old Birds)' },

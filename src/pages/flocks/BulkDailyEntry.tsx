@@ -6,6 +6,7 @@ import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput, Searc
 import { Save, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import { useFeedRates } from '@/hooks/useFeedRates'
+import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 
@@ -110,6 +111,7 @@ export const BulkDailyEntry: React.FC = () => {
     queryKey: ['medicines_master_list'],
     queryFn: async () => { const { data } = await supabase.from('medicines_master').select('id,name').order('name'); return data ?? [] }
   })
+  const { options: medOptionsAlias } = useMedicineOptionsWithAliases()
 
   // ── Sheds for selected flock: flock_sheds → shed_allocations → farm sheds ──
   const flockObj = useMemo(() => (allFlocks ?? []).find((f: any) => f.id === selectedFlock), [allFlocks, selectedFlock])
@@ -539,7 +541,7 @@ export const BulkDailyEntry: React.FC = () => {
 
   const medOptions = [
     { value: '', label: '— None —' },
-    ...(medicines ?? []).map((m: any) => ({ value: m.id, label: m.name }))
+    ...medOptionsAlias
   ]
   const flockOptions = [
     { value: '', label: '— All Flocks (by farm) —' },

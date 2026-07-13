@@ -296,6 +296,14 @@ const POTab: React.FC = () => {
   const [receiptForm, setReceiptForm] = useState({ receipt_date: today(), qty_received: '', unit: '', condition: 'Good', vehicle_no: '', received_by: '', invoice_no: '', farm_id: '', remarks: '' })
   const { data: farms=[] } = useQuery({ queryKey: ['farms_po'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
   const { data: itemsMaster=[] } = useQuery({ queryKey: ['items_master_po'], queryFn: async () => { const { data } = await supabase.from('items').select('name').eq('is_active',true).order('name'); return data ?? [] } })
+  // Every known alias for every item (GRN/PO/Intent/Medicine names already
+  // linked to it) so this datalist suggests a match no matter which of an
+  // item's names you start typing.
+  const { data: itemAliasNamesPo=[] } = useQuery({
+    queryKey: ['item_alias_names_po'],
+    queryFn: async () => { const { data } = await supabase.from('item_aliases').select('alias'); return data ?? [] },
+    staleTime: 60 * 1000,
+  })
   const { data: parties=[] } = useQuery({
     queryKey: ['parties_supp'],
     queryFn: async () => { const { data } = await supabase.from('parties').select('id,name').in('type', ['supplier', 'both']).order('name'); return data ?? [] }
@@ -884,7 +892,10 @@ const POTab: React.FC = () => {
             <Sel label="Material Status" value={form.material_status} onChange={f('material_status')} options={MAT_STATUS.map(s=>({value:s,label:s}))} />
           </div>
 
-          <datalist id="po-items-master">{itemsMaster.map((it: any) => <option key={it.name} value={it.name} />)}</datalist>
+          <datalist id="po-items-master">
+            {itemsMaster.map((it: any) => <option key={it.name} value={it.name} />)}
+            {itemAliasNamesPo.map((a: any, i: number) => <option key={`alias-${i}`} value={a.alias} />)}
+          </datalist>
           {editing && !multiEditMode ? (
             /* Single-line edit */
             <>

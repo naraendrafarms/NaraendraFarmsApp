@@ -7,6 +7,7 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 , DateInput, SearchableSelect } from '@/components/ui'
+import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle, Printer } from 'lucide-react'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import { useSearchParams } from 'react-router-dom'
@@ -3289,7 +3290,7 @@ export const MedicineEntry: React.FC = () => {
   })
 
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
-  const medOptions = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.unit})` })) ?? []
+  const { options: medOptions } = useMedicineOptionsWithAliases()
 
   const filteredUsage = (usage ?? []).filter((u: any) =>
     !medSearch || (u.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
@@ -3618,7 +3619,7 @@ export const MedicinePurchases: React.FC = () => {
     }); setShowForm(true)
   }
 
-  const medOptions = (medicines??[]).map((m: any) => ({ value: m.id, label: `${m.name} (${m.unit})` }))
+  const { options: medOptions } = useMedicineOptionsWithAliases()
   const farmOptions = (farms??[]).map((f: any) => ({ value: f.id, label: f.name }))
   const supplierOptions = (suppliers??[]).map((p: any) => ({ value: p.id, label: p.name }))
   const ids = (purchases??[]).map((p: any) => p.id)
