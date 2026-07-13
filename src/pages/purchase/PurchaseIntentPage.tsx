@@ -446,7 +446,7 @@ export const PurchaseIntentPage: React.FC = () => {
                   <th className="px-2 py-1.5 text-left">UOM</th>
                   <th className="px-2 py-1.5 text-left">Best Delivery By</th>
                   <th className="px-2 py-1.5 text-left">Supplier</th>
-                  <th className="px-2 py-1.5"></th>
+                  <th className="px-2 py-1.5 sticky right-0 bg-gray-50"></th>
                 </tr></thead>
                 <tbody>
                   {lines.map((l, i) => (
@@ -476,8 +476,8 @@ export const PurchaseIntentPage: React.FC = () => {
                           {(parties ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                       </td>
-                      <td className="px-2 py-1.5">
-                        <button onClick={() => removeLine(i)} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
+                      <td className="px-2 py-1.5 sticky right-0 bg-white border-l border-gray-100">
+                        <button onClick={() => removeLine(i)} className="text-red-400 hover:text-red-600" title="Remove line"><Trash2 size={13} /></button>
                       </td>
                     </tr>
                   ))}
