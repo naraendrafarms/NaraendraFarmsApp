@@ -960,33 +960,35 @@ export const BankLedgerPage: React.FC = () => {
       // insert since this form's own insert above already IS that entry.
       if (!editId && newTxnId && form.settle_payment_id) {
         const bill = (openPaymentsForParty ?? []).find((p: any) => p.id === form.settle_payment_id)
-        if (bill) {
-          const balance = billBalance(bill)
-          const settled = Math.min(balance, amount)
-          const tag = `BANKTXN:${newTxnId}`
-          await supabase.from('pending_payments').update({
-            paid_amount: (bill.paid_amount ?? 0) + settled,
-            paid_date: form.txn_date,
-            payment_status: settled >= balance ? 'Paid' : 'Pending',
-            transaction_ref: tag,
-          }).eq('id', form.settle_payment_id)
-          await supabase.from('bank_transactions').update({
-            match_status: 'manually_matched', linked_payment_id: form.settle_payment_id,
-          }).eq('id', newTxnId)
-          if (settled > 0) {
-            await supabase.from('cash_book').insert({
-              txn_date: form.txn_date, txn_type: 'payment', category: 'purchase_payment',
-              description: `Payment to ${bill.vendor_name}${bill.invoice_no ? ' — Inv ' + bill.invoice_no : ''}`,
-              party_name: bill.vendor_name, amount_in: 0, amount_out: settled,
-              payment_mode: toCbMode(form.category || 'NEFT'), reference_no: form.reference_no || null,
-              pending_payment_id: form.settle_payment_id,
-            })
-          }
-          qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
-          qc.invalidateQueries({ queryKey: ['pending_payments'] })
-          qc.invalidateQueries({ queryKey: ['pending_payments_open_for_party'] })
-          qc.invalidateQueries({ queryKey: ['cash_book'] })
+        if (!bill) throw new Error('Selected bill could not be found — reopen Add Transaction and try again')
+        const balance = billBalance(bill)
+        const settled = Math.min(balance, amount)
+        const tag = `BANKTXN:${newTxnId}`
+        const { error: ppErr } = await supabase.from('pending_payments').update({
+          paid_amount: (bill.paid_amount ?? 0) + settled,
+          paid_date: form.txn_date,
+          payment_status: settled >= balance ? 'Paid' : 'Pending',
+          transaction_ref: tag,
+        }).eq('id', form.settle_payment_id)
+        if (ppErr) throw new Error('Bill settle failed: ' + ppErr.message)
+        const { error: btErr } = await supabase.from('bank_transactions').update({
+          match_status: 'manually_matched', linked_payment_id: form.settle_payment_id,
+        }).eq('id', newTxnId)
+        if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
+        if (settled > 0) {
+          const { error: cbErr } = await supabase.from('cash_book').insert({
+            txn_date: form.txn_date, txn_type: 'payment', category: 'purchase_payment',
+            description: `Payment to ${bill.vendor_name}${bill.invoice_no ? ' — Inv ' + bill.invoice_no : ''}`,
+            party_name: bill.vendor_name, amount_in: 0, amount_out: settled,
+            payment_mode: toCbMode(form.category || 'NEFT'), reference_no: form.reference_no || null,
+            pending_payment_id: form.settle_payment_id,
+          })
+          if (cbErr) throw new Error('Cash Book entry failed: ' + cbErr.message)
         }
+        qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+        qc.invalidateQueries({ queryKey: ['pending_payments'] })
+        qc.invalidateQueries({ queryKey: ['pending_payments_open_for_party'] })
+        qc.invalidateQueries({ queryKey: ['cash_book'] })
       }
 
       // Buyer side: settling a specific NHE sale / HE dispatch invoice —
@@ -994,26 +996,27 @@ export const BankLedgerPage: React.FC = () => {
       if (!editId && newTxnId && form.settle_receivable_id) {
         const [source, recvId] = form.settle_receivable_id.split(':')
         const inv = (openReceivablesForParty ?? []).find((r: any) => r.source === source && r.id === recvId)
-        if (inv) {
-          const balance = receivableBalance(inv)
-          const settled = Math.min(balance, amount)
-          const newReceived = (inv.amount_received ?? 0) + settled
-          await supabase.from(source).update({
-            amount_received: newReceived,
-            received_date: form.txn_date,
-            payment_mode: form.category || 'NEFT',
-            payment_status: newReceived >= (inv.amount ?? 0) ? 'Received' : 'Partial',
-            bank_account_id: form.bank_account_id,
-            utr_ref: form.reference_no || null,
-          }).eq('id', recvId)
-          await supabase.from('bank_transactions').update({
-            [source === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id']: recvId,
-          }).eq('id', newTxnId)
-          qc.invalidateQueries({ queryKey: ['receivables_open_for_party'] })
-          qc.invalidateQueries({ queryKey: ['pending_receivables'] })
-          qc.invalidateQueries({ queryKey: ['nhe_sales'] })
-          qc.invalidateQueries({ queryKey: ['he_dispatch'] })
-        }
+        if (!inv) throw new Error('Selected invoice could not be found — reopen Add Transaction and try again')
+        const balance = receivableBalance(inv)
+        const settled = Math.min(balance, amount)
+        const newReceived = (inv.amount_received ?? 0) + settled
+        const { error: invErr } = await supabase.from(source).update({
+          amount_received: newReceived,
+          received_date: form.txn_date,
+          payment_mode: form.category || 'NEFT',
+          payment_status: newReceived >= (inv.amount ?? 0) ? 'Received' : 'Partial',
+          bank_account_id: form.bank_account_id,
+          utr_ref: form.reference_no || null,
+        }).eq('id', recvId)
+        if (invErr) throw new Error('Invoice settle failed: ' + invErr.message)
+        const { error: btErr } = await supabase.from('bank_transactions').update({
+          [source === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id']: recvId,
+        }).eq('id', newTxnId)
+        if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
+        qc.invalidateQueries({ queryKey: ['receivables_open_for_party'] })
+        qc.invalidateQueries({ queryKey: ['pending_receivables'] })
+        qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+        qc.invalidateQueries({ queryKey: ['he_dispatch'] })
       }
 
       toast.success(editId ? 'Transaction updated' : ((form.settle_payment_id || form.settle_receivable_id) ? 'Transaction saved — invoice settled' : 'Transaction saved'))
