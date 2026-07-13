@@ -162,6 +162,19 @@ function useStockRows(asOf: string) {
     staleTime: 5 * 60 * 1000,
   })
 
+  // Every other name each item is known by (Intent/PO/GRN/Medicine wording)
+  // — lets the search boxes below find an item by any of its names, not
+  // just its canonical Items Master name.
+  const { data: aliases } = useQuery({
+    queryKey: ['item_aliases_all'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('item_aliases').select('item_id,alias')
+      if (error) throw error
+      return data ?? []
+    },
+    staleTime: 60 * 1000,
+  })
+
   const { data: slData, isLoading: slLoading } = useQuery({
     queryKey: ['sl_all', asOf],
     queryFn: async () => {
@@ -226,11 +239,15 @@ function useStockRows(asOf: string) {
       if (!row.unit && r.unit) row.unit = r.unit
     }
 
+    const aliasMap: Record<string, string[]> = {}
+    for (const a of aliases ?? []) (aliasMap[a.item_id] ??= []).push(a.alias)
+
     return Object.values(m).map((r: any) => {
       const closing = r.opening + r.received + r.adjusted - r.used
-      return { ...r, closing, value: closing * (r.rate || 0) }
+      const searchText = `${r.item_name} ${(aliasMap[r.key] ?? []).join(' ')}`.toLowerCase()
+      return { ...r, closing, value: closing * (r.rate || 0), searchText }
     }).sort((a, b) => (a.category || 'zzz').localeCompare(b.category || 'zzz') || a.item_name.localeCompare(b.item_name))
-  }, [itemsMaster, slData, asOf])
+  }, [itemsMaster, slData, aliases, asOf])
 
   return { rows, isLoading: itemsLoading || slLoading }
 }
@@ -248,7 +265,7 @@ const StockStatusTab: React.FC = () => {
 
   const filtered = useMemo(() => rows.filter(r => {
     if (cat && r.category !== cat) return false
-    if (q && !r.item_name.toLowerCase().includes(q.toLowerCase())) return false
+    if (q && !(r.searchText ?? r.item_name.toLowerCase()).includes(q.toLowerCase())) return false
     if (onlyLow && !(r.reorder_level > 0 && r.closing <= r.reorder_level)) return false
     return true
   }), [rows, cat, q, onlyLow])
@@ -706,12 +723,22 @@ const LedgerTab: React.FC = () => {
     },
     staleTime: 2 * 60 * 1000,
   })
+  // Every other name each item is known by, so searching by an
+  // Intent/PO/GRN/Medicine name finds its ledger here too.
+  const { data: aliasesLedger } = useQuery({
+    queryKey: ['item_aliases_all'],
+    queryFn: async () => { const { data } = await supabase.from('item_aliases').select('item_id,alias'); return data ?? [] },
+    staleTime: 60 * 1000,
+  })
 
   const filtered = useMemo(() => {
+    const aliasMap: Record<string, string[]> = {}
+    for (const a of aliasesLedger ?? []) (aliasMap[a.item_id] ??= []).push(a.alias)
     if (!search) return allItems ?? []
     const s = search.toLowerCase()
-    return (allItems ?? []).filter(i => i.name.toLowerCase().includes(s))
-  }, [allItems, search])
+    return (allItems ?? []).filter(i =>
+      `${i.name} ${(aliasMap[i.id] ?? []).join(' ')}`.toLowerCase().includes(s))
+  }, [allItems, aliasesLedger, search])
 
   const { data: moves, isLoading: loadingMoves } = useQuery({
     queryKey: ['sl_moves', selectedItem, fromDate, toDate],
@@ -826,7 +853,7 @@ const ClosingStockReportTab: React.FC = () => {
 
   const filtered = useMemo(() => rows.filter(r => {
     if (cat && r.category !== cat) return false
-    if (q && !r.item_name.toLowerCase().includes(q.toLowerCase())) return false
+    if (q && !(r.searchText ?? r.item_name.toLowerCase()).includes(q.toLowerCase())) return false
     return r.closing !== 0 || r.received > 0 || r.opening > 0 || r.used > 0 || r.adjusted !== 0
   }), [rows, cat, q])
 
@@ -968,6 +995,13 @@ export const ConsumptionReportTab: React.FC<{ lockedCategory?: string }> = ({ lo
     },
     staleTime: 5 * 60 * 1000,
   })
+  // Every other name each item is known by, so searching an Intent/PO/GRN/
+  // Medicine name finds its consumption rows here too.
+  const { data: aliasesCons } = useQuery({
+    queryKey: ['item_aliases_all'],
+    queryFn: async () => { const { data } = await supabase.from('item_aliases').select('item_id,alias'); return data ?? [] },
+    staleTime: 60 * 1000,
+  })
 
   const { data: slData, isLoading } = useQuery({
     queryKey: ['sl_consumption', fromDate, toDate],
@@ -1003,18 +1037,25 @@ export const ConsumptionReportTab: React.FC<{ lockedCategory?: string }> = ({ lo
       if (category && itemCategory !== category) continue
       const period = groupBy === 'month' ? (r.txn_date ?? '').slice(0, 7) : r.txn_date
       const key = `${itemName}__${period}`
-      if (!m[key]) m[key] = { itemName, category: itemCategory, unit: master?.unit ?? '', period, qty: 0 }
+      if (!m[key]) m[key] = { itemName, category: itemCategory, unit: master?.unit ?? '', period, qty: 0, itemId: r.item_id ?? null }
       m[key].qty += Number(r.qty ?? 0)
     }
     return Object.values(m).sort((a: any, b: any) =>
       b.period.localeCompare(a.period) || a.itemName.localeCompare(b.itemName))
   }, [slData, itemMap, category, groupBy])
 
+  const aliasMapCons = useMemo(() => {
+    const m: Record<string, string[]> = {}
+    for (const a of aliasesCons ?? []) (m[a.item_id] ??= []).push(a.alias)
+    return m
+  }, [aliasesCons])
+
   const filtered = useMemo(() => {
     if (!q) return rows
     const s = q.toLowerCase()
-    return rows.filter((r: any) => r.itemName.toLowerCase().includes(s))
-  }, [rows, q])
+    return rows.filter((r: any) =>
+      `${r.itemName} ${(aliasMapCons[r.itemId] ?? []).join(' ')}`.toLowerCase().includes(s))
+  }, [rows, q, aliasMapCons])
 
   const totalsByItem = useMemo(() => {
     const m: Record<string, number> = {}
