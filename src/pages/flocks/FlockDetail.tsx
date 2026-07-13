@@ -751,9 +751,9 @@ export const FlockDetail: React.FC = () => {
 
       {/* Key metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <StatCard title="Total Eggs" value={(totalEggs/100000).toFixed(2)+'L'}
+        <StatCard title="Total Eggs" value={totalEggs.toLocaleString('en-IN')}
           subtitle="Lifetime production" icon={<Egg size={18}/>} color="text-yellow-600" />
-        <StatCard title="HE Eggs" value={(totalHE/100000).toFixed(2)+'L'}
+        <StatCard title="HE Eggs" value={totalHE.toLocaleString('en-IN')}
           subtitle={pct(hePct)+' of eggs'} icon={<Egg size={18}/>} color="text-brand-600" />
         <StatCard title="Alive ♀" value={(lastRecord
             ? (lastRecord.closing_female > 0 ? lastRecord.closing_female : (lastRecord.opening_female > 0 ? lastRecord.opening_female : 0))

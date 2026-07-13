@@ -490,8 +490,8 @@ export const FlockList: React.FC = () => {
                     {(f.total_placed_f??0).toLocaleString('en-IN')} + {(f.total_placed_m??0).toLocaleString('en-IN')}
                   </Td>
                   <Td right>{(f.current_female??0).toLocaleString('en-IN')}</Td>
-                  <Td right className="text-xs">{((f.total_eggs??0)/100000).toFixed(2)}L</Td>
-                  <Td right className="text-xs">{((f.total_he??0)/100000).toFixed(2)}L</Td>
+                  <Td right className="text-xs">{(f.total_eggs??0).toLocaleString('en-IN')}</Td>
+                  <Td right className="text-xs">{(f.total_he??0).toLocaleString('en-IN')}</Td>
                   <Td right>
                     <span className={(f.he_pct??0)>0.88?'text-green-600 font-medium':'text-orange-500'}>
                       {pct(f.he_pct)}
@@ -526,8 +526,8 @@ export const FlockList: React.FC = () => {
                     {filtered.reduce((s: number, f: any) => s + (f.total_placed_f ?? 0), 0).toLocaleString('en-IN')} + {filtered.reduce((s: number, f: any) => s + (f.total_placed_m ?? 0), 0).toLocaleString('en-IN')}
                   </Td>
                   <Td right>{filtered.reduce((s: number, f: any) => s + (f.current_female ?? 0), 0).toLocaleString('en-IN')}</Td>
-                  <Td right className="text-xs">{(filtered.reduce((s: number, f: any) => s + (f.total_eggs ?? 0), 0) / 100000).toFixed(2)}L</Td>
-                  <Td right className="text-xs">{(filtered.reduce((s: number, f: any) => s + (f.total_he ?? 0), 0) / 100000).toFixed(2)}L</Td>
+                  <Td right className="text-xs">{filtered.reduce((s: number, f: any) => s + (f.total_eggs ?? 0), 0).toLocaleString('en-IN')}</Td>
+                  <Td right className="text-xs">{filtered.reduce((s: number, f: any) => s + (f.total_he ?? 0), 0).toLocaleString('en-IN')}</Td>
                   <Td right></Td>
                   <Td right className="text-xs text-green-700">{inr(filtered.reduce((s: number, f: any) => s + (f.he_revenue ?? 0) + (f.nhe_revenue ?? 0), 0))}</Td>
                   <Td></Td>

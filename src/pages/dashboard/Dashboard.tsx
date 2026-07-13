@@ -260,7 +260,7 @@ export const Dashboard: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span>HE (Total)</span>
-                  <span className="font-medium text-gray-900">{((f.total_he??0)/100000).toFixed(2)}L</span>
+                  <span className="font-medium text-gray-900">{(f.total_he??0).toLocaleString('en-IN')}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>HE%</span>
