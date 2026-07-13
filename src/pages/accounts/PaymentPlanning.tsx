@@ -162,6 +162,22 @@ export const PaymentPlanningPage: React.FC = () => {
   const manualPayable = (manualItems ?? []).filter((m: any) => m.direction === 'payable').reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
   const manualReceivable = (manualItems ?? []).filter((m: any) => m.direction === 'receivable').reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
 
+  // Selecting a Manual Item folds its amount into Balance After / the
+  // selected total on this page, for planning visibility only — it can't go
+  // through Mark Paid or Export CMS since there's no vendor/bank/GRN behind
+  // it yet (that's what turns it into a real bill via Add Bill).
+  const [selectedManual, setSelectedManual] = useState<Set<string>>(new Set())
+  const toggleManual = (id: string) => {
+    setSelectedManual(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const selectedManualItems = (manualItems ?? []).filter((m: any) => selectedManual.has(m.id))
+  const selectedManualPayable = selectedManualItems.filter((m: any) => m.direction === 'payable').reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
+  const selectedManualReceivable = selectedManualItems.filter((m: any) => m.direction === 'receivable').reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
+
   const addManualMut = useMutation({
     mutationFn: async () => {
       if (!manualForm.label.trim()) throw new Error('Label is required')
@@ -282,7 +298,7 @@ export const PaymentPlanningPage: React.FC = () => {
 
   const kotakBal = kotakBalance?.balance ?? 0
   const cashBal  = cashBalance ?? 0
-  const balanceAfter = kotakBal - totalSelected
+  const balanceAfter = kotakBal - totalSelected - selectedManualPayable + selectedManualReceivable
 
   const exportCMS = () => {
     if (!selectedPayments.length) { toast.error('Select payments to export'); return }
@@ -446,7 +462,7 @@ export const PaymentPlanningPage: React.FC = () => {
           color="purple"
         />
         <StatCard
-          title={`Balance After (${selected.size} selected)`}
+          title={`Balance After (${selected.size + selectedManual.size} selected)`}
           value={inr(balanceAfter)}
           icon={<TrendingDown size={18} />}
           color={balanceAfter < 0 ? 'red' : 'green'}
@@ -482,28 +498,43 @@ export const PaymentPlanningPage: React.FC = () => {
           <Button icon={<Plus size={14} />} loading={addManualMut.isPending} onClick={() => addManualMut.mutate()}>Add</Button>
         </div>
         {(manualItems?.length ?? 0) > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
-              <thead><tr>
-                <Th>Label</Th><Th>Type</Th><Th>Due Date</Th><Th right>Amount</Th><Th></Th>
-              </tr></thead>
-              <tbody>
-                {(manualItems ?? []).map((m: any) => (
-                  <tr key={m.id} className="hover:bg-gray-50">
-                    <Td>{m.label}</Td>
-                    <Td><Badge color={m.direction === 'payable' ? 'red' : 'green'}>{m.direction === 'payable' ? 'Payable' : 'Receivable'}</Badge></Td>
-                    <Td className="text-xs">{m.due_date ? fmtDate(m.due_date) : '—'}</Td>
-                    <Td right className={m.direction === 'payable' ? 'text-red-600 font-medium' : 'text-green-700 font-medium'}>{inr(m.amount)}</Td>
-                    <Td>
-                      <button onClick={() => deleteManualMut.mutate(m.id)} className="text-gray-400 hover:text-red-600">
-                        <Trash2 size={14} />
-                      </button>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
+          <>
+            {selectedManual.size > 0 && (
+              <div className="px-4 py-1.5 bg-brand-50 text-xs text-brand-700">
+                {selectedManual.size} manual item(s) selected — included in Balance After above (not in Mark Paid / Export CMS)
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr>
+                  <Th></Th><Th>Label</Th><Th>Type</Th><Th>Due Date</Th><Th right>Amount</Th><Th></Th>
+                </tr></thead>
+                <tbody>
+                  {(manualItems ?? []).map((m: any) => (
+                    <tr key={m.id}
+                      onClick={() => toggleManual(m.id)}
+                      className={`cursor-pointer transition-colors ${selectedManual.has(m.id) ? 'bg-brand-50 border-l-2 border-brand-500' : 'hover:bg-gray-50'}`}
+                    >
+                      <Td>
+                        <input type="checkbox" checked={selectedManual.has(m.id)} onChange={() => toggleManual(m.id)}
+                          onClick={e => e.stopPropagation()}
+                          className="rounded border-gray-300 text-brand-600" />
+                      </Td>
+                      <Td>{m.label}</Td>
+                      <Td><Badge color={m.direction === 'payable' ? 'red' : 'green'}>{m.direction === 'payable' ? 'Payable' : 'Receivable'}</Badge></Td>
+                      <Td className="text-xs">{m.due_date ? fmtDate(m.due_date) : '—'}</Td>
+                      <Td right className={m.direction === 'payable' ? 'text-red-600 font-medium' : 'text-green-700 font-medium'}>{inr(m.amount)}</Td>
+                      <Td>
+                        <button onClick={e => { e.stopPropagation(); deleteManualMut.mutate(m.id) }} className="text-gray-400 hover:text-red-600">
+                          <Trash2 size={14} />
+                        </button>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          </>
         )}
       </Card>
 
