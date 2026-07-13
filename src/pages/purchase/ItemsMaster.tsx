@@ -7,11 +7,12 @@ import {
 } from '@/components/ui'
 import {
   Plus, Edit2, Search, Package, ToggleLeft, ToggleRight,
-  Trash2, Download, Upload, FileDown, CheckSquare, Square, GitMerge
+  Trash2, Download, Upload, FileDown, CheckSquare, Square, GitMerge, Tags, X
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import * as XLSX from 'xlsx'
+import { registerItemAlias } from '@/lib/itemAliases'
 
 // ─── Category grouping ────────────────────────────────────────────────────────
 const FEED_CATS = ['Feed Ingredient']
@@ -43,6 +44,8 @@ export const ItemsMasterPage: React.FC = () => {
   const [mergeModal, setMergeModal] = useState(false)
   const [keepId, setKeepId]         = useState<string>('')
   const [merging, setMerging]       = useState(false)
+  const [aliasItem, setAliasItem]   = useState<any>(null)
+  const [newAlias, setNewAlias]     = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const categoryOptions = useConfigOptions('item_category')
@@ -101,6 +104,48 @@ export const ItemsMasterPage: React.FC = () => {
       if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items_master'] }),
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  // ── Aliases: every other name this item is known by (Purchase Intent,
+  // PO, GRN, Medicine Master) — searchable everywhere via item_aliases.
+  const { data: aliasesForItemRaw } = useQuery({
+    queryKey: ['item_aliases_for_item', aliasItem?.id],
+    enabled: !!aliasItem,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('item_aliases').select('id,alias,source')
+        .eq('item_id', aliasItem.id).order('created_at')
+      if (error) throw error
+      return data ?? []
+    },
+  })
+  // The item's own canonical name/short_name are themselves seeded as
+  // aliases (so the item is always found by its own name) — hide those
+  // here since they're redundant with the modal title; only show the
+  // "extra" names someone deliberately added.
+  const aliasesForItem = (aliasesForItemRaw ?? []).filter((a: any) => a.source !== 'item_name' && a.source !== 'short_name')
+  const addAliasMut = useMutation({
+    mutationFn: async (alias: string) => {
+      if (!alias.trim()) throw new Error('Enter a name')
+      await registerItemAlias(aliasItem.id, alias, 'manual')
+    },
+    onSuccess: () => {
+      setNewAlias('')
+      qc.invalidateQueries({ queryKey: ['item_aliases_for_item', aliasItem?.id] })
+      qc.invalidateQueries({ queryKey: ['item_aliases_all'] })
+      toast.success('Alias added')
+    },
+    onError: (e: any) => toast.error(e.message || 'That name is already linked to a different item'),
+  })
+  const removeAliasMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('item_aliases').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['item_aliases_for_item', aliasItem?.id] })
+      qc.invalidateQueries({ queryKey: ['item_aliases_all'] })
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -433,6 +478,9 @@ export const ItemsMasterPage: React.FC = () => {
                       </Td>
                       <Td>
                         <div className="flex items-center gap-2">
+                          <button onClick={() => setAliasItem(item)} className="text-purple-600 hover:text-purple-800" title="Manage alias names">
+                            <Tags size={14}/>
+                          </button>
                           <button onClick={() => openEdit(item)} className="text-brand-600 hover:text-brand-800">
                             <Edit2 size={14}/>
                           </button>
@@ -586,6 +634,57 @@ export const ItemsMasterPage: React.FC = () => {
               <button onClick={handleMerge} disabled={!keepId || merging}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
                 {merging ? 'Merging…' : 'Confirm Merge'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Aliases Modal — every other name this item is known by, so search
+          in Purchase Intent / PO / GRN / Medicine dropdowns finds it under
+          any of these names, not just its canonical Items Master name. */}
+      {aliasItem && (
+        <Modal open={!!aliasItem} title={`Alias Names — ${aliasItem.name}`} onClose={() => { setAliasItem(null); setNewAlias('') }}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Add every other name this item is known by (Purchase Intent wording, PO wording, invoice/GRN name, etc.) — search anywhere in the app will then find it by any of these names, not just "{aliasItem.name}".
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={newAlias}
+                onChange={e => setNewAlias(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && newAlias.trim()) addAliasMut.mutate(newAlias) }}
+                placeholder="e.g. IBH Killed VAC, or the full invoice name"
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <button
+                onClick={() => addAliasMut.mutate(newAlias)}
+                disabled={addAliasMut.isPending || !newAlias.trim()}
+                className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {(aliasesForItem ?? []).length === 0 && (
+                <p className="text-xs text-gray-400 py-4 text-center">No alias names yet — this item is only found by "{aliasItem.name}".</p>
+              )}
+              {(aliasesForItem ?? []).map((a: any) => (
+                <div key={a.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                  <div>
+                    <span className="text-sm text-gray-800">{a.alias}</span>
+                    <span className="text-[10px] text-gray-400 ml-2 uppercase">{a.source}</span>
+                  </div>
+                  <button onClick={() => removeAliasMut.mutate(a.id)} className="text-gray-400 hover:text-red-600">
+                    <X size={14}/>
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end pt-2 border-t">
+              <button onClick={() => { setAliasItem(null); setNewAlias('') }}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50">
+                Done
               </button>
             </div>
           </div>
