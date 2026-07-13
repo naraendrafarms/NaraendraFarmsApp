@@ -176,10 +176,16 @@ export const ItemsMasterPage: React.FC = () => {
     const dupeIds = [...selected].filter(id => id !== keepId)
     setMerging(true)
     try {
-      // Remap item_id in all child tables from duplicates → kept item
+      // Remap item_id in all child tables from duplicates → kept item.
+      // medicines_master and purchase_intent_lines were added once
+      // item_aliases/item_id-linking landed on them (migrations 437, 453) —
+      // without remapping these too, medicines_master.item_id would go
+      // NULL (ON DELETE SET NULL) undoing the medicine auto-link fix, and
+      // purchase_intent_lines.item_id (plain FK, no ON DELETE clause) would
+      // block the whole merge with a raw foreign-key-violation error.
       const TABLES = [
-        'grn', 'medicine_usage', 'medicine_purchases',
-        'feed_production_ingredients', 'purchase_orders', 'stock_ledger',
+        'grn', 'medicine_usage', 'medicine_purchases', 'medicines_master',
+        'feed_production_ingredients', 'purchase_orders', 'purchase_intent_lines', 'stock_ledger',
       ]
       for (const table of TABLES) {
         const { error } = await supabase
@@ -187,6 +193,25 @@ export const ItemsMasterPage: React.FC = () => {
           .update({ item_id: keepId })
           .in('item_id', dupeIds)
         if (error && !error.message.includes('does not exist')) throw error
+      }
+      // item_aliases.item_id cascades on delete, so without remapping first
+      // every alias the duplicate items were known by would be silently
+      // lost instead of carried over to the kept item. Its alias text is
+      // also globally unique, so a duplicate that already exists for the
+      // kept item can't be blanket-UPDATEd (would violate that
+      // constraint) — drop those, remap the rest.
+      const { data: keptAliases } = await supabase.from('item_aliases').select('id,alias').eq('item_id', keepId)
+      const keptNorm = new Set((keptAliases ?? []).map((a: any) => a.alias.trim().toLowerCase()))
+      const { data: dupeAliases } = await supabase.from('item_aliases').select('id,alias').in('item_id', dupeIds)
+      for (const da of dupeAliases ?? []) {
+        const norm = da.alias.trim().toLowerCase()
+        if (keptNorm.has(norm)) {
+          await supabase.from('item_aliases').delete().eq('id', da.id)
+        } else {
+          const { error: aliasErr } = await supabase.from('item_aliases').update({ item_id: keepId }).eq('id', da.id)
+          if (aliasErr) throw new Error(`Alias remap failed: ${aliasErr.message}`)
+          keptNorm.add(norm)
+        }
       }
       // Also rewrite the denormalized item_name text columns — name-keyed
       // aggregations (Feed Mill stock, ledger fallbacks) still split the
@@ -211,6 +236,8 @@ export const ItemsMasterPage: React.FC = () => {
       setMergeModal(false)
       setKeepId('')
       qc.invalidateQueries({ queryKey: ['items_master'] })
+      qc.invalidateQueries({ queryKey: ['item_aliases_all'] })
+      qc.invalidateQueries({ queryKey: ['item_aliases_for_item'] })
     } catch (e: any) {
       toast.error('Merge failed: ' + e.message)
     } finally {
