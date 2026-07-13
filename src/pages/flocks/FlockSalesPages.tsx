@@ -955,6 +955,8 @@ export const HEDispatch: React.FC = () => {
   const totalDisp = filtered.reduce((s: number, d: any) => s + d.total_dispatched, 0)
   const totalAmt  = filtered.reduce((s: number, d: any) => s + (d.amount ?? 0), 0)
   const totalFree = filtered.reduce((s: number, d: any) => s + (d.free_eggs ?? 0), 0)
+  const totalTds  = filtered.reduce((s: number, d: any) => s + (d.tds_amount ?? 0), 0)
+  const totalInvQty = filtered.reduce((s: number, d: any) => s + (d.invoice_eggs ?? 0), 0)
   const noInvoiceCount = (dispatches ?? []).filter((d: any) => !d.invoice_no).length
 
   // Stock register — same logic as Reports → Egg Stock Balance day-wise view
@@ -1397,13 +1399,14 @@ export const HEDispatch: React.FC = () => {
             </tbody>
             {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50">
-                <Td colSpan={11}><strong>TOTAL ({filtered.length} records)</strong></Td>
+                <Td colSpan={7}><strong>TOTAL ({filtered.length} records)</strong></Td>
                 <Td right><strong>{totalDisp.toLocaleString('en-IN')}</strong></Td>
                 <Td right><strong>{totalFree.toLocaleString('en-IN')}</strong></Td>
-                <Td right><strong>{(totalDisp - totalFree).toLocaleString('en-IN')}</strong></Td>
+                <Td right><strong>{totalInvQty.toLocaleString('en-IN')}</strong></Td>
                 <Td right>—</Td>
                 <Td right><strong className="text-green-700">{inr(totalAmt)}</strong></Td>
-                <Td> </Td><Td> </Td><Td> </Td>
+                <Td right><strong className="text-red-500">{totalTds > 0 ? inr(totalTds) : '—'}</strong></Td>
+                <Td> </Td><Td> </Td><Td> </Td><Td> </Td><Td> </Td><Td> </Td>
               </tr></tfoot>
             )}
           </Table>
