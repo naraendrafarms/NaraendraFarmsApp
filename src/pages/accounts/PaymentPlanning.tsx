@@ -87,26 +87,32 @@ export const PaymentPlanningPage: React.FC = () => {
         // .in('payment_status', ['Pending', null]) silently excluded every
         // NULL-status row instead of catching it — use OR with IS NULL.
         supabase.from('nhe_sales')
-          .select('id,sale_date,sale_type,amount,parties(name),flocks(flock_no)')
-          .or('payment_status.eq.Pending,payment_status.is.null')
+          .select('id,sale_date,sale_type,amount,tds_amount,amount_received,parties(name),flocks(flock_no)')
+          .or('payment_status.eq.Pending,payment_status.eq.Partial,payment_status.is.null')
           .or('is_employee_sale.is.null,is_employee_sale.eq.false')
           .order('sale_date', { ascending: false })
           .limit(100),
         supabase.from('he_dispatch')
-          .select('id,dispatch_date,amount,parties(name),flocks(flock_no)')
-          .or('payment_status.eq.Pending,payment_status.is.null')
+          .select('id,dispatch_date,amount,tds_amount,amount_received,parties(name),flocks(flock_no)')
+          .or('payment_status.eq.Pending,payment_status.eq.Partial,payment_status.is.null')
           .order('dispatch_date', { ascending: false })
           .limit(100),
       ])
+      // Receivable = invoice amount, less TDS deducted at source (HE
+      // Dispatch/NHE Sale show this as "Net receivable" on the receipt
+      // form) and less whatever's already been received on a Partial row —
+      // previously this used the gross `amount` only, overstating what's
+      // actually still owed.
+      const netDue = (r: any) => Math.max(0, (r.amount ?? 0) - (r.tds_amount ?? 0) - (r.amount_received ?? 0))
       const nheRows = (nhe.data ?? []).map((r: any) => ({
         id: r.id, type: 'NHE', date: r.sale_date,
         party: r.parties?.name ?? '—', flock: r.flocks?.flock_no,
-        amount: r.amount ?? 0,
+        amount: netDue(r),
       }))
       const heRows = (he.data ?? []).map((r: any) => ({
         id: r.id, type: 'HE', date: r.dispatch_date,
         party: r.parties?.name ?? '—', flock: r.flocks?.flock_no,
-        amount: r.amount ?? 0,
+        amount: netDue(r),
       }))
       return [...nheRows, ...heRows].sort((a, b) => a.date < b.date ? 1 : -1)
     }
