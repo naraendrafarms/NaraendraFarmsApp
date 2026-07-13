@@ -377,7 +377,7 @@ export const PaymentPlanningPage: React.FC = () => {
   }
 
   const handlePrint = () => {
-    if (!selectedPayments.length) { toast.error('Select payments to print'); return }
+    if (!selectedPayments.length && !selectedManualItems.length) { toast.error('Select payments to print'); return }
     const totals = selectedPayments.reduce((acc: any, p: any) => {
       const invoice = p.invoice_amount ?? 0
       const payable = p.net_payable ?? invoice
@@ -386,6 +386,11 @@ export const PaymentPlanningPage: React.FC = () => {
       acc.payable += payable
       return acc
     }, { invoice: 0, discTds: 0, payable: 0 })
+    // Selected Manual Items (payable ones) are folded into the printed
+    // totals/balance too — receivable manual items instead fold into Need to
+    // Receive below, not this payable total.
+    totals.invoice += selectedManualPayable
+    totals.payable += selectedManualPayable
 
     const rows = selectedPayments.map((p: any, i: number) => {
       const party = partiesMap?.[p.vendor_name] ?? {}
@@ -404,14 +409,25 @@ export const PaymentPlanningPage: React.FC = () => {
         days: p.grn_date ? daysBetween(p.grn_date, planDate) : '',
       }
     })
+    const manualPayableRows = selectedManualItems.filter((m: any) => m.direction === 'payable').map((m: any, i: number) => ({
+      sno: rows.length + i + 1,
+      vendor_name: `${m.label} (manual)`,
+      credit_limit_days: 0,
+      invoice_amount: m.amount ?? 0,
+      payable_amount: m.amount ?? 0,
+      disc_tds: 0,
+      grn_date: null,
+      invoice_date: null,
+      days: '',
+    }))
 
     printPaymentPlanning({
       planDate,
-      rows,
+      rows: [...rows, ...manualPayableRows],
       totals,
       bankBalance: kotakBal,
-      bankBalanceAfter: kotakBal - totals.payable,
-      needToReceive: totalReceivable,
+      bankBalanceAfter: kotakBal - totals.payable + selectedManualReceivable,
+      needToReceive: totalReceivable + selectedManualReceivable,
     })
   }
 
@@ -431,7 +447,7 @@ export const PaymentPlanningPage: React.FC = () => {
                 Mark Paid ({selected.size})
               </Button>
             )}
-            <Button variant="outline" icon={<Printer size={16} />} onClick={handlePrint} disabled={selected.size === 0}>
+            <Button variant="outline" icon={<Printer size={16} />} onClick={handlePrint} disabled={selected.size === 0 && selectedManual.size === 0}>
               Print
             </Button>
             <Button icon={<Download size={16} />} onClick={exportCMS} disabled={selected.size === 0}>
