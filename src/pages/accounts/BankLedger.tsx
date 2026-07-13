@@ -1022,10 +1022,16 @@ export const BankLedgerPage: React.FC = () => {
         const balance = receivableBalance(inv)
         const settled = Math.min(balance, amount)
         const newReceived = (inv.amount_received ?? 0) + settled
+        // nhe_sales/he_dispatch.payment_mode has its own CHECK constraint
+        // (Cash/NEFT/RTGS/Bank Transfer/UPI/Cheque/Advance — see migration
+        // 338) which has nothing to do with Bank Ledger's own category list
+        // (Vendor Payment/Bank Charges/etc.) — writing form.category here
+        // violated the constraint. This is money received into a bank
+        // account, so NEFT is always a valid, safe default.
         const { error: invErr } = await supabase.from(source).update({
           amount_received: newReceived,
           received_date: form.txn_date,
-          payment_mode: form.category || 'NEFT',
+          payment_mode: 'NEFT',
           payment_status: newReceived >= (inv.amount ?? 0) ? 'Received' : 'Partial',
           bank_account_id: form.bank_account_id,
           utr_ref: form.reference_no || null,
