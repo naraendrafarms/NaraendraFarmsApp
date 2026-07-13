@@ -18,6 +18,7 @@ const EMPTY_FORM = {
   bank_account_id: '',
   party_id: '',
   settle_payment_id: '',
+  settle_receivable_id: '',
 }
 
 const EMPTY_ACCOUNT_FORM = {
@@ -622,6 +623,36 @@ export const BankLedgerPage: React.FC = () => {
     label: `${p.invoice_no ?? p.grn_no ?? p.id.slice(0, 8)} — Balance ₹${billBalance(p).toLocaleString('en-IN')}`,
   }))
 
+  // Open (not-fully-received) NHE sale / HE dispatch invoices for the party
+  // picked in Add Transaction, mirroring the vendor-bill picker above but
+  // for the buyer side — a Credit entered here can settle a specific
+  // invoice instead of just sitting untied.
+  const { data: openReceivablesForParty } = useQuery({
+    queryKey: ['receivables_open_for_party', form.party_id],
+    queryFn: async () => {
+      const [nhe, he] = await Promise.all([
+        supabase.from('nhe_sales')
+          .select('id,amount,amount_received,invoice_no,dc_no,sale_type,payment_status')
+          .eq('party_id', form.party_id)
+          .or('payment_status.neq.Received,payment_status.is.null')
+          .or('is_employee_sale.is.null,is_employee_sale.eq.false'),
+        supabase.from('he_dispatch')
+          .select('id,amount,amount_received,invoice_no,dc_no,payment_status')
+          .eq('party_id', form.party_id)
+          .or('payment_status.neq.Received,payment_status.is.null'),
+      ])
+      const nheRows = (nhe.data ?? []).map((r: any) => ({ ...r, source: 'nhe_sales' }))
+      const heRows = (he.data ?? []).map((r: any) => ({ ...r, source: 'he_dispatch' }))
+      return [...nheRows, ...heRows]
+    },
+    enabled: !!form.party_id && form.txn_type === 'Credit' && !editId,
+  })
+  const receivableBalance = (r: any) => Math.max(0, (r.amount ?? 0) - (r.amount_received ?? 0))
+  const settleReceivableOptions = (openReceivablesForParty ?? []).map((r: any) => ({
+    value: `${r.source}:${r.id}`,
+    label: `${r.invoice_no ?? r.dc_no ?? r.id.slice(0, 8)} (${r.source === 'he_dispatch' ? 'HE' : (r.sale_type ?? 'NHE')}) — Balance ₹${receivableBalance(r).toLocaleString('en-IN')}`,
+  }))
+
   // Every account (active + inactive) for the Manage Accounts modal — the
   // dropdown above only ever shows active ones.
   const { data: allAccounts, isLoading: allAccountsLoading } = useQuery({
@@ -885,6 +916,7 @@ export const BankLedgerPage: React.FC = () => {
       bank_account_id: t.bank_account_id ?? selectedAccount,
       party_id: t.party_id ?? '',
       settle_payment_id: '',
+      settle_receivable_id: '',
     })
     setShowModal(true)
   }
@@ -957,7 +989,34 @@ export const BankLedgerPage: React.FC = () => {
         }
       }
 
-      toast.success(editId ? 'Transaction updated' : (form.settle_payment_id ? 'Transaction saved — bill settled' : 'Transaction saved'))
+      // Buyer side: settling a specific NHE sale / HE dispatch invoice —
+      // same idea, mirrored for Credit (money received).
+      if (!editId && newTxnId && form.settle_receivable_id) {
+        const [source, recvId] = form.settle_receivable_id.split(':')
+        const inv = (openReceivablesForParty ?? []).find((r: any) => r.source === source && r.id === recvId)
+        if (inv) {
+          const balance = receivableBalance(inv)
+          const settled = Math.min(balance, amount)
+          const newReceived = (inv.amount_received ?? 0) + settled
+          await supabase.from(source).update({
+            amount_received: newReceived,
+            received_date: form.txn_date,
+            payment_mode: form.category || 'NEFT',
+            payment_status: newReceived >= (inv.amount ?? 0) ? 'Received' : 'Partial',
+            bank_account_id: form.bank_account_id,
+            utr_ref: form.reference_no || null,
+          }).eq('id', recvId)
+          await supabase.from('bank_transactions').update({
+            [source === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id']: recvId,
+          }).eq('id', newTxnId)
+          qc.invalidateQueries({ queryKey: ['receivables_open_for_party'] })
+          qc.invalidateQueries({ queryKey: ['pending_receivables'] })
+          qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+          qc.invalidateQueries({ queryKey: ['he_dispatch'] })
+        }
+      }
+
+      toast.success(editId ? 'Transaction updated' : ((form.settle_payment_id || form.settle_receivable_id) ? 'Transaction saved — invoice settled' : 'Transaction saved'))
       setShowModal(false)
       setForm({ ...EMPTY_FORM })
       setEditId(null)
@@ -1567,7 +1626,7 @@ export const BankLedgerPage: React.FC = () => {
             onChange={e => {
               const id = (e.target as HTMLSelectElement).value
               const p = (parties ?? []).find((x: any) => x.id === id)
-              setForm(f => ({ ...f, party_id: id, settle_payment_id: '', description: !f.description && p ? p.name : f.description }))
+              setForm(f => ({ ...f, party_id: id, settle_payment_id: '', settle_receivable_id: '', description: !f.description && p ? p.name : f.description }))
             }}
             options={[{ value: '', label: '— None —' }, ...(parties ?? []).map((p: any) => ({ value: p.id, label: `${p.name} (${p.type})` }))]}
           />
@@ -1582,6 +1641,20 @@ export const BankLedgerPage: React.FC = () => {
               />
               {!form.settle_payment_id && (
                 <p className="text-xs text-amber-600 mt-1">Without picking a bill here, this stays a plain bank entry and won't show in that party's ledger.</p>
+              )}
+            </div>
+          )}
+          {!editId && form.txn_type === 'Credit' && form.party_id && (
+            <div>
+              <SearchableSelect
+                label="Settle against invoice (optional — marks it Received and posts to Party Ledger)"
+                placeholder={settleReceivableOptions.length ? 'Not linked to an invoice' : 'No open invoices for this party'}
+                options={settleReceivableOptions}
+                value={form.settle_receivable_id}
+                onChange={v => setForm(f => ({ ...f, settle_receivable_id: v }))}
+              />
+              {!form.settle_receivable_id && (
+                <p className="text-xs text-amber-600 mt-1">Without picking an invoice here, this stays a plain bank entry and won't show in that party's ledger.</p>
               )}
             </div>
           )}
