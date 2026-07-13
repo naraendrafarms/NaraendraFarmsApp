@@ -19,10 +19,12 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
 }
 
 // Dedup-check helper for name-based master tables (medicines, etc.) —
-// collapses internal whitespace too, not just leading/trailing (trim
-// alone lets "Vitalosin 62.5 %" and "Vitalosin 62.5%" both through as
-// "different" names and create a real duplicate row).
-const normalizeName = (s: string) => (s ?? '').toLowerCase().trim().replace(/\s+/g, ' ')
+// strips ALL whitespace, not just collapsing repeats (collapsing runs of
+// spaces to one doesn't help when the actual difference is the presence
+// vs absence of a single space, e.g. "Vitalosin 62.5 %" vs "Vitalosin
+// 62.5%" — trim-only, and even collapse-only, both let this through as
+// "different" names and created a real duplicate row).
+const normalizeName = (s: string) => (s ?? '').toLowerCase().replace(/\s+/g, '')
 
 // ── SHARED BULK HELPERS ──────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
