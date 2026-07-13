@@ -32,6 +32,24 @@ function useAdjTypeList() {
   return opts.length ? opts.map(o => o.value) : ['Opening Stock','Wastage','Damage','Correction','Found','Transfer Out','Transfer In']
 }
 
+// Discrete/count units round to whole numbers fine (you can't have 8.3
+// bottles) — but weight/volume units (kg, Ltr, Gms, ml, etc.) are
+// routinely used in small fractional amounts (e.g. 90g = 0.09 kg,
+// 8.115 kg). Rounding those to the nearest integer previously showed
+// 8.115 kg as "8" and 0.09 kg as "0" — silently hiding real usage for
+// exactly the low-dose medicines/vaccines this matters most for.
+const DISCRETE_UNITS = new Set(['nos', 'dose', 'box', 'bag', 'bags', 'pcs', 'pieces', 'units'])
+const formatQty = (n: number, unit?: string) => {
+  const isDiscrete = DISCRETE_UNITS.has((unit ?? '').trim().toLowerCase())
+  return isDiscrete
+    ? Math.round(n).toLocaleString('en-IN')
+    : n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+}
+const roundQty = (n: number, unit?: string) => {
+  const isDiscrete = DISCRETE_UNITS.has((unit ?? '').trim().toLowerCase())
+  return isDiscrete ? Math.round(n) : Math.round(n * 1000) / 1000
+}
+
 const norm = (s?: string | null) => (s ?? '').trim().toLowerCase()
 const cleanNum = (v: any): number | null => {
   if (v == null || v === '') return null
@@ -241,8 +259,8 @@ const StockStatusTab: React.FC = () => {
   const exportCsv = () => {
     const headers = ['item_name','category','unit','opening','received','used','adjusted','closing','rate','value']
     const csv = [headers, ...filtered.map(r => [r.item_name, r.category, r.unit,
-      Math.round(r.opening), Math.round(r.received), Math.round(r.used), Math.round(r.adjusted),
-      Math.round(r.closing), r.rate, Math.round(r.value)])]
+      roundQty(r.opening, r.unit), roundQty(r.received, r.unit), roundQty(r.used, r.unit), roundQty(r.adjusted, r.unit),
+      roundQty(r.closing, r.unit), r.rate, Math.round(r.value)])]
       .map(row => row.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\n')
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}))
     a.download = `stock_status_${asOf}.csv`; a.click()
@@ -295,12 +313,12 @@ const StockStatusTab: React.FC = () => {
                       <Td className="font-medium max-w-[220px] truncate">{r.item_name}</Td>
                       <Td>{r.category ? <Badge color="blue">{r.category}</Badge> : <span className="text-gray-300 text-xs">—</span>}</Td>
                       <Td className="text-xs">{r.unit}</Td>
-                      <Td right className="text-xs text-gray-500">{Math.round(r.opening).toLocaleString('en-IN')}</Td>
-                      <Td right className="text-xs text-green-600">{Math.round(r.received).toLocaleString('en-IN')}</Td>
-                      <Td right className="text-xs text-orange-600">{Math.round(r.used).toLocaleString('en-IN')}</Td>
-                      <Td right className="text-xs text-gray-500">{r.adjusted ? Math.round(r.adjusted).toLocaleString('en-IN') : '—'}</Td>
+                      <Td right className="text-xs text-gray-500">{formatQty(r.opening, r.unit)}</Td>
+                      <Td right className="text-xs text-green-600">{formatQty(r.received, r.unit)}</Td>
+                      <Td right className="text-xs text-orange-600">{formatQty(r.used, r.unit)}</Td>
+                      <Td right className="text-xs text-gray-500">{r.adjusted ? formatQty(r.adjusted, r.unit) : '—'}</Td>
                       <Td right>
-                        <Badge color={r.closing > 0 ? (low ? 'yellow' : 'green') : 'red'}>{Math.round(r.closing).toLocaleString('en-IN')}</Badge>
+                        <Badge color={r.closing > 0 ? (low ? 'yellow' : 'green') : 'red'}>{formatQty(r.closing, r.unit)}</Badge>
                       </Td>
                       <Td right className="text-xs">{r.rate > 0 ? r.rate.toFixed(2) : '—'}</Td>
                       <Td right className="font-medium text-xs">{r.value > 0 ? inr(r.value) : '—'}</Td>
@@ -821,8 +839,8 @@ const ClosingStockReportTab: React.FC = () => {
       ['Item Name','Category','Unit','Opening Qty','Received','Used','Adjusted','Closing Qty','Rate (Rs)','Closing Value (Rs)'],
       ...filtered.map(r => [
         r.item_name, r.category || 'Other', r.unit,
-        Math.round(r.opening), Math.round(r.received), Math.round(r.used),
-        Math.round(r.adjusted), Math.round(r.closing), r.rate > 0 ? Number(r.rate.toFixed(2)) : '',
+        roundQty(r.opening, r.unit), roundQty(r.received, r.unit), roundQty(r.used, r.unit),
+        roundQty(r.adjusted, r.unit), roundQty(r.closing, r.unit), r.rate > 0 ? Number(r.rate.toFixed(2)) : '',
         r.closing > 0 && r.rate > 0 ? Math.round(r.closing * r.rate) : 0,
       ]),
       ['','','','','','','','TOTAL','', Math.round(totalClosingValue)],
@@ -903,12 +921,12 @@ const ClosingStockReportTab: React.FC = () => {
                     <Td className="font-medium max-w-[240px] truncate">{r.item_name}</Td>
                     <Td className="text-xs">{r.category ? <Badge color="blue">{r.category}</Badge> : <span className="text-gray-300">—</span>}</Td>
                     <Td className="text-xs">{r.unit}</Td>
-                    <Td right className="text-xs text-gray-500">{Math.round(r.opening).toLocaleString('en-IN')}</Td>
-                    <Td right className="text-xs text-green-700">{Math.round(r.received).toLocaleString('en-IN')}</Td>
-                    <Td right className="text-xs text-orange-600">{Math.round(r.used).toLocaleString('en-IN')}</Td>
-                    <Td right className="text-xs text-gray-500">{r.adjusted ? Math.round(r.adjusted).toLocaleString('en-IN') : '—'}</Td>
+                    <Td right className="text-xs text-gray-500">{formatQty(r.opening, r.unit)}</Td>
+                    <Td right className="text-xs text-green-700">{formatQty(r.received, r.unit)}</Td>
+                    <Td right className="text-xs text-orange-600">{formatQty(r.used, r.unit)}</Td>
+                    <Td right className="text-xs text-gray-500">{r.adjusted ? formatQty(r.adjusted, r.unit) : '—'}</Td>
                     <Td right>
-                      <Badge color={r.closing > 0 ? 'green' : 'red'}>{Math.round(r.closing).toLocaleString('en-IN')}</Badge>
+                      <Badge color={r.closing > 0 ? 'green' : 'red'}>{formatQty(r.closing, r.unit)}</Badge>
                     </Td>
                     <Td right className="text-xs">{r.rate > 0 ? r.rate.toFixed(2) : '—'}</Td>
                     <Td right className="font-semibold text-blue-700">{r.closing > 0 && r.rate > 0 ? inr(r.closing * r.rate) : '—'}</Td>
