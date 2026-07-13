@@ -604,16 +604,38 @@ export const BankLedgerPage: React.FC = () => {
   // Open (unpaid) bills for the party picked in Add Transaction, so a Debit
   // entered here can settle a specific bill instead of just sitting in the
   // bank ledger with a party tag that Party Ledger never sees.
+  //
+  // Two gotchas that previously made this list silently come back empty:
+  // 1. SQL NULL never matches <> ('neq'), so any bill whose payment_status
+  //    was never set (NULL, not the string 'Pending') was invisible — same
+  //    class of bug documented for the receivables query elsewhere in this
+  //    app. Must OR in payment_status IS NULL explicitly.
+  // 2. Many older pending_payments rows only have vendor_name, not party_id
+  //    (v_party_ledger itself falls back to a vendor_name match for this
+  //    same reason) — filtering strictly on party_id hid all of them.
   const { data: openPaymentsForParty } = useQuery({
     queryKey: ['pending_payments_open_for_party', form.party_id],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('pending_payments')
-        .select('id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount')
-        .eq('party_id', form.party_id)
-        .neq('payment_status', 'Paid')
-        .order('grn_date', { ascending: false })
-      return (data ?? []) as any[]
+      const party = (parties ?? []).find((p: any) => p.id === form.party_id)
+      const cols = 'id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount,payment_status'
+      const [byId, byName] = await Promise.all([
+        supabase.from('pending_payments').select(cols)
+          .eq('party_id', form.party_id)
+          .or('payment_status.neq.Paid,payment_status.is.null'),
+        party?.name
+          ? supabase.from('pending_payments').select(cols)
+              .is('party_id', null).eq('vendor_name', party.name)
+              .or('payment_status.neq.Paid,payment_status.is.null')
+          : Promise.resolve({ data: [], error: null }),
+      ])
+      if (byId.error) throw byId.error
+      if (byName.error) throw byName.error
+      const seen = new Set<string>()
+      const merged = [...(byId.data ?? []), ...(byName.data ?? [])].filter((r: any) => {
+        if (seen.has(r.id)) return false
+        seen.add(r.id); return true
+      })
+      return merged as any[]
     },
     enabled: !!form.party_id && form.txn_type === 'Debit' && !editId,
   })
