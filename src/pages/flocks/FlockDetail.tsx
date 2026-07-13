@@ -592,18 +592,22 @@ export const FlockDetail: React.FC = () => {
   if (isLoading) return <Spinner />
   if (!flock) return <div className="p-8 text-center text-gray-500">Flock not found</div>
 
-  // Computed totals from dailyAggregated (one row per date, sheds already summed)
-  // Using aggregated avoids double-counting multi-shed flocks
-  const totalEggs  = dailyAggregated.reduce((s, d) => s + (d.total_eggs ?? 0), 0)
-  const totalHE    = dailyAggregated.reduce((s, d) => s + (d.he_eggs ?? 0), 0)
-  const totalMortF = dailyAggregated.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
-  const totalMortM = dailyAggregated.reduce((s, d) => s + (d.mortality_male ?? 0), 0)
-  const totalTrF   = dailyAggregated.reduce((s, d) => s + (d.transfer_female ?? d.trcull_female ?? 0), 0)
-  const totalTrM   = dailyAggregated.reduce((s, d) => s + (d.transfer_male   ?? d.trcull_male   ?? 0), 0)
-  const totalCullF = dailyAggregated.reduce((s, d) => s + (d.cull_female ?? 0), 0)
-  const totalCullM = dailyAggregated.reduce((s, d) => s + (d.cull_male   ?? 0), 0)
-  const totalFeedF = dailyAggregated.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0)
-  const totalFeedM = dailyAggregated.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0)
+  // Computed totals from displayDaily (one row per date, sheds already
+  // summed, AND the From/To date filter applied) — this is the TOTAL row
+  // shown under the table, so it must match whatever range is currently
+  // filtered. Previously summed dailyAggregated (the full, unfiltered
+  // flock lifetime) instead, so picking a date range narrowed the rows
+  // shown but left the TOTAL row showing the all-time total regardless.
+  const totalEggs  = displayDaily.reduce((s, d) => s + (d.total_eggs ?? 0), 0)
+  const totalHE    = displayDaily.reduce((s, d) => s + (d.he_eggs ?? 0), 0)
+  const totalMortF = displayDaily.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
+  const totalMortM = displayDaily.reduce((s, d) => s + (d.mortality_male ?? 0), 0)
+  const totalTrF   = displayDaily.reduce((s, d) => s + (d.transfer_female ?? d.trcull_female ?? 0), 0)
+  const totalTrM   = displayDaily.reduce((s, d) => s + (d.transfer_male   ?? d.trcull_male   ?? 0), 0)
+  const totalCullF = displayDaily.reduce((s, d) => s + (d.cull_female ?? 0), 0)
+  const totalCullM = displayDaily.reduce((s, d) => s + (d.cull_male   ?? 0), 0)
+  const totalFeedF = displayDaily.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0)
+  const totalFeedM = displayDaily.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0)
   const hePct = totalEggs > 0 ? totalHE / totalEggs : 0
 
   // Bulk selection helpers for daily tab (select by date, delete all shed rows for that date)
@@ -854,11 +858,41 @@ export const FlockDetail: React.FC = () => {
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>
               Download Template
             </Button>
-            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => exportCSV(
-              `flock_${flock?.flock_no ?? id}_daily_records.csv`,
-              ['Date','Opening F','Opening M','Closing F','Closing M','Mortality F','Mortality M','Cull F','Cull M','Transfer F','Transfer M'],
-              (daily as any[] ?? []).map((d: any) => [d.record_date, d.opening_female ?? 0, d.opening_male ?? 0, d.closing_female ?? 0, d.closing_male ?? 0, d.mortality_female ?? 0, d.mortality_male ?? 0, d.cull_female ?? 0, d.cull_male ?? 0, d.transfer_female ?? 0, d.transfer_male ?? 0])
-            )}>
+            <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={() => {
+              // Export exactly what the table shows: the date-range filter
+              // applied (previously ignored — this always exported every
+              // record regardless of From/To) and multi-shed rows summed
+              // into one row per day (previously exported the raw per-shed
+              // rows). Previously also missing Feed/Eggs/HD%/HE/HE% columns
+              // entirely, even though they're all visible on screen.
+              const rows = [...displayDaily].reverse()
+              exportCSV(
+                `flock_${flock?.flock_no ?? id}_daily_records.csv`,
+                ['Date','Week/Day','Opening F','Opening M','Feed F (kg)','Feed M (kg)','Total Eggs','HD%','HE Eggs','HE%','Transfer F','Cull F','Mortality F','Mortality M','Closing F','Closing M'],
+                rows.map((d: any) => {
+                  const dayAge = flock?.placement_date
+                    ? Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
+                    : (dailyIndexMap.get(d.record_date) ?? 0)
+                  const weekNum = Math.floor(dayAge / 7) + 1
+                  const dayInWeek = (dayAge % 7) + 1
+                  return [
+                    d.record_date, `W${weekNum} D${dayInWeek}`,
+                    d.opening_female ?? 0, d.opening_male ?? 0,
+                    d.feed_female_kg ?? 0, d.feed_male_kg ?? 0,
+                    d.total_eggs ?? 0, d.hd_pct != null ? (d.hd_pct * 100).toFixed(1) : '',
+                    d.he_eggs ?? 0, d.he_pct != null ? (d.he_pct * 100).toFixed(1) : '',
+                    d.transfer_female ?? d.trcull_female ?? 0, d.cull_female ?? 0,
+                    d.mortality_female ?? 0, d.mortality_male ?? 0,
+                    d.closing_female ?? 0, d.closing_male ?? 0,
+                  ]
+                }).concat([[
+                  `TOTAL (${rows.length} days${(fromDate || toDate) ? ' in range' : ''})`, '', '', '',
+                  totalFeedF, totalFeedM, totalEggs, pct(hePct, 1),
+                  totalHE, pct(hePct, 1), totalTrF, totalCullF, totalMortF, totalMortM,
+                  lastRecord?.closing_female ?? '', lastRecord?.closing_male ?? '',
+                ]])
+              )
+            }}>
               Export Excel
             </Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>}
@@ -970,7 +1004,7 @@ export const FlockDetail: React.FC = () => {
                   <tfoot>
                     <tr className="bg-yellow-50 font-bold text-xs">
                       <td className="px-2 py-2"></td>
-                      <td className="px-2 py-2 sticky left-0 bg-yellow-50" colSpan={2}>TOTAL ({uniqueDates} days)</td>
+                      <td className="px-2 py-2 sticky left-0 bg-yellow-50" colSpan={2}>TOTAL ({displayDaily.length} days{(fromDate || toDate) ? ' in range' : ''})</td>
                       <td className="px-2 py-2 text-right">—</td>
                       <td className="px-2 py-2 text-right">—</td>
                       <td className="px-2 py-2 text-right">{totalFeedF.toLocaleString('en-IN')}</td>
