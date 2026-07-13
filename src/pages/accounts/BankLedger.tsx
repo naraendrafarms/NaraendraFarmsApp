@@ -2,11 +2,11 @@ import React, { useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, today, FY_OPTIONS, currentFY, fyRange } from '@/lib/utils'
-import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState } from '@/components/ui'
+import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState, SearchableSelect } from '@/components/ui'
 import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { ifscError, accountNoError } from '@/lib/validators'
-import { postLedgerEntry, clearLedgerEntries } from '@/lib/ledgerSync'
+import { postLedgerEntry, clearLedgerEntries, toCbMode } from '@/lib/ledgerSync'
 
 const EMPTY_FORM = {
   txn_date: today(),
@@ -17,6 +17,7 @@ const EMPTY_FORM = {
   amount: '',
   bank_account_id: '',
   party_id: '',
+  settle_payment_id: '',
 }
 
 const EMPTY_ACCOUNT_FORM = {
@@ -599,6 +600,28 @@ export const BankLedgerPage: React.FC = () => {
     }
   })
 
+  // Open (unpaid) bills for the party picked in Add Transaction, so a Debit
+  // entered here can settle a specific bill instead of just sitting in the
+  // bank ledger with a party tag that Party Ledger never sees.
+  const { data: openPaymentsForParty } = useQuery({
+    queryKey: ['pending_payments_open_for_party', form.party_id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('pending_payments')
+        .select('id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount')
+        .eq('party_id', form.party_id)
+        .neq('payment_status', 'Paid')
+        .order('grn_date', { ascending: false })
+      return (data ?? []) as any[]
+    },
+    enabled: !!form.party_id && form.txn_type === 'Debit' && !editId,
+  })
+  const billBalance = (p: any) => Math.max(0, (p.net_payable ?? p.invoice_amount ?? 0) - (p.paid_amount ?? 0) - (p.discount_amount ?? 0))
+  const settleOptions = (openPaymentsForParty ?? []).map((p: any) => ({
+    value: p.id,
+    label: `${p.invoice_no ?? p.grn_no ?? p.id.slice(0, 8)} — Balance ₹${billBalance(p).toLocaleString('en-IN')}`,
+  }))
+
   // Every account (active + inactive) for the Manage Accounts modal — the
   // dropdown above only ever shows active ones.
   const { data: allAccounts, isLoading: allAccountsLoading } = useQuery({
@@ -861,6 +884,7 @@ export const BankLedgerPage: React.FC = () => {
       amount: t.amount != null ? String(t.amount) : '',
       bank_account_id: t.bank_account_id ?? selectedAccount,
       party_id: t.party_id ?? '',
+      settle_payment_id: '',
     })
     setShowModal(true)
   }
@@ -876,6 +900,7 @@ export const BankLedgerPage: React.FC = () => {
       return
     }
     setSaving(true)
+    const amount = parseFloat(form.amount) || 0
     const payload = {
       bank_account_id: form.bank_account_id,
       txn_date: form.txn_date,
@@ -883,17 +908,56 @@ export const BankLedgerPage: React.FC = () => {
       category: form.category || null,
       reference_no: form.reference_no || null,
       description: form.description || null,
-      amount: parseFloat(form.amount) || 0,
+      amount,
       party_id: form.party_id || null,
     }
-    const { error } = editId
-      ? await supabase.from('bank_transactions').update(payload).eq('id', editId)
-      : await supabase.from('bank_transactions').insert(payload)
-    setSaving(false)
-    if (error) {
-      toast.error(error.message)
-    } else {
-      toast.success(editId ? 'Transaction updated' : 'Transaction saved')
+    try {
+      let newTxnId: string | null = null
+      if (editId) {
+        const { error } = await supabase.from('bank_transactions').update(payload).eq('id', editId)
+        if (error) throw error
+      } else {
+        const { data, error } = await supabase.from('bank_transactions').insert(payload).select('id').single()
+        if (error) throw error
+        newTxnId = data.id
+      }
+
+      // Settling a specific bill from here: mark it Paid (so Party Ledger's
+      // "Payment Made" row picks it up) and post the Cash Book entry — same
+      // as the Link to Bills flow, minus the duplicate bank_transactions
+      // insert since this form's own insert above already IS that entry.
+      if (!editId && newTxnId && form.settle_payment_id) {
+        const bill = (openPaymentsForParty ?? []).find((p: any) => p.id === form.settle_payment_id)
+        if (bill) {
+          const balance = billBalance(bill)
+          const settled = Math.min(balance, amount)
+          const tag = `BANKTXN:${newTxnId}`
+          await supabase.from('pending_payments').update({
+            paid_amount: (bill.paid_amount ?? 0) + settled,
+            paid_date: form.txn_date,
+            payment_status: settled >= balance ? 'Paid' : 'Pending',
+            transaction_ref: tag,
+          }).eq('id', form.settle_payment_id)
+          await supabase.from('bank_transactions').update({
+            match_status: 'manually_matched', linked_payment_id: form.settle_payment_id,
+          }).eq('id', newTxnId)
+          if (settled > 0) {
+            await supabase.from('cash_book').insert({
+              txn_date: form.txn_date, txn_type: 'payment', category: 'purchase_payment',
+              description: `Payment to ${bill.vendor_name}${bill.invoice_no ? ' — Inv ' + bill.invoice_no : ''}`,
+              party_name: bill.vendor_name, amount_in: 0, amount_out: settled,
+              payment_mode: toCbMode(form.category || 'NEFT'), reference_no: form.reference_no || null,
+              pending_payment_id: form.settle_payment_id,
+            })
+          }
+          qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+          qc.invalidateQueries({ queryKey: ['pending_payments'] })
+          qc.invalidateQueries({ queryKey: ['pending_payments_open_for_party'] })
+          qc.invalidateQueries({ queryKey: ['cash_book'] })
+        }
+      }
+
+      toast.success(editId ? 'Transaction updated' : (form.settle_payment_id ? 'Transaction saved — bill settled' : 'Transaction saved'))
       setShowModal(false)
       setForm({ ...EMPTY_FORM })
       setEditId(null)
@@ -903,6 +967,10 @@ export const BankLedgerPage: React.FC = () => {
       if (payload.bank_account_id !== selectedAccount) {
         qc.invalidateQueries({ queryKey: ['bank_transactions', payload.bank_account_id] })
       }
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -1499,10 +1567,24 @@ export const BankLedgerPage: React.FC = () => {
             onChange={e => {
               const id = (e.target as HTMLSelectElement).value
               const p = (parties ?? []).find((x: any) => x.id === id)
-              setForm(f => ({ ...f, party_id: id, description: !f.description && p ? p.name : f.description }))
+              setForm(f => ({ ...f, party_id: id, settle_payment_id: '', description: !f.description && p ? p.name : f.description }))
             }}
             options={[{ value: '', label: '— None —' }, ...(parties ?? []).map((p: any) => ({ value: p.id, label: `${p.name} (${p.type})` }))]}
           />
+          {!editId && form.txn_type === 'Debit' && form.party_id && (
+            <div>
+              <SearchableSelect
+                label="Settle against bill (optional — marks it Paid and posts to Party Ledger)"
+                placeholder={settleOptions.length ? 'Not linked to a bill' : 'No open bills for this party'}
+                options={settleOptions}
+                value={form.settle_payment_id}
+                onChange={v => setForm(f => ({ ...f, settle_payment_id: v }))}
+              />
+              {!form.settle_payment_id && (
+                <p className="text-xs text-amber-600 mt-1">Without picking a bill here, this stays a plain bank entry and won't show in that party's ledger.</p>
+              )}
+            </div>
+          )}
           <Input
             label="Reference No"
             value={form.reference_no}

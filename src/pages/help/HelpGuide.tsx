@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-07-12'
+const LAST_UPDATED = '2026-07-13'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-13', tag: 'Fix',      text: 'Bank Ledger → Add Transaction: picking a Vendor/Party here never posted anything to that party\'s Party Ledger — it only tagged the bank row, with no link to any bill. Added a "Settle against bill" picker (shown for Debit + a party selected) that marks the chosen open bill Paid and posts the Cash Book entry, same as Link to Bills.' },
   { date: '2026-07-12', tag: 'Improved', text: 'Daily Payment Planning → Print: now uses the full Naraendra Farms letterhead (logo, address, GSTIN, phone) matching GRN/HE Dispatch prints, and adds a 4-column signature row — Prepared By / Checked By / Verified By / Authorized Signatory. Also fixed the Kotak Balance shown on this page and in print, which was summing every bank transaction ever recorded instead of the correct per-financial-year balance used everywhere else (Bank Ledger).' },
   { date: '2026-07-12', tag: 'New',      text: 'Tasks module added (new "Tasks" tab in the sidebar) — admin tasks, monthly compliance deadlines (GST/TDS/PF/ESI) with auto-recurrence, and daily team task assignment. Assign a task directly from Pending Payments or Employee List with an "Assign Task" button; a "My Tasks" toggle and a Dashboard widget show what is assigned to you. Assigning/reassigning a task now pops up a live notification for the person it is assigned to.' },
   { date: '2026-07-12', tag: 'Improved', text: 'Discussions (Chat): new messages now show a real popup card with the sender and message text and an inline reply box — reply without opening the chat panel, or tap the message to jump into that conversation. Previously only a small red dot appeared on the chat icon.' },
