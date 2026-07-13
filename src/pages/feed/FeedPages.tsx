@@ -6,7 +6,7 @@ import { parseFile } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Factory, Package, ArrowRight, TrendingUp, Edit2, Trash2, Download, Upload, Printer } from 'lucide-react'
 import { QuickAddParty, QuickAddIngredient } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
@@ -596,10 +596,10 @@ export const GRNEntry: React.FC = () => {
             </FormRow>
           ) : isMedOrVax ? (
             <FormRow cols={3}>
-              <Select label={form.category || 'Item'} placeholder="— Select from master —" options={medOptions}
-                value={form.medicine_id} onChange={e => {
-                  s('medicine_id', e.target.value)
-                  const med = medicines?.find((m: any) => m.id === e.target.value)
+              <SearchableSelect label={form.category || 'Item'} placeholder="Search from master…" options={medOptions}
+                value={form.medicine_id} onChange={v => {
+                  s('medicine_id', v)
+                  const med = medicines?.find((m: any) => m.id === v)
                   if (med) { s('item_name', med.name); s('unit', med.unit ?? 'ml') }
                 }} />
               <Input label="Batch No" value={form.batch_no} onChange={e => s('batch_no', e.target.value)} />

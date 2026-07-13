@@ -3444,10 +3444,10 @@ export const MedicineEntry: React.FC = () => {
                 value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
               <DateInput label="Date" required value={form.usage_date} onChange={e => s('usage_date', e.target.value)} />
             </FormRow>
-            <Select label="Medicine / Vaccine" placeholder="— Select —" options={medOptions}
-              value={form.medicine_id} onChange={e => {
-                s('medicine_id', e.target.value)
-                const med = medicines?.find((m: any) => m.id === e.target.value)
+            <SearchableSelect label="Medicine / Vaccine" placeholder="Search medicine…" options={medOptions}
+              value={form.medicine_id} onChange={v => {
+                s('medicine_id', v)
+                const med = medicines?.find((m: any) => m.id === v)
                 if (med) { s('unit', med.unit); s('rate', med.rate?.toString() ?? '') }
               }} />
             <FormRow cols={4}>
@@ -3750,10 +3750,10 @@ export const MedicinePurchases: React.FC = () => {
         <div className="space-y-4">
           <FormRow>
             <DateInput label="Purchase Date" required value={form.purchase_date} onChange={e => s('purchase_date', e.target.value)} />
-            <Select label="Medicine / Vaccine" required placeholder="— Select —" options={medOptions}
-              value={form.medicine_id} onChange={e => {
-                const med = (medicines??[]).find((m: any) => m.id === e.target.value)
-                setForm(f => ({ ...f, medicine_id: e.target.value, unit: med?.unit ?? f.unit, rate: med?.rate?.toString() ?? f.rate }))
+            <SearchableSelect label="Medicine / Vaccine" required placeholder="Search medicine…" options={medOptions}
+              value={form.medicine_id} onChange={v => {
+                const med = (medicines??[]).find((m: any) => m.id === v)
+                setForm(f => ({ ...f, medicine_id: v, unit: med?.unit ?? f.unit, rate: med?.rate?.toString() ?? f.rate }))
               }} />
           </FormRow>
           <FormRow>

@@ -18,6 +18,12 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
 }
 
+// Dedup-check helper for name-based master tables (medicines, etc.) —
+// collapses internal whitespace too, not just leading/trailing (trim
+// alone lets "Vitalosin 62.5 %" and "Vitalosin 62.5%" both through as
+// "different" names and create a real duplicate row).
+const normalizeName = (s: string) => (s ?? '').toLowerCase().trim().replace(/\s+/g, ' ')
+
 // ── SHARED BULK HELPERS ──────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
   const ref = React.useRef<HTMLInputElement>(null)
@@ -814,8 +820,11 @@ export const MedicinesMaster: React.FC = () => {
       else{
         // No DB constraint prevents a duplicate name (same class of bug as
         // the duplicate bank-account issue found and cleaned up earlier) —
-        // check client-side before inserting.
-        const dup=(data??[]).find((m:any)=>m.name.toLowerCase().trim()===form.name.toLowerCase().trim())
+        // check client-side before inserting. normalizeName collapses
+        // internal whitespace too (not just trim), since "Vitalosin 62.5 %"
+        // vs "Vitalosin 62.5%" previously slipped past a trim-only check
+        // and created a real duplicate row.
+        const dup=(data??[]).find((m:any)=>normalizeName(m.name)===normalizeName(form.name))
         if(dup)throw new Error(`"${form.name}" already exists — edit that entry instead of adding a duplicate.`)
         const{error}=await supabase.from('medicines_master').insert(p);if(error)throw error
       }
@@ -902,8 +911,8 @@ export const MedicinesMaster: React.FC = () => {
     // moment any row's name matched an existing one. Skip rows that already
     // exist by name instead of trying to upsert.
     const { data: existingMeds } = await supabase.from('medicines_master').select('name')
-    const existingNames = new Set((existingMeds ?? []).map((m: any) => m.name.toLowerCase().trim()))
-    const newRows = toUpsert.filter(r => !existingNames.has(r.name.toLowerCase().trim()))
+    const existingNames = new Set((existingMeds ?? []).map((m: any) => normalizeName(m.name)))
+    const newRows = toUpsert.filter(r => !existingNames.has(normalizeName(r.name)))
     if (newRows.length) {
       const { error } = await supabase.from('medicines_master').insert(newRows)
       if (error) { toast.error(error.message); return }
