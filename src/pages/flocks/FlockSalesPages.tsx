@@ -3191,6 +3191,7 @@ export const MedicineEntry: React.FC = () => {
   const [flockFilter, setFlockFilter] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [medSearch, setMedSearch] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
@@ -3290,19 +3291,22 @@ export const MedicineEntry: React.FC = () => {
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const medOptions = medicines?.map((m: any) => ({ value: m.id, label: `${m.name} (${m.unit})` })) ?? []
 
-  const usageIds = (usage ?? []).map((u: any) => u.id)
+  const filteredUsage = (usage ?? []).filter((u: any) =>
+    !medSearch || (u.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
+
+  const usageIds = filteredUsage.map((u: any) => u.id)
   const allUsageSel = usageIds.length > 0 && usageIds.every((id: string) => sel.has(id))
   const someUsageSel = usageIds.some((id: string) => sel.has(id))
   const toggleUsage = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAllUsage = () => setSel(s => { const n = new Set(s); allUsageSel ? usageIds.forEach((id: string) => n.delete(id)) : usageIds.forEach((id: string) => n.add(id)); return n })
 
   const handleExportMed = () => {
-    const rows = tab === 'daily' ? usage : monthly
+    const rows = tab === 'daily' ? filteredUsage : monthly
     if (!rows?.length) { toast.error('No data to export'); return }
     if (tab === 'daily') {
       exportFlatCSV(`medicine_usage.csv`,
         ['flock_no','usage_date','medicine','qty','unit','rate','amount','remarks'],
-        (usage??[]).map((u:any)=>[u.flocks?.flock_no, u.usage_date, u.medicines_master?.name, u.quantity, u.unit, u.rate, u.amount, u.remarks])
+        filteredUsage.map((u:any)=>[u.flocks?.flock_no, u.usage_date, u.medicines_master?.name, u.quantity, u.unit, u.rate, u.amount, u.remarks])
       )
     } else {
       exportFlatCSV(`medicine_monthly.csv`,
@@ -3334,6 +3338,9 @@ export const MedicineEntry: React.FC = () => {
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        {tab === 'daily' && (
+          <Input placeholder="Search medicine…" value={medSearch} onChange={e => setMedSearch(e.target.value)} className="w-44" />
+        )}
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           From
           <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
@@ -3344,7 +3351,7 @@ export const MedicineEntry: React.FC = () => {
           <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
-        {hasFilter && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>}
+        {(hasFilter || medSearch) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setMedSearch('') }}>Clear</Button>}
         <div className="flex rounded-lg border border-gray-200 overflow-hidden ml-auto">
           {(['monthly','daily'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
@@ -3392,7 +3399,7 @@ export const MedicineEntry: React.FC = () => {
                 <Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th>
               </tr></thead>
               <tbody>
-                {usage?.map((u: any) => (
+                {filteredUsage.map((u: any) => (
                   <tr key={u.id} className={`hover:bg-gray-50 ${sel.has(u.id) ? 'bg-red-50' : ''}`}>
                     <Td><CB checked={sel.has(u.id)} onChange={() => toggleUsage(u.id)}/></Td>
                     <Td><Badge color="green">F-{u.flocks?.flock_no}</Badge></Td>
@@ -3405,7 +3412,7 @@ export const MedicineEntry: React.FC = () => {
                 ))}
               </tbody>
             </Table>
-            {usage?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No usage records" />}
+            {filteredUsage.length === 0 && <EmptyState icon={<Package size={32}/>} title={medSearch ? `No medicine matching "${medSearch}"` : 'No usage records'} />}
           </Card>
           {bulkConfirm && (
             <ConfirmBulkDelete label={`Delete ${sel.size} medicine usage records? This cannot be undone.`}
