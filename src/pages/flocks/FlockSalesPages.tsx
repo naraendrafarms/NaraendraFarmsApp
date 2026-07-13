@@ -85,7 +85,11 @@ export const ReceivePaymentModal: React.FC<{
       // column so this falls back to Head Office.
       setCashFarmId(sale.cash_farm_id ?? 'ho')
       setDate(sale.received_date ?? today())
-      setAmtReceived(sale.amount_received?.toString() ?? sale.amount?.toString() ?? '')
+      // Default to what's actually still owed — the invoice amount less any
+      // TDS already deducted at source (shown as "Net receivable" when the
+      // sale/dispatch was entered) — not the full gross invoice amount.
+      const netDue = Math.max(0, (sale.amount ?? 0) - (sale.tds_amount ?? 0))
+      setAmtReceived(sale.amount_received?.toString() ?? netDue.toString())
       setUtr(sale.utr_ref ?? '')
       setStatus(sale.payment_status === 'Pending' || !sale.payment_status ? 'Received' : sale.payment_status)
       setSelectedAdvanceId('')
