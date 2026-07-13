@@ -212,7 +212,7 @@ export const Dashboard: React.FC = () => {
         />
         <StatCard
           title="Total Eggs Produced"
-          value={(totalEggs / 100000).toFixed(1) + ' L'}
+          value={totalEggs.toLocaleString('en-IN')}
           subtitle="All flocks lifetime"
           icon={<Egg size={18}/>}
           color="text-yellow-600"
