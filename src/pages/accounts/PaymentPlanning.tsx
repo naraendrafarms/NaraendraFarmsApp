@@ -2,8 +2,8 @@ import React, { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, currentFY, fyRange } from '@/lib/utils'
-import { Card, CardHeader, Button, DateInput, Input, Modal, Spinner, Table, Th, Td, Badge, StatCard } from '@/components/ui'
-import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle, Printer } from 'lucide-react'
+import { Card, CardHeader, Button, DateInput, Input, Modal, Spinner, Table, Th, Td, Badge, StatCard, Select } from '@/components/ui'
+import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle, Printer, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import { printPaymentPlanning } from '@/lib/invoicePrint'
@@ -143,6 +143,49 @@ export const PaymentPlanningPage: React.FC = () => {
       for (const p of (data ?? [])) map[p.name] = p
       return map
     }
+  })
+
+  // Ad-hoc "manual items" — real upcoming cash in/out with no bill row
+  // anywhere yet (a pending salary for one employee, an advance due next
+  // month, etc.). Deliberately NOT wired into Salary/Advances' own tested
+  // paid/unpaid flows — just a visibility placeholder here until the real
+  // entry is made properly, at which point you delete the manual row.
+  const [manualForm, setManualForm] = useState({ label: '', amount: '', direction: 'payable', due_date: today() })
+  const { data: manualItems } = useQuery({
+    queryKey: ['payment_plan_manual_items'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('payment_plan_manual_items').select('*').order('due_date', { ascending: true })
+      if (error) throw error
+      return data ?? []
+    }
+  })
+  const manualPayable = (manualItems ?? []).filter((m: any) => m.direction === 'payable').reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
+  const manualReceivable = (manualItems ?? []).filter((m: any) => m.direction === 'receivable').reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
+
+  const addManualMut = useMutation({
+    mutationFn: async () => {
+      if (!manualForm.label.trim()) throw new Error('Label is required')
+      const amt = parseFloat(manualForm.amount)
+      if (!(amt > 0)) throw new Error('Enter an amount greater than 0')
+      const { error } = await supabase.from('payment_plan_manual_items').insert({
+        label: manualForm.label.trim(), amount: amt, direction: manualForm.direction, due_date: manualForm.due_date || null,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Added')
+      setManualForm({ label: '', amount: '', direction: 'payable', due_date: today() })
+      qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] })
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+  const deleteManualMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('payment_plan_manual_items').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] }),
+    onError: (e: any) => toast.error(e.message),
   })
 
   const toggleSelect = (id: string) => {
@@ -383,7 +426,7 @@ export const PaymentPlanningPage: React.FC = () => {
       />
 
       {/* Balance Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <StatCard
           title="Kotak Balance"
           value={inr(kotakBal)}
@@ -408,7 +451,61 @@ export const PaymentPlanningPage: React.FC = () => {
           icon={<TrendingDown size={18} />}
           color={balanceAfter < 0 ? 'red' : 'green'}
         />
+        <StatCard
+          title="Manual Items (Net)"
+          value={inr(manualReceivable - manualPayable)}
+          icon={<IndianRupee size={18} />}
+          color={manualReceivable - manualPayable < 0 ? 'red' : 'gray'}
+        />
       </div>
+
+      {/* Manual Items — ad-hoc payables/receivables with no bill yet */}
+      <Card padding={false}>
+        <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-800 text-sm">Manual Items — not yet a bill/salary/advance entry</h3>
+          <p className="text-xs text-gray-400 mt-0.5">e.g. a pending salary for one employee, or an advance you know you'll pay soon. Delete this once the real entry is made in Salary / Advances / Pending Payments.</p>
+        </div>
+        <div className="p-3 flex flex-wrap items-end gap-2 border-b border-gray-100">
+          <div className="flex-1 min-w-[160px]">
+            <Input label="Label" value={manualForm.label} onChange={e => setManualForm(f => ({ ...f, label: e.target.value }))} placeholder="e.g. June salary — Ramesh" />
+          </div>
+          <div className="w-32">
+            <Input label="Amount" type="number" value={manualForm.amount} onChange={e => setManualForm(f => ({ ...f, amount: e.target.value }))} placeholder="0.00" />
+          </div>
+          <div className="w-36">
+            <Select label="Type" value={manualForm.direction} onChange={e => setManualForm(f => ({ ...f, direction: (e.target as HTMLSelectElement).value }))}
+              options={[{ value: 'payable', label: 'Payable (owed by us)' }, { value: 'receivable', label: 'Receivable (owed to us)' }]} />
+          </div>
+          <div className="w-36">
+            <DateInput label="Due Date" value={manualForm.due_date} onChange={e => setManualForm(f => ({ ...f, due_date: e.target.value }))} />
+          </div>
+          <Button icon={<Plus size={14} />} loading={addManualMut.isPending} onClick={() => addManualMut.mutate()}>Add</Button>
+        </div>
+        {(manualItems?.length ?? 0) > 0 && (
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr>
+                <Th>Label</Th><Th>Type</Th><Th>Due Date</Th><Th right>Amount</Th><Th></Th>
+              </tr></thead>
+              <tbody>
+                {(manualItems ?? []).map((m: any) => (
+                  <tr key={m.id} className="hover:bg-gray-50">
+                    <Td>{m.label}</Td>
+                    <Td><Badge color={m.direction === 'payable' ? 'red' : 'green'}>{m.direction === 'payable' ? 'Payable' : 'Receivable'}</Badge></Td>
+                    <Td className="text-xs">{m.due_date ? fmtDate(m.due_date) : '—'}</Td>
+                    <Td right className={m.direction === 'payable' ? 'text-red-600 font-medium' : 'text-green-700 font-medium'}>{inr(m.amount)}</Td>
+                    <Td>
+                      <button onClick={() => deleteManualMut.mutate(m.id)} className="text-gray-400 hover:text-red-600">
+                        <Trash2 size={14} />
+                      </button>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        )}
+      </Card>
 
       {/* Alert banners */}
       {overdue.length > 0 && (
