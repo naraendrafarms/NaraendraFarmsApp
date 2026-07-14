@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-07-13'
+const LAST_UPDATED = '2026-07-14'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-14', tag: 'Fix',      text: 'NHE Sale (Bird): recording a sale paid partly cash + partly online failed to save with a database error ("violates check constraint nhe_sales_payment_mode_check") — the app set payment_mode to "Cash+NEFT" but the database never allowed that value. Cash Book and Bank Ledger already recorded each part correctly; only the summary label on the sale itself was blocked. Now saves correctly.' },
   { date: '2026-07-13', tag: 'Fix',      text: 'Items Master → Merge Items: predates the alias system, so merging duplicates would have silently deleted every alias name the duplicate items were known by (item_aliases cascades on delete), reset any linked medicine\'s item link back to unlinked, and could fail outright with a raw database error if a Purchase Intent line pointed at the duplicate. Also found grn/feed_production_ingredients still carry a legacy ingredient_id column (pre-dating the unified Items Master) that Feed Mill\'s stock summary reads directly — merge never touched it, so Feed Mill numbers could stay split across the old/new item after a merge. Merge now carries all of this over to the kept item correctly, and renames the item_name/ingredient_name text shown directly on PO, Purchase Intent, and Feed Mill lists (previously only GRN/Stock Ledger got renamed, so those three kept showing the old name even with the link fixed).' },
   { date: '2026-07-13', tag: 'Improved', text: 'Inventory: the search box on every tab (Stock Balance, Closing Stock Report, Stock Ledger movements, Consumption Report) is now alias-aware too — searching by an Intent/PO/GRN/Medicine name finds the item\'s stock the same way Purchase Intent/GRN/medicine dropdowns already do.' },
   { date: '2026-07-13', tag: 'New',      text: 'Items Master: added a "Manage alias names" button (tag icon) on every item — add or remove the other names this item is known by (Purchase Intent wording, PO wording, invoice/GRN name, medicine name) directly, without waiting for a "Link to Item" prompt to come up. Once added, search anywhere in the app finds the item by any of those names.' },
