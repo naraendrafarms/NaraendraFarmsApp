@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, fyRange, FY_OPTIONS } from '@/lib/utils'
 import { Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
+import toast from 'react-hot-toast'
 
 const TDS_RATE_OPTIONS = [
   { value: '', label: 'All Rates' },
@@ -26,6 +28,9 @@ export const TDSPayable: React.FC = () => {
     if (v) { const r = fyRange(v); setDateFrom(r.start); setDateTo(r.end) }
   }
   const [statusFilter, setStatusFilter] = useState('')
+  const qc = useQueryClient()
+  const tdsSectionOptions = useConfigOptions('tds_section', [])
+  const sectionLabel = (code: string) => tdsSectionOptions.find(o => o.value === code)?.label ?? code
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['pending_payments_tds', dateFrom, dateTo],
@@ -33,7 +38,7 @@ export const TDSPayable: React.FC = () => {
       // Only require tds_amount > 0 — some bills have TDS entered as a flat
       // amount (Pending Payments edit) without a tds_pct, so don't filter on rate.
       let q = supabase.from('pending_payments')
-        .select('*')
+        .select('*, parties!party_id(pan_no,deductee_type), partners!partner_id(deductee_type)')
         .gt('tds_amount', 0)
         .order('grn_date', { ascending: false })
       if (dateFrom) q = q.gte('grn_date', dateFrom)
@@ -51,7 +56,7 @@ export const TDSPayable: React.FC = () => {
     queryKey: ['salary_tds', dateFrom, dateTo],
     queryFn: async () => {
       let q = supabase.from('salary_monthly')
-        .select('id,month,tds,is_paid,employees!employee_id(name,emp_id,farms(name))')
+        .select('id,month,tds,is_paid,tds_section,tds_interest,employees!employee_id(name,emp_id,pan_no,farms(name))')
         .gt('tds', 0)
         .order('month', { ascending: false })
       if (dateFrom) q = q.gte('month', dateFrom)
@@ -62,6 +67,20 @@ export const TDSPayable: React.FC = () => {
     },
     staleTime: 60_000,
   })
+
+  const pan = (r: any) => r.parties?.pan_no ?? r.employees?.pan_no ?? ''
+  const deducteeType = (r: any) => r.parties?.deductee_type ?? r.partners?.deductee_type ?? 'Non-Company'
+
+  const updateVendorTds = async (id: string, patch: { tds_section?: string; tds_interest?: number }) => {
+    const { error } = await supabase.from('pending_payments').update(patch).eq('id', id)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+  }
+  const updateSalaryTds = async (id: string, patch: { tds_section?: string; tds_interest?: number }) => {
+    const { error } = await supabase.from('salary_monthly').update(patch).eq('id', id)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['salary_tds'] })
+  }
 
   const filteredSalary = useMemo(() => {
     return (salaryRows as any[]).filter(r => {
@@ -119,6 +138,24 @@ export const TDSPayable: React.FC = () => {
   const totalNetPayable = filtered.reduce((s: number, r: any) => s + (r.net_payable ?? (r.invoice_amount ?? 0) - (r.tds_amount ?? 0)), 0)
   const pendingTDS = filtered.filter((r: any) => r.payment_status !== 'Paid').reduce((s: number, r: any) => s + (r.tds_amount ?? 0), 0)
 
+  // Section-wise summary — groups both vendor bills and salary rows by tds_section
+  const sectionSummary = useMemo(() => {
+    const map: Record<string, { tax: number; interest: number }> = {}
+    filtered.forEach((r: any) => {
+      const key = r.tds_section || 'Unspecified'
+      if (!map[key]) map[key] = { tax: 0, interest: 0 }
+      map[key].tax += r.tds_amount ?? 0
+      map[key].interest += r.tds_interest ?? 0
+    })
+    filteredSalary.forEach((r: any) => {
+      const key = r.tds_section || 'Unspecified'
+      if (!map[key]) map[key] = { tax: 0, interest: 0 }
+      map[key].tax += r.tds ?? 0
+      map[key].interest += r.tds_interest ?? 0
+    })
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
+  }, [filtered, filteredSalary])
+
   const exportXlsx = () => {
     const data = filtered.map((r: any) => ({
       Date: fmtDate(r.grn_date),
@@ -130,6 +167,10 @@ export const TDSPayable: React.FC = () => {
       'TDS Amount': r.tds_amount ?? 0,
       'Net Payable': r.net_payable ?? (r.invoice_amount ?? 0) - (r.tds_amount ?? 0),
       Status: r.payment_status ?? 'Pending',
+      PAN: pan(r),
+      'Deductee Type': deducteeType(r),
+      'TDS Section': r.tds_section ?? '',
+      'TDS Interest': r.tds_interest ?? 0,
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
@@ -142,9 +183,20 @@ export const TDSPayable: React.FC = () => {
         Site: r.employees?.farms?.name ?? '',
         'TDS Amount': r.tds ?? 0,
         Status: r.is_paid ? 'Paid' : 'Pending',
+        PAN: r.employees?.pan_no ?? '',
+        'TDS Section': r.tds_section ?? '',
+        'TDS Interest': r.tds_interest ?? 0,
       }))
       const wsSal = XLSX.utils.json_to_sheet(salData)
       XLSX.utils.book_append_sheet(wb, wsSal, 'Salary TDS')
+    }
+    if (sectionSummary.length) {
+      const secData = sectionSummary.map(([sec, s]) => ({
+        Section: sec, Label: sec === 'Unspecified' ? '' : sectionLabel(sec),
+        'Total Tax': s.tax, 'Total Interest': s.interest, 'Total TDS Payable': s.tax + s.interest,
+      }))
+      const wsSec = XLSX.utils.json_to_sheet(secData)
+      XLSX.utils.book_append_sheet(wb, wsSec, 'Section Summary')
     }
     XLSX.writeFile(wb, 'TDS_Payable.xlsx')
   }
@@ -247,10 +299,11 @@ export const TDSPayable: React.FC = () => {
                 <Th>Date</Th><Th>Vendor</Th><Th>GRN #</Th><Th>Invoice #</Th>
                 <Th right>Invoice Amt</Th><Th right>TDS %</Th><Th right>TDS Amt</Th>
                 <Th right>Net Payable</Th><Th>Status</Th>
+                <Th>PAN</Th><Th>Deductee Type</Th><Th>TDS Section</Th><Th right>TDS Interest</Th>
               </tr></thead>
               <tbody>
                 {filtered.length === 0
-                  ? <tr><td colSpan={9} className="text-center py-8 text-gray-400 text-sm">No TDS entries found</td></tr>
+                  ? <tr><td colSpan={13} className="text-center py-8 text-gray-400 text-sm">No TDS entries found</td></tr>
                   : filtered.map((r: any) => {
                       const netPay = r.net_payable ?? (r.invoice_amount ?? 0) - (r.tds_amount ?? 0)
                       return (
@@ -268,6 +321,26 @@ export const TDSPayable: React.FC = () => {
                               ? <Badge color="green">Paid</Badge>
                               : <Badge color="orange">Pending</Badge>}
                           </Td>
+                          <Td className="text-xs font-mono">{pan(r) || '—'}</Td>
+                          <Td className="text-xs">{deducteeType(r)}</Td>
+                          <Td>
+                            <select
+                              defaultValue={r.tds_section ?? ''}
+                              title={r.tds_section ? sectionLabel(r.tds_section) : ''}
+                              onChange={e => updateVendorTds(r.id, { tds_section: e.target.value || undefined })}
+                              className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white"
+                            >
+                              <option value="">—</option>
+                              {tdsSectionOptions.map(o => <option key={o.value} value={o.value}>{o.value}</option>)}
+                            </select>
+                          </Td>
+                          <Td right>
+                            <input
+                              type="number" step="0.01" defaultValue={r.tds_interest ?? 0}
+                              onBlur={e => updateVendorTds(r.id, { tds_interest: parseFloat(e.target.value) || 0 })}
+                              className="text-xs border border-gray-200 rounded px-1 py-0.5 w-20 text-right"
+                            />
+                          </Td>
                         </tr>
                       )
                     })}
@@ -279,7 +352,7 @@ export const TDSPayable: React.FC = () => {
                   <Td></Td>
                   <Td right className="text-red-600">{inr(totalTDS)}</Td>
                   <Td right className="text-green-700">{inr(totalNetPayable)}</Td>
-                  <Td></Td>
+                  <Td colSpan={5}></Td>
                 </tr></tfoot>
               )}
             </Table>
@@ -293,10 +366,11 @@ export const TDSPayable: React.FC = () => {
                 <thead><tr>
                   <Th>Month</Th><Th>Employee</Th><Th>Emp ID</Th><Th>Site</Th>
                   <Th right>TDS Amt</Th><Th>Status</Th>
+                  <Th>PAN</Th><Th>TDS Section</Th><Th right>TDS Interest</Th>
                 </tr></thead>
                 <tbody>
                   {filteredSalary.length === 0
-                    ? <tr><td colSpan={6} className="text-center py-8 text-gray-400 text-sm">No salary TDS entries found</td></tr>
+                    ? <tr><td colSpan={9} className="text-center py-8 text-gray-400 text-sm">No salary TDS entries found</td></tr>
                     : filteredSalary.map((r: any) => (
                         <tr key={r.id} className="hover:bg-gray-50">
                           <Td className="text-xs">{r.month ? fmtDate(r.month) : '—'}</Td>
@@ -309,6 +383,25 @@ export const TDSPayable: React.FC = () => {
                               ? <Badge color="green">Paid</Badge>
                               : <Badge color="orange">Pending</Badge>}
                           </Td>
+                          <Td className="text-xs font-mono">{r.employees?.pan_no ?? '—'}</Td>
+                          <Td>
+                            <select
+                              defaultValue={r.tds_section ?? ''}
+                              title={r.tds_section ? sectionLabel(r.tds_section) : ''}
+                              onChange={e => updateSalaryTds(r.id, { tds_section: e.target.value || undefined })}
+                              className="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white"
+                            >
+                              <option value="">—</option>
+                              {tdsSectionOptions.map(o => <option key={o.value} value={o.value}>{o.value}</option>)}
+                            </select>
+                          </Td>
+                          <Td right>
+                            <input
+                              type="number" step="0.01" defaultValue={r.tds_interest ?? 0}
+                              onBlur={e => updateSalaryTds(r.id, { tds_interest: parseFloat(e.target.value) || 0 })}
+                              className="text-xs border border-gray-200 rounded px-1 py-0.5 w-20 text-right"
+                            />
+                          </Td>
                         </tr>
                       ))}
                 </tbody>
@@ -316,12 +409,40 @@ export const TDSPayable: React.FC = () => {
                   <tfoot><tr className="bg-gray-50 font-semibold">
                     <Td colSpan={4}>TOTAL ({filteredSalary.length})</Td>
                     <Td right className="text-red-600">{inr(totalSalaryTDS)}</Td>
-                    <Td></Td>
+                    <Td colSpan={4}></Td>
                   </tr></tfoot>
                 )}
               </Table>
             )}
           </Card>
+
+          {/* Section-wise summary */}
+          {sectionSummary.length > 0 && (
+            <Card>
+              <p className="text-xs font-semibold text-gray-600 mb-2">Section-wise Summary</p>
+              <Table>
+                <thead><tr>
+                  <Th>TDS Section</Th><Th right>Total Tax</Th><Th right>Total Interest</Th><Th right>Total TDS Payable</Th>
+                </tr></thead>
+                <tbody>
+                  {sectionSummary.map(([sec, s]) => (
+                    <tr key={sec} className="hover:bg-gray-50">
+                      <Td className="text-xs"><span title={sec === 'Unspecified' ? '' : sectionLabel(sec)}>{sec}</span></Td>
+                      <Td right className="text-xs">{inr(s.tax)}</Td>
+                      <Td right className="text-xs">{inr(s.interest)}</Td>
+                      <Td right className="font-semibold text-red-600 text-xs">{inr(s.tax + s.interest)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr className="bg-gray-50 font-semibold">
+                  <Td>GRAND TOTAL</Td>
+                  <Td right>{inr(sectionSummary.reduce((s, [, v]) => s + v.tax, 0))}</Td>
+                  <Td right>{inr(sectionSummary.reduce((s, [, v]) => s + v.interest, 0))}</Td>
+                  <Td right className="text-red-600">{inr(sectionSummary.reduce((s, [, v]) => s + v.tax + v.interest, 0))}</Td>
+                </tr></tfoot>
+              </Table>
+            </Card>
+          )}
         </>
       )}
     </div>

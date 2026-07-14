@@ -114,7 +114,7 @@ export const EmployeeList: React.FC = () => {
     emp_id:'', name:'', designation:'', farm_id:'', department:'',
     base_salary:'', basic_rate:'', hra_rate:'', allowance_rate:'', skill_category:'', increment:'0', bank_name:'', bank_branch:'', account_no:'', ifsc:'',
     joining_date:'', leaving_date:'', dob:'', gender:'', mobile:'', esi_no:'', pf_no:'',
-    uan_no:'', is_active:'true',
+    uan_no:'', pan_no:'', is_active:'true',
     esi_applicable:'false', pf_applicable:'false', pt_applicable:'false',
     restrict_pf:'false', zone_area:'', emp_category:'', location_branch:'',
     payment_mode:'own_account', shared_with_emp_id:'',
@@ -136,7 +136,7 @@ export const EmployeeList: React.FC = () => {
         joining_date: emp.joining_date??'', leaving_date: emp.leaving_date??'',
         dob: emp.dob??'', gender: emp.gender??'',
         mobile: emp.mobile??'', esi_no: emp.esi_no??'', pf_no: emp.pf_no??'',
-        uan_no: emp.uan_no??'',
+        uan_no: emp.uan_no??'', pan_no: emp.pan_no??'',
         is_active: emp.is_active?'true':'false',
         esi_applicable: emp.esi_applicable?'true':'false',
         pf_applicable: emp.pf_applicable?'true':'false',
@@ -153,7 +153,7 @@ export const EmployeeList: React.FC = () => {
       setForm({emp_id:'',name:'',designation:'',farm_id:'',department:'',
         base_salary:'',basic_rate:'',hra_rate:'',allowance_rate:'',skill_category:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
         joining_date:'',leaving_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',
-        uan_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
+        uan_no:'',pan_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
         restrict_pf:'false',zone_area:'',emp_category:'',location_branch:'',
         payment_mode:'own_account',shared_with_emp_id:''})
     }
@@ -181,6 +181,7 @@ export const EmployeeList: React.FC = () => {
         mobile: form.mobile || null, esi_no: form.esi_no || null,
         // UAN and PF No are merged into one — keep pf_no in sync for older reports
         uan_no: form.uan_no || null, pf_no: form.uan_no || null,
+        pan_no: form.pan_no ? form.pan_no.toUpperCase() : null,
         is_active: form.is_active === 'true',
         esi_applicable: form.esi_applicable === 'true',
         pf_applicable: form.pf_applicable === 'true',
@@ -587,6 +588,9 @@ export const EmployeeList: React.FC = () => {
           <FormRow>
             <Input label="Account No" value={form.account_no} onChange={e=>s('account_no',e.target.value)} error={accountNoError(form.account_no) ?? undefined} />
             <Input label="IFSC Code" value={form.ifsc} onChange={e=>s('ifsc',e.target.value.toUpperCase())} error={ifscError(form.ifsc) ?? undefined} />
+          </FormRow>
+          <FormRow>
+            <Input label="PAN No." value={form.pan_no} onChange={e=>s('pan_no',e.target.value.toUpperCase())} hint="Required for TDS Payable report" />
           </FormRow>
           <FormRow>
             <Select label="Salary Payment Mode"

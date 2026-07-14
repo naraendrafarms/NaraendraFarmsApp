@@ -62,6 +62,7 @@ import { GSTReportPage } from '@/pages/reports/GSTReport'
 import { EggStockPage } from '@/pages/reports/EggStock'
 import { TDSReceivable } from '@/pages/reports/TDSReceivable'
 import { TDSPayable } from '@/pages/reports/TDSPayable'
+import { StockStatement } from '@/pages/reports/StockStatement'
 import { CashBookPage } from '@/pages/accounts/CashBook'
 import { FlockPLSummary } from '@/pages/reports/FlockPLSummary'
 import { BankLedgerPage } from '@/pages/accounts/BankLedger'
@@ -219,6 +220,7 @@ export const App: React.FC = () => {
             <Route path="reports/egg-stock" element={<EggStockPage />} />
             <Route path="reports/tds-receivable" element={<TDSReceivable />} />
             <Route path="reports/tds-payable" element={<TDSPayable />} />
+            <Route path="reports/stock-statement" element={<StockStatement />} />
             <Route path="reports/daily-summary" element={<DailySummaryPage />} />
             <Route path="accounts/cash-book" element={<CashBookPage />} />
             <Route path="accounts/bank-ledger" element={<BankLedgerPage />} />

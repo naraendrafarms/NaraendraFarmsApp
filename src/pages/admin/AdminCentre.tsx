@@ -714,6 +714,114 @@ const InlineConfig: React.FC<{ title: string; grp: string; placeholder: string }
   )
 }
 
+// TDS Section manager — config_options grp='tds_section', editing BOTH value (code) and label (description)
+const TdsSectionConfig: React.FC = () => {
+  const qc = useQueryClient()
+  const [newCode, setNewCode] = useState('')
+  const [newLabel, setNewLabel] = useState('')
+  const [editId, setEditId] = useState<number|null>(null)
+  const [editCode, setEditCode] = useState('')
+  const [editLabel, setEditLabel] = useState('')
+  const [confirmDelId, setConfirmDelId] = useState<number|null>(null)
+
+  const grp = 'tds_section'
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['config_options_admin', grp],
+    queryFn: async () => {
+      const { data } = await supabase.from('config_options').select('id,value,label,sort_order,is_active').eq('grp', grp).order('sort_order').order('value')
+      return data ?? []
+    }
+  })
+
+  const inv = () => { qc.invalidateQueries({ queryKey: ['config_options_admin', grp] }); qc.invalidateQueries({ queryKey: ['config_options', grp] }) }
+
+  const toggleActiveMut = useMutation({
+    mutationFn: async (r: any) => {
+      const { error } = await supabase.from('config_options').update({ is_active: !(r.is_active ?? true) }).eq('id', r.id)
+      if (error) throw error
+    },
+    onSuccess: () => inv(),
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const addMut = useMutation({
+    mutationFn: async () => {
+      if (!newCode.trim()) throw new Error('Section code required')
+      const maxOrder = (rows as any[]).reduce((m: number, r: any) => Math.max(m, r.sort_order ?? 0), 0)
+      const { error } = await supabase.from('config_options').insert({ grp, value: newCode.trim(), label: newLabel.trim() || newCode.trim(), sort_order: maxOrder + 1 })
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Added!'); inv(); setNewCode(''); setNewLabel('') },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const saveMut = useMutation({
+    mutationFn: async ({ id, value, label }: { id: number; value: string; label: string }) => {
+      if (!value.trim()) throw new Error('Section code required')
+      const { error } = await supabase.from('config_options').update({ value: value.trim(), label: label.trim() || value.trim() }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Saved!'); inv(); setEditId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: number) => {
+      const { error } = await supabase.from('config_options').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Deleted!'); inv(); setConfirmDelId(null) },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  return (
+    <Card className="space-y-3">
+      <p className="font-semibold text-gray-700 text-sm">TDS Sections</p>
+      {isLoading ? <Spinner /> : (
+        <div className="space-y-1.5">
+          {(rows as any[]).map((r: any) => (
+            <div key={r.id} className="flex items-center gap-2">
+              {editId === r.id ? (
+                <>
+                  <Input label="" value={editCode} onChange={e => setEditCode(e.target.value)} className="w-24 text-sm" placeholder="Code" />
+                  <Input label="" value={editLabel} onChange={e => setEditLabel(e.target.value)} className="flex-1 text-sm" placeholder="Description" />
+                  <Button size="sm" onClick={() => saveMut.mutate({ id: r.id, value: editCode, label: editLabel })} loading={saveMut.isPending}>Save</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setEditId(null)}>Cancel</Button>
+                </>
+              ) : confirmDelId === r.id ? (
+                <>
+                  <span className="flex-1 text-xs text-red-600">Delete section "{r.value}"? Existing records already saved with this value are NOT updated.</span>
+                  <Button size="sm" variant="danger" onClick={() => delMut.mutate(r.id)} loading={delMut.isPending}>Yes</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setConfirmDelId(null)}>No</Button>
+                </>
+              ) : (
+                <>
+                  <span className={`flex-1 text-sm rounded px-2 py-1 ${r.is_active === false ? 'text-gray-400 bg-gray-100 line-through' : 'text-gray-700 bg-gray-50'}`}>
+                    <span className="font-mono">{r.value}</span> — {r.label ?? r.value}{r.is_active === false && <span className="ml-1.5 text-[10px] uppercase tracking-wide no-underline text-amber-600 font-semibold">inactive</span>}
+                  </span>
+                  <button onClick={() => toggleActiveMut.mutate(r)} title={r.is_active === false ? 'Activate — show in dropdowns again' : 'Deactivate — hide from dropdowns without deleting'}
+                    className="px-1.5 py-0.5 text-[10px] rounded border border-gray-200 text-gray-500 hover:text-amber-600 hover:border-amber-300">
+                    {r.is_active === false ? 'On' : 'Off'}
+                  </button>
+                  <button onClick={() => { setEditId(r.id); setEditCode(r.value); setEditLabel(r.label ?? r.value) }}
+                    className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                  <button onClick={() => setConfirmDelId(r.id)}
+                    className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 size={13}/></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 pt-1">
+        <Input label="" value={newCode} onChange={e => setNewCode(e.target.value)} placeholder="Code e.g. 1002" className="w-24 text-sm" />
+        <Input label="" value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Description e.g. Salary (Section 192)" className="flex-1 text-sm" />
+        <Button size="sm" icon={<Plus size={14}/>} onClick={() => addMut.mutate()} loading={addMut.isPending}>Add</Button>
+      </div>
+    </Card>
+  )
+}
+
 // Editor for designation_extra_days (extra days paid per designation)
 const ExtraDaysConfigCard: React.FC = () => {
   const qc = useQueryClient()
@@ -1074,6 +1182,7 @@ const MastersHub: React.FC = () => (
     <Section title="Accounts / Cash Book">
       <InlineConfig title="Transaction Types" grp="txn_type" placeholder="e.g. receipt, payment" />
       <InlineConfig title="Cash Book Categories" grp="cashbook_category" placeholder="e.g. je_sale, salary" />
+      <TdsSectionConfig />
     </Section>
 
     <Section title="Flocks & Birds">

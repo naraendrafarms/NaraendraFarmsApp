@@ -120,6 +120,7 @@ const NAV: NavItem[] = [
       { label: 'Daily Summary',           to: '/reports/daily-summary' },
       { label: 'TDS Receivable',          to: '/reports/tds-receivable' },
       { label: 'TDS Payable',             to: '/reports/tds-payable' },
+      { label: 'Stock Statement',         to: '/reports/stock-statement' },
       { label: 'Site Invoice (Consolidated)', to: '/reports/site-invoice' },
       { label: 'Bird / Cull Sales Report',    to: '/reports/bird-sales' },
     ]
