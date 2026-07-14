@@ -56,7 +56,7 @@ export const TDSPayable: React.FC = () => {
     queryKey: ['salary_tds', dateFrom, dateTo],
     queryFn: async () => {
       let q = supabase.from('salary_monthly')
-        .select('id,month,tds,is_paid,tds_section,tds_interest,employees!employee_id(name,emp_id,pan_no,farms(name))')
+        .select('id,month,tds,is_paid,tds_section,tds_interest,tds_deposited,tds_deposit_date,employees!employee_id(name,emp_id,pan_no,farms(name))')
         .gt('tds', 0)
         .order('month', { ascending: false })
       if (dateFrom) q = q.gte('month', dateFrom)
@@ -71,15 +71,34 @@ export const TDSPayable: React.FC = () => {
   const pan = (r: any) => r.parties?.pan_no ?? r.employees?.pan_no ?? ''
   const deducteeType = (r: any) => r.parties?.deductee_type ?? r.partners?.deductee_type ?? 'Non-Company'
 
-  const updateVendorTds = async (id: string, patch: { tds_section?: string; tds_interest?: number }) => {
+  // TDS deducted in month M is due to the government by the 7th of month
+  // M+1 — completely independent of whether the vendor/employee themselves
+  // have since been paid (that's payment_status / is_paid, a different thing).
+  const tdsDueDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return null
+    const [y, m] = dateStr.split('T')[0].split('-').map(Number)
+    const dueMonth = m === 12 ? 1 : m + 1
+    const dueYear = m === 12 ? y + 1 : y
+    return `${dueYear}-${String(dueMonth).padStart(2, '0')}-07`
+  }
+  const isOverdue = (r: any, dateField: string) => {
+    if (r.tds_deposited) return false
+    const due = tdsDueDate(r[dateField])
+    return due ? due < today() : false
+  }
+
+  const updateVendorTds = async (id: string, patch: { tds_section?: string; tds_interest?: number; tds_deposited?: boolean; tds_deposit_date?: string | null }) => {
     const { error } = await supabase.from('pending_payments').update(patch).eq('id', id)
     if (error) { toast.error(error.message); return }
     qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
   }
-  const updateSalaryTds = async (id: string, patch: { tds_section?: string; tds_interest?: number }) => {
+  const updateSalaryTds = async (id: string, patch: { tds_section?: string; tds_interest?: number; tds_deposited?: boolean; tds_deposit_date?: string | null }) => {
     const { error } = await supabase.from('salary_monthly').update(patch).eq('id', id)
     if (error) { toast.error(error.message); return }
     qc.invalidateQueries({ queryKey: ['salary_tds'] })
+  }
+  const toggleDeposited = (updater: (id: string, patch: any) => void, r: any) => {
+    updater(r.id, { tds_deposited: !r.tds_deposited, tds_deposit_date: !r.tds_deposited ? today() : null })
   }
 
   const filteredSalary = useMemo(() => {
@@ -171,6 +190,9 @@ export const TDSPayable: React.FC = () => {
       'Deductee Type': deducteeType(r),
       'TDS Section': r.tds_section ?? '',
       'TDS Interest': r.tds_interest ?? 0,
+      'TDS Due Date': tdsDueDate(r.grn_date) ? fmtDate(tdsDueDate(r.grn_date)) : '',
+      'TDS Deposit Status': r.tds_deposited ? 'Deposited' : (isOverdue(r, 'grn_date') ? 'Overdue' : 'Pending'),
+      'TDS Deposit Date': r.tds_deposit_date ? fmtDate(r.tds_deposit_date) : '',
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
@@ -186,6 +208,9 @@ export const TDSPayable: React.FC = () => {
         PAN: r.employees?.pan_no ?? '',
         'TDS Section': r.tds_section ?? '',
         'TDS Interest': r.tds_interest ?? 0,
+        'TDS Due Date': tdsDueDate(r.month) ? fmtDate(tdsDueDate(r.month)) : '',
+        'TDS Deposit Status': r.tds_deposited ? 'Deposited' : (isOverdue(r, 'month') ? 'Overdue' : 'Pending'),
+        'TDS Deposit Date': r.tds_deposit_date ? fmtDate(r.tds_deposit_date) : '',
       }))
       const wsSal = XLSX.utils.json_to_sheet(salData)
       XLSX.utils.book_append_sheet(wb, wsSal, 'Salary TDS')
@@ -298,14 +323,17 @@ export const TDSPayable: React.FC = () => {
               <thead><tr>
                 <Th>Date</Th><Th>Vendor</Th><Th>GRN #</Th><Th>Invoice #</Th>
                 <Th right>Invoice Amt</Th><Th right>TDS %</Th><Th right>TDS Amt</Th>
-                <Th right>Net Payable</Th><Th>Status</Th>
+                <Th right>Net Payable</Th><Th>Bill Status</Th>
                 <Th>PAN</Th><Th>Deductee Type</Th><Th>TDS Section</Th><Th right>TDS Interest</Th>
+                <Th>TDS Due Date</Th><Th>TDS Deposit Status</Th>
               </tr></thead>
               <tbody>
                 {filtered.length === 0
-                  ? <tr><td colSpan={13} className="text-center py-8 text-gray-400 text-sm">No TDS entries found</td></tr>
+                  ? <tr><td colSpan={15} className="text-center py-8 text-gray-400 text-sm">No TDS entries found</td></tr>
                   : filtered.map((r: any) => {
                       const netPay = r.net_payable ?? (r.invoice_amount ?? 0) - (r.tds_amount ?? 0)
+                      const due = tdsDueDate(r.grn_date)
+                      const overdue = isOverdue(r, 'grn_date')
                       return (
                         <tr key={r.id} className="hover:bg-gray-50">
                           <Td className="text-xs">{r.grn_date ? fmtDate(r.grn_date) : '—'}</Td>
@@ -341,6 +369,17 @@ export const TDSPayable: React.FC = () => {
                               className="text-xs border border-gray-200 rounded px-1 py-0.5 w-20 text-right"
                             />
                           </Td>
+                          <Td className={`text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{due ? fmtDate(due) : '—'}</Td>
+                          <Td>
+                            <button
+                              onClick={() => toggleDeposited(updateVendorTds, r)}
+                              title={r.tds_deposit_date ? `Deposited ${fmtDate(r.tds_deposit_date)}` : 'Not yet deposited to the government'}
+                            >
+                              {r.tds_deposited
+                                ? <Badge color="green">Deposited</Badge>
+                                : overdue ? <Badge color="red">Overdue</Badge> : <Badge color="orange">Pending</Badge>}
+                            </button>
+                          </Td>
                         </tr>
                       )
                     })}
@@ -352,7 +391,7 @@ export const TDSPayable: React.FC = () => {
                   <Td></Td>
                   <Td right className="text-red-600">{inr(totalTDS)}</Td>
                   <Td right className="text-green-700">{inr(totalNetPayable)}</Td>
-                  <Td colSpan={5}></Td>
+                  <Td colSpan={7}></Td>
                 </tr></tfoot>
               )}
             </Table>
@@ -365,13 +404,17 @@ export const TDSPayable: React.FC = () => {
               <Table>
                 <thead><tr>
                   <Th>Month</Th><Th>Employee</Th><Th>Emp ID</Th><Th>Site</Th>
-                  <Th right>TDS Amt</Th><Th>Status</Th>
+                  <Th right>TDS Amt</Th><Th>Salary Status</Th>
                   <Th>PAN</Th><Th>TDS Section</Th><Th right>TDS Interest</Th>
+                  <Th>TDS Due Date</Th><Th>TDS Deposit Status</Th>
                 </tr></thead>
                 <tbody>
                   {filteredSalary.length === 0
-                    ? <tr><td colSpan={9} className="text-center py-8 text-gray-400 text-sm">No salary TDS entries found</td></tr>
-                    : filteredSalary.map((r: any) => (
+                    ? <tr><td colSpan={11} className="text-center py-8 text-gray-400 text-sm">No salary TDS entries found</td></tr>
+                    : filteredSalary.map((r: any) => {
+                        const due = tdsDueDate(r.month)
+                        const overdue = isOverdue(r, 'month')
+                        return (
                         <tr key={r.id} className="hover:bg-gray-50">
                           <Td className="text-xs">{r.month ? fmtDate(r.month) : '—'}</Td>
                           <Td className="text-xs font-medium">{r.employees?.name ?? '—'}</Td>
@@ -402,14 +445,25 @@ export const TDSPayable: React.FC = () => {
                               className="text-xs border border-gray-200 rounded px-1 py-0.5 w-20 text-right"
                             />
                           </Td>
+                          <Td className={`text-xs ${overdue ? 'text-red-600 font-semibold' : ''}`}>{due ? fmtDate(due) : '—'}</Td>
+                          <Td>
+                            <button
+                              onClick={() => toggleDeposited(updateSalaryTds, r)}
+                              title={r.tds_deposit_date ? `Deposited ${fmtDate(r.tds_deposit_date)}` : 'Not yet deposited to the government'}
+                            >
+                              {r.tds_deposited
+                                ? <Badge color="green">Deposited</Badge>
+                                : overdue ? <Badge color="red">Overdue</Badge> : <Badge color="orange">Pending</Badge>}
+                            </button>
+                          </Td>
                         </tr>
-                      ))}
+                      )})}
                 </tbody>
                 {filteredSalary.length > 0 && (
                   <tfoot><tr className="bg-gray-50 font-semibold">
                     <Td colSpan={4}>TOTAL ({filteredSalary.length})</Td>
                     <Td right className="text-red-600">{inr(totalSalaryTDS)}</Td>
-                    <Td colSpan={4}></Td>
+                    <Td colSpan={6}></Td>
                   </tr></tfoot>
                 )}
               </Table>
