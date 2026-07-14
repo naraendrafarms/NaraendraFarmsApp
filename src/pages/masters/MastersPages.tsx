@@ -471,7 +471,7 @@ export const PartiesMaster: React.FC = () => {
   const [mergeKeepId,  setMergeKeepId]  = useState('')
   const [filterName,   setFilterName]   = useState('')
   const [filterType,   setFilterType]   = useState('')
-  const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0',bank_name:'',branch:'',account_no:'',ifsc:''})
+  const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0',bank_name:'',branch:'',account_no:'',ifsc:'',pan_no:'',deductee_type:'Non-Company'})
   const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
   // When GSTIN typed: auto-set registered + derive state code
@@ -493,7 +493,7 @@ export const PartiesMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
-    setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??'',gst_type:row.gst_type??'unregistered',state_code:row.state_code??'',is_rcm_default:row.is_rcm_default??false,tds_pct_default:String(row.tds_pct_default??'0'),bank_name:row.bank_name??'',branch:row.branch??'',account_no:row.account_no??'',ifsc:row.ifsc??''}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0',bank_name:'',branch:'',account_no:'',ifsc:''})
+    setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??'',gst_type:row.gst_type??'unregistered',state_code:row.state_code??'',is_rcm_default:row.is_rcm_default??false,tds_pct_default:String(row.tds_pct_default??'0'),bank_name:row.bank_name??'',branch:row.branch??'',account_no:row.account_no??'',ifsc:row.ifsc??'',pan_no:row.pan_no??'',deductee_type:row.deductee_type??'Non-Company'}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0',bank_name:'',branch:'',account_no:'',ifsc:'',pan_no:'',deductee_type:'Non-Company'})
     setShowForm(true)
   }
 
@@ -502,7 +502,7 @@ export const PartiesMaster: React.FC = () => {
       if(!form.name)throw new Error('Name required')
       const ifscErr=ifscError(form.ifsc);if(ifscErr)throw new Error(ifscErr)
       const acctErr=accountNoError(form.account_no);if(acctErr)throw new Error(acctErr)
-      const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null,gst_type:form.gst_type,state_code:form.state_code||null,is_rcm_default:form.is_rcm_default,tds_pct_default:parseFloat(form.tds_pct_default)||0,bank_name:form.bank_name||null,branch:form.branch||null,account_no:form.account_no||null,ifsc:form.ifsc||null}
+      const p={name:form.name,type:form.type,category:form.category||null,contact:form.contact||null,address:form.address||null,gstin:form.gstin||null,gst_type:form.gst_type,state_code:form.state_code||null,is_rcm_default:form.is_rcm_default,tds_pct_default:parseFloat(form.tds_pct_default)||0,bank_name:form.bank_name||null,branch:form.branch||null,account_no:form.account_no||null,ifsc:form.ifsc||null,pan_no:form.pan_no ? form.pan_no.toUpperCase() : null,deductee_type:form.deductee_type}
       if(editing){const{error}=await supabase.from('parties').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('parties').insert(p);if(error)throw error}
     },
@@ -776,6 +776,11 @@ export const PartiesMaster: React.FC = () => {
               {value:'5',  label:'5% (Rent/Commission)'},
               {value:'10', label:'10% (Professional)'},
             ]} />
+          <FormRow>
+            <Input label="PAN No." value={form.pan_no} onChange={e=>s('pan_no',e.target.value.toUpperCase())} hint="Required for TDS Payable report" />
+            <Select label="Deductee Type" value={form.deductee_type} onChange={e=>s('deductee_type',e.target.value)}
+              options={[{value:'Non-Company',label:'Non-Company (Individual/HUF/Firm)'},{value:'Company',label:'Company'}]} />
+          </FormRow>
           <Divider label="Bank Details (for payments / CMS)" />
           <FormRow>
             <Input label="Bank Name" value={form.bank_name} onChange={e=>s('bank_name',e.target.value)} hint="e.g. SBI, Kotak" />
