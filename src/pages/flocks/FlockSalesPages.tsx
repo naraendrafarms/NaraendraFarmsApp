@@ -2778,7 +2778,7 @@ export const NHESales: React.FC = () => {
               <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Date</Th><Th>Type</Th><Th>Party</Th>
               <Th right>Qty</Th><Th right>Wt (kg)</Th><Th right>₹/kg</Th><Th right>Amount</Th>
-              <Th>Payment</Th><Th>Vehicle/DC</Th><Th></Th>
+              <Th>Payment</Th><Th>Vehicle No</Th><Th>DC No</Th><Th></Th>
             </tr></thead>
             <tbody>
               {filtered.map((s: any) => (
@@ -2829,7 +2829,8 @@ export const NHESales: React.FC = () => {
                         ? <button onClick={() => setReceiptSale(s)} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium hover:bg-yellow-200">◑ Partial {s.amount_received ? `· ${inr(s.amount_received)}` : ''}</button>
                         : <button onClick={() => setReceiptSale(s)} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200 text-xs hover:bg-orange-100">⊕ Receive</button>}
                   </Td>
-                  <Td className="text-xs text-gray-400">{s.vehicle_no ?? s.dc_no ?? '—'}</Td>
+                  <Td className="text-xs text-gray-400">{s.vehicle_no ?? '—'}</Td>
+                  <Td className="text-xs text-gray-400">{s.dc_no ?? '—'}</Td>
                   <Td>
                     <div className="flex gap-1">
                       {isBirdSale(s.sale_type) && (Number(s.amount_received) || 0) > (Number(s.amount) || 0) && (
@@ -2856,7 +2857,7 @@ export const NHESales: React.FC = () => {
               <tfoot><tr className="bg-gray-50 font-semibold">
                 <Td colSpan={7}>TOTAL ({filtered.length} records)</Td>
                 <Td right className="text-green-700">{inr(filtered.reduce((sum: number, s: any) => sum + Number(s.amount ?? 0), 0))}</Td>
-                <Td colSpan={3}></Td>
+                <Td colSpan={4}></Td>
               </tr></tfoot>
             )}
           </Table>
