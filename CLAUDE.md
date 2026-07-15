@@ -16,6 +16,17 @@
 
 ---
 
+## Explain Before Fixing (NEVER CHANGE THIS)
+When the user reports something wrong or asks a question that turns up a bug,
+**explain what the actual problem is FIRST** (root cause, what's affected,
+what the fix would involve) and **wait for their go-ahead** before writing
+any code or running a migration — even for a fix that looks small or
+obvious. Only skip this step when the user's message is already a direct,
+explicit instruction to make a specific change (not just "why is X
+happening?" or a bug report). If in doubt, explain first and ask.
+
+---
+
 ## Rules to Follow Every Session
 
 ### 1. Migration Checklist (MANDATORY every time)
