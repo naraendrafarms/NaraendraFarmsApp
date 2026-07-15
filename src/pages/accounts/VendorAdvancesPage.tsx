@@ -8,6 +8,8 @@ import {
 } from '@/components/ui'
 import { Plus, Trash2, Pencil, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { ChallanPickerModal } from '@/pages/reports/TDSPayable'
 
 const EMPTY = {
   advance_date: today(),
@@ -17,6 +19,9 @@ const EMPTY = {
   reference_no: '',
   remarks: '',
   bank_account_id: '',
+  tds_pct: '',
+  tds_amount: '',
+  tds_section: '',
 }
 
 const MODES = [
@@ -39,6 +44,7 @@ export const VendorAdvancesPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [filterParty, setFilterParty] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const tdsSectionOptions = useConfigOptions('tds_section', [])
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
@@ -65,7 +71,7 @@ export const VendorAdvancesPage: React.FC = () => {
     queryFn: async () => {
       let q = supabase
         .from('vendor_advances')
-        .select('id,advance_date,party_id,amount,amount_used,payment_mode,reference_no,remarks,parties(name)')
+        .select('id,advance_date,party_id,amount,amount_used,payment_mode,reference_no,remarks,tds_pct,tds_amount,tds_section,tds_interest,tds_deposited,tds_deposit_date,tds_challan_id,parties(name)')
         .order('advance_date', { ascending: false })
       if (filterParty) q = q.eq('party_id', filterParty)
       const { data } = await q
@@ -84,6 +90,8 @@ export const VendorAdvancesPage: React.FC = () => {
   const addMut = useMutation({
     mutationFn: async (row: typeof EMPTY & { bank_account_id?: string }) => {
       const amt = parseFloat(row.amount) || 0
+      const tdsAmt = parseFloat(row.tds_amount) || 0
+      const net = amt - tdsAmt
       const partyName = (parties as any[]).find((p: any) => p.id === row.party_id)?.name ?? ''
       const narration = `Advance to ${partyName}${row.reference_no ? ` (${row.reference_no})` : ''}`
 
@@ -94,6 +102,9 @@ export const VendorAdvancesPage: React.FC = () => {
         payment_mode: row.payment_mode,
         reference_no: row.reference_no || null,
         remarks: row.remarks || null,
+        tds_pct: parseFloat(row.tds_pct) || 0,
+        tds_amount: tdsAmt,
+        tds_section: row.tds_section || null,
       }).select('id').single()
       if (error) throw error
 
@@ -106,7 +117,7 @@ export const VendorAdvancesPage: React.FC = () => {
           description: narration,
           party_name: partyName,
           amount_in: 0,
-          amount_out: amt,
+          amount_out: net,
           payment_mode: 'cash',
           reference_no: row.reference_no || null,
           vendor_advance_id: adv.id,
@@ -120,7 +131,7 @@ export const VendorAdvancesPage: React.FC = () => {
           category: 'Vendor Advance',
           reference_no: row.reference_no || null,
           description: narration,
-          amount: amt,
+          amount: net,
           vendor_advance_id: adv.id,
         })
         if (bErr) throw new Error('Advance saved but Bank entry failed: ' + bErr.message)
@@ -139,6 +150,8 @@ export const VendorAdvancesPage: React.FC = () => {
   const editMut = useMutation({
     mutationFn: async (row: typeof EMPTY & { id: string }) => {
       const amt = parseFloat(row.amount) || 0
+      const tdsAmt = parseFloat(row.tds_amount) || 0
+      const net = amt - tdsAmt
       const { error } = await supabase.from('vendor_advances').update({
         advance_date: row.advance_date,
         party_id: row.party_id,
@@ -146,6 +159,9 @@ export const VendorAdvancesPage: React.FC = () => {
         payment_mode: row.payment_mode,
         reference_no: row.reference_no || null,
         remarks: row.remarks || null,
+        tds_pct: parseFloat(row.tds_pct) || 0,
+        tds_amount: tdsAmt,
+        tds_section: row.tds_section || null,
       }).eq('id', row.id)
       if (error) throw error
 
@@ -157,7 +173,7 @@ export const VendorAdvancesPage: React.FC = () => {
       if (isCash) {
         const { error: cbErr } = await supabase.from('cash_book').insert({
           txn_date: row.advance_date, txn_type: 'payment', category: 'purchase_payment',
-          description: narration, party_name: partyName, amount_in: 0, amount_out: amt,
+          description: narration, party_name: partyName, amount_in: 0, amount_out: net,
           payment_mode: 'cash', reference_no: row.reference_no || null, vendor_advance_id: row.id,
         })
         if (cbErr) throw new Error('Advance updated but Cash Book entry failed: ' + cbErr.message)
@@ -165,7 +181,7 @@ export const VendorAdvancesPage: React.FC = () => {
         const { error: bErr } = await supabase.from('bank_transactions').insert({
           bank_account_id: row.bank_account_id, txn_date: row.advance_date, txn_type: 'Debit',
           category: 'Vendor Advance', reference_no: row.reference_no || null, description: narration,
-          amount: amt, vendor_advance_id: row.id,
+          amount: net, vendor_advance_id: row.id,
         })
         if (bErr) throw new Error('Advance updated but Bank entry failed: ' + bErr.message)
       }
@@ -238,9 +254,19 @@ export const VendorAdvancesPage: React.FC = () => {
       reference_no: a.reference_no ?? '',
       remarks: a.remarks ?? '',
       bank_account_id: '',
+      tds_pct: a.tds_pct ? String(a.tds_pct) : '',
+      tds_amount: a.tds_amount ? String(a.tds_amount) : '',
+      tds_section: a.tds_section ?? '',
     })
     setShowModal(true)
   }
+
+  const updateAdvanceTds = async (id: string, patch: any) => {
+    const { error } = await supabase.from('vendor_advances').update(patch).eq('id', id)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+  }
+  const [challanModal, setChallanModal] = useState<any>(null)
 
   const totalPaid = advances.reduce((s, a: any) => s + (a.amount ?? 0), 0)
   const totalUsed = advances.reduce((s, a: any) => s + (a.amount_used ?? 0), 0)
@@ -328,6 +354,7 @@ export const VendorAdvancesPage: React.FC = () => {
                 <Th className="text-right">Paid</Th>
                 <Th className="text-right">Used</Th>
                 <Th className="text-right">Balance</Th>
+                <Th>TDS</Th>
                 <Th></Th>
               </tr>
             </thead>
@@ -351,6 +378,24 @@ export const VendorAdvancesPage: React.FC = () => {
                     <Td className="text-right text-red-700 font-medium">{inr(a.amount)}</Td>
                     <Td className="text-right text-gray-600">{inr(a.amount_used)}</Td>
                     <Td className="text-right font-bold text-blue-700">{inr(bal)}</Td>
+                    <Td>
+                      {a.tds_amount > 0 ? (
+                        <button
+                          className="text-xs"
+                          onClick={() => {
+                            if (a.tds_deposited) {
+                              updateAdvanceTds(a.id, { tds_deposited: false, tds_deposit_date: null, tds_challan_id: null })
+                            } else {
+                              setChallanModal({ ...a, vendor_name: (a as any).parties?.name ?? '' })
+                            }
+                          }}
+                        >
+                          <Badge color={a.tds_deposited ? 'green' : 'yellow'}>
+                            {inr(a.tds_amount)} {a.tds_deposited ? 'Deposited' : 'Pending'}
+                          </Badge>
+                        </button>
+                      ) : '—'}
+                    </Td>
                     <Td>
                       <div className="flex items-center gap-2">
                         <button
@@ -380,11 +425,22 @@ export const VendorAdvancesPage: React.FC = () => {
                 <Td className="text-right text-gray-600">{inr(advances.reduce((s: number, a: any) => s + (a.amount_used ?? 0), 0))}</Td>
                 <Td className="text-right text-blue-700">{inr(advances.reduce((s: number, a: any) => s + ((a.amount ?? 0) - (a.amount_used ?? 0)), 0))}</Td>
                 <Td></Td>
+                <Td></Td>
               </tr>
             </tfoot>
           </Table>
         )}
       </Card>
+
+      {challanModal && (
+        <ChallanPickerModal
+          row={challanModal}
+          source="advance"
+          sectionOptions={tdsSectionOptions}
+          onSave={updateAdvanceTds}
+          onClose={() => setChallanModal(null)}
+        />
+      )}
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editId ? 'Edit Vendor Advance' : 'Add Vendor Advance'}>
         <div className="space-y-4 p-1">
@@ -410,6 +466,45 @@ export const VendorAdvancesPage: React.FC = () => {
               placeholder="0.00"
             />
           </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">TDS %</label>
+              <Input
+                type="number"
+                value={form.tds_pct}
+                onChange={e => {
+                  const pct = e.target.value
+                  const amt = parseFloat(form.amount) || 0
+                  const tdsAmt = amt * (parseFloat(pct) || 0) / 100
+                  setForm(f => ({ ...f, tds_pct: pct, tds_amount: tdsAmt ? tdsAmt.toFixed(2) : '' }))
+                }}
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">TDS Amount</label>
+              <Input
+                type="number"
+                value={form.tds_amount}
+                onChange={e => set('tds_amount', e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">TDS Section</label>
+              <Select
+                value={form.tds_section}
+                onChange={e => set('tds_section', e.target.value)}
+                options={[{ value: '', label: '— None —' }, ...tdsSectionOptions]}
+              />
+            </div>
+          </div>
+          {parseFloat(form.tds_amount) > 0 && (
+            <p className="text-xs text-gray-500">
+              Net payout: {inr((parseFloat(form.amount) || 0) - (parseFloat(form.tds_amount) || 0))}
+              {' '}(TDS {inr(parseFloat(form.tds_amount) || 0)} withheld, tracked as a payable — advance still counts at the full amount on the Party Ledger)
+            </p>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Payment Mode</label>
             <Select

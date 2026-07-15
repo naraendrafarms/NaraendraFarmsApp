@@ -51,15 +51,15 @@ const deriveFyQuarter = (dateStr: string): { fy: string; quarter: string } => {
 // list) or create a new one on the spot. Setting tds_challan_id also derives
 // tds_deposited=true and tds_deposit_date from the challan's own deposit_date
 // — it is never re-entered independently, so the two can't drift apart.
-const ChallanPickerModal: React.FC<{
+export const ChallanPickerModal: React.FC<{
   row: any
-  source: 'vendor' | 'salary'
+  source: 'vendor' | 'salary' | 'advance'
   sectionOptions: { value: string; label: string }[]
   onSave: (id: string, patch: any) => Promise<void>
   onClose: () => void
 }> = ({ row, source, sectionOptions, onSave, onClose }) => {
   const qc = useQueryClient()
-  const rowAmount = source === 'vendor' ? (row.tds_amount ?? 0) : (row.tds ?? 0)
+  const rowAmount = source === 'salary' ? (row.tds ?? 0) : (row.tds_amount ?? 0)
   const rowSection = row.tds_section ?? ''
 
   const { data: existing = [] } = useQuery({
@@ -121,7 +121,7 @@ const ChallanPickerModal: React.FC<{
       </>}>
       <div className="space-y-3">
         <p className="text-xs text-gray-500">
-          {source === 'vendor' ? (row.vendor_name ?? '') : (row.employees?.name ?? '')} — TDS {inr(rowAmount)}
+          {source === 'salary' ? (row.employees?.name ?? '') : (row.vendor_name ?? '')} — TDS {inr(rowAmount)}
           {rowSection ? ` · Section ${rowSection}` : ''}
         </p>
         <div className="flex gap-3 text-sm">
