@@ -6,6 +6,7 @@ import { Card, SectionHeader, Button, Input, Spinner, Table, Th, Td, Badge } fro
 import { Download, CheckCircle2, Pencil, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { printReport } from '@/lib/invoicePrint'
+import * as XLSX from 'xlsx'
 
 const PF_CEIL = 15000
 
@@ -256,12 +257,40 @@ export const StatutoryFilingPage: React.FC = () => {
     downloadFile(`ECR_${month}.txt`, lines.join('\n'))
     toast.success(`ECR: ${pfRows.length} members`)
   }
+  // Matches the ESIC portal's own "Monthly Contribution" upload template
+  // exactly — column headers, column order, and file format (.xls, all
+  // columns as TEXT so IP Number/dates aren't reformatted by Excel).
+  // Contribution amounts are deliberately NOT included: the ESIC system
+  // computes Employee/Employer % itself from wages, it doesn't accept them.
+  // Reason Code defaults to '0' (Without Reason) and Last Working Day is
+  // left blank — this app doesn't yet track employee exits for ESIC, so
+  // every row is filed as a normal working month. Wage basis and ESI
+  // eligibility are unchanged — this only reshapes the exported file.
   const exportESIC = () => {
     if (!esiRows.length) { toast.error('No ESI-applicable employees this month'); return }
-    downloadFile(`ESIC_${month}.csv`, csv([
-      ['IP Number', 'IP Name', 'No. of Days', 'Wages (Basic)', 'Employee 0.75%', 'Employer 3.25%'],
-      ...esiRows.map(r => [r.esi_no, r.name, Math.round(r.days), Math.round(r.basic), Math.round(r.esiEE), Math.round(r.esiER)]),
-    ]), 'text/csv')
+    const header = [
+      'IP Number \n(10 Digits)',
+      'IP Name\n( Only alphabets and space )',
+      'No of Days for which wages paid/payable during the month',
+      'Total Monthly Wages',
+      ' Reason Code for Zero workings days(numeric only; provide 0 for all other reasons- Click on the link for reference)',
+      ' Last Working Day\n( Format DD/MM/YYYY  or DD-MM-YYYY)',
+    ]
+    const data = esiRows.map(r => [
+      String(r.esi_no ?? ''), String(r.name ?? ''),
+      String(Math.ceil(r.days)), String(Math.round(r.basic)),
+      '0', '',
+    ])
+    const ws = XLSX.utils.aoa_to_sheet([header, ...data])
+    // Force every cell (including the header) to TEXT type, per the
+    // template's own instructions — an ESIC-portal-format requirement.
+    Object.keys(ws).forEach(addr => {
+      if (addr[0] === '!') return
+      if (ws[addr]) ws[addr].t = 's'
+    })
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+    XLSX.writeFile(wb, `ESIC_${month}.xls`, { bookType: 'biff8' })
     toast.success(`ESIC: ${esiRows.length} IPs`)
   }
   const exportPT = () => {
@@ -306,7 +335,7 @@ export const StatutoryFilingPage: React.FC = () => {
               <thead><tr><Th>IP / Name</Th><Th right>Wages (Basic)</Th><Th right>EE</Th><Th right>ER</Th></tr></thead>
               <tbody>
                 {esiRows.map((r, i) => (
-                  <tr key={i}><Td className="text-xs">{r.esi_no || '⚠ no IP'}<div className="text-[10px] text-gray-400">{r.name} · {Math.round(r.days)}d</div></Td>
+                  <tr key={i}><Td className="text-xs">{r.esi_no || '⚠ no IP'}<div className="text-[10px] text-gray-400">{r.name} · {Math.ceil(r.days)}d</div></Td>
                     <Td right className="text-xs">{inr(r.basic)}</Td><Td right className="text-xs">{inr(r.esiEE)}</Td><Td right className="text-xs">{inr(r.esiER)}</Td></tr>
                 ))}
                 <tr className="bg-gray-50 font-semibold"><Td>Total</Td><Td right>{inr(t(esiRows,'basic'))}</Td><Td right>{inr(t(esiRows,'esiEE'))}</Td><Td right>{inr(t(esiRows,'esiER'))}</Td></tr>
@@ -314,7 +343,13 @@ export const StatutoryFilingPage: React.FC = () => {
             </Table>
           </Card>
           <Card padding={false}>
-            <div className="px-3 py-2 border-b font-semibold text-sm text-orange-700">PT — {ptRows.length} employees</div>
+            <div className="px-3 py-2 border-b">
+              <p className="font-semibold text-sm text-orange-700">PT — {ptRows.length} employees</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                ₹150 slab (₹15,001–₹20,000): {ptRows.filter(r => r.pt === 150).length} employees
+                {' · '}₹200 slab (above ₹20,000): {ptRows.filter(r => r.pt === 200).length} employees
+              </p>
+            </div>
             <Table>
               <thead><tr><Th>Name</Th><Th right>PT</Th></tr></thead>
               <tbody>
