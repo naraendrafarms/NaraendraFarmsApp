@@ -260,7 +260,7 @@ export const StatutoryFilingPage: React.FC = () => {
     if (!esiRows.length) { toast.error('No ESI-applicable employees this month'); return }
     downloadFile(`ESIC_${month}.csv`, csv([
       ['IP Number', 'IP Name', 'No. of Days', 'Wages (Basic)', 'Employee 0.75%', 'Employer 3.25%'],
-      ...esiRows.map(r => [r.esi_no, r.name, r.days, Math.round(r.basic), Math.round(r.esiEE), Math.round(r.esiER)]),
+      ...esiRows.map(r => [r.esi_no, r.name, Math.round(r.days), Math.round(r.basic), Math.round(r.esiEE), Math.round(r.esiER)]),
     ]), 'text/csv')
     toast.success(`ESIC: ${esiRows.length} IPs`)
   }
@@ -306,7 +306,7 @@ export const StatutoryFilingPage: React.FC = () => {
               <thead><tr><Th>IP / Name</Th><Th right>Wages (Basic)</Th><Th right>EE</Th><Th right>ER</Th></tr></thead>
               <tbody>
                 {esiRows.map((r, i) => (
-                  <tr key={i}><Td className="text-xs">{r.esi_no || '⚠ no IP'}<div className="text-[10px] text-gray-400">{r.name} · {r.days}d</div></Td>
+                  <tr key={i}><Td className="text-xs">{r.esi_no || '⚠ no IP'}<div className="text-[10px] text-gray-400">{r.name} · {Math.round(r.days)}d</div></Td>
                     <Td right className="text-xs">{inr(r.basic)}</Td><Td right className="text-xs">{inr(r.esiEE)}</Td><Td right className="text-xs">{inr(r.esiER)}</Td></tr>
                 ))}
                 <tr className="bg-gray-50 font-semibold"><Td>Total</Td><Td right>{inr(t(esiRows,'basic'))}</Td><Td right>{inr(t(esiRows,'esiEE'))}</Td><Td right>{inr(t(esiRows,'esiER'))}</Td></tr>
