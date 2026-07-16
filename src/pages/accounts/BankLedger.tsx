@@ -19,6 +19,7 @@ const EMPTY_FORM = {
   party_id: '',
   settle_payment_id: '',
   settle_receivable_id: '',
+  already_linked: false,
 }
 
 const EMPTY_ACCOUNT_FORM = {
@@ -655,7 +656,7 @@ export const BankLedgerPage: React.FC = () => {
       })
       return merged as any[]
     },
-    enabled: !!form.party_id && form.txn_type === 'Debit' && !editId,
+    enabled: !!form.party_id && form.txn_type === 'Debit' && !form.already_linked,
   })
   const billBalance = (p: any) => Math.max(0, (p.net_payable ?? p.invoice_amount ?? 0) - (p.paid_amount ?? 0) - (p.discount_amount ?? 0))
   const settleOptions = (openPaymentsForParty ?? []).map((p: any) => ({
@@ -685,7 +686,7 @@ export const BankLedgerPage: React.FC = () => {
       const heRows = (he.data ?? []).map((r: any) => ({ ...r, source: 'he_dispatch' }))
       return [...nheRows, ...heRows]
     },
-    enabled: !!form.party_id && form.txn_type === 'Credit' && !editId,
+    enabled: !!form.party_id && form.txn_type === 'Credit' && !form.already_linked,
   })
   const receivableBalance = (r: any) => Math.max(0, (r.amount ?? 0) - (r.amount_received ?? 0))
   const settleReceivableOptions = (openReceivablesForParty ?? []).map((r: any) => ({
@@ -802,7 +803,7 @@ export const BankLedgerPage: React.FC = () => {
       if (!selectedAccount) return []
       const { data } = await supabase
         .from('bank_transactions')
-        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type)')
+        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type),linked_payment_id,nhe_sale_id,he_dispatch_id')
         .eq('bank_account_id', selectedAccount)
         .gte('txn_date', fyRange(fy).start)
         .order('txn_date', { ascending: true })
@@ -957,6 +958,7 @@ export const BankLedgerPage: React.FC = () => {
       party_id: t.party_id ?? '',
       settle_payment_id: '',
       settle_receivable_id: '',
+      already_linked: !!(t.linked_payment_id || t.nhe_sale_id || t.he_dispatch_id),
     })
     setShowModal(true)
   }
@@ -993,17 +995,22 @@ export const BankLedgerPage: React.FC = () => {
         if (error) throw error
         newTxnId = data.id
       }
+      // Existing transactions can now also be settled against a bill/invoice
+      // (previously the picker only appeared while creating a new entry, so
+      // an already-saved, unlinked bank transaction had no way back into a
+      // party's ledger at all) — both settle blocks below key off this.
+      const txnId = newTxnId ?? editId
 
       // Settling a specific bill from here: mark it Paid (so Party Ledger's
       // "Payment Made" row picks it up) and post the Cash Book entry — same
       // as the Link to Bills flow, minus the duplicate bank_transactions
       // insert since this form's own insert above already IS that entry.
-      if (!editId && newTxnId && form.settle_payment_id) {
+      if (txnId && form.settle_payment_id) {
         const bill = (openPaymentsForParty ?? []).find((p: any) => p.id === form.settle_payment_id)
         if (!bill) throw new Error('Selected bill could not be found — reopen Add Transaction and try again')
         const balance = billBalance(bill)
         const settled = Math.min(balance, amount)
-        const tag = `BANKTXN:${newTxnId}`
+        const tag = `BANKTXN:${txnId}`
         const { error: ppErr } = await supabase.from('pending_payments').update({
           paid_amount: (bill.paid_amount ?? 0) + settled,
           paid_date: form.txn_date,
@@ -1013,7 +1020,7 @@ export const BankLedgerPage: React.FC = () => {
         if (ppErr) throw new Error('Bill settle failed: ' + ppErr.message)
         const { error: btErr } = await supabase.from('bank_transactions').update({
           match_status: 'manually_matched', linked_payment_id: form.settle_payment_id,
-        }).eq('id', newTxnId)
+        }).eq('id', txnId)
         if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
         if (settled > 0) {
           const { error: cbErr } = await supabase.from('cash_book').insert({
@@ -1033,7 +1040,7 @@ export const BankLedgerPage: React.FC = () => {
 
       // Buyer side: settling a specific NHE sale / HE dispatch invoice —
       // same idea, mirrored for Credit (money received).
-      if (!editId && newTxnId && form.settle_receivable_id) {
+      if (txnId && form.settle_receivable_id) {
         const [source, recvId] = form.settle_receivable_id.split(':')
         const inv = (openReceivablesForParty ?? []).find((r: any) => r.source === source && r.id === recvId)
         if (!inv) throw new Error('Selected invoice could not be found — reopen Add Transaction and try again')
@@ -1057,7 +1064,7 @@ export const BankLedgerPage: React.FC = () => {
         if (invErr) throw new Error('Invoice settle failed: ' + invErr.message)
         const { error: btErr } = await supabase.from('bank_transactions').update({
           [source === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id']: recvId,
-        }).eq('id', newTxnId)
+        }).eq('id', txnId)
         if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
         qc.invalidateQueries({ queryKey: ['receivables_open_for_party'] })
         qc.invalidateQueries({ queryKey: ['pending_receivables'] })
@@ -1065,7 +1072,8 @@ export const BankLedgerPage: React.FC = () => {
         qc.invalidateQueries({ queryKey: ['he_dispatch'] })
       }
 
-      toast.success(editId ? 'Transaction updated' : ((form.settle_payment_id || form.settle_receivable_id) ? 'Transaction saved — invoice settled' : 'Transaction saved'))
+      const settled = !!(form.settle_payment_id || form.settle_receivable_id)
+      toast.success(editId ? (settled ? 'Transaction updated — invoice settled' : 'Transaction updated') : (settled ? 'Transaction saved — invoice settled' : 'Transaction saved'))
       setShowModal(false)
       setForm({ ...EMPTY_FORM })
       setEditId(null)
@@ -1679,7 +1687,10 @@ export const BankLedgerPage: React.FC = () => {
             }}
             options={[{ value: '', label: '— None —' }, ...(parties ?? []).map((p: any) => ({ value: p.id, label: `${p.name} (${p.type})` }))]}
           />
-          {!editId && form.txn_type === 'Debit' && form.party_id && (
+          {editId && form.already_linked && (
+            <p className="text-xs text-gray-500 -mt-2">This transaction is already linked to a bill/invoice — already reflected in that party's ledger.</p>
+          )}
+          {form.txn_type === 'Debit' && form.party_id && !form.already_linked && (
             <div>
               <SearchableSelect
                 label="Settle against bill (optional — marks it Paid and posts to Party Ledger)"
@@ -1693,7 +1704,7 @@ export const BankLedgerPage: React.FC = () => {
               )}
             </div>
           )}
-          {!editId && form.txn_type === 'Credit' && form.party_id && (
+          {form.txn_type === 'Credit' && form.party_id && !form.already_linked && (
             <div>
               <SearchableSelect
                 label="Settle against invoice (optional — marks it Received and posts to Party Ledger)"
