@@ -221,6 +221,7 @@ export const ReceivePaymentModal: React.FC<{
           reference_no: utr || sale.dc_no || sale.invoice_no || null,
           description,
           amount: amt,
+          party_id: sale.party_id ?? null,
           [linkCol]: sale.id,
         })
       }
@@ -350,6 +351,7 @@ const RefundExcessModal: React.FC<{
         bank_account_id: bankAccountId, txn_date: date, txn_type: 'Debit',
         category: 'Refund — Excess Payment', amount: amt,
         description: `Refund to ${sale.parties?.name ?? 'party'} — excess on Cull Bird sale ${sale.dc_no ? 'DC#'+sale.dc_no : ''}`.trim(),
+        party_id: sale.party_id ?? null,
         nhe_sale_id: sale.id,
       }).select('id').single()
       if (txnErr) throw txnErr
@@ -2279,6 +2281,7 @@ export const NHESales: React.FC = () => {
           reference_no: form.dc_no || form.invoice_no || null,
           description: [`NHE Sale`, flockNo ? `F-${flockNo}` : '', party?.name ?? ''].filter(Boolean).join(' — '),
           amount: onlineAmt,
+          party_id: form.party_id || null,
           nhe_sale_id: savedId,
         })
       }

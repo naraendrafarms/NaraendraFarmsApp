@@ -284,6 +284,9 @@ export const PendingPaymentsPage: React.FC = () => {
       const totalAmt = bills.reduce((s, r) => s + getBalance(r), 0)
       let tag: string | null = bulkPayForm.ref || null
       if (bulkPayForm.mode.toLowerCase() !== 'cash') {
+        // party_id follows the same single-representative convention as
+        // linked_payment_id above — bills[0]'s party, since a batch spanning
+        // multiple vendors has no single "the" party to assign.
         const { data: txn, error: txnErr } = await supabase.from('bank_transactions').insert({
           bank_account_id: bulkPayForm.bankAccountId,
           txn_date: bulkPayForm.date,
@@ -292,6 +295,7 @@ export const PendingPaymentsPage: React.FC = () => {
           reference_no: bulkPayForm.ref || null,
           description: `Vendor payment batch — ${bills.length} bill(s)`,
           amount: totalAmt,
+          party_id: bills[0].party_id || null,
           linked_payment_id: bills[0].id,
         }).select('id').single()
         if (txnErr) throw txnErr
