@@ -44,6 +44,7 @@ type PayRecord = {
   cheque_no: string | null
   remarks: string | null
   bank_account_id: string | null
+  is_opening: boolean | null
 }
 
 type PayModal = {
@@ -89,7 +90,7 @@ export const PendingPaymentsPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id')
+        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id,is_opening')
         .order('grn_date', { ascending: false })
       if (error) throw error
       return (data ?? []) as PayRecord[]
@@ -203,7 +204,8 @@ export const PendingPaymentsPage: React.FC = () => {
     const amt = parseFloat(modal.paidAmt)
     if (!amt || amt <= 0) { setErr('Enter valid amount'); return }
     const isAdvance = modal.mode === 'Advance'
-    if (!isAdvance && modal.mode.toLowerCase() !== 'cash' && !modal.bankAccountId) { setErr('Select which bank account this is paid from'); return }
+    const isOpeningAdj = modal.mode === 'Opening Adjustment'
+    if (!isAdvance && !isOpeningAdj && modal.mode.toLowerCase() !== 'cash' && !modal.bankAccountId) { setErr('Select which bank account this is paid from'); return }
     if (isAdvance && !modal.advanceId) { setErr('Select which advance to adjust against this bill'); return }
     setSaving(true); setErr('')
     try {
@@ -211,7 +213,19 @@ export const PendingPaymentsPage: React.FC = () => {
       const bal = getBalance(modal.record) - amt
       const newStatus = bal <= 0.01 ? 'Paid' : modal.record.payment_status
 
-      if (isAdvance) {
+      if (isOpeningAdj) {
+        const { error } = await supabase.from('pending_payments').update({
+          paid_amount: newPaid,
+          paid_date: modal.paidDate,
+          account_type: 'Opening Adjustment',
+          remarks: modal.remarks || modal.record.remarks || null,
+          payment_status: newStatus,
+          bank_account_id: null,
+        }).eq('id', modal.record.id)
+        if (error) throw error
+        // Deliberately no postLedgerEntry — an opening balance being cleared
+        // isn't a new cash movement, so Cash Book/Bank Ledger stay untouched.
+      } else if (isAdvance) {
         const advance = (vendorAdvancesForModal ?? []).find((a: any) => a.id === modal.advanceId)
         if (!advance) throw new Error('Advance not found')
         const available = advance.amount - advance.amount_used
@@ -278,9 +292,30 @@ export const PendingPaymentsPage: React.FC = () => {
   const handleBulkPay = async () => {
     const bills = (records ?? []).filter(r => selectedIds.has(r.id) && r.payment_status !== 'Paid')
     if (bills.length === 0) { toast.error('No unpaid bills selected'); return }
-    if (bulkPayForm.mode.toLowerCase() !== 'cash' && !bulkPayForm.bankAccountId) { toast.error('Select which bank account this is paid from'); return }
+    const isOpeningAdj = bulkPayForm.mode === 'Opening Adjustment'
+    if (!isOpeningAdj && bulkPayForm.mode.toLowerCase() !== 'cash' && !bulkPayForm.bankAccountId) { toast.error('Select which bank account this is paid from'); return }
     setBulkPaying(true)
     try {
+      if (isOpeningAdj) {
+        // No cash movement at all — every selected bill is an opening
+        // balance being cleared, not a new real payment.
+        for (const bill of bills) {
+          const newPaid = (bill.paid_amount ?? 0) + getBalance(bill)
+          const { error } = await supabase.from('pending_payments').update({
+            paid_amount: newPaid, paid_date: bulkPayForm.date,
+            account_type: 'Opening Adjustment', payment_status: 'Paid', bank_account_id: null,
+          }).eq('id', bill.id)
+          if (error) throw error
+        }
+        qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+        qc.invalidateQueries({ queryKey: ['pending_payments'] })
+        qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+        qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+        toast.success(`Marked ${bills.length} bill(s) Paid — no Cash Book/Bank Ledger entry posted`)
+        setSelectedIds(new Set())
+        setBulkPayForm({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '' })
+        return
+      }
       const totalAmt = bills.reduce((s, r) => s + getBalance(r), 0)
       let tag: string | null = bulkPayForm.ref || null
       if (bulkPayForm.mode.toLowerCase() !== 'cash') {
@@ -582,6 +617,7 @@ export const PendingPaymentsPage: React.FC = () => {
         const selectedUnpaid = (records ?? []).filter(r => selectedIds.has(r.id) && r.payment_status !== 'Paid')
         const selectedTotal = selectedUnpaid.reduce((s, r) => s + getBalance(r), 0)
         if (selectedUnpaid.length === 0) return null
+        const allSelectedAreOpening = selectedUnpaid.every(r => r.is_opening)
         return (
           <div className="flex flex-wrap items-end gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm">
             <div className="flex flex-col gap-1">
@@ -589,9 +625,16 @@ export const PendingPaymentsPage: React.FC = () => {
               <select value={bulkPayForm.mode} onChange={e => setBulkPayForm(f => ({ ...f, mode: e.target.value }))}
                 className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
                 <option>NEFT</option><option>RTGS</option><option>IMPS</option><option>Cheque</option><option>UPI</option><option>Cash</option>
+                {allSelectedAreOpening && <option value="Opening Adjustment">Opening Adjustment (no bank movement)</option>}
               </select>
+              {bulkPayForm.mode === 'Opening Adjustment' && (
+                <p className="text-xs text-amber-600 max-w-xs">Marks these Paid without touching Cash Book/Bank Ledger — use only when already settled before this app was in use.</p>
+              )}
+              {!allSelectedAreOpening && selectedUnpaid.some(r => r.is_opening) && (
+                <p className="text-xs text-gray-400 max-w-xs">An opening-balance bill is mixed in with regular bills — select opening bills alone to use Opening Adjustment mode.</p>
+              )}
             </div>
-            {bulkPayForm.mode.toLowerCase() !== 'cash' && (
+            {bulkPayForm.mode.toLowerCase() !== 'cash' && bulkPayForm.mode !== 'Opening Adjustment' && (
               <div className="flex flex-col gap-1">
                 <span className="text-xs text-gray-500">Bank Account</span>
                 <select value={bulkPayForm.bankAccountId} onChange={e => setBulkPayForm(f => ({ ...f, bankAccountId: e.target.value }))}
@@ -773,7 +816,11 @@ export const PendingPaymentsPage: React.FC = () => {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
                   {['NEFT', 'RTGS', 'IMPS', 'Cheque', 'Cash', 'UPI'].map(v => <option key={v}>{v}</option>)}
                   {(vendorAdvancesForModal ?? []).length > 0 && <option value="Advance">Advance (adjust against existing balance)</option>}
+                  {modal.record.is_opening && <option value="Opening Adjustment">Opening Adjustment (no bank movement)</option>}
                 </select>
+                {modal.mode === 'Opening Adjustment' && (
+                  <p className="text-xs text-amber-600 mt-1">Marks this opening-balance bill Paid without touching Cash Book or Bank Ledger — use this only when the balance was already settled before this app was in use.</p>
+                )}
               </div>
               {modal.mode === 'Advance' && (
                 <div>
