@@ -69,6 +69,14 @@ const BillsTab: React.FC = () => {
     }
   })
 
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_accounts').select('id,bank_name,account_name').eq('is_active', true).order('bank_name')
+      return data ?? []
+    }
+  })
+
   const { data: bills, isLoading } = useQuery({
     queryKey: ['elec_bills', filterMonth, filterMeter],
     queryFn: async () => {
@@ -103,14 +111,14 @@ const BillsTab: React.FC = () => {
     return m
   }, [priorBills])
 
-  const blank = () => ({ meter_id:'', bill_month:'', units_consumed:'', amount:'', acd_dc_due:'0', deposit_amount:'0', deposit_interest:'0', meter_rent:'0', paid_date:'', remarks:'' })
+  const blank = () => ({ meter_id:'', bill_month:'', units_consumed:'', amount:'', acd_dc_due:'0', deposit_amount:'0', deposit_interest:'0', meter_rent:'0', paid_date:'', payment_mode:'cash', bank_account_id:'', remarks:'' })
   const [form, setForm] = useState(blank())
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const openForm = (bill?: any) => {
     if (bill) {
       setEditing(bill)
-      setForm({ meter_id: bill.meter_id, bill_month: bill.bill_month?.slice(0,7)??'', units_consumed: bill.units_consumed?.toString()??'', amount: bill.amount?.toString()??'', acd_dc_due: bill.acd_dc_due?.toString()??'0', deposit_amount: bill.deposit_amount?.toString()??'0', deposit_interest: bill.deposit_interest?.toString()??'0', meter_rent: bill.meter_rent?.toString()??'0', paid_date: bill.paid_date??'', remarks: bill.remarks??'' })
+      setForm({ meter_id: bill.meter_id, bill_month: bill.bill_month?.slice(0,7)??'', units_consumed: bill.units_consumed?.toString()??'', amount: bill.amount?.toString()??'', acd_dc_due: bill.acd_dc_due?.toString()??'0', deposit_amount: bill.deposit_amount?.toString()??'0', deposit_interest: bill.deposit_interest?.toString()??'0', meter_rent: bill.meter_rent?.toString()??'0', paid_date: bill.paid_date??'', payment_mode: bill.payment_mode??'cash', bank_account_id: bill.bank_account_id??'', remarks: bill.remarks??'' })
     } else {
       setEditing(null)
       setForm(blank())
@@ -118,10 +126,40 @@ const BillsTab: React.FC = () => {
     setShowForm(true)
   }
 
+  // Delete then reinsert the ledger row tied to this bill (same pattern as
+  // Vendor Advances) — simplest way to keep it in sync if the amount,
+  // payment mode, bank account, or paid_date itself changes on edit.
+  const syncPaymentLedger = async (billId: string, payload: any, meterLabel: string) => {
+    await supabase.from('cash_book').delete().eq('electricity_bill_id', billId)
+    await supabase.from('bank_transactions').delete().eq('electricity_bill_id', billId)
+    if (!payload.paid_date) return
+    const netPayable = (parseFloat(payload.amount)||0) - (parseFloat(payload.deposit_interest)||0)
+    const narration = `Electricity bill — ${meterLabel} (${payload.bill_month})`
+    if (payload.payment_mode === 'bank') {
+      if (!payload.bank_account_id) throw new Error('Select a bank account for a bank-paid bill')
+      const { error } = await supabase.from('bank_transactions').insert({
+        bank_account_id: payload.bank_account_id, txn_date: payload.paid_date, txn_type: 'Debit',
+        category: 'Electricity', description: narration, amount: netPayable, electricity_bill_id: billId,
+      })
+      if (error) throw new Error('Bill saved but Bank Ledger entry failed: ' + error.message)
+    } else {
+      const { error } = await supabase.from('cash_book').insert({
+        txn_date: payload.paid_date, txn_type: 'payment', category: 'expense',
+        description: narration, amount_in: 0, amount_out: netPayable, payment_mode: 'cash',
+        electricity_bill_id: billId,
+      })
+      if (error) throw new Error('Bill saved but Cash Book entry failed: ' + error.message)
+    }
+  }
+
   const mut = useMutation({
     mutationFn: async () => {
-      const payload = { meter_id: form.meter_id, bill_month: form.bill_month+'-01', units_consumed: parseInt(form.units_consumed)||null, amount: parseFloat(form.amount), acd_dc_due: parseFloat(form.acd_dc_due)||0, deposit_amount: parseFloat(form.deposit_amount)||0, deposit_interest: parseFloat(form.deposit_interest)||0, meter_rent: parseFloat(form.meter_rent)||0, paid_date: form.paid_date||null, remarks: form.remarks||null }
+      const payload = { meter_id: form.meter_id, bill_month: form.bill_month+'-01', units_consumed: parseInt(form.units_consumed)||null, amount: parseFloat(form.amount), acd_dc_due: parseFloat(form.acd_dc_due)||0, deposit_amount: parseFloat(form.deposit_amount)||0, deposit_interest: parseFloat(form.deposit_interest)||0, meter_rent: parseFloat(form.meter_rent)||0, paid_date: form.paid_date||null, payment_mode: form.payment_mode, bank_account_id: form.payment_mode==='bank' ? (form.bank_account_id||null) : null, remarks: form.remarks||null }
       if (!payload.meter_id || !payload.bill_month || !payload.amount) throw new Error('Meter, month and amount required')
+      if (payload.paid_date && payload.payment_mode === 'bank' && !payload.bank_account_id) throw new Error('Select a bank account for a bank-paid bill')
+      const meter = (meters as any[] ?? []).find(m => m.id === payload.meter_id)
+      const meterLabel = meter ? `${meter.meter_name} / ${meter.farms?.name ?? ''}` : ''
+      let billId = editing?.id
       if (editing) {
         const{error}=await supabase.from('electricity_bills').update(payload).eq('id',editing.id); if(error)throw error
         // Allocations store both alloc_pct and a pre-computed allocated_amount
@@ -135,7 +173,11 @@ const BillsTab: React.FC = () => {
           await supabase.from('electricity_allocation').update({ allocated_amount: newAmt }).eq('id', a.id)
         }
       }
-      else { const{error}=await supabase.from('electricity_bills').insert(payload); if(error)throw error }
+      else {
+        const { data, error }=await supabase.from('electricity_bills').insert(payload).select('id').single(); if(error)throw error
+        billId = data.id
+      }
+      await syncPaymentLedger(billId, payload, meterLabel)
     },
     onSuccess: () => { toast.success(editing?'Updated!':'Saved!'); qc.invalidateQueries({queryKey:['elec_bills']}); qc.invalidateQueries({queryKey:['elec_allocations']}); setShowForm(false) },
     onError: (e:any) => toast.error(e.message)
@@ -143,8 +185,11 @@ const BillsTab: React.FC = () => {
 
   const delMut = useMutation({
     mutationFn: async (id: string) => {
-      // Delete allocations first (cascade in case FK doesn't have ON DELETE CASCADE yet)
+      // Delete allocations and any linked ledger entry first (cascade in
+      // case FKs don't have ON DELETE CASCADE yet)
       await supabase.from('electricity_allocation').delete().eq('bill_id', id)
+      await supabase.from('cash_book').delete().eq('electricity_bill_id', id)
+      await supabase.from('bank_transactions').delete().eq('electricity_bill_id', id)
       const { error } = await supabase.from('electricity_bills').delete().eq('id', id)
       if (error) throw error
     },
@@ -156,9 +201,11 @@ const BillsTab: React.FC = () => {
     if (!selected.size) return
     if (!confirm(`Delete ${selected.size} bill(s)?`)) return
     const ids = [...selected]
-    // Delete allocations first, then bills
+    // Delete allocations and linked ledger entries first, then bills
     for (let i = 0; i < ids.length; i += 50) {
       await supabase.from('electricity_allocation').delete().in('bill_id', ids.slice(i, i+50))
+      await supabase.from('cash_book').delete().in('electricity_bill_id', ids.slice(i, i+50))
+      await supabase.from('bank_transactions').delete().in('electricity_bill_id', ids.slice(i, i+50))
     }
     for (let i = 0; i < ids.length; i += 50) {
       await supabase.from('electricity_bills').delete().in('id', ids.slice(i, i+50))
@@ -364,6 +411,16 @@ const BillsTab: React.FC = () => {
             <Input label="Meter Rent (₹)" type="number" step="0.01" value={form.meter_rent} onChange={e=>set('meter_rent',e.target.value)}/>
             <DateInput label="Paid Date" value={form.paid_date} onChange={e=>set('paid_date',e.target.value)}/>
           </FormRow>
+          {form.paid_date && (
+            <FormRow>
+              <Select label="Payment Mode" value={form.payment_mode} onChange={e=>set('payment_mode',e.target.value)}
+                options={[{value:'cash',label:'Cash'},{value:'bank',label:'Bank'}]}/>
+              {form.payment_mode==='bank' && (
+                <Select label="Bank Account" required placeholder="— Select account —" value={form.bank_account_id} onChange={e=>set('bank_account_id',e.target.value)}
+                  options={(bankAccounts??[]).map((b:any)=>({value:b.id,label:`${b.bank_name} — ${b.account_name}`}))}/>
+              )}
+            </FormRow>
+          )}
           {(parseFloat(form.deposit_interest)||0) > 0 && (
             <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-800">
               Net Payable = {inr((parseFloat(form.amount)||0) - (parseFloat(form.deposit_interest)||0))}
