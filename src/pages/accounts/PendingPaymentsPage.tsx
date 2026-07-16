@@ -453,9 +453,23 @@ export const PendingPaymentsPage: React.FC = () => {
         // Status "Paid" is a flag; the Paid column/Balance read paid_amount.
         // The edit path used to flip only the flag, leaving Paid blank and a
         // stale Balance on the list. Record the settled amount too.
+        //
+        // The reverse direction had the matching bug: switching status AWAY
+        // from Paid (e.g. reverting a bank-import auto-match) correctly
+        // cleared the Cash Book/Bank Ledger entry below, but never reset
+        // paid_amount here — a plain object spread with {} contributes no
+        // key at all, so Supabase's partial .update() left the old (full)
+        // paid_amount sitting in the row untouched, silently zeroing the
+        // bill's balance and hiding the Pay button forever.
+        //
+        // Only reset it on an actual Paid -> non-Paid transition, never
+        // blanket-zero whenever the dropdown just happens to read
+        // Pending/HOLD — a bill can legitimately sit at Pending with a real
+        // partial paid_amount from the Pay screen, and re-saving this Edit
+        // form without touching Status must not wipe that out.
         ...(editForm.payment_status === 'Paid'
           ? { paid_amount: Math.max(0, netPayable - (parseFloat(editForm.discount_amount) || 0)) }
-          : {}),
+          : (!isNew && editModal.payment_status === 'Paid' ? { paid_amount: 0 } : {})),
       }
       let savedId: string
       if (isNew) {
