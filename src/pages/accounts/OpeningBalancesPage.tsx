@@ -83,9 +83,7 @@ export const OpeningBalancesPage: React.FC = () => {
       // it's an unused advance sitting with that vendor. Create a matching
       // vendor_advances row (amount_used=0) so the existing "Advance (adjust
       // against existing balance)" picker in Pending Payments can settle new
-      // GRN bills against it, the same way a real advance already can. A Dr
-      // on a buyer, or on a partner, is a genuine plain receivable — no
-      // advance row for those.
+      // GRN bills against it, the same way a real advance already can.
       const party = kind === 'party' ? (parties as any[]).find((p: any) => p.id === targetId) : null
       if (drcr === 'Dr' && kind === 'party' && (party?.type === 'supplier' || party?.type === 'both') && obRow) {
         const { error: vaErr } = await supabase.from('vendor_advances').insert({
@@ -94,6 +92,22 @@ export const OpeningBalancesPage: React.FC = () => {
           opening_balance_id: obRow.id,
         })
         if (vaErr) throw vaErr
+      }
+
+      // Dr opening on a BUYER (a customer owing us — e.g. a pending eggs
+      // amount) never showed up anywhere actionable — Daily Payment
+      // Planning's "Pending Receivables" only reads real nhe_sales/he_dispatch
+      // rows, not Opening Balances. Auto-add it to that page's Manual Items
+      // list instead (linked back so it stays in sync and cleans up if the
+      // opening balance is deleted — see migration 470's ON DELETE CASCADE).
+      if (drcr === 'Dr' && kind === 'party' && (party?.type === 'buyer' || party?.type === 'both') && obRow) {
+        const { error: miErr } = await supabase.from('payment_plan_manual_items').insert({
+          label: `${party?.name ?? 'Opening'}${remarks ? ` — ${remarks}` : ''}`,
+          amount: amt, direction: 'receivable', due_date: asOf,
+          notes: 'Opening balance carried forward from prior FY',
+          opening_balance_id: obRow.id,
+        })
+        if (miErr) throw miErr
       }
     },
     onSuccess: () => {
@@ -104,6 +118,7 @@ export const OpeningBalancesPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['cms_pending_payments'] })
       qc.invalidateQueries({ queryKey: ['vendor_advances'] })
       qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
+      qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] })
       setTargetId(''); setAmount(''); setRemarks('')
     },
     onError: (e: any) => toast.error(e.message)
@@ -136,6 +151,7 @@ export const OpeningBalancesPage: React.FC = () => {
       inv()
       qc.invalidateQueries({ queryKey: ['vendor_advances'] })
       qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
+      qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] })
     },
     onError: (e: any) => toast.error(e.message)
   })
