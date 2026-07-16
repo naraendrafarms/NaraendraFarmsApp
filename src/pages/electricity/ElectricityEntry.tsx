@@ -7,7 +7,7 @@ import {
   Card, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, Zap, Edit2, Trash2, Download, Upload, BarChart2, Settings, Printer } from 'lucide-react'
+import { Plus, Zap, Edit2, Trash2, Download, Upload, BarChart2, Settings, Printer, IndianRupee } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { printReport } from '@/lib/invoicePrint'
 
@@ -111,14 +111,14 @@ const BillsTab: React.FC = () => {
     return m
   }, [priorBills])
 
-  const blank = () => ({ meter_id:'', bill_month:'', units_consumed:'', amount:'', acd_dc_due:'0', deposit_amount:'0', deposit_interest:'0', meter_rent:'0', paid_date:'', payment_mode:'cash', bank_account_id:'', remarks:'' })
+  const blank = () => ({ meter_id:'', bill_month:'', units_consumed:'', amount:'', acd_dc_due:'0', deposit_amount:'0', deposit_interest:'0', meter_rent:'0', remarks:'' })
   const [form, setForm] = useState(blank())
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const openForm = (bill?: any) => {
     if (bill) {
       setEditing(bill)
-      setForm({ meter_id: bill.meter_id, bill_month: bill.bill_month?.slice(0,7)??'', units_consumed: bill.units_consumed?.toString()??'', amount: bill.amount?.toString()??'', acd_dc_due: bill.acd_dc_due?.toString()??'0', deposit_amount: bill.deposit_amount?.toString()??'0', deposit_interest: bill.deposit_interest?.toString()??'0', meter_rent: bill.meter_rent?.toString()??'0', paid_date: bill.paid_date??'', payment_mode: bill.payment_mode??'cash', bank_account_id: bill.bank_account_id??'', remarks: bill.remarks??'' })
+      setForm({ meter_id: bill.meter_id, bill_month: bill.bill_month?.slice(0,7)??'', units_consumed: bill.units_consumed?.toString()??'', amount: bill.amount?.toString()??'', acd_dc_due: bill.acd_dc_due?.toString()??'0', deposit_amount: bill.deposit_amount?.toString()??'0', deposit_interest: bill.deposit_interest?.toString()??'0', meter_rent: bill.meter_rent?.toString()??'0', remarks: bill.remarks??'' })
     } else {
       setEditing(null)
       setForm(blank())
@@ -126,40 +126,144 @@ const BillsTab: React.FC = () => {
     setShowForm(true)
   }
 
-  // Delete then reinsert the ledger row tied to this bill (same pattern as
-  // Vendor Advances) — simplest way to keep it in sync if the amount,
-  // payment mode, bank account, or paid_date itself changes on edit.
-  const syncPaymentLedger = async (billId: string, payload: any, meterLabel: string) => {
-    await supabase.from('cash_book').delete().eq('electricity_bill_id', billId)
-    await supabase.from('bank_transactions').delete().eq('electricity_bill_id', billId)
-    if (!payload.paid_date) return
-    const netPayable = (parseFloat(payload.amount)||0) - (parseFloat(payload.deposit_interest)||0)
-    const narration = `Electricity bill — ${meterLabel} (${payload.bill_month})`
-    if (payload.payment_mode === 'bank') {
-      if (!payload.bank_account_id) throw new Error('Select a bank account for a bank-paid bill')
-      const { error } = await supabase.from('bank_transactions').insert({
-        bank_account_id: payload.bank_account_id, txn_date: payload.paid_date, txn_type: 'Debit',
-        category: 'Electricity', description: narration, amount: netPayable, electricity_bill_id: billId,
-      })
-      if (error) throw new Error('Bill saved but Bank Ledger entry failed: ' + error.message)
-    } else {
-      const { error } = await supabase.from('cash_book').insert({
-        txn_date: payload.paid_date, txn_type: 'payment', category: 'expense',
-        description: narration, amount_in: 0, amount_out: netPayable, payment_mode: 'cash',
-        electricity_bill_id: billId,
-      })
-      if (error) throw new Error('Bill saved but Cash Book entry failed: ' + error.message)
-    }
+  // ── Payments (electricity_bill_payments) ──────────────────────────────────
+  const { data: payments } = useQuery({
+    queryKey: ['elec_bill_payments'],
+    queryFn: async () => { const{data}=await supabase.from('electricity_bill_payments').select('*').order('paid_date',{ascending:false}); return data??[] }
+  })
+  const paymentsByBill = useMemo(() => {
+    const map: Record<string, any[]> = {}
+    for (const p of (payments ?? [])) { if (!map[(p as any).bill_id]) map[(p as any).bill_id] = []; map[(p as any).bill_id].push(p) }
+    return map
+  }, [payments])
+  const netPayableOf = (b: any) => (b.amount??0) - (b.deposit_interest??0)
+  const totalPaidOf = (billId: string) => (paymentsByBill[billId] ?? []).reduce((s:number,p:any)=>s+(p.amount??0),0)
+
+  const [payModalBill, setPayModalBill] = useState<any>(null)
+  const [payForm, setPayForm] = useState({ amount:'', paid_date:'', payment_mode:'cash', bank_account_id:'', remarks:'' })
+  const openPayModal = (bill: any) => {
+    const balance = netPayableOf(bill) - totalPaidOf(bill.id)
+    setPayForm({ amount: balance>0?balance.toFixed(2):'', paid_date:'', payment_mode:'cash', bank_account_id:'', remarks:'' })
+    setPayModalBill(bill)
   }
+  const [historyBill, setHistoryBill] = useState<any>(null)
+
+  const [batchMode, setBatchMode] = useState(false)
+  const [batchForm, setBatchForm] = useState({ paid_date:'', payment_mode:'cash', bank_account_id:'' })
+  const [batchAmounts, setBatchAmounts] = useState<Record<string,string>>({})
+  const openBatchModal = () => {
+    const amounts: Record<string,string> = {}
+    for (const id of selected) {
+      const bill = (bills??[]).find((b:any)=>b.id===id)
+      if (bill) { const bal = netPayableOf(bill) - totalPaidOf(bill.id); amounts[id] = bal>0?bal.toFixed(2):'0' }
+    }
+    setBatchAmounts(amounts)
+    setBatchForm({ paid_date:'', payment_mode:'cash', bank_account_id:'' })
+    setBatchMode(true)
+  }
+
+  const recordPaymentMut = useMutation({
+    mutationFn: async () => {
+      if (!payModalBill) return
+      const amount = parseFloat(payForm.amount) || 0
+      if (amount <= 0) throw new Error('Amount must be greater than 0')
+      if (!payForm.paid_date) throw new Error('Payment date required')
+      if (payForm.payment_mode === 'bank' && !payForm.bank_account_id) throw new Error('Select a bank account')
+      const balance = netPayableOf(payModalBill) - totalPaidOf(payModalBill.id)
+      if (amount > balance + 0.5) toast('Amount exceeds remaining balance due — saving anyway (small ACD/DC true-ups are common)', { icon: '⚠️' })
+      const meter = payModalBill.electricity_meters
+      const meterLabel = meter ? `${meter.meter_name} / ${meter.farms?.name ?? ''}` : ''
+      const { data: pay, error: payErr } = await supabase.from('electricity_bill_payments').insert({
+        bill_id: payModalBill.id, paid_date: payForm.paid_date, amount,
+        payment_mode: payForm.payment_mode, bank_account_id: payForm.payment_mode==='bank'?payForm.bank_account_id:null,
+        remarks: payForm.remarks || null,
+      }).select('id').single()
+      if (payErr) throw payErr
+      const narration = `Electricity bill — ${meterLabel} (${payModalBill.bill_month?.slice(0,7)})`
+      if (payForm.payment_mode === 'bank') {
+        const { error } = await supabase.from('bank_transactions').insert({
+          bank_account_id: payForm.bank_account_id, txn_date: payForm.paid_date, txn_type: 'Debit',
+          category: 'Electricity', description: narration, amount, electricity_bill_id: payModalBill.id,
+          electricity_payment_id: pay.id,
+        })
+        if (error) throw new Error('Payment saved but Bank Ledger entry failed: ' + error.message)
+      } else {
+        const { error } = await supabase.from('cash_book').insert({
+          txn_date: payForm.paid_date, txn_type: 'payment', category: 'expense',
+          description: narration, amount_in: 0, amount_out: amount, payment_mode: 'cash',
+          electricity_bill_id: payModalBill.id, electricity_payment_id: pay.id,
+        })
+        if (error) throw new Error('Payment saved but Cash Book entry failed: ' + error.message)
+      }
+    },
+    onSuccess: () => { toast.success('Payment recorded'); qc.invalidateQueries({queryKey:['elec_bill_payments']}); setPayModalBill(null) },
+    onError: (e:any) => toast.error(e.message)
+  })
+
+  const batchPayMut = useMutation({
+    mutationFn: async () => {
+      if (!batchForm.paid_date) throw new Error('Payment date required')
+      if (batchForm.payment_mode === 'bank' && !batchForm.bank_account_id) throw new Error('Select a bank account')
+      const ids = [...selected].filter(id => (parseFloat(batchAmounts[id]||'0')||0) > 0)
+      if (!ids.length) throw new Error('Enter an amount greater than 0 for at least one selected bill')
+      const batchRef = `BATCH-${Date.now()}`
+      let total = 0
+      for (const id of ids) {
+        const amount = parseFloat(batchAmounts[id]||'0') || 0
+        total += amount
+        const { error } = await supabase.from('electricity_bill_payments').insert({
+          bill_id: id, paid_date: batchForm.paid_date, amount, payment_mode: batchForm.payment_mode,
+          bank_account_id: batchForm.payment_mode==='bank'?batchForm.bank_account_id:null,
+          remarks: 'Batch/CMS payment', batch_ref: batchRef,
+        })
+        if (error) throw error
+      }
+      const narration = `Electricity — batch payment (${ids.length} bills, CMS)`
+      if (batchForm.payment_mode === 'bank') {
+        const { error } = await supabase.from('bank_transactions').insert({
+          bank_account_id: batchForm.bank_account_id, txn_date: batchForm.paid_date, txn_type: 'Debit',
+          category: 'Electricity', description: narration, amount: total, batch_ref: batchRef,
+        })
+        if (error) throw new Error('Payments saved but Bank Ledger entry failed: ' + error.message)
+      } else {
+        const { error } = await supabase.from('cash_book').insert({
+          txn_date: batchForm.paid_date, txn_type: 'payment', category: 'expense',
+          description: narration, amount_in: 0, amount_out: total, payment_mode: 'cash', batch_ref: batchRef,
+        })
+        if (error) throw new Error('Payments saved but Cash Book entry failed: ' + error.message)
+      }
+    },
+    onSuccess: () => { toast.success('Batch payment recorded'); qc.invalidateQueries({queryKey:['elec_bill_payments']}); setBatchMode(false); setSelected(new Set()) },
+    onError: (e:any) => toast.error(e.message)
+  })
+
+  const deletePaymentMut = useMutation({
+    mutationFn: async (payment: any) => {
+      if (payment.batch_ref) throw new Error('This payment is part of a batch — delete the whole batch instead (see Batch Payments)')
+      await supabase.from('cash_book').delete().eq('electricity_payment_id', payment.id)
+      await supabase.from('bank_transactions').delete().eq('electricity_payment_id', payment.id)
+      const { error } = await supabase.from('electricity_bill_payments').delete().eq('id', payment.id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Payment deleted'); qc.invalidateQueries({queryKey:['elec_bill_payments']}) },
+    onError: (e:any) => toast.error(e.message)
+  })
+
+  const deleteBatchMut = useMutation({
+    mutationFn: async (batchRef: string) => {
+      await supabase.from('cash_book').delete().eq('batch_ref', batchRef)
+      await supabase.from('bank_transactions').delete().eq('batch_ref', batchRef)
+      const { error } = await supabase.from('electricity_bill_payments').delete().eq('batch_ref', batchRef)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Batch payment deleted'); qc.invalidateQueries({queryKey:['elec_bill_payments']}) },
+    onError: (e:any) => toast.error(e.message)
+  })
 
   const mut = useMutation({
     mutationFn: async () => {
-      const payload = { meter_id: form.meter_id, bill_month: form.bill_month+'-01', units_consumed: parseInt(form.units_consumed)||null, amount: parseFloat(form.amount), acd_dc_due: parseFloat(form.acd_dc_due)||0, deposit_amount: parseFloat(form.deposit_amount)||0, deposit_interest: parseFloat(form.deposit_interest)||0, meter_rent: parseFloat(form.meter_rent)||0, paid_date: form.paid_date||null, payment_mode: form.payment_mode, bank_account_id: form.payment_mode==='bank' ? (form.bank_account_id||null) : null, remarks: form.remarks||null }
+      const payload = { meter_id: form.meter_id, bill_month: form.bill_month+'-01', units_consumed: parseInt(form.units_consumed)||null, amount: parseFloat(form.amount), acd_dc_due: parseFloat(form.acd_dc_due)||0, deposit_amount: parseFloat(form.deposit_amount)||0, deposit_interest: parseFloat(form.deposit_interest)||0, meter_rent: parseFloat(form.meter_rent)||0, remarks: form.remarks||null }
       if (!payload.meter_id || !payload.bill_month || !payload.amount) throw new Error('Meter, month and amount required')
-      if (payload.paid_date && payload.payment_mode === 'bank' && !payload.bank_account_id) throw new Error('Select a bank account for a bank-paid bill')
-      const meter = (meters as any[] ?? []).find(m => m.id === payload.meter_id)
-      const meterLabel = meter ? `${meter.meter_name} / ${meter.farms?.name ?? ''}` : ''
-      let billId = editing?.id
       if (editing) {
         const{error}=await supabase.from('electricity_bills').update(payload).eq('id',editing.id); if(error)throw error
         // Allocations store both alloc_pct and a pre-computed allocated_amount
@@ -174,10 +278,8 @@ const BillsTab: React.FC = () => {
         }
       }
       else {
-        const { data, error }=await supabase.from('electricity_bills').insert(payload).select('id').single(); if(error)throw error
-        billId = data.id
+        const { error }=await supabase.from('electricity_bills').insert(payload); if(error)throw error
       }
-      await syncPaymentLedger(billId, payload, meterLabel)
     },
     onSuccess: () => { toast.success(editing?'Updated!':'Saved!'); qc.invalidateQueries({queryKey:['elec_bills']}); qc.invalidateQueries({queryKey:['elec_allocations']}); setShowForm(false) },
     onError: (e:any) => toast.error(e.message)
@@ -185,15 +287,16 @@ const BillsTab: React.FC = () => {
 
   const delMut = useMutation({
     mutationFn: async (id: string) => {
-      // Delete allocations and any linked ledger entry first (cascade in
-      // case FKs don't have ON DELETE CASCADE yet)
+      // Delete allocations, payments, and any linked ledger entry first
+      // (cascade in case FKs don't have ON DELETE CASCADE yet)
       await supabase.from('electricity_allocation').delete().eq('bill_id', id)
       await supabase.from('cash_book').delete().eq('electricity_bill_id', id)
       await supabase.from('bank_transactions').delete().eq('electricity_bill_id', id)
+      await supabase.from('electricity_bill_payments').delete().eq('bill_id', id)
       const { error } = await supabase.from('electricity_bills').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({queryKey:['elec_bills']}); qc.invalidateQueries({queryKey:['elec_allocations']}) },
+    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({queryKey:['elec_bills']}); qc.invalidateQueries({queryKey:['elec_allocations']}); qc.invalidateQueries({queryKey:['elec_bill_payments']}) },
     onError: (e:any) => toast.error('Delete failed: ' + e.message)
   })
 
@@ -201,11 +304,12 @@ const BillsTab: React.FC = () => {
     if (!selected.size) return
     if (!confirm(`Delete ${selected.size} bill(s)?`)) return
     const ids = [...selected]
-    // Delete allocations and linked ledger entries first, then bills
+    // Delete allocations, payments and linked ledger entries first, then bills
     for (let i = 0; i < ids.length; i += 50) {
       await supabase.from('electricity_allocation').delete().in('bill_id', ids.slice(i, i+50))
       await supabase.from('cash_book').delete().in('electricity_bill_id', ids.slice(i, i+50))
       await supabase.from('bank_transactions').delete().in('electricity_bill_id', ids.slice(i, i+50))
+      await supabase.from('electricity_bill_payments').delete().in('bill_id', ids.slice(i, i+50))
     }
     for (let i = 0; i < ids.length; i += 50) {
       await supabase.from('electricity_bills').delete().in('id', ids.slice(i, i+50))
@@ -213,6 +317,7 @@ const BillsTab: React.FC = () => {
     setSelected(new Set())
     qc.invalidateQueries({queryKey:['elec_bills']})
     qc.invalidateQueries({queryKey:['elec_allocations']})
+    qc.invalidateQueries({queryKey:['elec_bill_payments']})
     toast.success(`Deleted ${ids.length} bills`)
   }
 
@@ -233,7 +338,7 @@ const BillsTab: React.FC = () => {
       const meter_id = meterMap[obj.meter_name?.toLowerCase()] || meterMap[obj.usc_no?.toLowerCase()]
       if (!meter_id || !obj.bill_month || !obj.amount) return null
       const month = obj.bill_month.length === 7 ? obj.bill_month + '-01' : obj.bill_month
-      return { meter_id, bill_month: month, units_consumed: parseInt(obj.units_consumed)||null, amount: parseFloat(obj.amount)||0, acd_dc_due: parseFloat(obj.acd_dc_due)||0, deposit_amount: parseFloat(obj.deposit_amount)||0, paid_date: obj.paid_date||null, remarks: obj.remarks||null }
+      return { meter_id, bill_month: month, units_consumed: parseInt(obj.units_consumed)||null, amount: parseFloat(obj.amount)||0, acd_dc_due: parseFloat(obj.acd_dc_due)||0, deposit_amount: parseFloat(obj.deposit_amount)||0, remarks: obj.remarks||null }
     }).filter(Boolean) as any[]
     if (!toInsert.length) { toast.error('No valid rows (meter_name/usc_no not matched)'); return }
     // Never overwrite existing bills silently — fetch existing (meter_id, bill_month)
@@ -273,14 +378,19 @@ const BillsTab: React.FC = () => {
         </div>
         <div className="flex gap-2">
           {selected.size > 0 && <Button variant="outline" size="sm" className="!text-red-600 !border-red-300" onClick={bulkDelete}>Delete {selected.size}</Button>}
+          {selected.size > 0 && <Button variant="outline" size="sm" icon={<IndianRupee size={14}/>} onClick={openBatchModal}>Batch Payment ({selected.size})</Button>}
           <Button variant="outline" size="sm" icon={<Download size={14}/>}
-            onClick={()=>exportCSV('electricity_bills_template.csv',['meter_name','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','paid_date','remarks'],[['Main Meter','2025-06','1200','18500','0','0','2025-06-15','']]) }>
+            onClick={()=>exportCSV('electricity_bills_template.csv',['meter_name','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','remarks'],[['Main Meter','2025-06','1200','18500','0','0','']]) }>
             Template
           </Button>
           <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport}/>
           <Button variant="outline" size="sm" icon={<Download size={14}/>}
-            onClick={()=>exportCSV('electricity_bills.csv',['meter_name','usc_no','site','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','paid_date','remarks'],(bills??[]).map((b:any)=>[b.electricity_meters?.meter_name,b.electricity_meters?.usc_no,b.electricity_meters?.farms?.name,b.bill_month?.slice(0,7),b.units_consumed,b.amount,b.acd_dc_due,b.deposit_amount,b.paid_date,b.remarks]))}>
+            onClick={()=>exportCSV('electricity_bills.csv',['meter_name','usc_no','site','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','payment_status','balance_due','remarks'],(bills??[]).map((b:any)=>{
+              const netPayable = netPayableOf(b); const totalPaid = totalPaidOf(b.id); const balance = netPayable-totalPaid
+              const status = totalPaid<=0 ? 'Pending' : totalPaid>=netPayable ? 'Paid' : 'Partial'
+              return [b.electricity_meters?.meter_name,b.electricity_meters?.usc_no,b.electricity_meters?.farms?.name,b.bill_month?.slice(0,7),b.units_consumed,b.amount,b.acd_dc_due,b.deposit_amount,status,balance>0?balance.toFixed(2):'0',b.remarks]
+            }))}>
             Export
           </Button>
           <Button variant="outline" size="sm" icon={<Printer size={14}/>}
@@ -349,10 +459,14 @@ const BillsTab: React.FC = () => {
               <Th><input type="checkbox" checked={selected.size>0&&selected.size===(bills??[]).length} onChange={toggleAll} className="rounded"/></Th>
               <Th>Meter / Site</Th><Th>USC No</Th><Th>Month</Th>
               <Th right>Units</Th><Th right>Amount</Th><Th right>ACD/DC</Th>
-              <Th right>Deposit</Th><Th right>Int. Credit</Th><Th right>Net Payable</Th><Th>Paid Date</Th><Th>Remarks</Th><Th></Th>
+              <Th right>Deposit</Th><Th right>Int. Credit</Th><Th right>Net Payable</Th><Th>Status</Th><Th>Remarks</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {(bills??[]).map((b:any) => (
+              {(bills??[]).map((b:any) => {
+                const netPayable = netPayableOf(b); const totalPaid = totalPaidOf(b.id); const balance = netPayable - totalPaid
+                const status = totalPaid<=0 ? 'Pending' : totalPaid>=netPayable ? 'Paid' : 'Partial'
+                const statusColor = status==='Paid' ? 'green' : status==='Partial' ? 'yellow' : 'gray'
+                return (
                 <tr key={b.id} className={`hover:bg-gray-50 ${selected.has(b.id)?'bg-brand-50':''}`}>
                   <Td><input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggleSelect(b.id)} className="rounded"/></Td>
                   <Td><span className="font-medium text-sm">{b.electricity_meters?.meter_name}</span><br/><span className="text-xs text-gray-400">{b.electricity_meters?.farms?.name}</span></Td>
@@ -363,17 +477,22 @@ const BillsTab: React.FC = () => {
                   <Td right>{b.acd_dc_due>0?inr(b.acd_dc_due):'—'}</Td>
                   <Td right>{b.deposit_amount>0?inr(b.deposit_amount):'—'}</Td>
                   <Td right>{b.deposit_interest>0?<span className="text-green-600 font-medium">+{inr(b.deposit_interest)}</span>:'—'}</Td>
-                  <Td right><span className="font-semibold">{inr((b.amount??0)-(b.deposit_interest??0))}</span></Td>
-                  <Td className="text-xs">{b.paid_date ? <Badge color="green">{b.paid_date}</Badge> : <span className="text-gray-300">—</span>}</Td>
+                  <Td right><span className="font-semibold">{inr(netPayable)}</span></Td>
+                  <Td className="text-xs">
+                    <button onClick={()=>setHistoryBill(b)}>
+                      <Badge color={statusColor}>{status}{status==='Partial' ? ` · ${inr(balance)} due` : ''}</Badge>
+                    </button>
+                  </Td>
                   <Td className="text-xs text-gray-400 max-w-xs truncate">{b.remarks??''}</Td>
                   <Td>
                     <div className="flex gap-1">
+                      {status!=='Paid' && <button onClick={()=>openPayModal(b)} className="p-1.5 rounded hover:bg-green-50 text-gray-400 hover:text-green-600" title="Record Payment"><IndianRupee size={13}/></button>}
                       <button onClick={()=>openForm(b)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
                       <button onClick={()=>{ if(confirm('Delete this bill?')) delMut.mutate(b.id) }} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
                     </div>
                   </Td>
                 </tr>
-              ))}
+              )})}
             </tbody>
             {(bills??[]).length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
@@ -407,20 +526,7 @@ const BillsTab: React.FC = () => {
             <Input label="Security Deposit (₹)" type="number" step="0.01" value={form.deposit_amount} onChange={e=>set('deposit_amount',e.target.value)}/>
             <Input label="Deposit Interest Credit (₹)" type="number" step="0.01" value={form.deposit_interest} onChange={e=>set('deposit_interest',e.target.value)} hint="Annual interest credited by APEPDCL — reduces net payable"/>
           </FormRow>
-          <FormRow>
-            <Input label="Meter Rent (₹)" type="number" step="0.01" value={form.meter_rent} onChange={e=>set('meter_rent',e.target.value)}/>
-            <DateInput label="Paid Date" value={form.paid_date} onChange={e=>set('paid_date',e.target.value)}/>
-          </FormRow>
-          {form.paid_date && (
-            <FormRow>
-              <Select label="Payment Mode" value={form.payment_mode} onChange={e=>set('payment_mode',e.target.value)}
-                options={[{value:'cash',label:'Cash'},{value:'bank',label:'Bank'}]}/>
-              {form.payment_mode==='bank' && (
-                <Select label="Bank Account" required placeholder="— Select account —" value={form.bank_account_id} onChange={e=>set('bank_account_id',e.target.value)}
-                  options={(bankAccounts??[]).map((b:any)=>({value:b.id,label:`${b.bank_name} — ${b.account_name}`}))}/>
-              )}
-            </FormRow>
-          )}
+          <Input label="Meter Rent (₹)" type="number" step="0.01" value={form.meter_rent} onChange={e=>set('meter_rent',e.target.value)}/>
           {(parseFloat(form.deposit_interest)||0) > 0 && (
             <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-800">
               Net Payable = {inr((parseFloat(form.amount)||0) - (parseFloat(form.deposit_interest)||0))}
@@ -428,6 +534,106 @@ const BillsTab: React.FC = () => {
             </div>
           )}
           <Input label="Remarks" value={form.remarks} onChange={e=>set('remarks',e.target.value)}/>
+        </div>
+      </Modal>
+
+      {/* Record Payment modal */}
+      <Modal open={!!payModalBill} onClose={()=>setPayModalBill(null)}
+        title={payModalBill ? `Record Payment — ${payModalBill.electricity_meters?.meter_name} ${fmtMonth(payModalBill.bill_month)}` : ''} size="sm"
+        footer={<><Button variant="secondary" onClick={()=>setPayModalBill(null)}>Cancel</Button><Button loading={recordPaymentMut.isPending} onClick={()=>recordPaymentMut.mutate()}>Save Payment</Button></>}>
+        {payModalBill && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
+              Net Payable {inr(netPayableOf(payModalBill))} − Paid so far {inr(totalPaidOf(payModalBill.id))} = <strong>Balance Due {inr(netPayableOf(payModalBill)-totalPaidOf(payModalBill.id))}</strong>
+            </div>
+            <FormRow>
+              <Input label="Amount (₹)" required type="number" step="0.01" value={payForm.amount} onChange={e=>setPayForm(f=>({...f,amount:e.target.value}))}/>
+              <DateInput label="Payment Date" value={payForm.paid_date} onChange={e=>setPayForm(f=>({...f,paid_date:e.target.value}))}/>
+            </FormRow>
+            <FormRow>
+              <Select label="Payment Mode" value={payForm.payment_mode} onChange={e=>setPayForm(f=>({...f,payment_mode:e.target.value}))}
+                options={[{value:'cash',label:'Cash'},{value:'bank',label:'Bank'}]}/>
+              {payForm.payment_mode==='bank' && (
+                <Select label="Bank Account" required placeholder="— Select account —" value={payForm.bank_account_id} onChange={e=>setPayForm(f=>({...f,bank_account_id:e.target.value}))}
+                  options={(bankAccounts??[]).map((b:any)=>({value:b.id,label:`${b.bank_name} — ${b.account_name}`}))}/>
+              )}
+            </FormRow>
+            <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm(f=>({...f,remarks:e.target.value}))}/>
+          </div>
+        )}
+      </Modal>
+
+      {/* Payment history modal */}
+      <Modal open={!!historyBill} onClose={()=>setHistoryBill(null)}
+        title={historyBill ? `Payment History — ${historyBill.electricity_meters?.meter_name} ${fmtMonth(historyBill.bill_month)}` : ''} size="sm"
+        footer={<Button variant="secondary" onClick={()=>setHistoryBill(null)}>Close</Button>}>
+        {historyBill && (
+          <div className="space-y-2">
+            <div className="text-sm text-gray-600 mb-2">
+              Net Payable {inr(netPayableOf(historyBill))} · Paid {inr(totalPaidOf(historyBill.id))} · Balance {inr(netPayableOf(historyBill)-totalPaidOf(historyBill.id))}
+            </div>
+            {(paymentsByBill[historyBill.id]??[]).length === 0 && <div className="text-gray-400 text-sm text-center py-4">No payments recorded yet</div>}
+            {(paymentsByBill[historyBill.id]??[]).map((p:any)=>(
+              <div key={p.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+                <div>
+                  <span className="font-medium">{inr(p.amount)}</span>
+                  <span className="text-gray-400 mx-2">·</span>
+                  <span>{p.paid_date}</span>
+                  <span className="text-gray-400 mx-2">·</span>
+                  <span className="capitalize">{p.payment_mode}</span>
+                  {p.batch_ref && <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Batch</span>}
+                  {p.remarks && <div className="text-xs text-gray-400 mt-0.5">{p.remarks}</div>}
+                </div>
+                {p.batch_ref ? (
+                  <button onClick={()=>{ if(confirm('Delete the ENTIRE batch this payment belongs to? This removes every bill\'s payment in this batch and the single combined ledger entry.')) deleteBatchMut.mutate(p.batch_ref) }}
+                    className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600" title="Delete whole batch"><Trash2 size={13}/></button>
+                ) : (
+                  <button onClick={()=>{ if(confirm('Delete this payment? Linked Cash Book/Bank Ledger entry will also be removed.')) deletePaymentMut.mutate(p) }}
+                    className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* Batch (CMS) payment modal — one bank/cash debit settling several bills at once */}
+      <Modal open={batchMode} onClose={()=>setBatchMode(false)} title={`Batch Payment — ${selected.size} bill(s)`} size="md"
+        footer={<><Button variant="secondary" onClick={()=>setBatchMode(false)}>Cancel</Button><Button loading={batchPayMut.isPending} onClick={()=>batchPayMut.mutate()}>Save Batch Payment</Button></>}>
+        <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800">
+            One CMS bank debit settling multiple bills. Each bill gets its own payment record; the ledger gets ONE combined entry for the total.
+          </div>
+          <FormRow>
+            <DateInput label="Payment Date" value={batchForm.paid_date} onChange={e=>setBatchForm(f=>({...f,paid_date:e.target.value}))}/>
+            <Select label="Payment Mode" value={batchForm.payment_mode} onChange={e=>setBatchForm(f=>({...f,payment_mode:e.target.value}))}
+              options={[{value:'cash',label:'Cash'},{value:'bank',label:'Bank'}]}/>
+          </FormRow>
+          {batchForm.payment_mode==='bank' && (
+            <Select label="Bank Account" required placeholder="— Select account —" value={batchForm.bank_account_id} onChange={e=>setBatchForm(f=>({...f,bank_account_id:e.target.value}))}
+              options={(bankAccounts??[]).map((b:any)=>({value:b.id,label:`${b.bank_name} — ${b.account_name}`}))}/>
+          )}
+          <div className="space-y-2 max-h-72 overflow-y-auto">
+            {[...selected].map(id => {
+              const bill = (bills??[]).find((b:any)=>b.id===id)
+              if (!bill) return null
+              return (
+                <div key={id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+                  <div className="flex-1 text-sm">
+                    <span className="font-medium">{bill.electricity_meters?.meter_name}</span>
+                    <span className="text-gray-400 ml-2">{fmtMonth(bill.bill_month)}</span>
+                    <span className="text-gray-400 ml-2">Balance {inr(netPayableOf(bill)-totalPaidOf(bill.id))}</span>
+                  </div>
+                  <div className="w-32">
+                    <Input label="" type="number" step="0.01" value={batchAmounts[id]??''} onChange={e=>setBatchAmounts(a=>({...a,[id]:e.target.value}))}/>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="text-right text-sm font-semibold">
+            Total: {inr([...selected].reduce((s,id)=>s+(parseFloat(batchAmounts[id]||'0')||0),0))}
+          </div>
         </div>
       </Modal>
     </>
@@ -594,6 +800,17 @@ const HistoryTab: React.FC = () => {
     }
   })
 
+  const { data: payments } = useQuery({
+    queryKey: ['elec_bill_payments_totals'],
+    queryFn: async () => { const{data}=await supabase.from('electricity_bill_payments').select('bill_id,amount'); return data??[] }
+  })
+  const totalPaidByBill = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const p of (payments ?? []) as any[]) map[p.bill_id] = (map[p.bill_id] ?? 0) + (p.amount ?? 0)
+    return map
+  }, [payments])
+  const isBillPaid = (b: any) => (totalPaidByBill[b.id] ?? 0) >= ((b.amount??0)-(b.deposit_interest??0))
+
   const byMonth = useMemo(()=>{
     const map: Record<string,{month:string;bills:any[];total:number;units:number}>={}
     ;(bills??[]).forEach((b:any)=>{ const m=b.bill_month?.slice(0,7)??''; if(!map[m])map[m]={month:m,bills:[],total:0,units:0}; map[m].bills.push(b); map[m].total+=b.amount??0; map[m].units+=b.units_consumed??0 })
@@ -616,7 +833,7 @@ const HistoryTab: React.FC = () => {
         <div className="flex gap-4 text-sm text-gray-600 items-center">
           <span>{(bills??[]).length} bills · <strong>{grandUnits.toLocaleString('en-IN')}</strong> units · <strong className="text-gray-900">{inr(grandTotal)}</strong></span>
           <Button variant="outline" size="sm" icon={<Download size={14}/>}
-            onClick={()=>exportCSV('elec_history.csv',['month','meter','site','units','amount','acd_dc_due','paid_date'],(bills??[]).map((b:any)=>[b.bill_month?.slice(0,7),b.electricity_meters?.meter_name,b.electricity_meters?.farms?.name,b.units_consumed,b.amount,b.acd_dc_due,b.paid_date]))}>
+            onClick={()=>exportCSV('elec_history.csv',['month','meter','site','units','amount','acd_dc_due','payment_status'],(bills??[]).map((b:any)=>[b.bill_month?.slice(0,7),b.electricity_meters?.meter_name,b.electricity_meters?.farms?.name,b.units_consumed,b.amount,b.acd_dc_due,isBillPaid(b)?'Paid':(totalPaidByBill[b.id]??0)>0?'Partial':'Pending']))}>
             Export
           </Button>
         </div>
@@ -631,8 +848,8 @@ const HistoryTab: React.FC = () => {
                   <span className="text-gray-500">{group.units.toLocaleString('en-IN')} units</span>
                   <span className="font-bold text-gray-900">{inr(group.total)}</span>
                   {group.units>0 && <span className="text-gray-500">₹{(group.total/group.units).toFixed(2)}/unit</span>}
-                  <Badge color={group.bills.every((b:any)=>b.paid_date)?'green':'yellow'}>
-                    {group.bills.every((b:any)=>b.paid_date)?'All Paid':'Pending'}
+                  <Badge color={group.bills.every((b:any)=>isBillPaid(b))?'green':'yellow'}>
+                    {group.bills.every((b:any)=>isBillPaid(b))?'All Paid':'Pending'}
                   </Badge>
                 </div>
               </div>
@@ -647,7 +864,7 @@ const HistoryTab: React.FC = () => {
                       <Td right><span className="font-semibold">{inr(b.amount)}</span></Td>
                       <Td right className="text-xs text-gray-500">{b.units_consumed>0?`₹${(b.amount/b.units_consumed).toFixed(2)}`:'—'}</Td>
                       <Td right className="text-xs">{b.acd_dc_due>0?inr(b.acd_dc_due):'—'}</Td>
-                      <Td className="text-xs">{b.paid_date ? <Badge color="green">{b.paid_date}</Badge> : <Badge color="yellow">Unpaid</Badge>}</Td>
+                      <Td className="text-xs">{isBillPaid(b) ? <Badge color="green">Paid</Badge> : (totalPaidByBill[b.id]??0)>0 ? <Badge color="yellow">Partial</Badge> : <Badge color="gray">Unpaid</Badge>}</Td>
                     </tr>
                   ))}
                 </tbody>

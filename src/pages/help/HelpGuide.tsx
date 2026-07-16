@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-07-14'
+const LAST_UPDATED = '2026-07-16'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-16', tag: 'New',      text: 'Electricity → Bills Entry: replaced the one-shot "Paid Date" with proper partial/multi-payment support. A bill\'s Add/Edit form now only covers billing details — payments are recorded separately via a new payment icon per bill, showing a Pending/Partial/Paid status badge (click it to see the full payment history, each tied to its own Cash Book/Bank Ledger entry). Also added "Batch Payment (CMS)" — select multiple bills across different meters/sites paid in a single bank transaction, enter one date/mode/bank account, and each bill gets its own payment record while the ledger gets one combined entry matching the actual bank debit. History tab and CSV exports now show computed payment status/balance instead of the old raw paid_date.' },
   { date: '2026-07-16', tag: 'New',      text: 'Electricity → Bills Entry: marking a bill "Paid" previously only set a date on the bill itself — it never recorded anything in Cash Book or Bank Ledger. Now, setting a Paid Date lets you pick Cash or Bank (with account) and posts the actual payment (bill amount less any Deposit Interest Credit) to the matching ledger, kept in sync if you edit or delete the bill afterwards.' },
   { date: '2026-07-14', tag: 'Fix',      text: 'Employees → Statutory Compliance Center: the ESIC export was a generic CSV that didn\'t match what the ESIC portal actually accepts — wrong file type, wrong/extra columns (it included computed contribution amounts the portal doesn\'t want, and was missing the required Reason Code / Last Working Day columns), and days rounded to nearest instead of always rounding up as the portal requires. Rebuilt to match the ESIC Monthly Contribution upload template exactly (real .xls file, correct columns, correct rounding). Wage basis and ESI eligibility rules were not changed — only the exported file. Also added ₹150/₹200 slab-wise employee counts to the PT card (PT-applicable employees only, same list as the PT export).' },
   { date: '2026-07-14', tag: 'Improved', text: 'Flock Management → NHE Sales list: the "Vehicle/DC" column only showed one of Vehicle No or DC No (whichever was set), hiding the other even though both are saved on every sale. Now shown as two separate columns.' },
