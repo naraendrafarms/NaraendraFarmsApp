@@ -77,6 +77,24 @@ export const OpeningBalancesPage: React.FC = () => {
         })
         if (ppErr) throw ppErr
       }
+
+      // Dr opening on a SUPPLIER (kind='party', party.type='supplier') means
+      // money already paid to them last FY that isn't a plain receivable —
+      // it's an unused advance sitting with that vendor. Create a matching
+      // vendor_advances row (amount_used=0) so the existing "Advance (adjust
+      // against existing balance)" picker in Pending Payments can settle new
+      // GRN bills against it, the same way a real advance already can. A Dr
+      // on a buyer, or on a partner, is a genuine plain receivable — no
+      // advance row for those.
+      const party = kind === 'party' ? (parties as any[]).find((p: any) => p.id === targetId) : null
+      if (drcr === 'Dr' && kind === 'party' && (party?.type === 'supplier' || party?.type === 'both') && obRow) {
+        const { error: vaErr } = await supabase.from('vendor_advances').insert({
+          advance_date: asOf, party_id: targetId, amount: amt, amount_used: 0,
+          payment_mode: 'Opening Balance', remarks: remarks || 'Carried forward from prior FY',
+          opening_balance_id: obRow.id,
+        })
+        if (vaErr) throw vaErr
+      }
     },
     onSuccess: () => {
       toast.success('Opening balance saved')
@@ -84,14 +102,41 @@ export const OpeningBalancesPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['cms_pending_payments'] })
+      qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+      qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
       setTargetId(''); setAmount(''); setRemarks('')
     },
     onError: (e: any) => toast.error(e.message)
   })
 
   const del = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('opening_balances').delete().eq('id', id); if (error) throw error },
-    onSuccess: () => { toast.success('Deleted'); inv() },
+    mutationFn: async (id: string) => {
+      // Deleting the opening balance itself used to leave its auto-created
+      // pending_payments bill / vendor_advances row behind, orphaned —
+      // clean those up too, but refuse if either has already been used
+      // (paid/partially paid, or partially adjusted) rather than silently
+      // destroying real payment history.
+      const [{ data: bill }, { data: advance }] = await Promise.all([
+        supabase.from('pending_payments').select('id,paid_amount,payment_status').eq('opening_balance_id', id).maybeSingle(),
+        supabase.from('vendor_advances').select('id,amount_used').eq('opening_balance_id', id).maybeSingle(),
+      ])
+      if (bill && ((bill.paid_amount ?? 0) > 0 || bill.payment_status === 'Paid')) {
+        throw new Error('This opening balance\'s bill has already been paid/partially paid in Pending Payments — settle or reverse that first before deleting the opening balance.')
+      }
+      if (advance && (advance.amount_used ?? 0) > 0) {
+        throw new Error('This opening balance\'s advance has already been adjusted against a bill — reverse that adjustment first before deleting the opening balance.')
+      }
+      if (bill) await supabase.from('pending_payments').delete().eq('id', bill.id)
+      if (advance) await supabase.from('vendor_advances').delete().eq('id', advance.id)
+      const { error } = await supabase.from('opening_balances').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Deleted')
+      inv()
+      qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+      qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
+    },
     onError: (e: any) => toast.error(e.message)
   })
 
