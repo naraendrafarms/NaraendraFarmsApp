@@ -13,7 +13,7 @@ export const toCbMode = (mode: string) => {
 export const postLedgerEntry = async (opts: {
   paymentId: string; vendorName: string; invoiceNo?: string | null; grnNo?: string | null
   amount: number; mode: string; date: string; ref?: string | null; remarks?: string | null
-  bankAccountId?: string | null
+  bankAccountId?: string | null; partyId?: string | null
 }) => {
   if (opts.amount <= 0) return
   await supabase.from('cash_book').insert({
@@ -42,6 +42,7 @@ export const postLedgerEntry = async (opts: {
       reference_no: opts.ref || null,
       description: `Payment to ${opts.vendorName}${opts.invoiceNo ? ' — Inv ' + opts.invoiceNo : ''}${opts.grnNo ? ' / GRN ' + opts.grnNo : ''}`,
       amount: opts.amount,
+      party_id: opts.partyId || null,
       linked_payment_id: opts.paymentId,
     })
   }

@@ -250,7 +250,7 @@ export const PendingPaymentsPage: React.FC = () => {
           paymentId: modal.record.id, vendorName: modal.record.vendor_name,
           invoiceNo: modal.record.invoice_no, grnNo: modal.record.grn_no,
           amount: amt, mode: modal.mode, date: modal.paidDate, ref: modal.ref, remarks: modal.remarks,
-          bankAccountId: modal.bankAccountId,
+          bankAccountId: modal.bankAccountId, partyId: modal.record.party_id,
         })
       }
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
@@ -319,7 +319,7 @@ export const PendingPaymentsPage: React.FC = () => {
         await postLedgerEntry({
           paymentId: bill.id, vendorName: bill.vendor_name, invoiceNo: bill.invoice_no, grnNo: bill.grn_no,
           amount: balance, mode: bulkPayForm.mode, date: bulkPayForm.date, ref: bulkPayForm.ref,
-          remarks: `Bulk payment batch (${bills.length} bills)`,
+          remarks: `Bulk payment batch (${bills.length} bills)`, partyId: bill.party_id,
         })
       }
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
@@ -448,6 +448,7 @@ export const PendingPaymentsPage: React.FC = () => {
           paymentId: savedId, vendorName: payload.vendor_name, invoiceNo: payload.invoice_no, grnNo: payload.grn_no,
           amount, mode: payload.account_type ?? 'NEFT', date: payload.paid_date || todayStr,
           ref: payload.utr_no || payload.cheque_no, remarks: payload.remarks, bankAccountId: payload.bank_account_id,
+          partyId: payload.party_id,
         })
       } else if (oldStatus === 'Paid' && newStatus !== 'Paid') {
         await clearLedgerEntries(savedId)

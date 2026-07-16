@@ -20,6 +20,9 @@ const EMPTY_FORM = {
   settle_payment_id: '',
   settle_receivable_id: '',
   already_linked: false,
+  linked_payment_id: '',
+  linked_nhe_sale_id: '',
+  linked_he_dispatch_id: '',
 }
 
 const EMPTY_ACCOUNT_FORM = {
@@ -182,7 +185,7 @@ const LinkToBills: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount')
+        .select('id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount,party_id')
         .neq('payment_status', 'Paid')
         .order('vendor_name')
       return (data ?? []) as any[]
@@ -271,13 +274,15 @@ const LinkToBills: React.FC = () => {
         await postLedgerEntry({
           paymentId: id, vendorName: payment.vendor_name, invoiceNo: payment.invoice_no, grnNo: payment.grn_no,
           amount: balance, mode: 'NEFT', date: linkModal.txn_date, ref: linkModal.reference_no,
-          remarks: `Bank-reconciled: ${linkModal.description ?? ''}`,
+          remarks: `Bank-reconciled: ${linkModal.description ?? ''}`, partyId: payment.party_id,
         })
       }
       // Link the bank transaction (linked_payment_id = first bill; tag holds the full set)
+      const firstBill = (openPayments ?? []).find((p: any) => p.id === ids[0])
       await supabase.from('bank_transactions').update({
         match_status: 'manually_matched',
         linked_payment_id: ids[0],
+        party_id: firstBill?.party_id ?? null,
       }).eq('id', linkModal.id)
 
       qc.invalidateQueries({ queryKey: ['bank_txn_waiting'] })
@@ -623,7 +628,37 @@ export const BankLedgerPage: React.FC = () => {
   // Open (unpaid) bills for the party picked in Add Transaction, so a Debit
   // entered here can settle a specific bill instead of just sitting in the
   // bank ledger with a party tag that Party Ledger never sees.
-  //
+
+  // What an already-linked transaction is actually linked TO — shown in the
+  // edit modal instead of a generic "already linked" note, so re-opening an
+  // old entry tells you which bill/invoice it settled without having to go
+  // find it in Pending Payments / NHE Sales / HE Dispatch yourself.
+  const { data: linkedRefDetails } = useQuery({
+    queryKey: ['bank_txn_linked_ref', form.linked_payment_id, form.linked_nhe_sale_id, form.linked_he_dispatch_id],
+    queryFn: async () => {
+      if (form.linked_payment_id) {
+        const { data } = await supabase.from('pending_payments')
+          .select('vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,payment_status')
+          .eq('id', form.linked_payment_id).maybeSingle()
+        return data ? { kind: 'bill' as const, ...data } : null
+      }
+      if (form.linked_nhe_sale_id) {
+        const { data } = await supabase.from('nhe_sales')
+          .select('invoice_no,dc_no,amount,amount_received,payment_status,parties(name)')
+          .eq('id', form.linked_nhe_sale_id).maybeSingle()
+        return data ? { kind: 'nhe' as const, ...data } : null
+      }
+      if (form.linked_he_dispatch_id) {
+        const { data } = await supabase.from('he_dispatch')
+          .select('invoice_no,dc_no,amount,amount_received,payment_status,parties(name)')
+          .eq('id', form.linked_he_dispatch_id).maybeSingle()
+        return data ? { kind: 'he' as const, ...data } : null
+      }
+      return null
+    },
+    enabled: !!editId && form.already_linked,
+  })
+
   // Two gotchas that previously made this list silently come back empty:
   // 1. SQL NULL never matches <> ('neq'), so any bill whose payment_status
   //    was never set (NULL, not the string 'Pending') was invisible — same
@@ -959,6 +994,9 @@ export const BankLedgerPage: React.FC = () => {
       settle_payment_id: '',
       settle_receivable_id: '',
       already_linked: !!(t.linked_payment_id || t.nhe_sale_id || t.he_dispatch_id),
+      linked_payment_id: t.linked_payment_id ?? '',
+      linked_nhe_sale_id: t.nhe_sale_id ?? '',
+      linked_he_dispatch_id: t.he_dispatch_id ?? '',
     })
     setShowModal(true)
   }
@@ -1688,7 +1726,24 @@ export const BankLedgerPage: React.FC = () => {
             options={[{ value: '', label: '— None —' }, ...(parties ?? []).map((p: any) => ({ value: p.id, label: `${p.name} (${p.type})` }))]}
           />
           {editId && form.already_linked && (
-            <p className="text-xs text-gray-500 -mt-2">This transaction is already linked to a bill/invoice — already reflected in that party's ledger.</p>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 -mt-2">
+              {linkedRefDetails?.kind === 'bill' ? (
+                <p className="text-xs text-gray-600">
+                  Linked to bill — <strong>{linkedRefDetails.vendor_name}</strong>
+                  {linkedRefDetails.invoice_no ? `, Inv ${linkedRefDetails.invoice_no}` : ''}
+                  {linkedRefDetails.grn_no ? `, GRN ${linkedRefDetails.grn_no}` : ''}
+                  {' — '}{inr(linkedRefDetails.net_payable ?? linkedRefDetails.invoice_amount ?? 0)} ({linkedRefDetails.payment_status ?? 'Pending'})
+                </p>
+              ) : (linkedRefDetails?.kind === 'nhe' || linkedRefDetails?.kind === 'he') ? (
+                <p className="text-xs text-gray-600">
+                  Linked to {linkedRefDetails.kind === 'he' ? 'HE Dispatch' : 'NHE Sale'} — <strong>{(linkedRefDetails as any).parties?.name ?? ''}</strong>
+                  {linkedRefDetails.invoice_no ? `, Inv ${linkedRefDetails.invoice_no}` : linkedRefDetails.dc_no ? `, DC ${linkedRefDetails.dc_no}` : ''}
+                  {' — '}{inr(linkedRefDetails.amount ?? 0)} ({linkedRefDetails.payment_status ?? 'Pending'})
+                </p>
+              ) : (
+                <p className="text-xs text-gray-500">This transaction is already linked to a bill/invoice — already reflected in that party's ledger.</p>
+              )}
+            </div>
           )}
           {form.txn_type === 'Debit' && form.party_id && !form.already_linked && (
             <div>

@@ -179,7 +179,7 @@ export const PurchaseEntry: React.FC = () => {
               txn_date: form.purchase_date, txn_type: 'Debit', category: 'Vendor Payment',
               reference_no: form.invoice_no || form.grn_no || null,
               description: `Payment to ${supplierName}${form.invoice_no ? ' — Inv ' + form.invoice_no : ''}${form.grn_no ? ' / GRN ' + form.grn_no : ''}`,
-              amount: netPayableFinal || 0, linked_payment_id: editId,
+              amount: netPayableFinal || 0, party_id: form.supplier_id || null, linked_payment_id: editId,
             })
           }
         } else if (editOrigStatus === 'Paid' && form.payment_status !== 'Paid') {
@@ -332,7 +332,7 @@ export const PurchaseEntry: React.FC = () => {
             txn_date: form.purchase_date, txn_type: 'Debit', category: 'Vendor Payment',
             reference_no: form.invoice_no || form.grn_no || null,
             description: `${form.category} purchase — ${itemName}`,
-            amount: total, linked_payment_id: paidPendingPaymentId,
+            amount: total, party_id: form.supplier_id || null, linked_payment_id: paidPendingPaymentId,
           })
         }
       }

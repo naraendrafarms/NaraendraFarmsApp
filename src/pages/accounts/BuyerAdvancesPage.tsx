@@ -124,6 +124,7 @@ export const BuyerAdvancesPage: React.FC = () => {
           reference_no: row.reference_no || null,
           description: narration,
           amount: amt,
+          party_id: row.party_id || null,
           party_advance_id: adv.id,
         })
         if (bErr) throw new Error('Advance saved but Bank entry failed: ' + bErr.message)
@@ -171,7 +172,7 @@ export const BuyerAdvancesPage: React.FC = () => {
         const { error: bErr } = await supabase.from('bank_transactions').insert({
           bank_account_id: row.bank_account_id, txn_date: row.advance_date, txn_type: 'Credit',
           category: 'Sale Receipt', reference_no: row.reference_no || null, description: narration,
-          amount: amt, party_advance_id: row.id,
+          amount: amt, party_id: row.party_id || null, party_advance_id: row.id,
         })
         if (bErr) throw new Error('Advance updated but Bank entry failed: ' + bErr.message)
       }

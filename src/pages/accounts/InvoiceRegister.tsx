@@ -221,7 +221,7 @@ export const InvoiceRegister: React.FC = () => {
               bank_account_id: status === 'paid' && mode.toLowerCase() !== 'cash' ? bankAccountId : null,
             })
             .eq('vendor_name', vendorName).eq('invoice_no', inv.invoice_no)
-            .select('id').maybeSingle()
+            .select('id,party_id').maybeSingle()
           if (status === 'paid' && pp?.id) {
             await supabase.from('cash_book').delete().eq('pending_payment_id', pp.id)
             await supabase.from('bank_transactions').delete().eq('linked_payment_id', pp.id)
@@ -237,7 +237,7 @@ export const InvoiceRegister: React.FC = () => {
               await supabase.from('bank_transactions').insert({
                 bank_account_id: bankAccountId, txn_date: date, txn_type: 'Debit', category: 'Vendor Payment',
                 description: `Payment to ${vendorName} — Inv ${inv.invoice_no}`,
-                amount, linked_payment_id: pp.id,
+                amount, party_id: (pp as any).party_id || null, linked_payment_id: pp.id,
               })
             }
           }
