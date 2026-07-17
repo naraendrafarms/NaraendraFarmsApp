@@ -8,7 +8,7 @@ import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, ArrowRight, Pencil, Trash2, Upload, FileDown, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
@@ -227,8 +227,8 @@ export const EggConversions: React.FC = () => {
       />
 
       <div className="flex gap-3 items-end">
-        <Select label="" placeholder="All Flocks" options={flockOptions}
-          value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        <SearchableSelect placeholder="All Flocks" options={flockOptions}
+          value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
         {flockFilter && <Button variant="ghost" size="sm" onClick={() => setFlockFilter('')}>Clear</Button>}
       </div>
 
@@ -278,8 +278,8 @@ export const EggConversions: React.FC = () => {
         }>
         <div className="space-y-4">
           <FormRow>
-            <Select label="Flock" required placeholder="— Select —" options={flockOptions}
-              value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+            <SearchableSelect label="Flock" required placeholder="— Select —" options={flockOptions}
+              value={form.flock_id} onChange={v => s('flock_id', v)} />
             <DateInput label="Date" required value={form.conversion_date}
               onChange={e => s('conversion_date', e.target.value)} />
           </FormRow>
