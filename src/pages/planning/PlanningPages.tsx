@@ -24,6 +24,26 @@ async function fetchPlanLines(planId: string) {
   return data ?? []
 }
 
+// PostgREST caps a single response at its server-side "max rows" setting
+// (1000 by default) regardless of a client .limit() — a client limit only
+// sets the requested range, so it does NOT reliably raise that cap. Page
+// through with .range() until a short page comes back, so a full financial
+// year's transactions can never silently truncate.
+const PAGE_SIZE = 1000
+async function fetchAllPages<T>(buildPage: (from: number, to: number) => any, errLabel: string): Promise<T[]> {
+  const all: T[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await buildPage(from, from + PAGE_SIZE - 1)
+    if (error) { toast.error(`${errLabel}: ${error.message}`); break }
+    const page = (data ?? []) as T[]
+    all.push(...page)
+    if (page.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return all
+}
+
 // ── Flock Cost Projection ────────────────────────────────────────────────────
 
 const FlockProjectionTab: React.FC = () => {
@@ -666,38 +686,37 @@ const CAStatementTab: React.FC = () => {
   })
 
   // salary_monthly/electricity_bills are keyed by whole calendar month — if
-  // Period End falls mid-month, including that partial month's full cost
-  // against only part of its revenue overstates cost relative to Turnover.
-  // Clip the cost cutoff to the last COMPLETE month within the period.
-  const monthCutoff = useMemo(() => {
-    const d = new Date(periodEnd + 'T00:00:00')
-    const lastDayOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-    if (d.getDate() === lastDayOfMonth) return periodEnd
-    const prevMonthEnd = new Date(d.getFullYear(), d.getMonth(), 0)
-    return prevMonthEnd.toISOString().slice(0, 10)
-  }, [periodEnd])
-  const monthCutoffTruncated = monthCutoff !== periodEnd
-
-  // A row cap well above what any single farm generates in a year — supabase
-  // defaults to 1000 rows per request, which would silently truncate (not
-  // error) a full financial year's transactions and understate every total.
-  const ROW_CAP = 20000
+  // Period Start/End fall mid-month, including that partial month's full
+  // cost against only part of its revenue mismatches cost against revenue in
+  // either direction. Clip BOTH ends to the nearest COMPLETE month within the
+  // period. Built from local Y/M/D parts throughout (never toISOString on a
+  // local Date) so this can't drift a day in IST.
+  const ymd = (y: number, m: number, d: number) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  const { monthCutoffStart, monthCutoffEnd } = useMemo(() => {
+    const s = new Date(periodStart + 'T00:00:00')
+    const e = new Date(periodEnd + 'T00:00:00')
+    // Start: if not the 1st, roll forward to the 1st of the NEXT month.
+    const cutoffStart = s.getDate() === 1 ? periodStart : ymd(s.getFullYear(), s.getMonth() + 1, 1)
+    // End: if not the actual last day of its month, roll back to the last day of the PREVIOUS month.
+    const lastDayOfEndMonth = new Date(e.getFullYear(), e.getMonth() + 1, 0).getDate()
+    const cutoffEnd = e.getDate() === lastDayOfEndMonth ? periodEnd : ymd(e.getFullYear(), e.getMonth(), 0)
+    return { monthCutoffStart: cutoffStart, monthCutoffEnd: cutoffEnd }
+  }, [periodStart, periodEnd])
+  const monthCutoffTruncated = monthCutoffStart !== periodStart || monthCutoffEnd !== periodEnd
 
   const { data: nheSales } = useQuery({
     queryKey: ['ca_nhe_sales', periodStart, periodEnd],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('nhe_sales').select('sale_type,amount,sale_date').gte('sale_date', periodStart).lte('sale_date', periodEnd).limit(ROW_CAP)
-      if (error) toast.error('NHE Sales: ' + error.message)
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('nhe_sales').select('sale_type,amount,sale_date').gte('sale_date', periodStart).lte('sale_date', periodEnd).range(from, to),
+      'NHE Sales'
+    )
   })
   const { data: heDispatch } = useQuery({
     queryKey: ['ca_he_dispatch', periodStart, periodEnd],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('he_dispatch').select('amount,invoice_eggs,dispatch_date').gte('dispatch_date', periodStart).lte('dispatch_date', periodEnd).limit(ROW_CAP)
-      if (error) toast.error('HE Dispatch: ' + error.message)
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('he_dispatch').select('amount,invoice_eggs,dispatch_date').gte('dispatch_date', periodStart).lte('dispatch_date', periodEnd).range(from, to),
+      'HE Dispatch'
+    )
   })
   // Egg quantity/value per sale_type comes from nhe_sale_lines (not the
   // nhe_sales header) so a multi-type invoice attributes value per egg type
@@ -708,68 +727,60 @@ const CAStatementTab: React.FC = () => {
   // excluding the row, silently returning unfiltered lines.
   const { data: eggSaleLines } = useQuery({
     queryKey: ['ca_nhe_sale_lines', periodStart, periodEnd],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('nhe_sale_lines').select('sale_type,quantity,amount,nhe_sales!inner(sale_date)').in('sale_type', EGG_SALE_TYPES)
-        .gte('nhe_sales.sale_date', periodStart).lte('nhe_sales.sale_date', periodEnd).limit(ROW_CAP)
-      if (error) toast.error('NHE egg pricing lookup failed: ' + error.message)
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('nhe_sale_lines').select('sale_type,quantity,amount,nhe_sales!inner(sale_date)').in('sale_type', EGG_SALE_TYPES)
+        .gte('nhe_sales.sale_date', periodStart).lte('nhe_sales.sale_date', periodEnd).range(from, to),
+      'NHE egg pricing lookup'
+    )
   })
   // cash_book category no longer used for Product Sales/Other Income
   // (Turnover is accrual now) — only for the pure-cash "other" misc income
   // that has no invoice source, and for the Cash & Bank balance below.
   const { data: cashBookOtherIncome } = useQuery({
     queryKey: ['ca_cash_book_other', periodStart, periodEnd],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('cash_book').select('amount_in,nhe_sale_id,he_dispatch_id').eq('category', 'other')
-        .is('nhe_sale_id', null).is('he_dispatch_id', null).gte('txn_date', periodStart).lte('txn_date', periodEnd).limit(ROW_CAP)
-      if (error) toast.error('Cash Book (other income): ' + error.message)
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('cash_book').select('amount_in,nhe_sale_id,he_dispatch_id').eq('category', 'other')
+        .is('nhe_sale_id', null).is('he_dispatch_id', null).gte('txn_date', periodStart).lte('txn_date', periodEnd).range(from, to),
+      'Cash Book (other income)'
+    )
   })
   const { data: electricityBills } = useQuery({
-    queryKey: ['ca_electricity', periodStart, monthCutoff],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('electricity_bills').select('amount,bill_month').gte('bill_month', periodStart).lte('bill_month', monthCutoff).limit(ROW_CAP)
-      if (error) toast.error('Electricity Bills: ' + error.message)
-      return data ?? []
-    }
+    queryKey: ['ca_electricity', monthCutoffStart, monthCutoffEnd],
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('electricity_bills').select('amount,bill_month').gte('bill_month', monthCutoffStart).lte('bill_month', monthCutoffEnd).range(from, to),
+      'Electricity Bills'
+    )
   })
   const { data: salaryRows } = useQuery({
-    queryKey: ['ca_salary', periodStart, monthCutoff],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('salary_monthly').select('earned_salary,ot_bonus,arrears,month,employees(designation)').gte('month', periodStart).lte('month', monthCutoff).limit(ROW_CAP)
-      if (error) toast.error('Salary: ' + error.message)
-      return data ?? []
-    }
+    queryKey: ['ca_salary', monthCutoffStart, monthCutoffEnd],
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('salary_monthly').select('earned_salary,ot_bonus,arrears,month,employees(designation)').gte('month', monthCutoffStart).lte('month', monthCutoffEnd).range(from, to),
+      'Salary'
+    )
   })
   const { data: eggProduction } = useQuery({
     queryKey: ['ca_production_qty', periodStart, periodEnd],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('daily_records').select('total_eggs').gte('record_date', periodStart).lte('record_date', periodEnd).limit(ROW_CAP)
-      if (error) toast.error('Daily Records: ' + error.message)
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('daily_records').select('total_eggs').gte('record_date', periodStart).lte('record_date', periodEnd).range(from, to),
+      'Daily Records'
+    )
   })
   const { data: partyBalances } = useQuery({
     queryKey: ['ca_party_ledger', periodEnd],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('v_party_ledger').select('party_id,debit,credit,parties(type)').lte('txn_date', periodEnd).limit(ROW_CAP)
-      if (error) toast.error('Party Ledger: ' + error.message)
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('v_party_ledger').select('party_id,debit,credit,parties(type)').lte('txn_date', periodEnd).range(from, to),
+      'Party Ledger'
+    )
   })
   const { data: cashBankBalance } = useQuery({
     queryKey: ['ca_cash_bank_balance', periodEnd],
     queryFn: async () => {
-      const [{ data: cb, error: e1 }, { data: bt, error: e2 }] = await Promise.all([
-        supabase.from('cash_book').select('amount_in,amount_out').lte('txn_date', periodEnd).limit(ROW_CAP),
-        supabase.from('bank_transactions').select('txn_type,amount').lte('txn_date', periodEnd).limit(ROW_CAP),
+      const [cb, bt] = await Promise.all([
+        fetchAllPages<any>((from, to) => supabase.from('cash_book').select('amount_in,amount_out').lte('txn_date', periodEnd).range(from, to), 'Cash Book balance'),
+        fetchAllPages<any>((from, to) => supabase.from('bank_transactions').select('txn_type,amount').lte('txn_date', periodEnd).range(from, to), 'Bank Ledger balance'),
       ])
-      if (e1) toast.error('Cash Book balance: ' + e1.message)
-      if (e2) toast.error('Bank Ledger balance: ' + e2.message)
-      const cashBal = (cb ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
-      const bankBal = (bt ?? []).reduce((s: number, t: any) => s + (t.txn_type === 'Credit' ? (t.amount ?? 0) : -(t.amount ?? 0)), 0)
+      const cashBal = cb.reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
+      const bankBal = bt.reduce((s: number, t: any) => s + (t.txn_type === 'Credit' ? (t.amount ?? 0) : -(t.amount ?? 0)), 0)
       return cashBal + bankBal
     }
   })
@@ -906,7 +917,7 @@ const CAStatementTab: React.FC = () => {
         </FormRow>
         {monthCutoffTruncated && (
           <div className="text-xs text-amber-600 mt-1">
-            Direct Wages / Employee Benefits / Electricity are recorded by whole calendar month — since Period End ({periodEnd}) falls mid-month, those three are cut off at the last complete month ({monthCutoff}) instead, so cost isn't counted against only part of that month's revenue.
+            Direct Wages / Employee Benefits / Electricity are recorded by whole calendar month — since {periodStart} to {periodEnd} isn't a whole number of complete months, those three use {monthCutoffStart} to {monthCutoffEnd} instead, so cost isn't counted against only part of a month's revenue at either end.
           </div>
         )}
 
