@@ -1220,8 +1220,8 @@ export const HEDispatch: React.FC = () => {
 
       {/* Filter row */}
       <div className="flex gap-3 flex-wrap items-end">
-        <Select label="" placeholder="All Flocks" options={flockOptions}
-          value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        <SearchableSelect placeholder="All Flocks" options={flockOptions}
+          value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
         {tab === 'dispatch' && <>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           From
@@ -1599,8 +1599,8 @@ export const HEDispatch: React.FC = () => {
         <div className="space-y-4">
           {/* Header */}
           <FormRow>
-            <Select label="Flock *" required placeholder="— Select —" options={flockOptions}
-              value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+            <SearchableSelect label="Flock *" required placeholder="— Select —" options={flockOptions}
+              value={form.flock_id} onChange={v => s('flock_id', v)} />
             <DateInput label="Dispatch Date *" required value={form.dispatch_date}
               onChange={e => s('dispatch_date', e.target.value)} />
           </FormRow>
@@ -2691,8 +2691,8 @@ export const NHESales: React.FC = () => {
 
       {/* Toolbar */}
       <div className="flex gap-3 flex-wrap items-end">
-        <Select label="" placeholder="All Flocks" options={flockOptions}
-          value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        <SearchableSelect placeholder="All Flocks" options={flockOptions}
+          value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
         <SearchableSelect placeholder="All Employees"
           options={[{ value: '', label: 'All Employees' }, ...(employees ?? []).map((e: any) => ({ value: e.id, label: `${e.emp_id ? e.emp_id + ' — ' : ''}${e.name}` }))]}
           value={empFilter} onChange={v => setEmpFilter(v)} className="w-48" />
@@ -2929,8 +2929,8 @@ export const NHESales: React.FC = () => {
           <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <FormRow>
-            <Select label="Flock" required placeholder="— Select —" options={flockOptions}
-              value={form.flock_id} onChange={e => sv('flock_id', e.target.value)} />
+            <SearchableSelect label="Flock" required placeholder="— Select —" options={flockOptions}
+              value={form.flock_id} onChange={v => sv('flock_id', v)} />
             <DateInput label="Sale Date" required value={form.sale_date} onChange={e => sv('sale_date', e.target.value)} />
             <Select label="Sale Type" required options={NHE_TYPES} value={form.sale_type} onChange={e => {
               sv('sale_type', e.target.value)
@@ -3495,8 +3495,8 @@ export const MedicineEntry: React.FC = () => {
         }
       />
       <div className="flex gap-3 flex-wrap items-end">
-        <Select label="" placeholder="All Flocks" options={flockOptions}
-          value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        <SearchableSelect placeholder="All Flocks" options={flockOptions}
+          value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
         {(tab === 'daily' || tab === 'allocation') && (
           <Input placeholder="Search medicine…" value={medSearch} onChange={e => setMedSearch(e.target.value)} className="w-44" />
         )}
@@ -3667,8 +3667,8 @@ export const MedicineEntry: React.FC = () => {
         {tab === 'monthly' ? (
           <div className="space-y-4">
             <FormRow>
-              <Select label="Flock" required placeholder="— Select —" options={flockOptions}
-                value={monthlyForm.flock_id} onChange={e => sm('flock_id', e.target.value)} />
+              <SearchableSelect label="Flock" required placeholder="— Select —" options={flockOptions}
+                value={monthlyForm.flock_id} onChange={v => sm('flock_id', v)} />
               <Input label="Month" required type="month" value={monthlyForm.month} onChange={e => sm('month', e.target.value)} />
             </FormRow>
             <Input label="Total Medicine Amount (Rs)" required type="number" step="0.01"
@@ -3678,8 +3678,8 @@ export const MedicineEntry: React.FC = () => {
         ) : (
           <div className="space-y-4">
             <FormRow>
-              <Select label="Flock" required placeholder="— Select —" options={flockOptions}
-                value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+              <SearchableSelect label="Flock" required placeholder="— Select —" options={flockOptions}
+                value={form.flock_id} onChange={v => s('flock_id', v)} />
               <DateInput label="Date" required value={form.usage_date} onChange={e => s('usage_date', e.target.value)} />
             </FormRow>
             <SearchableSelect label="Medicine / Vaccine" placeholder="Search medicine…" options={medOptions}
@@ -3707,8 +3707,8 @@ export const MedicineEntry: React.FC = () => {
           <Button loading={saveAllocMut.isPending} onClick={() => saveAllocMut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <FormRow>
-            <Select label="Flock" required placeholder="— Select —" options={flockOptions}
-              value={allocForm.flock_id} onChange={e => setAllocForm(f => ({ ...f, flock_id: e.target.value }))} />
+            <SearchableSelect label="Flock" required placeholder="— Select —" options={flockOptions}
+              value={allocForm.flock_id} onChange={v => setAllocForm(f => ({ ...f, flock_id: v }))} />
             <DateInput label="Date" required value={allocForm.allocation_date} onChange={e => setAllocForm(f => ({ ...f, allocation_date: e.target.value }))} />
           </FormRow>
           <SearchableSelect label="Medicine / Vaccine" placeholder="Search medicine…" options={medOptions}
@@ -3906,8 +3906,8 @@ export const MedicinePurchases: React.FC = () => {
             </button>
           ))}
         </div>
-        <Select label="" placeholder="All Medicines" options={medOptions}
-          value={filterMed} onChange={e => setFilterMed(e.target.value)} className="w-52" />
+        <SearchableSelect placeholder="All Medicines" options={medOptions}
+          value={filterMed} onChange={v => setFilterMed(v)} className="w-52" />
         {activeTab === 'purchases' && <>
           <label className="flex items-center gap-1.5 text-sm text-gray-600">From
             <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm" />
@@ -4019,11 +4019,11 @@ export const MedicinePurchases: React.FC = () => {
               }} />
           </FormRow>
           <FormRow>
-            <Select label="Farm / Site" placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
+            <SearchableSelect label="Farm / Site" placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={v => s('farm_id', v)} />
             <div className="relative">
               <div className="flex items-end gap-1">
                 <div className="flex-1">
-                  <Select label="Supplier" placeholder="— Select —" options={supplierOptions} value={form.supplier_id} onChange={e => s('supplier_id', e.target.value)} />
+                  <SearchableSelect label="Supplier" placeholder="— Select —" options={supplierOptions} value={form.supplier_id} onChange={v => s('supplier_id', v)} />
                 </div>
                 <QuickAddParty defaultType="supplier" onCreated={p => s('supplier_id', p.id)} />
               </div>
