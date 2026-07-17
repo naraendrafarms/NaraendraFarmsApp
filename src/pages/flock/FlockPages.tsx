@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { inr, fmtDate } from '@/lib/utils'
 import { parseFile } from '@/lib/parseFile'
 import { useFeedRates } from '@/hooks/useFeedRates'
+import { useMedicineRates } from '@/lib/medicineRates'
 import {
   Card, CardHeader, Button, Input, Select,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
@@ -1502,30 +1503,14 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     queryFn: async () => {
       const { data } = await supabase
         .from('medicine_usage')
-        .select('*, medicines_master(name,type)')
+        .select('*, medicines_master(name,type,item_id)')
         .eq('flock_id', flockId)
         .order('usage_date', { ascending: false })
       return data ?? []
     }
   })
 
-  const { data: grnRates } = useQuery({
-    queryKey: ['grn_med_rates'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('grn')
-        .select('item_name,price_per_unit,grn_date')
-        .in('category', ['Medicine', 'Vaccine'])
-        .order('grn_date', { ascending: false })
-      if (!data) return {} as Record<string, number>
-      const map: Record<string, number> = {}
-      for (const g of data) {
-        if (g.item_name && g.price_per_unit && !(g.item_name in map))
-          map[g.item_name.trim().toLowerCase()] = g.price_per_unit
-      }
-      return map
-    }
-  })
+  const getRate = useMedicineRates()
 
   const deleteMut = useMutation({
     mutationFn: async (id: string) => { const { error } = await supabase.from('medicine_usage').delete().eq('id', id); if (error) throw error },
@@ -1545,17 +1530,9 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onError: (e: any) => toast.error('Med delete: ' + (e.details || e.hint || e.message))
   })
 
-  const getGrnRate = (name: string) => {
-    if (!grnRates || !name) return null
-    const key = name.trim().toLowerCase()
-    if (grnRates[key] !== undefined) return grnRates[key]
-    const found = Object.keys(grnRates).find(k => k.includes(key) || key.includes(k))
-    return found ? grnRates[found] : null
-  }
-
   const calcCost = (r: any) => {
-    const grnRate = getGrnRate(r.medicines_master?.name ?? '')
-    const rate = grnRate ?? r.rate ?? 0
+    const stockRate = getRate(r.medicines_master?.item_id, r.medicines_master?.name ?? '')
+    const rate = stockRate ?? r.rate ?? 0
     return (r.quantity ?? 0) * rate
   }
 
@@ -1588,7 +1565,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       </Card>
 
       <div className="grid grid-cols-2 gap-4 max-w-sm">
-        <StatCard title="Cost (GRN Rates)" value={inr(totalCostGrn)} icon={<FlaskConical size={18}/>} color="text-green-600" />
+        <StatCard title="Cost (Stock Rates)" value={inr(totalCostGrn)} icon={<FlaskConical size={18}/>} color="text-green-600" />
         <StatCard title="Cost (Excel Rates)" value={inr(totalCostExcel)} icon={<FlaskConical size={18}/>} color="text-gray-400" />
       </div>
 
@@ -1600,12 +1577,12 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               <thead><tr>
                 <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
                 <Th>Date</Th><Th>Medicine / Vaccine</Th><Th right>Qty</Th>
-                <Th>Unit</Th><Th right>GRN Rate</Th><Th right>Excel Rate</Th><Th right>Cost (GRN)</Th>
+                <Th>Unit</Th><Th right>Rate (Stock)</Th><Th right>Excel Rate</Th><Th right>Cost (Stock)</Th>
                 <Th></Th>
               </tr></thead>
               <tbody>
                 {filtered.map((r: any) => {
-                  const grnRate = getGrnRate(r.medicines_master?.name ?? '')
+                  const stockRate = getRate(r.medicines_master?.item_id, r.medicines_master?.name ?? '')
                   const cost = calcCost(r)
                   return (
                     <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-red-50' : ''}`}>
@@ -1614,7 +1591,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                     <Td className="text-xs font-medium">{r.medicines_master?.name ?? '—'}</Td>
                     <Td right className="text-xs">{r.quantity}</Td>
                     <Td className="text-xs text-gray-400">{r.unit ?? r.medicines_master?.unit ?? '—'}</Td>
-                    <Td right className="text-xs">{grnRate != null ? <span className="text-green-700 font-medium">₹{grnRate}</span> : <span className="text-gray-400">not in GRN</span>}</Td>
+                    <Td right className="text-xs">{stockRate != null ? <span className="text-green-700 font-medium">₹{stockRate}</span> : <span className="text-gray-400">not in stock</span>}</Td>
                     <Td right className="text-xs text-gray-400">{r.rate != null ? `₹${r.rate}` : '—'}</Td>
                     <Td right className="text-xs font-semibold">{inr(cost)}</Td>
                     <Td>

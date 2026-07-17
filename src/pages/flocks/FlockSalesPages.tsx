@@ -8,6 +8,7 @@ import {
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 , DateInput, SearchableSelect } from '@/components/ui'
 import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
+import { useMedicineRates } from '@/lib/medicineRates'
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle, Printer } from 'lucide-react'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import { useSearchParams } from 'react-router-dom'
@@ -3237,7 +3238,7 @@ export const MedicineEntry: React.FC = () => {
     queryKey: ['medicine_usage', flockFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase.from('medicine_usage')
-        .select('*, flocks(flock_no), medicines_master(name,unit)')
+        .select('*, flocks(flock_no), medicines_master(name,unit,item_id)')
         .order('usage_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (fromDate) q = q.gte('usage_date', fromDate)
@@ -3313,6 +3314,16 @@ export const MedicineEntry: React.FC = () => {
 
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const { options: medOptions } = useMedicineOptionsWithAliases()
+  const getStockRate = useMedicineRates()
+  // Effective rate/amount — same source (stock_ledger's latest inward
+  // price, covering GRN + Inventory opening/adjustment entries alike) as
+  // the Flock Detail Medicine tab, instead of only ever showing whatever
+  // was manually typed into this row's rate/amount fields at entry time.
+  const effectiveRate = (u: any) => getStockRate(u.medicines_master?.item_id, u.medicines_master?.name) ?? u.rate ?? null
+  const effectiveAmount = (u: any) => {
+    const rate = effectiveRate(u)
+    return u.amount ?? (rate != null && u.quantity != null ? rate * u.quantity : null)
+  }
 
   const filteredUsage = (usage ?? []).filter((u: any) =>
     !medSearch || (u.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
@@ -3329,7 +3340,7 @@ export const MedicineEntry: React.FC = () => {
     if (tab === 'daily') {
       exportFlatCSV(`medicine_usage.csv`,
         ['flock_no','usage_date','medicine','qty','unit','rate','amount','remarks'],
-        filteredUsage.map((u:any)=>[u.flocks?.flock_no, u.usage_date, u.medicines_master?.name, u.quantity, u.unit, u.rate, u.amount, u.remarks])
+        filteredUsage.map((u:any)=>[u.flocks?.flock_no, u.usage_date, u.medicines_master?.name, u.quantity, u.unit, effectiveRate(u), effectiveAmount(u), u.remarks])
       )
     } else {
       exportFlatCSV(`medicine_monthly.csv`,
@@ -3429,11 +3440,17 @@ export const MedicineEntry: React.FC = () => {
                     <Td className="text-xs">{fmtDate(u.usage_date)}</Td>
                     <Td className="text-sm">{u.medicines_master?.name ?? '—'}</Td>
                     <Td right className="text-xs">{u.quantity ?? '—'} {u.unit}</Td>
-                    <Td right className="text-xs">{u.rate ? `Rs ${u.rate}` : '—'}</Td>
-                    <Td right className="font-semibold text-xs">{u.amount ? inr(u.amount) : '—'}</Td>
+                    <Td right className="text-xs">{effectiveRate(u) != null ? `Rs ${effectiveRate(u)}` : '—'}</Td>
+                    <Td right className="font-semibold text-xs">{effectiveAmount(u) != null ? inr(effectiveAmount(u)!) : '—'}</Td>
                   </tr>
                 ))}
               </tbody>
+              {filteredUsage.length > 0 && (
+                <tfoot><tr className="bg-gray-50">
+                  <Td colSpan={5}><strong>TOTAL</strong></Td>
+                  <Td right><strong>{inr(filteredUsage.reduce((s: number, u: any) => s + (effectiveAmount(u) ?? 0), 0))}</strong></Td>
+                </tr></tfoot>
+              )}
             </Table>
             {filteredUsage.length === 0 && <EmptyState icon={<Package size={32}/>} title={medSearch ? `No medicine matching "${medSearch}"` : 'No usage records'} />}
           </Card>
