@@ -6,7 +6,7 @@ import { today } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Trash2, Download, Upload, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
@@ -290,8 +290,8 @@ export const FarmExpensesPage: React.FC = () => {
       {/* Filters */}
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
-          <Select label="Site" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e => setFilterFarm(e.target.value)} />
-          <Select label="Flock" placeholder="All Flocks" options={flockOptions} value={filterFlock} onChange={e => setFilterFlock(e.target.value)} />
+          <SearchableSelect label="Site" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={v => setFilterFarm(v)} />
+          <SearchableSelect label="Flock" placeholder="All Flocks" options={flockOptions} value={filterFlock} onChange={v => setFilterFlock(v)} />
           <Select label="Category" placeholder="All Categories" options={catOptions} value={filterCat} onChange={e => setFilterCat(e.target.value)} />
           <DateInput label="From" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
           <DateInput label="To"   value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
@@ -400,8 +400,8 @@ export const FarmExpensesPage: React.FC = () => {
             <Select label="Category" required options={CATEGORIES} value={form.category} onChange={e => s('category', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Select label="Site" placeholder="— Optional —" options={farmOptions} value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
-            <Select label="Flock" placeholder="— Optional —" options={flockOptions} value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+            <SearchableSelect label="Site" placeholder="— Optional —" options={farmOptions} value={form.farm_id} onChange={v => s('farm_id', v)} />
+            <SearchableSelect label="Flock" placeholder="— Optional —" options={flockOptions} value={form.flock_id} onChange={v => s('flock_id', v)} />
           </FormRow>
           <Input label="Description" required placeholder="e.g. Shed roof repair — Agraharam Shed 2" value={form.description} onChange={e => s('description', e.target.value)} />
           <FormRow>
