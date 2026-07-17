@@ -6,7 +6,7 @@ import { inr, fmtMonth, currentFY } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Zap, Edit2, Trash2, Download, Upload, BarChart2, Settings, Printer, IndianRupee } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { printReport } from '@/lib/invoicePrint'
@@ -756,7 +756,7 @@ const AllocationTab: React.FC = () => {
         <div className="space-y-3">
           {allocForm.map((row,i)=>(
             <div key={i} className="flex gap-2 items-end">
-              <div className="flex-1"><Select label={i===0?'Flock':''} placeholder="— Select —" options={flockOptions} value={row.flock_id} onChange={e=>setAllocField(i,'flock_id',e.target.value)}/></div>
+              <div className="flex-1"><SearchableSelect label={i===0?'Flock':''} placeholder="— Select —" options={flockOptions} value={row.flock_id} onChange={v=>setAllocField(i,'flock_id',v)}/></div>
               <div className="w-20"><Input label={i===0?'%':''} type="number" step="0.1" value={row.alloc_pct} onChange={e=>setAllocField(i,'alloc_pct',e.target.value)}/></div>
               <div className="w-36"><Select label={i===0?'Method':''} options={ALLOC_METHODS} value={row.method} onChange={e=>setAllocField(i,'method',e.target.value)}/></div>
               {allocForm.length>1 && <button onClick={()=>removeAllocRow(i)} className="mb-1 text-red-400 hover:text-red-600 text-lg font-bold">×</button>}
@@ -826,7 +826,7 @@ const HistoryTab: React.FC = () => {
     <>
       <div className="flex flex-wrap gap-3 items-end justify-between mb-4">
         <div className="flex flex-wrap gap-2 items-end">
-          <Select label="" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={e=>{setFilterFarm(e.target.value);setFilterMeter('')}} className="w-48"/>
+          <SearchableSelect placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={v=>{setFilterFarm(v);setFilterMeter('')}} className="w-48"/>
           <Select label="" placeholder="All Meters" options={meterOptions} value={filterMeter} onChange={e=>setFilterMeter(e.target.value)} className="w-64"/>
           {(filterFarm||filterMeter) && <Button variant="ghost" size="sm" onClick={()=>{setFilterFarm('');setFilterMeter('')}}>Clear</Button>}
         </div>
