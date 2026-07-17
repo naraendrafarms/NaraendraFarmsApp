@@ -22,6 +22,7 @@ import { useItemOptionsWithAliases, registerItemAlias, resolveItemIdByName } fro
 // document, linked only via an optional reference, never sharing a number.
 
 type LineForm = {
+  id?: string  // existing purchase_intent_lines.id — present only for rows loaded from an existing intent (openEdit); absent for newly-added lines. Used to UPDATE in place instead of delete-all-then-reinsert, so ordered_qty/status tracking survives an edit.
   require_for: string
   item_id: string
   item_name: string
@@ -102,6 +103,7 @@ export const PurchaseIntentPage: React.FC = () => {
     const { data: fullLines } = await supabase.from('purchase_intent_lines')
       .select('*').eq('intent_id', intent.id).order('sl_no')
     setLines((fullLines ?? []).map((l: any) => ({
+      id: l.id,
       require_for: l.require_for ?? '', item_id: l.item_id ?? '', item_name: l.item_name ?? '',
       require_qty: l.require_qty != null ? String(l.require_qty) : '',
       pack_size: l.pack_size != null ? String(l.pack_size) : '',
@@ -136,32 +138,82 @@ export const PurchaseIntentPage: React.FC = () => {
       if (editingId) {
         const { error } = await supabase.from('purchase_intents').update(payload).eq('id', editingId)
         if (error) throw error
-        await supabase.from('purchase_intent_lines').delete().eq('intent_id', editingId)
+
+        // Diff-based upsert instead of delete-all-then-reinsert: a full
+        // delete+insert generated new ids for every line on every edit,
+        // resetting ordered_qty/status back to defaults (erasing PO-linkage
+        // tracking) and breaking any purchase_orders.intent_line_id that
+        // pointed at the now-deleted old row id. Update existing lines by
+        // their real id (preserving ordered_qty/status), insert genuinely
+        // new lines, and delete only the lines the user actually removed
+        // from the table.
+        const { data: existingLines, error: exErr } = await supabase.from('purchase_intent_lines')
+          .select('id').eq('intent_id', editingId)
+        if (exErr) throw exErr
+        const existingIds = (existingLines ?? []).map((l: any) => l.id)
+        const keptIds = validLines.filter(l => l.id).map(l => l.id as string)
+        const removedIds = existingIds.filter((id: string) => !keptIds.includes(id))
+
+        if (removedIds.length) {
+          const { error: delErr } = await supabase.from('purchase_intent_lines').delete().in('id', removedIds)
+          if (delErr) throw delErr
+        }
+
+        for (let idx = 0; idx < validLines.length; idx++) {
+          const l = validLines[idx]
+          const qty = parseFloat(l.require_qty) || 0
+          const pack = parseFloat(l.pack_size) || 0
+          const row = {
+            intent_id: intentId,
+            sl_no: idx + 1,
+            require_for: l.require_for || null,
+            item_id: l.item_id || null,
+            item_name: l.item_name.trim(),
+            require_qty: qty,
+            pack_size: pack || null,
+            uom: l.uom || null,
+            total_qty: pack ? qty * pack : qty,
+            best_delivery_by: l.best_delivery_by || null,
+            supplier_party_id: l.supplier_party_id || null,
+          }
+          if (l.id) {
+            // Existing line — UPDATE in place. Deliberately does NOT touch
+            // ordered_qty/status, so quantity tracking against linked POs
+            // survives editing an unrelated field (e.g. fixing a typo in
+            // require_for).
+            const { error: updErr } = await supabase.from('purchase_intent_lines').update(row).eq('id', l.id)
+            if (updErr) throw updErr
+          } else {
+            // Genuinely new line added in this edit session.
+            const { error: insErr } = await supabase.from('purchase_intent_lines').insert(row)
+            if (insErr) throw insErr
+          }
+        }
       } else {
         const { data, error } = await supabase.from('purchase_intents').insert(payload).select('id').single()
         if (error) throw error
         intentId = data.id
-      }
 
-      const lineRows = validLines.map((l, idx) => {
-        const qty = parseFloat(l.require_qty) || 0
-        const pack = parseFloat(l.pack_size) || 0
-        return {
-          intent_id: intentId,
-          sl_no: idx + 1,
-          require_for: l.require_for || null,
-          item_id: l.item_id || null,
-          item_name: l.item_name.trim(),
-          require_qty: qty,
-          pack_size: pack || null,
-          uom: l.uom || null,
-          total_qty: pack ? qty * pack : qty,
-          best_delivery_by: l.best_delivery_by || null,
-          supplier_party_id: l.supplier_party_id || null,
-        }
-      })
-      const { error: lineErr } = await supabase.from('purchase_intent_lines').insert(lineRows)
-      if (lineErr) throw lineErr
+        const lineRows = validLines.map((l, idx) => {
+          const qty = parseFloat(l.require_qty) || 0
+          const pack = parseFloat(l.pack_size) || 0
+          return {
+            intent_id: intentId,
+            sl_no: idx + 1,
+            require_for: l.require_for || null,
+            item_id: l.item_id || null,
+            item_name: l.item_name.trim(),
+            require_qty: qty,
+            pack_size: pack || null,
+            uom: l.uom || null,
+            total_qty: pack ? qty * pack : qty,
+            best_delivery_by: l.best_delivery_by || null,
+            supplier_party_id: l.supplier_party_id || null,
+          }
+        })
+        const { error: lineErr } = await supabase.from('purchase_intent_lines').insert(lineRows)
+        if (lineErr) throw lineErr
+      }
     },
     onSuccess: () => {
       toast.success(editingId ? 'Purchase Intent updated' : 'Purchase Intent created')

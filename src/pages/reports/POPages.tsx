@@ -378,6 +378,32 @@ const POTab: React.FC = () => {
     } catch { /* non-critical, don't block the PO save */ }
   }
 
+  // Reverse of bumpIntentLine — called when a PO line that had an
+  // intent_line_id is deleted, so the linked intent line's ordered_qty and
+  // status don't stay stuck forever (it would otherwise never reappear in
+  // the "open intent lines" picker).
+  const unbumpIntentLine = async (intentLineId: string, qty: number) => {
+    try {
+      const { data: line } = await supabase.from('purchase_intent_lines')
+        .select('require_qty,ordered_qty').eq('id', intentLineId).single()
+      if (!line) return
+      const newOrdered = Math.max(0, (line.ordered_qty ?? 0) - qty)
+      const status = newOrdered <= 0 ? 'open' : newOrdered >= (line.require_qty ?? 0) ? 'ordered' : 'partial'
+      await supabase.from('purchase_intent_lines').update({ ordered_qty: newOrdered, status }).eq('id', intentLineId)
+    } catch { /* non-critical, don't block the PO delete */ }
+  }
+
+  // Cleans up the side effects receiptMut created for a given PO line
+  // (po_receipts row + the GRN it auto-created) — used when material_status
+  // is flipped away from 'Received', or the PO line is deleted entirely.
+  // Only deletes GRN rows marked auto_source='po_receipt' for this po_id, so
+  // a manually-entered GRN that also happens to reference this PO is never
+  // touched.
+  const cleanupAutoReceipt = async (poId: string) => {
+    await supabase.from('po_receipts').delete().eq('po_id', poId)
+    await supabase.from('grn').delete().eq('po_id', poId).eq('auto_source', 'po_receipt')
+  }
+
   const { data: orders=[], isLoading } = useQuery({
     queryKey: ['purchase_orders', fy],
     queryFn: async () => {
@@ -412,8 +438,25 @@ const POTab: React.FC = () => {
         const keptIds = validLines.filter(l => l.id).map(l => l.id)
         const removedIds = groupEditIds.filter(id => !keptIds.includes(id))
         if (removedIds.length) {
+          // Look up each removed line's old state before deleting so its
+          // auto-created GRN/po_receipts and any linked intent line's
+          // ordered_qty can be unwound — otherwise the intent line stays
+          // marked ordered forever and the stale GRN/receipt lingers.
+          const { data: removedRows } = await supabase.from('purchase_orders')
+            .select('id,intent_line_id,quantity').in('id', removedIds)
+          for (const rr of removedRows ?? []) {
+            await cleanupAutoReceipt(rr.id)
+            if (rr.intent_line_id) await unbumpIntentLine(rr.intent_line_id, Number(rr.quantity) || 0)
+          }
           const { error } = await supabase.from('purchase_orders').delete().in('id', removedIds)
           if (error) throw error
+        }
+        // Fetch old material_status for kept lines so we know which ones are
+        // transitioning AWAY from 'Received' under the new shared status.
+        const oldStatusById: Record<string, string> = {}
+        if (keptIds.length) {
+          const { data: oldRows } = await supabase.from('purchase_orders').select('id,material_status').in('id', keptIds)
+          for (const or of oldRows ?? []) oldStatusById[or.id] = or.material_status
         }
         for (const l of validLines) {
           const payload = {
@@ -428,6 +471,13 @@ const POTab: React.FC = () => {
             dose: l.dose || null, intent_line_id: l.intent_line_id || null,
           }
           if (l.id) {
+            // Reversing Received → anything else: clean up the po_receipts
+            // row and the GRN this line's receipt auto-created, so they
+            // don't remain stale (stock ledger would otherwise still count
+            // the material as received).
+            if (oldStatusById[l.id] === 'Received' && form.material_status !== 'Received') {
+              await cleanupAutoReceipt(l.id)
+            }
             const { error } = await supabase.from('purchase_orders').update(payload).eq('id', l.id)
             if (error) throw error
           } else {
@@ -456,6 +506,11 @@ const POTab: React.FC = () => {
         // a link that wasn't there before — avoids double-counting on
         // every subsequent save of the same PO line.
         const linkIsNew = form.intent_line_id && form.intent_line_id !== (editing.intent_line_id ?? '')
+        // Reversing Received → anything else: clean up the auto-created
+        // GRN/po_receipts before the status flips, same as the multi-edit path.
+        if (editing.material_status === 'Received' && form.material_status !== 'Received') {
+          await cleanupAutoReceipt(editing.id)
+        }
         const { error } = await supabase.from('purchase_orders').update(payload).eq('id', editing.id)
         if (error) throw error
         if (linkIsNew) await bumpIntentLine(form.intent_line_id, Number(form.quantity) || 0)
@@ -499,8 +554,23 @@ const POTab: React.FC = () => {
   })
 
   const delMut = useMutation({
-    mutationFn: async (id: string) => { const{error}=await supabase.from('purchase_orders').delete().eq('id', id); if(error) throw error },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); setDelId(null); toast.success('Deleted') },
+    mutationFn: async (id: string) => {
+      // Deleting a PO line entirely must clean up the same side effects a
+      // status reversal does — its auto-created GRN/po_receipts, and any
+      // linked intent line's ordered_qty (else it stays stuck as
+      // ordered/partial forever after the PO that "used" it is gone).
+      const { data: row } = await supabase.from('purchase_orders').select('intent_line_id,quantity').eq('id', id).single()
+      await cleanupAutoReceipt(id)
+      if (row?.intent_line_id) await unbumpIntentLine(row.intent_line_id, Number(row.quantity) || 0)
+      const { error } = await supabase.from('purchase_orders').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
+      qc.invalidateQueries({ queryKey: ['purchase_intent_lines_open'] }); qc.invalidateQueries({ queryKey: ['purchase_intents'] })
+      qc.invalidateQueries({ queryKey: ['po_receipts_sum'] }); qc.invalidateQueries({ queryKey: ['grns'] })
+      setDelId(null); toast.success('Deleted')
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -591,6 +661,11 @@ const POTab: React.FC = () => {
         await supabase.from('grn').insert({
           grn_no, grn_date: receiptForm.receipt_date,
           farm_id, party_id, category: grnCat, po_id: receiptPO.id,
+          // Marks this row as auto-created by the stock-receipt flow (see
+          // migration 481) so a later status reversal / PO delete can safely
+          // clean up ONLY this row, never a manually-entered GRN that also
+          // references this po_id.
+          auto_source: 'po_receipt',
           ingredient_id, medicine_id,
           item_name: receiptPO.item_name,
           invoice_no: receiptForm.invoice_no || null,
@@ -622,20 +697,47 @@ const POTab: React.FC = () => {
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
+      // Same cleanup as the single delMut — unwind auto-created GRN/receipts
+      // and any linked intent line's ordered_qty for every row being deleted.
+      const { data: rows } = await supabase.from('purchase_orders').select('id,intent_line_id,quantity').in('id', ids)
+      for (const r of rows ?? []) {
+        await cleanupAutoReceipt(r.id)
+        if (r.intent_line_id) await unbumpIntentLine(r.intent_line_id, Number(r.quantity) || 0)
+      }
       for (let i = 0; i < ids.length; i += 50) {
         const { error } = await supabase.from('purchase_orders').delete().in('id', ids.slice(i, i + 50))
         if (error) throw error
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); setSelected(new Set()); setBulkDelOpen(false); toast.success('Deleted selected POs') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
+      qc.invalidateQueries({ queryKey: ['purchase_intent_lines_open'] }); qc.invalidateQueries({ queryKey: ['purchase_intents'] })
+      qc.invalidateQueries({ queryKey: ['po_receipts_sum'] }); qc.invalidateQueries({ queryKey: ['grns'] })
+      setSelected(new Set()); setBulkDelOpen(false); toast.success('Deleted selected POs')
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
   const bulkStatusMut = useMutation({
     mutationFn: async ({ ids, status }: { ids: string[]; status: string }) => {
+      // If moving AWAY from 'Received', clean up each row's auto-created
+      // GRN/po_receipts first — same reasoning as the single/multi-edit save
+      // paths. Rows already at a non-Received status are untouched by
+      // cleanupAutoReceipt (no matching rows to delete), so this is safe to
+      // call unconditionally for the ones that were Received.
+      if (status !== 'Received') {
+        const { data: rows } = await supabase.from('purchase_orders').select('id,material_status').in('id', ids)
+        for (const r of (rows ?? []).filter((r: any) => r.material_status === 'Received')) {
+          await cleanupAutoReceipt(r.id)
+        }
+      }
       await supabase.from('purchase_orders').update({ material_status: status }).in('id', ids)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] }); setSelected(new Set()); setBulkStatusOpen(false); toast.success('Status updated') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase_orders'] }); qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
+      qc.invalidateQueries({ queryKey: ['po_receipts_sum'] }); qc.invalidateQueries({ queryKey: ['grns'] })
+      setSelected(new Set()); setBulkStatusOpen(false); toast.success('Status updated')
+    },
     onError: (e: any) => toast.error(e.message),
   })
 

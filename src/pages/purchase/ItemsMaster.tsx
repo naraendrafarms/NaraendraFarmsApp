@@ -334,19 +334,21 @@ export const ItemsMasterPage: React.FC = () => {
 
   // ── Export Excel ─────────────────────────────────────────────────────────────
   const exportExcel = () => {
+    // Column keys MUST match TEMPLATE_HEADERS exactly (lowercase) so a
+    // freshly exported file can be re-imported without every row being
+    // silently dropped by the `r.name` lookup in importExcel.
     const rows = (items ?? []).map((i: any) => ({
-      Code: i.code ?? '',
-      Name: i.name,
-      'Short Name': i.short_name ?? '',
-      Category: i.category,
-      'Sub Type': i.sub_type ?? '',
-      Unit: i.unit,
-      'HSN Code': i.hsn_code ?? '',
-      Manufacturer: i.manufacturer ?? '',
-      'Protein %': i.protein_pct ?? '',
-      'Moisture %': i.moisture_pct ?? '',
-      'Reorder Level': i.reorder_level ?? '',
-      Status: i.is_active ? 'Active' : 'Inactive',
+      name: i.name,
+      code: i.code ?? '',
+      short_name: i.short_name ?? '',
+      category: i.category,
+      sub_type: i.sub_type ?? '',
+      unit: i.unit,
+      hsn_code: i.hsn_code ?? '',
+      manufacturer: i.manufacturer ?? '',
+      protein_pct: i.protein_pct ?? '',
+      moisture_pct: i.moisture_pct ?? '',
+      reorder_level: i.reorder_level ?? '',
     }))
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()

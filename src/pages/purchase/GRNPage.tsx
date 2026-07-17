@@ -12,19 +12,39 @@ import { registerItemAlias } from '@/lib/itemAliases'
 
 // Raw GRN input columns for the import template — only fields the user types.
 // Amounts (basic / gst / total) are computed in code on import, never imported.
+// free_qty and flock_no only apply when category = 'Chicks' — free_qty is
+// the number of free birds received (not charged), flock_no is resolved to
+// flock_id by lookup against the flocks table on import.
 const GRN_TEMPLATE_HEADERS = [
   'grn_no', 'grn_date', 'farm', 'supplier', 'category', 'item',
   'qty', 'unit', 'bags', 'bag_type', 'price_per_unit', 'gst_pct',
   'invoice_no', 'invoice_date', 'batch_no', 'expiry_date', 'vehicle_no', 'remarks',
+  'free_qty', 'flock_no',
 ]
 const GRN_TEMPLATE_EXAMPLE = [
   'GRN-20250601-001', '2025-06-01', 'Farm A', 'Vendor ABC', 'Feed Ingredient', 'Maize',
   '1000', 'kg', '20', 'Maize 50kg', '25', '0',
   'INV-001', '2025-06-01', '', '', 'AP01AB1234', '',
+  '', '',
 ]
 
 // BATCH_CATS: medicine-type categories that need batch/expiry tracking
 const BATCH_CATS = new Set(['Medicine', 'Vaccine', 'Supplement', 'Injectable'])
+
+// Feed stock is aggregated in kg everywhere — normalize MT/Quintal into kg,
+// scaling the rate inversely so amounts stay identical. Shared by the manual
+// save form and the bulk import path so neither can drift from the other.
+// Throws if unit === 'Bag' for Feed Ingredient (no fixed kg conversion).
+function normalizeFeedUnit(p: { qty: number | null; price_per_unit: number | null; unit: string | null }) {
+  if (p.unit === 'Bag') throw new Error('For Feed Ingredients use kg, MT or Quintal — "Bag" has no fixed kg conversion')
+  const unitFactor = p.unit === 'MT' ? 1000 : p.unit === 'Quintal' ? 100 : 1
+  if (unitFactor !== 1) {
+    p.qty = (p.qty ?? 0) * unitFactor
+    p.price_per_unit = p.price_per_unit != null ? p.price_per_unit / unitFactor : null
+    p.unit = 'kg'
+  }
+  return p
+}
 
 function exportCSV(filename: string, headers: string[], rows: string[][]) {
   const lines = [headers, ...rows].map(r => r.map(c => `"${(c ?? '').toString().replace(/"/g, '""')}"`).join(','))
@@ -268,17 +288,7 @@ export const GRNPage: React.FC = () => {
       if (isChick && !form.flock_id) throw new Error('Select the flock for this chick GRN')
       if (form.expiry_date && form.expiry_date < form.grn_date) throw new Error('Expiry date is before the GRN date — goods already expired at receipt?')
       const p = payload() as any
-      // Feed stock is aggregated in kg everywhere — normalize MT/Quintal at
-      // save time, scaling the rate inversely so amounts stay identical.
-      if (form.category === 'Feed Ingredient') {
-        if (form.unit === 'Bag') throw new Error('For Feed Ingredients use kg, MT or Quintal — "Bag" has no fixed kg conversion')
-        const unitFactor = form.unit === 'MT' ? 1000 : form.unit === 'Quintal' ? 100 : 1
-        if (unitFactor !== 1) {
-          p.qty = (p.qty ?? 0) * unitFactor
-          p.price_per_unit = p.price_per_unit != null ? p.price_per_unit / unitFactor : null
-          p.unit = 'kg'
-        }
-      }
+      if (form.category === 'Feed Ingredient') normalizeFeedUnit(p)
       if (editing) {
         const { error } = await supabase.from('grn').update(p).eq('id', editing.id)
         if (error) throw error
@@ -334,25 +344,55 @@ export const GRNPage: React.FC = () => {
       const farmByName = new Map((farms ?? []).map((f: any) => [f.name.toLowerCase().trim(), f.id]))
       const partyByName = new Map((parties ?? []).map((p: any) => [p.name.toLowerCase().trim(), p.id]))
       const itemByName = new Map((items ?? []).map((i: any) => [i.name.toLowerCase().trim(), i]))
+      const flockByNo = new Map((flocks ?? []).map((f: any) => [f.flock_no.toString().toLowerCase().trim(), f.id]))
 
       const get = (r: string[], name: string) => { const c = col(name); return c >= 0 ? (r[c] ?? '').toString().trim() : '' }
 
-      const inserts = dataRows.map(r => {
+      let feedSkipped = 0, chickSkipped = 0
+      const inserts: any[] = []
+      for (const r of dataRows) {
         const qty = parseFloat(get(r, 'qty')) || 0
         const rate = parseFloat(get(r, 'price_per_unit')) || 0
         const gstPct = parseFloat(get(r, 'gst_pct')) || 0
-        // Amounts computed here — never taken from the template
-        const basic = +(qty * rate).toFixed(2)
-        const gstAmt = +(basic * gstPct / 100).toFixed(2)
-        const total = +(basic + gstAmt).toFixed(2)
 
         const category = get(r, 'category') || 'Feed Ingredient'
         const itemName = get(r, 'item')
         const matchedItem = itemByName.get(itemName.toLowerCase())
         const farmName = get(r, 'farm')
         const partyName = get(r, 'supplier')
+        const unit = get(r, 'unit') || matchedItem?.unit || null
 
-        return {
+        // Chicks: flock_id is required, same as the manual form — skip the
+        // row (with a toast count) rather than insert with a null flock_id.
+        // For batch-tracked categories (medicine/vaccine/etc.) flock is
+        // optional, same as the form.
+        const flockNo = get(r, 'flock_no')
+        let flock_id: string | null = flockNo ? (flockByNo.get(flockNo.toLowerCase()) ?? null) : null
+        if (category === 'Chicks' && !flock_id) { chickSkipped++; continue }
+
+        // Feed Ingredient: mirror the manual form's payload() unit
+        // normalization exactly — reject 'Bag', convert MT/Quintal to kg
+        // with inverse rate scaling — so an imported row can't silently
+        // understate stock by 100-1000x or bypass the form's Bag block.
+        let normQty = qty, normRate = rate, normUnit = unit
+        if (category === 'Feed Ingredient') {
+          try {
+            const norm = normalizeFeedUnit({ qty, price_per_unit: rate, unit })
+            normQty = norm.qty ?? 0
+            normRate = norm.price_per_unit ?? 0
+            normUnit = norm.unit
+          } catch {
+            feedSkipped++
+            continue
+          }
+        }
+
+        // Amounts computed here — never taken from the template
+        const basic = +(normQty * normRate).toFixed(2)
+        const gstAmt = +(basic * gstPct / 100).toFixed(2)
+        const total = +(basic + gstAmt).toFixed(2)
+
+        inserts.push({
           grn_no: get(r, 'grn_no') || null,
           grn_date: get(r, 'grn_date') || today(),
           farm_id: farmByName.get(farmName.toLowerCase()) ?? null,
@@ -362,11 +402,11 @@ export const GRNPage: React.FC = () => {
           category,
           item_id: matchedItem?.id ?? null,
           item_name: itemName || null,
-          qty: qty || null,
-          unit: get(r, 'unit') || matchedItem?.unit || null,
+          qty: normQty || null,
+          unit: normUnit,
           bags: parseInt(get(r, 'bags')) || null,
           bag_type: get(r, 'bag_type') || null,
-          price_per_unit: rate || null,
+          price_per_unit: normRate || null,
           basic_amount: basic || null,
           gst_pct: gstPct || 0,
           gst_amount: gstAmt || null,
@@ -376,16 +416,29 @@ export const GRNPage: React.FC = () => {
           // every category, and a later form-edit silently erased them.
           batch_no: BATCH_CATS.has(category) ? (get(r, 'batch_no') || null) : null,
           expiry_date: BATCH_CATS.has(category) ? (get(r, 'expiry_date') || null) : null,
+          flock_id: (category === 'Chicks' || BATCH_CATS.has(category)) ? flock_id : null,
+          free_qty: category === 'Chicks' ? (parseInt(get(r, 'free_qty')) || 0) : null,
           vehicle_no: get(r, 'vehicle_no') || null,
           remarks: get(r, 'remarks') || null,
-        }
-      }).filter(g => g.grn_no && g.grn_date)
+        })
+      }
 
-      if (!inserts.length) { toast.error('Rows must have grn_no and grn_date'); return }
-      const { error } = await supabase.from('grn').insert(inserts)
+      const validInserts = inserts.filter(g => g.grn_no && g.grn_date)
+      if (!validInserts.length) {
+        if (feedSkipped || chickSkipped) {
+          toast.error(`No valid rows — ${feedSkipped} Feed Ingredient row(s) skipped (Bag unit not allowed), ${chickSkipped} Chicks row(s) skipped (flock not found)`)
+        } else {
+          toast.error('Rows must have grn_no and grn_date')
+        }
+        return
+      }
+      const { error } = await supabase.from('grn').insert(validInserts)
       if (error) throw error
       qc.invalidateQueries({ queryKey: ['grns'] })
-      toast.success(`Imported ${inserts.length} GRN(s)`)
+      let msg = `Imported ${validInserts.length} GRN(s)`
+      if (feedSkipped) msg += ` — ${feedSkipped} Feed Ingredient row(s) skipped (Bag unit not allowed)`
+      if (chickSkipped) msg += ` — ${chickSkipped} Chicks row(s) skipped (flock not found)`
+      toast.success(msg)
     } catch (err: any) {
       toast.error(err.message)
     } finally {
