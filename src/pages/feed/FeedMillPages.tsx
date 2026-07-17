@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
 import { parseFile } from '@/lib/parseFile'
 import {
-  Card, Button, Input, Modal,
+  Card, Button, Input, Modal, Select,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 , DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Edit2, Trash2, Download, Upload, ChevronDown, ChevronUp, Copy } from 'lucide-react'
@@ -53,6 +53,7 @@ type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock
 // FINISHED FEED STOCK TAB
 // ══════════════════════════════════════════════════════════════════
 const FinishedFeedStockTab: React.FC = () => {
+  const qc = useQueryClient()
   const { data: feedTypes = [] } = useQuery({
     queryKey: ['feed_types'],
     queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] }
@@ -66,6 +67,49 @@ const FinishedFeedStockTab: React.FC = () => {
     queryKey: ['feed_transfers'],
     queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('feed_type_id,quantity_kg'); return data ?? [] }
   })
+  const { data: adjustments = [] } = useQuery({
+    queryKey: ['finished_feed_adjustments'],
+    queryFn: async () => { const { data } = await supabase.from('finished_feed_adjustments').select('*, feed_types(code,name)').order('adjustment_date', { ascending: false }); return data ?? [] }
+  })
+
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
+  const [form, setForm] = useState({ feed_type_id: '', adjustment_date: today(), adjustment_type: 'Opening Stock', quantity_kg: '', rate_per_kg: '', remarks: '' })
+  const [deleteRow, setDeleteRow] = useState<any>(null)
+
+  const openNew = () => { setEditing(null); setForm({ feed_type_id: '', adjustment_date: today(), adjustment_type: 'Opening Stock', quantity_kg: '', rate_per_kg: '', remarks: '' }); setShowForm(true) }
+  const openEdit = (r: any) => {
+    setEditing(r)
+    setForm({ feed_type_id: r.feed_type_id ?? '', adjustment_date: r.adjustment_date ?? today(), adjustment_type: r.adjustment_type ?? 'Opening Stock', quantity_kg: r.quantity_kg?.toString() ?? '', rate_per_kg: r.rate_per_kg?.toString() ?? '', remarks: r.remarks ?? '' })
+    setShowForm(true)
+  }
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      if (!form.feed_type_id || !form.adjustment_date || !form.quantity_kg) throw new Error('Feed type, date and quantity are required')
+      const payload = {
+        feed_type_id: form.feed_type_id, adjustment_date: form.adjustment_date,
+        adjustment_type: form.adjustment_type, quantity_kg: parseFloat(form.quantity_kg),
+        rate_per_kg: form.rate_per_kg ? parseFloat(form.rate_per_kg) : null,
+        remarks: form.remarks || null,
+      }
+      if (editing) {
+        const { error } = await supabase.from('finished_feed_adjustments').update(payload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('finished_feed_adjustments').insert(payload)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['finished_feed_adjustments'] }); setShowForm(false); setEditing(null); toast.success('Saved') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => { const { error } = await supabase.from('finished_feed_adjustments').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['finished_feed_adjustments'] }); setDeleteRow(null); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
 
   // Group produced kg by the formula's feed_type_id
   const producedByType: Record<string, number> = {}
@@ -74,26 +118,40 @@ const FinishedFeedStockTab: React.FC = () => {
     if (!ftId) continue
     producedByType[ftId] = (producedByType[ftId] ?? 0) + Number(p.quantity_kg ?? 0)
   }
+  // Signed net adjustment (Opening Stock / Correction) per feed_type_id —
+  // separate from Production, so it doesn't skew per-formula cost/consumption
+  // reports the way a fake Production entry would.
+  const adjustedByType: Record<string, number> = {}
+  for (const a of (adjustments as any[])) {
+    adjustedByType[a.feed_type_id] = (adjustedByType[a.feed_type_id] ?? 0) + Number(a.quantity_kg ?? 0)
+  }
 
   const rows = (feedTypes as any[]).map((ft: any) => {
     const produced   = producedByType[ft.id] ?? 0
+    const adjusted   = adjustedByType[ft.id] ?? 0
     const dispatched = (dispatches  as any[]).filter((d: any) => d.feed_type_id === ft.id).reduce((s: number, d: any) => s + (d.quantity_kg ?? 0), 0)
-    const balance    = produced - dispatched
+    const balance    = produced + adjusted - dispatched
     const costPerKg  = byTypeId[ft.id] ?? 0
-    return { ...ft, produced, dispatched, balance, costPerKg, stockValue: balance * costPerKg }
-  }).filter((r: any) => r.produced > 0 || r.dispatched > 0)
+    return { ...ft, produced, adjusted, dispatched, balance, costPerKg, stockValue: balance * costPerKg }
+  }).filter((r: any) => r.produced > 0 || r.dispatched > 0 || r.adjusted !== 0)
 
   const totalProd = rows.reduce((s, r) => s + r.produced, 0)
+  const totalAdj  = rows.reduce((s, r) => s + r.adjusted, 0)
   const totalDisp = rows.reduce((s, r) => s + r.dispatched, 0)
   const totalBal  = rows.reduce((s, r) => s + r.balance, 0)
   const totalValue = rows.reduce((s, r) => s + r.stockValue, 0)
 
+  const feedTypeOptions = (feedTypes as any[]).map((ft: any) => ({ value: ft.id, label: `${ft.code} — ${ft.name}` }))
+
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="sm" icon={<Plus size={14}/>} onClick={openNew}>Add Opening Stock / Adjustment</Button>
+      </div>
       <div className="grid grid-cols-3 gap-4">
         <Card className="!p-4"><p className="text-xs text-gray-500">Total Produced</p><p className="text-xl font-bold text-brand-700 mt-1">{(totalProd/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalProd.toLocaleString('en-IN')} kg</p></Card>
         <Card className="!p-4"><p className="text-xs text-gray-500">Total Dispatched</p><p className="text-xl font-bold text-blue-700 mt-1">{(totalDisp/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalDisp.toLocaleString('en-IN')} kg</p></Card>
-        <Card className="!p-4"><p className="text-xs text-gray-500">Balance in Stock</p><p className={`text-xl font-bold mt-1 ${totalBal < 0 ? 'text-red-600' : 'text-green-700'}`}>{(totalBal/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalBal.toLocaleString('en-IN')} kg</p></Card>
+        <Card className="!p-4"><p className="text-xs text-gray-500">Balance in Stock</p><p className={`text-xl font-bold mt-1 ${totalBal < 0 ? 'text-red-600' : 'text-green-700'}`}>{(totalBal/1000).toFixed(2)} MT</p><p className="text-xs text-gray-400">{totalBal.toLocaleString('en-IN')} kg{totalAdj !== 0 ? ` (incl. ${totalAdj.toLocaleString('en-IN')} kg opening/adj.)` : ''}</p></Card>
       </div>
       <Card className="!p-4"><p className="text-xs text-gray-500">Total Stock Value</p><p className="text-xl font-bold text-purple-700 mt-1">{inr(totalValue)}</p></Card>
       <Card padding={false}>
@@ -101,6 +159,7 @@ const FinishedFeedStockTab: React.FC = () => {
           <thead><tr>
             <Th>Feed Type</Th>
             <Th right>Produced (kg)</Th>
+            <Th right>Opening/Adj. (kg)</Th>
             <Th right>Dispatched to Farms (kg)</Th>
             <Th right>Balance (kg)</Th>
             <Th right>Cost/kg</Th>
@@ -111,6 +170,7 @@ const FinishedFeedStockTab: React.FC = () => {
               <tr key={r.id} className="hover:bg-gray-50">
                 <Td><Badge color="blue">{r.code}</Badge><span className="text-sm ml-2">{r.name}</span></Td>
                 <Td right>{r.produced.toLocaleString('en-IN')}</Td>
+                <Td right className={r.adjusted < 0 ? 'text-red-600' : 'text-gray-500'}>{r.adjusted !== 0 ? r.adjusted.toLocaleString('en-IN') : '—'}</Td>
                 <Td right className="text-blue-600">{r.dispatched.toLocaleString('en-IN')}</Td>
                 <Td right className={r.balance < 0 ? 'text-red-600 font-semibold' : 'text-green-700 font-semibold'}>{r.balance.toLocaleString('en-IN')}</Td>
                 <Td right>{r.costPerKg > 0 ? inr(r.costPerKg) : '—'}</Td>
@@ -122,6 +182,7 @@ const FinishedFeedStockTab: React.FC = () => {
             <tfoot><tr className="bg-gray-50 font-semibold">
               <Td>TOTAL</Td>
               <Td right>{totalProd.toLocaleString('en-IN')}</Td>
+              <Td right>{totalAdj !== 0 ? totalAdj.toLocaleString('en-IN') : '—'}</Td>
               <Td right className="text-blue-600">{totalDisp.toLocaleString('en-IN')}</Td>
               <Td right className={totalBal < 0 ? 'text-red-600' : 'text-green-700'}>{totalBal.toLocaleString('en-IN')}</Td>
               <Td right></Td>
@@ -131,6 +192,59 @@ const FinishedFeedStockTab: React.FC = () => {
         </Table>
         {rows.length === 0 && <EmptyState title="No production records yet" />}
       </Card>
+
+      {(adjustments as any[]).length > 0 && (
+        <Card padding={false}>
+          <div className="px-4 pt-3 pb-1"><p className="font-semibold text-sm text-gray-700">Opening Stock / Adjustment Entries</p></div>
+          <Table>
+            <thead><tr><Th>Date</Th><Th>Feed Type</Th><Th>Type</Th><Th right>Qty (kg)</Th><Th right>Rate/kg</Th><Th>Remarks</Th><Th></Th></tr></thead>
+            <tbody>
+              {(adjustments as any[]).map((a: any) => (
+                <tr key={a.id} className="hover:bg-gray-50">
+                  <Td className="text-xs">{fmtDate(a.adjustment_date)}</Td>
+                  <Td className="text-sm">{a.feed_types?.code} — {a.feed_types?.name}</Td>
+                  <Td className="text-xs">{a.adjustment_type}</Td>
+                  <Td right className={a.quantity_kg < 0 ? 'text-red-600' : ''}>{Number(a.quantity_kg).toLocaleString('en-IN')}</Td>
+                  <Td right className="text-xs">{a.rate_per_kg ? inr(a.rate_per_kg) : '—'}</Td>
+                  <Td className="text-xs text-gray-400">{a.remarks}</Td>
+                  <Td>
+                    <div className="flex gap-1 justify-end">
+                      <button onClick={() => openEdit(a)} className="p-1 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                      <button onClick={() => setDeleteRow(a)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card>
+      )}
+
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }} title={editing ? 'Edit Entry' : 'Add Opening Stock / Adjustment'} size="md"
+        footer={<><Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
+          <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
+        <div className="space-y-4">
+          <Select label="Feed Type" required placeholder="— Select —" options={feedTypeOptions}
+            value={form.feed_type_id} onChange={e => setForm(f => ({ ...f, feed_type_id: e.target.value }))} />
+          <div className="grid grid-cols-2 gap-3">
+            <DateInput label="Date" required value={form.adjustment_date} onChange={e => setForm(f => ({ ...f, adjustment_date: e.target.value }))} />
+            <Select label="Type" options={[{ value: 'Opening Stock', label: 'Opening Stock' }, { value: 'Correction', label: 'Correction' }]}
+              value={form.adjustment_type} onChange={e => setForm(f => ({ ...f, adjustment_type: e.target.value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Quantity (kg)" required type="number" step="0.001" value={form.quantity_kg}
+              onChange={e => setForm(f => ({ ...f, quantity_kg: e.target.value }))} hint="Negative to reduce stock" />
+            <Input label="Rate/kg" type="number" step="0.01" value={form.rate_per_kg} onChange={e => setForm(f => ({ ...f, rate_per_kg: e.target.value }))} />
+          </div>
+          <Input label="Remarks" value={form.remarks} onChange={e => setForm(f => ({ ...f, remarks: e.target.value }))} />
+        </div>
+      </Modal>
+
+      <Modal open={!!deleteRow} onClose={() => setDeleteRow(null)} title="Delete Entry"
+        footer={<><Button variant="secondary" onClick={() => setDeleteRow(null)}>Cancel</Button>
+          <Button variant="danger" loading={delMut.isPending} onClick={() => delMut.mutate(deleteRow.id)}>Delete</Button></>}>
+        <p className="text-sm text-gray-600">Delete this opening stock / adjustment entry?</p>
+      </Modal>
     </div>
   )
 }
