@@ -10,6 +10,7 @@ import {
 import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download, Upload, FileDown, CalendarClock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
 
 const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -58,7 +59,7 @@ const addDays = (dateStr: string, days: number) => {
 const normVaccineName = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
 const empty = () => ({
-  flock_id: '', shed_id: '', farm_id: '',
+  flock_id: '', shed_id: '', farm_id: '', medicine_id: '',
   vaccine_date: today(), vaccine_name: '', dose_no: '1',
   route: '', quantity: '', unit: '', cost: '',
   next_due_date: '', administered_by: '', remarks: ''
@@ -79,6 +80,7 @@ export const VaccinationRecordsPage: React.FC = () => {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const { options: medOptions, medicines } = useMedicineOptionsWithAliases()
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all'],
@@ -155,7 +157,7 @@ export const VaccinationRecordsPage: React.FC = () => {
     if (row) {
       setEditing(row)
       setForm({
-        flock_id: row.flock_id ?? '', shed_id: row.shed_id ?? '', farm_id: row.farm_id ?? '',
+        flock_id: row.flock_id ?? '', shed_id: row.shed_id ?? '', farm_id: row.farm_id ?? '', medicine_id: row.medicine_id ?? '',
         vaccine_date: row.vaccine_date ?? today(), vaccine_name: row.vaccine_name ?? '',
         dose_no: row.dose_no?.toString() ?? '1', route: row.route ?? '',
         quantity: row.quantity?.toString() ?? '', unit: row.unit ?? '',
@@ -186,7 +188,7 @@ export const VaccinationRecordsPage: React.FC = () => {
     mutationFn: async () => {
       if (!form.flock_id || !form.vaccine_date || !form.vaccine_name) throw new Error('Flock, date and vaccine name required')
       const payload = {
-        flock_id: form.flock_id, shed_id: form.shed_id || null, farm_id: form.farm_id || null,
+        flock_id: form.flock_id, shed_id: form.shed_id || null, farm_id: form.farm_id || null, medicine_id: form.medicine_id || null,
         vaccine_date: form.vaccine_date, vaccine_name: form.vaccine_name.trim(),
         dose_no: parseInt(form.dose_no) || 1, route: form.route || null,
         quantity: parseFloat(form.quantity) || null, unit: form.unit || null,
@@ -360,6 +362,11 @@ export const VaccinationRecordsPage: React.FC = () => {
               <SearchableSelect label="Site" placeholder="— All Sites —" options={farmOptions} value={form.farm_id} onChange={v => { s('farm_id', v); s('shed_id', '') }} />
               <SearchableSelect label="Shed (optional)" placeholder="— All Sheds —" options={shedOptions} value={form.shed_id} onChange={v => s('shed_id', v)} />
             </FormRow>
+            <SearchableSelect label="Link to Medicines Master (optional)" placeholder="Search medicine/vaccine…" options={medOptions}
+              value={form.medicine_id} onChange={v => {
+                const med = (medicines as any[]).find(m => m.id === v)
+                setForm(f => ({ ...f, medicine_id: v, vaccine_name: med ? med.name : f.vaccine_name, unit: med?.unit ?? f.unit }))
+              }} />
             <FormRow>
               <Input label="Vaccine Name" required value={form.vaccine_name} onChange={e => s('vaccine_name', e.target.value)} placeholder="e.g. Marek's, ND LaSota…" />
               <Input label="Dose No." type="number" value={form.dose_no} onChange={e => s('dose_no', e.target.value)} />

@@ -13,6 +13,7 @@ import { ifscError, accountNoError } from '@/lib/validators'
 import { parseGstin, GST_TYPE_OPTIONS, GST_RATE_OPTIONS } from '@/lib/gst'
 import { useConfigValues } from '@/hooks/useConfigOptions'
 import { printReport } from '@/lib/invoicePrint'
+import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -1697,7 +1698,7 @@ export const FeedTypesMaster: React.FC = () => {
 // ══════════════════════════════════════════════════════════════════
 // VACCINATION SCHEDULE MASTER
 // ══════════════════════════════════════════════════════════════════
-const EMPTY_VACC = { sno: '', age_label: '', vaccine_name: '', dose: '', route: '', product: '', notes: '' }
+const EMPTY_VACC = { sno: '', age_label: '', vaccine_name: '', dose: '', route: '', product: '', notes: '', medicine_id: '' }
 const ROUTES = ['S/C','I/M','I/O','D/W','N/D','W/W','Spray','Eye Drop','Drinking Water']
 const routeColor: Record<string,any> = { 'S/C':'blue','I/M':'red','I/O':'green','D/W':'yellow','N/D':'orange','W/W':'gray','Spray':'purple','Eye Drop':'teal','Drinking Water':'blue' }
 
@@ -1715,6 +1716,7 @@ export const VaccinationSchedulePage: React.FC = () => {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState<any>(EMPTY_VACC)
+  const { options: medOptions, medicines: medList } = useMedicineOptionsWithAliases()
   const [delId, setDelId] = useState<string|null>(null)
   const [bulkDel, setBulkDel] = useState(false)
   const [clearAll, setClearAll] = useState(false)
@@ -1729,7 +1731,7 @@ export const VaccinationSchedulePage: React.FC = () => {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      const p = { sno: form.sno ? Number(form.sno) : null, age_label: form.age_label, vaccine_name: form.vaccine_name, dose: form.dose||null, route: form.route||null, product: form.product||null, notes: form.notes||null }
+      const p = { sno: form.sno ? Number(form.sno) : null, age_label: form.age_label, vaccine_name: form.vaccine_name, dose: form.dose||null, route: form.route||null, product: form.product||null, notes: form.notes||null, medicine_id: form.medicine_id||null }
       if (editing) await supabase.from('vaccination_schedule').update(p).eq('id', editing.id)
       else await supabase.from('vaccination_schedule').insert(p)
     },
@@ -1880,6 +1882,11 @@ export const VaccinationSchedulePage: React.FC = () => {
             <Input label="S.No" type="number" value={form.sno} onChange={f('sno')} />
             <Input label="Age Label *" value={form.age_label} onChange={f('age_label')} placeholder="e.g. Day 1, Week 4" required />
           </div>
+          <SearchableSelect label="Link to Medicines Master (optional)" placeholder="Search medicine/vaccine…" options={medOptions}
+            value={form.medicine_id} onChange={v => {
+              const med = (medList as any[]).find(m => m.id === v)
+              setForm((prev: any) => ({ ...prev, medicine_id: v, vaccine_name: med ? med.name : prev.vaccine_name }))
+            }} />
           <Input label="Vaccine / Treatment Name *" value={form.vaccine_name} onChange={f('vaccine_name')} required />
           <div className="grid grid-cols-2 gap-3">
             <Input label="Dose" value={form.dose} onChange={f('dose')} placeholder="e.g. 1 drop" />
