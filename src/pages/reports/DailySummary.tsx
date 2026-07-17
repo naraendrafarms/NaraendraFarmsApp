@@ -118,33 +118,42 @@ export const DailySummaryPage: React.FC = () => {
     queryKey: ['attendance_for_manpower', date],
     queryFn: async () => { const { data } = await supabase.from('attendance_daily').select('employee_id,farm_id,status').eq('attendance_date', date); return data ?? [] }
   })
+  // Real designation list + display order comes from config_options, not a
+  // guessed set of buckets — whatever designations actually exist in the
+  // app show up here, in the order the app's own dropdown uses.
+  const { data: designationOptions } = useQuery({
+    queryKey: ['designation_options_for_manpower'],
+    queryFn: async () => { const { data } = await supabase.from('config_options').select('value,sort_order').eq('grp', 'designation').eq('is_active', true).order('sort_order'); return data ?? [] }
+  })
+
+  const designationOrder = React.useMemo(() => {
+    const m = new Map<string, number>()
+    ;(designationOptions ?? []).forEach((d: any, i: number) => m.set(d.value, d.sort_order ?? i))
+    return m
+  }, [designationOptions])
 
   const manpowerBySite = React.useMemo(() => {
     const attByEmp = new Map((attendance ?? []).map((a: any) => [a.employee_id, a.status]))
-    const bySite: Record<string, { inch: number; superP: number; superH: number; workerP: number; workerH: number; secP: number; secH: number }> = {}
+    const bySite: Record<string, Record<string, { p: number; h: number }>> = {}
     for (const e of (employees ?? [])) {
       const siteId = e.farm_id ?? '__none__'
-      if (!bySite[siteId]) bySite[siteId] = { inch: 0, superP: 0, superH: 0, workerP: 0, workerH: 0, secP: 0, secH: 0 }
-      const d = (e.designation ?? '').toLowerCase()
+      const designation = e.designation || 'Unspecified'
       const st = attByEmp.get(e.id)
       const isP = st === 'P' || st === 'OT'
       const isH = st === 'H'
-      if (d.includes('incharge')) { if (isP) bySite[siteId].inch++ }
-      else if (d.includes('supervisor')) { if (isP) bySite[siteId].superP++; if (isH) bySite[siteId].superH++ }
-      else if (d.includes('security')) { if (isP) bySite[siteId].secP++; if (isH) bySite[siteId].secH++ }
-      else if (d.includes('worker') || d.includes('labour') || d.includes('labor')) { if (isP) bySite[siteId].workerP++; if (isH) bySite[siteId].workerH++ }
+      const site = (bySite[siteId] ??= {})
+      const d = (site[designation] ??= { p: 0, h: 0 })
+      if (isP) d.p++
+      if (isH) d.h++
     }
     return bySite
   }, [employees, attendance])
 
   const manpowerLines = (siteId: string) => {
-    const m = manpowerBySite[siteId] ?? { inch: 0, superP: 0, superH: 0, workerP: 0, workerH: 0, secP: 0, secH: 0 }
-    return [
-      ` Inch.${pad2(m.inch)}`,
-      `Super.${m.superP}+${m.superH}`,
-      `Worker.${m.workerP}+${m.workerH}`,
-      `Security ${m.secP}+${m.secH}`,
-    ]
+    const site = manpowerBySite[siteId] ?? {}
+    const designations = Object.keys(site).sort((a, b) => (designationOrder.get(a) ?? 999) - (designationOrder.get(b) ?? 999) || a.localeCompare(b))
+    if (!designations.length) return ['(no employees mapped to this site)']
+    return designations.map(d => `${d} — P:${site[d].p} H:${site[d].h}`)
   }
 
   // A flock can have multiple daily_records rows for one date — one per shed.
@@ -246,14 +255,31 @@ export const DailySummaryPage: React.FC = () => {
     lines.push(`Production Std.${std?.hen_week_pct != null ? std.hen_week_pct.toFixed(0) + '%' : '—'}`)
     lines.push(`Eggs wt. Act.—`)  // no egg-weight tracking exists yet in the app
     lines.push(`Eggs wt. Std.—`)
+    // Group by the real medicines_master.type value instead of assuming a
+    // binary "sanitizer or not" split — whatever types are actually in use
+    // (medicine, vaccine, sanitizer, supplement, disinfectant, ...) each get
+    // their own labeled section, so nothing gets silently mislabeled.
+    const medsForFlock = medByFlock[f.id] ?? []
+    const typeGroups: Record<string, any[]> = {}
+    for (const m of medsForFlock) {
+      const type = m.medicines_master?.type || 'other'
+      ;(typeGroups[type] ??= []).push(m)
+    }
+    const sectionLabel = (type: string) =>
+      type === 'sanitizer' ? 'Water sanitation'
+      : type === 'medicine' || type === 'vaccine' ? 'MEDICINE & VACCINE'
+      : type.charAt(0).toUpperCase() + type.slice(1)
+    const medVaccineItems = [...(typeGroups['medicine'] ?? []), ...(typeGroups['vaccine'] ?? [])]
+    const otherTypes = Object.keys(typeGroups).filter(t => t !== 'medicine' && t !== 'vaccine')
+
     lines.push('')
-    lines.push(`  MEDICINE & VACCINE`)
-    const meds = (medByFlock[f.id] ?? []).filter((m: any) => m.medicines_master?.type !== 'sanitizer')
-    lines.push(...numberedBlock(meds.map((m: any) => `${m.medicines_master?.name ?? '—'}=${m.quantity ?? ''}${m.unit ?? ''}`), 5))
-    lines.push('')
-    lines.push(`        Water sanitation`)
-    const sanitizers = (medByFlock[f.id] ?? []).filter((m: any) => m.medicines_master?.type === 'sanitizer')
-    lines.push(...numberedBlock(sanitizers.map((m: any) => `${m.medicines_master?.name ?? '—'}=${m.quantity ?? ''}${m.unit ?? ''}`), 3))
+    lines.push(`  ${sectionLabel('medicine')}`)
+    lines.push(...numberedBlock(medVaccineItems.map((m: any) => `${m.medicines_master?.name ?? '—'}=${m.quantity ?? ''}${m.unit ?? ''}`), 5))
+    for (const type of otherTypes) {
+      lines.push('')
+      lines.push(`        ${sectionLabel(type)}`)
+      lines.push(...numberedBlock(typeGroups[type].map((m: any) => `${m.medicines_master?.name ?? '—'}=${m.quantity ?? ''}${m.unit ?? ''}`), 3))
+    }
     lines.push('')
     lines.push(`             SPRAY`)
     const sprays = sprayByFlock[f.id] ?? []
