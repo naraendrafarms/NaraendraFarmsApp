@@ -628,10 +628,248 @@ const QuarterlyBudgetTab: React.FC = () => {
   )
 }
 
+// ── CA Analysis of Financial Result ──────────────────────────────────────────
+// Matches the owner's real CA statement layout exactly (Turnover -> Cost of
+// Production -> Gross Profit -> Indirect Expenses -> Net Profit -> Working
+// Capital -> Ratios). Whatever has a clean, honest single data source in the
+// app is computed automatically; everything the app genuinely has no record
+// of (RM Consumed split, Other Direct/Indirect Expenses, Payment to
+// Promoters, Depreciation, Net Worth, Inventories valuation, Loans &
+// Advances, Other Current Assets, Current Liabilities-Expenses) is a plain
+// manual field, not a guess.
+
+const SALE_CATEGORIES = ['he_sale', 'je_sale', 'te_sale', 'be_sale', 'bird_sale', 'litter_sale', 'bag_sale']
+const OTHER_INCOME_CATEGORIES = ['sales_collection', 'other']
+// Designations treated as direct farm labour (Direct Wages) vs office/admin
+// (Employee Benefits) — same real config_options designation values used
+// elsewhere in the app (see Daily Farm Summary manpower section).
+const OFFICE_DESIGNATIONS = ['Administration Head', 'Operations Head', 'Manager Finance', 'Administrative Manager', 'Accountant']
+
+const CAStatementTab: React.FC = () => {
+  const qc = useQueryClient()
+  const currentYear = new Date(todayIST()).getFullYear()
+  const [periodStart, setPeriodStart] = useState(`${currentYear}-04-01`)
+  const [periodEnd, setPeriodEnd] = useState(todayIST())
+  const [title, setTitle] = useState('')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const { data: savedStatements } = useQuery({
+    queryKey: ['ca_financial_statements'],
+    queryFn: async () => { const { data, error } = await supabase.from('ca_financial_statements').select('*').order('created_at', { ascending: false }); if (error) toast.error(error.message); return data ?? [] }
+  })
+
+  const { data: cashBookTxns } = useQuery({
+    queryKey: ['ca_cash_book', periodStart, periodEnd],
+    queryFn: async () => { const { data } = await supabase.from('cash_book').select('category,amount_in,amount_out').gte('txn_date', periodStart).lte('txn_date', periodEnd); return data ?? [] }
+  })
+  const { data: electricityBills } = useQuery({
+    queryKey: ['ca_electricity', periodStart, periodEnd],
+    queryFn: async () => { const { data } = await supabase.from('electricity_bills').select('amount,bill_month').gte('bill_month', periodStart).lte('bill_month', periodEnd); return data ?? [] }
+  })
+  const { data: salaryRows } = useQuery({
+    queryKey: ['ca_salary', periodStart, periodEnd],
+    queryFn: async () => {
+      const { data } = await supabase.from('salary_monthly').select('net_salary,month,employees(designation)').gte('month', periodStart).lte('month', periodEnd)
+      return data ?? []
+    }
+  })
+  const { data: eggProduction } = useQuery({
+    queryKey: ['ca_production_qty', periodStart, periodEnd],
+    queryFn: async () => { const { data } = await supabase.from('daily_records').select('total_eggs').gte('record_date', periodStart).lte('record_date', periodEnd); return data ?? [] }
+  })
+  const { data: partyBalances } = useQuery({
+    queryKey: ['ca_party_ledger', periodEnd],
+    queryFn: async () => {
+      const { data } = await supabase.from('v_party_ledger').select('party_id,debit,credit,parties(type)').lte('txn_date', periodEnd)
+      return data ?? []
+    }
+  })
+  const { data: cashBankBalance } = useQuery({
+    queryKey: ['ca_cash_bank_balance', periodEnd],
+    queryFn: async () => {
+      const [{ data: cb }, { data: bt }] = await Promise.all([
+        supabase.from('cash_book').select('amount_in,amount_out').lte('txn_date', periodEnd),
+        supabase.from('bank_transactions').select('txn_type,amount').lte('txn_date', periodEnd),
+      ])
+      const cashBal = (cb ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
+      const bankBal = (bt ?? []).reduce((s: number, t: any) => s + (t.txn_type === 'Credit' ? (t.amount ?? 0) : -(t.amount ?? 0)), 0)
+      return cashBal + bankBal
+    }
+  })
+
+  const productSales = useMemo(() => (cashBookTxns ?? []).filter((t: any) => SALE_CATEGORIES.includes(t.category)).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [cashBookTxns])
+  const otherIncome = useMemo(() => (cashBookTxns ?? []).filter((t: any) => OTHER_INCOME_CATEGORIES.includes(t.category)).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [cashBookTxns])
+  const electricity = useMemo(() => (electricityBills ?? []).reduce((s: number, b: any) => s + (b.amount ?? 0), 0), [electricityBills])
+  const directWages = useMemo(() => (salaryRows ?? []).filter((r: any) => !OFFICE_DESIGNATIONS.includes(r.employees?.designation)).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0), [salaryRows])
+  const employeeBenefits = useMemo(() => (salaryRows ?? []).filter((r: any) => OFFICE_DESIGNATIONS.includes(r.employees?.designation)).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0), [salaryRows])
+  const totalProductionQty = useMemo(() => (eggProduction ?? []).reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0), [eggProduction])
+  const sundryDebtors = useMemo(() => {
+    const byParty: Record<string, number> = {}
+    for (const r of (partyBalances ?? []) as any[]) {
+      if (!['buyer', 'both'].includes(r.parties?.type)) continue
+      byParty[r.party_id] = (byParty[r.party_id] ?? 0) + (r.debit ?? 0) - (r.credit ?? 0)
+    }
+    return Object.values(byParty).filter(v => v > 0).reduce((s, v) => s + v, 0)
+  }, [partyBalances])
+  const creditorsGoods = useMemo(() => {
+    const byParty: Record<string, number> = {}
+    for (const r of (partyBalances ?? []) as any[]) {
+      if (!['supplier', 'both'].includes(r.parties?.type)) continue
+      byParty[r.party_id] = (byParty[r.party_id] ?? 0) + (r.credit ?? 0) - (r.debit ?? 0)
+    }
+    return Object.values(byParty).filter(v => v > 0).reduce((s, v) => s + v, 0)
+  }, [partyBalances])
+
+  // Manual-entry fields — no clean single data source exists for these yet.
+  const [manual, setManual] = useState({
+    rmConsumed: '', otherDirectExpenses: '', paymentToPromoters: '', otherIndirectExpenses: '', depreciation: '',
+    netWorth: '', inventories: '', loansAdvances: '', otherCurrentAssets: '', currentLiabilitiesExpenses: '',
+  })
+  const setM = (k: keyof typeof manual, v: string) => setManual(m => ({ ...m, [k]: v }))
+  const num = (v: string) => parseFloat(v) || 0
+
+  const totalTurnover = productSales + otherIncome
+  const totalCOP = num(manual.rmConsumed) + directWages + electricity + num(manual.otherDirectExpenses)
+  const grossProfit = totalTurnover - totalCOP
+  const totalIndirect = employeeBenefits + num(manual.paymentToPromoters) + num(manual.otherIndirectExpenses) + num(manual.depreciation)
+  const netProfit = grossProfit - totalIndirect
+  const avgSalesPrice = totalProductionQty > 0 ? productSales / totalProductionQty : 0
+  const totalCurrentAssets = num(manual.inventories) + num(manual.loansAdvances) + sundryDebtors + (cashBankBalance ?? 0) + num(manual.otherCurrentAssets)
+  const totalCurrentLiabilities = creditorsGoods + num(manual.currentLiabilitiesExpenses)
+  const workingCapital = totalCurrentAssets - totalCurrentLiabilities
+  const gpRatio = totalTurnover > 0 ? grossProfit / totalTurnover : 0
+  const npRatio = totalTurnover > 0 ? netProfit / totalTurnover : 0
+  const currentRatio = totalCurrentLiabilities > 0 ? totalCurrentAssets / totalCurrentLiabilities : 0
+  const quickRatio = totalCurrentLiabilities > 0 ? (totalCurrentAssets - num(manual.inventories)) / totalCurrentLiabilities : 0
+  const debtorsTurnoverRatio = totalTurnover > 0 ? sundryDebtors / totalTurnover : 0
+  const creditorsTurnoverRatio = totalTurnover > 0 ? creditorsGoods / totalTurnover : 0
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      if (!title.trim()) throw new Error('Title required')
+      const { error } = await supabase.from('ca_financial_statements').insert({
+        title, period_start: periodStart, period_end: periodEnd,
+        product_sales: productSales, other_income: otherIncome,
+        rm_consumed: num(manual.rmConsumed), direct_wages: directWages, electricity, other_direct_expenses: num(manual.otherDirectExpenses),
+        employee_benefits: employeeBenefits, payment_to_promoters: num(manual.paymentToPromoters), other_indirect_expenses: num(manual.otherIndirectExpenses), depreciation: num(manual.depreciation),
+        total_production_qty: totalProductionQty,
+        net_worth: num(manual.netWorth), inventories: num(manual.inventories), loans_advances: num(manual.loansAdvances),
+        sundry_debtors: sundryDebtors, cash_bank: cashBankBalance ?? 0, other_current_assets: num(manual.otherCurrentAssets),
+        current_liabilities_goods: creditorsGoods, current_liabilities_expenses: num(manual.currentLiabilitiesExpenses),
+      })
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Statement saved'); qc.invalidateQueries({ queryKey: ['ca_financial_statements'] }) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => { const { error } = await supabase.from('ca_financial_statements').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({ queryKey: ['ca_financial_statements'] }); setSelectedId(null) },
+  })
+
+  const selected = (savedStatements ?? []).find((s: any) => s.id === selectedId)
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <SectionHeader title="Analysis of Financial Result — same layout as your CA's statement" />
+        <FormRow cols={3}>
+          <Input label="Title" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. FY 25-26" />
+          <DateInput label="Period Start" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
+          <DateInput label="Period End" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
+        </FormRow>
+
+        <div className="overflow-x-auto mt-3">
+          <Table>
+            <thead><tr><Th>Particulars</Th><Th right>Amount</Th><Th>Source</Th></tr></thead>
+            <tbody>
+              <tr><Td className="font-semibold" colSpan={3}>1. TURNOVER</Td></tr>
+              <tr><Td>Product Sales</Td><Td right>{inr(productSales)}</Td><Td className="text-xs text-gray-400">Cash Book (sale categories)</Td></tr>
+              <tr><Td>Other Income</Td><Td right>{inr(otherIncome)}</Td><Td className="text-xs text-gray-400">Cash Book (other categories)</Td></tr>
+              <tr><Td className="font-semibold">Total Turnover</Td><Td right className="font-semibold">{inr(totalTurnover)}</Td><Td /></tr>
+
+              <tr><Td className="font-semibold" colSpan={3}>2. COST OF PRODUCTION</Td></tr>
+              <tr><Td>RM Consumed</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.rmConsumed} onChange={e => setM('rmConsumed', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — no dedicated source yet</Td></tr>
+              <tr><Td>Direct Wages</Td><Td right>{inr(directWages)}</Td><Td className="text-xs text-gray-400">Salary (site/operational designations)</Td></tr>
+              <tr><Td>Electricity</Td><Td right>{inr(electricity)}</Td><Td className="text-xs text-gray-400">Electricity Bills</Td></tr>
+              <tr><Td>Other Direct Expenses</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherDirectExpenses} onChange={e => setM('otherDirectExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
+              <tr><Td className="font-semibold">Total Cost of Production</Td><Td right className="font-semibold">{inr(totalCOP)}</Td><Td /></tr>
+
+              <tr><Td className="font-semibold">3. Gross Profit [1-2]</Td><Td right className="font-semibold">{inr(grossProfit)}</Td><Td /></tr>
+
+              <tr><Td className="font-semibold" colSpan={3}>4. INDIRECT EXPENSES</Td></tr>
+              <tr><Td>Employee Benefits</Td><Td right>{inr(employeeBenefits)}</Td><Td className="text-xs text-gray-400">Salary (office/admin designations)</Td></tr>
+              <tr><Td>Payment to Promoters</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.paymentToPromoters} onChange={e => setM('paymentToPromoters', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
+              <tr><Td>Other Indirect Expenses</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherIndirectExpenses} onChange={e => setM('otherIndirectExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
+              <tr><Td>Depreciation</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.depreciation} onChange={e => setM('depreciation', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — no fixed asset register yet</Td></tr>
+              <tr><Td className="font-semibold">Total Indirect Expenses</Td><Td right className="font-semibold">{inr(totalIndirect)}</Td><Td /></tr>
+
+              <tr><Td className="font-semibold">5. Net Profit [3-4]</Td><Td right className={`font-semibold ${netProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>{inr(netProfit)}</Td><Td /></tr>
+
+              <tr><Td className="font-semibold" colSpan={3}>6. QUANTITATIVE INFORMATION</Td></tr>
+              <tr><Td>Total Production (Eggs)</Td><Td right>{totalProductionQty.toLocaleString('en-IN')}</Td><Td className="text-xs text-gray-400">Daily Records</Td></tr>
+              <tr><Td>Average Sales Price (₹/egg)</Td><Td right>{avgSalesPrice.toFixed(2)}</Td><Td className="text-xs text-gray-400">Product Sales ÷ Qty</Td></tr>
+
+              <tr><Td>Net Worth</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.netWorth} onChange={e => setM('netWorth', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — no equity ledger yet</Td></tr>
+
+              <tr><Td className="font-semibold" colSpan={3}>WORKING CAPITAL</Td></tr>
+              <tr><Td>Inventories</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.inventories} onChange={e => setM('inventories', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — stock valuation not built yet</Td></tr>
+              <tr><Td>Loans &amp; Advances</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.loansAdvances} onChange={e => setM('loansAdvances', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
+              <tr><Td>Sundry Debtors</Td><Td right>{inr(sundryDebtors)}</Td><Td className="text-xs text-gray-400">Party Ledger (buyer balances)</Td></tr>
+              <tr><Td>Cash &amp; Bank</Td><Td right>{inr(cashBankBalance ?? 0)}</Td><Td className="text-xs text-gray-400">Cash Book + Bank Ledger</Td></tr>
+              <tr><Td>Other Current Assets</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherCurrentAssets} onChange={e => setM('otherCurrentAssets', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
+              <tr><Td className="font-semibold">Total Current Assets</Td><Td right className="font-semibold">{inr(totalCurrentAssets)}</Td><Td /></tr>
+              <tr><Td>Current Liabilities (Goods)</Td><Td right>{inr(creditorsGoods)}</Td><Td className="text-xs text-gray-400">Party Ledger (supplier balances)</Td></tr>
+              <tr><Td>Current Liabilities (Expenses)</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.currentLiabilitiesExpenses} onChange={e => setM('currentLiabilitiesExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
+              <tr><Td className="font-semibold">Total Current Liabilities</Td><Td right className="font-semibold">{inr(totalCurrentLiabilities)}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Working Capital [CA-CL]</Td><Td right className="font-semibold">{inr(workingCapital)}</Td><Td /></tr>
+
+              <tr><Td className="font-semibold" colSpan={3}>RATIOS</Td></tr>
+              <tr><Td>Gross Profit Ratio</Td><Td right>{(gpRatio * 100).toFixed(2)}%</Td><Td /></tr>
+              <tr><Td>Net Profit Ratio</Td><Td right>{(npRatio * 100).toFixed(2)}%</Td><Td /></tr>
+              <tr><Td>Current Ratio</Td><Td right>{currentRatio.toFixed(2)}</Td><Td /></tr>
+              <tr><Td>Quick Ratio</Td><Td right>{quickRatio.toFixed(2)}</Td><Td /></tr>
+              <tr><Td>Debtors Turnover Ratio</Td><Td right>{debtorsTurnoverRatio.toFixed(4)}</Td><Td /></tr>
+              <tr><Td>Creditors Turnover Ratio</Td><Td right>{creditorsTurnoverRatio.toFixed(4)}</Td><Td /></tr>
+            </tbody>
+          </Table>
+        </div>
+        <div className="mt-3"><Button icon={<Save size={14} />} onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>Save Statement</Button></div>
+      </Card>
+
+      <Card>
+        <SectionHeader title="Saved Statements" />
+        {!savedStatements?.length ? <EmptyState title="No statements saved yet" /> : (
+          <Table>
+            <thead><tr><Th>Title</Th><Th>Period</Th><Th>Status</Th><Th right>Net Profit</Th><Th></Th></tr></thead>
+            <tbody>
+              {savedStatements.map((s: any) => (
+                <tr key={s.id} className="cursor-pointer hover:bg-gray-50" onClick={() => setSelectedId(s.id === selectedId ? null : s.id)}>
+                  <Td>{s.title}</Td>
+                  <Td>{s.period_start} to {s.period_end}</Td>
+                  <Td>{s.status}</Td>
+                  <Td right>{inr((s.product_sales + s.other_income) - (s.rm_consumed + s.direct_wages + s.electricity + s.other_direct_expenses) - (s.employee_benefits + s.payment_to_promoters + s.other_indirect_expenses + s.depreciation))}</Td>
+                  <Td><button onClick={e => { e.stopPropagation(); deleteMut.mutate(s.id) }}><Trash2 size={14} className="text-red-500" /></button></Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+        {selected && (
+          <div className="mt-3 text-sm text-gray-600">
+            Turnover: {inr(selected.product_sales + selected.other_income)} | Working Capital: {inr((selected.inventories + selected.loans_advances + selected.sundry_debtors + selected.cash_bank + selected.other_current_assets) - (selected.current_liabilities_goods + selected.current_liabilities_expenses))}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
 // ── Page shell ────────────────────────────────────────────────────────────
 
 export const PlanningPage: React.FC = () => {
-  const [tab, setTab] = useState<'flock' | 'budget'>('flock')
+  const [tab, setTab] = useState<'flock' | 'budget' | 'ca'>('flock')
   return (
     <div className="space-y-4">
       <div>
@@ -647,9 +885,14 @@ export const PlanningPage: React.FC = () => {
           className={`px-4 py-2 text-sm font-medium ${tab === 'budget' ? 'border-b-2 border-green-600 text-green-700' : 'text-gray-500'}`}>
           Quarterly Budget &amp; Cash Flow
         </button>
+        <button onClick={() => setTab('ca')}
+          className={`px-4 py-2 text-sm font-medium ${tab === 'ca' ? 'border-b-2 border-green-600 text-green-700' : 'text-gray-500'}`}>
+          CA Analysis of Financial Result
+        </button>
       </div>
       {tab === 'flock' && <FlockProjectionTab />}
       {tab === 'budget' && <QuarterlyBudgetTab />}
+      {tab === 'ca' && <CAStatementTab />}
     </div>
   )
 }
