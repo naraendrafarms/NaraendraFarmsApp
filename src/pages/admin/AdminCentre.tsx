@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Textarea,
-  Table, Th, Td, Badge, SectionHeader, Spinner, Divider
+  Table, Th, Td, Badge, SectionHeader, Spinner, Divider, SearchableSelect
 } from '@/components/ui'
 import {
   Shield, Users, Bird, Factory, Zap, IndianRupee,
@@ -284,7 +284,7 @@ const FlockShedAssign: React.FC = () => {
       <Modal open={showForm} onClose={()=>setShowForm(false)} title="Assign Flock to Sheds" size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
-          <Select label="Flock" required placeholder="— Select flock —" options={flockOptions} value={flockId} onChange={e=>{setFlockId(e.target.value); setShedIds(shedsForFlock(e.target.value))}}/>
+          <SearchableSelect label="Flock" required placeholder="— Select flock —" options={flockOptions} value={flockId} onChange={v=>{setFlockId(v); setShedIds(shedsForFlock(v))}}/>
           {flockId && (
             <div>
               <p className="text-sm font-medium text-gray-700 mb-2">Sheds <span className="text-gray-400">({shedIds.length} selected)</span></p>
@@ -407,7 +407,7 @@ const ElecAllocation: React.FC = () => {
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <Select label="Electricity Bill (Meter)" required placeholder="— Select meter —" options={billOptions} value={form.bill_id} onChange={e=>setForm((f:any)=>({...f,bill_id:e.target.value}))}/>
-          <Select label="Allocate to Flock" required placeholder="— Select flock —" options={flockOptions} value={form.flock_id} onChange={e=>setForm((f:any)=>({...f,flock_id:e.target.value}))}/>
+          <SearchableSelect label="Allocate to Flock" required placeholder="— Select flock —" options={flockOptions} value={form.flock_id} onChange={v=>setForm((f:any)=>({...f,flock_id:v}))}/>
           <FormRow>
             <Input label="Amount (Rs)" required type="number" value={form.amount} onChange={e=>setForm((f:any)=>({...f,amount:e.target.value}))} hint="Portion of the bill for this flock"/>
             <Input label="Units (kWh)" type="number" value={form.units} onChange={e=>setForm((f:any)=>({...f,units:e.target.value}))}/>
@@ -507,7 +507,7 @@ const SalaryAllocation: React.FC = () => {
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <Select label="Site Salary (Farm)" required placeholder="— Select farm abstract —" options={absOptions} value={form.abstract_id} onChange={e=>setForm((f:any)=>({...f,abstract_id:e.target.value}))}/>
-          <Select label="Allocate to Flock" required placeholder="— Select flock —" options={flockOptions} value={form.flock_id} onChange={e=>setForm((f:any)=>({...f,flock_id:e.target.value}))}/>
+          <SearchableSelect label="Allocate to Flock" required placeholder="— Select flock —" options={flockOptions} value={form.flock_id} onChange={v=>setForm((f:any)=>({...f,flock_id:v}))}/>
           <FormRow>
             <Input label="Amount (Rs)" required type="number" value={form.amount} onChange={e=>setForm((f:any)=>({...f,amount:e.target.value}))}/>
             <Input label="% of Site Salary" type="number" step="0.1" value={form.pct} onChange={e=>setForm((f:any)=>({...f,pct:e.target.value}))} hint="Optional — for reference"/>
