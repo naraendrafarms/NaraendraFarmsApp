@@ -45,6 +45,8 @@ type PayRecord = {
   remarks: string | null
   bank_account_id: string | null
   is_opening: boolean | null
+  advance_adjusted: number | null
+  vendor_advance_id: string | null
 }
 
 type PayModal = {
@@ -90,7 +92,7 @@ export const PendingPaymentsPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id,is_opening')
+        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id,is_opening,advance_adjusted,vendor_advance_id')
         .order('grn_date', { ascending: false })
       if (error) throw error
       return (data ?? []) as PayRecord[]
@@ -467,9 +469,17 @@ export const PendingPaymentsPage: React.FC = () => {
         // Pending/HOLD — a bill can legitimately sit at Pending with a real
         // partial paid_amount from the Pay screen, and re-saving this Edit
         // form without touching Status must not wipe that out.
+        //
+        // A bill paid via the "Advance" mode also carries advance_adjusted +
+        // vendor_advance_id — the first fix (reset paid_amount only) missed
+        // these, so reverting an advance-paid bill left it still pointing at
+        // the advance with the full amount marked adjusted, even though the
+        // advance's own amount_used is given back below. Reset both too.
         ...(editForm.payment_status === 'Paid'
           ? { paid_amount: Math.max(0, netPayable - (parseFloat(editForm.discount_amount) || 0)) }
-          : (!isNew && editModal.payment_status === 'Paid' ? { paid_amount: 0 } : {})),
+          : (!isNew && editModal.payment_status === 'Paid'
+              ? { paid_amount: 0, advance_adjusted: 0, vendor_advance_id: null }
+              : {})),
       }
       let savedId: string
       if (isNew) {
@@ -501,6 +511,24 @@ export const PendingPaymentsPage: React.FC = () => {
         })
       } else if (oldStatus === 'Paid' && newStatus !== 'Paid') {
         await clearLedgerEntries(savedId)
+        // A bill paid via "Advance" mode never posted a ledger entry at all
+        // (the money already left when the advance itself was paid) — so
+        // clearLedgerEntries above is a no-op for it. What DOES need
+        // reversing is the advance's own amount_used, which handlePay's
+        // isAdvance branch increments when the bill is settled — otherwise
+        // reverting the bill leaves that amount permanently locked out of
+        // the advance's available balance.
+        if (!isNew && editModal.vendor_advance_id && (editModal.advance_adjusted ?? 0) > 0) {
+          const { data: advance } = await supabase.from('vendor_advances')
+            .select('amount_used').eq('id', editModal.vendor_advance_id).maybeSingle()
+          if (advance) {
+            await supabase.from('vendor_advances').update({
+              amount_used: Math.max(0, (advance.amount_used ?? 0) - (editModal.advance_adjusted ?? 0)),
+            }).eq('id', editModal.vendor_advance_id)
+            qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+            qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
+          }
+        }
       }
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
