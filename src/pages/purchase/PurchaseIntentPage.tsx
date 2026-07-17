@@ -60,15 +60,21 @@ export const PurchaseIntentPage: React.FC = () => {
   })
   const { data: items } = useQuery({
     queryKey: ['items_active'],
-    queryFn: async () => { const { data } = await supabase.from('items').select('id,name,unit').eq('is_active', true).order('name'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('items').select('id,name,unit,manufacturer').eq('is_active', true).order('name'); return data ?? [] }
   })
+  const itemById = new Map((items ?? []).map((it: any) => [it.id, it]))
+  const itemByNameLower = new Map((items ?? []).map((it: any) => [it.name.toLowerCase().trim(), it]))
+  const manufacturerForLine = (l: LineForm) => {
+    const it = (l.item_id && itemById.get(l.item_id)) || itemByNameLower.get(l.item_name.toLowerCase().trim())
+    return it?.manufacturer ?? null
+  }
   // Alias-aware item search — the Intent line's item name stays free text
   // (an intent name legitimately differs from the PO/GRN name for the same
   // real item), but typing an already-known alias (this item's Items
   // Master name, or a name it was linked under from a past PO/GRN/Intent)
   // auto-resolves item_id silently; a "Link to Item" picker handles a
   // genuinely new name.
-  const { options: itemOptionsAlias } = useItemOptionsWithAliases()
+  const { options: itemOptionsAlias, items: itemsForAlias } = useItemOptionsWithAliases()
   const [linkingLine, setLinkingLine] = useState<number | null>(null)
   const { data: parties } = useQuery({
     queryKey: ['parties_suppliers_intent'],
@@ -526,8 +532,11 @@ export const PurchaseIntentPage: React.FC = () => {
                           list={`items-list-${i}`}
                           className="w-32 border border-gray-200 rounded px-1.5 py-1 text-xs" placeholder="Item name" />
                         <datalist id={`items-list-${i}`}>
-                          {itemOptionsAlias.map((it: any) => <option key={it.value} value={it.label} />)}
+                          {itemsForAlias.map((it: any) => <option key={it.id} value={it.name} label={it.manufacturer ? `${it.name} · ${it.manufacturer}` : it.name} />)}
                         </datalist>
+                        {l.item_name && manufacturerForLine(l) && (
+                          <div className="text-[10px] text-gray-500 mt-0.5">Mfr: {manufacturerForLine(l)}</div>
+                        )}
                         {l.item_name && (
                           l.item_id ? (
                             <div className="text-[10px] text-blue-600 mt-0.5">✓ linked to Items Master</div>
