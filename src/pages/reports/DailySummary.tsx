@@ -11,14 +11,10 @@ const fmtDMY2 = (d: string) => { const [y, m, day] = d.split('-'); return `${day
 const pct1 = (n: number) => n.toFixed(2) + '%'
 const sign = (n: number) => (n >= 0 ? '+' : '') + n.toFixed(2)
 
-// Numbered list with blank placeholder lines up to `min`, matching the
-// paper-register look of the original WhatsApp message (e.g. "3." "4." "5."
-// left blank when there's nothing to report that day) instead of just
-// stopping at however many real entries there are.
-function numberedBlock(items: string[], min: number): string[] {
-  const lines = items.map((s, i) => `${i + 1}.${s}`)
-  for (let i = items.length; i < min; i++) lines.push(`${i + 1}.`)
-  return lines
+// Numbered list of only the entries that actually happened that day — no
+// blank placeholder lines when there's nothing to report.
+function listOrNone(items: string[]): string[] {
+  return items.length ? items.map((s, i) => `${i + 1}.${s}`) : ['None']
 }
 
 export const DailySummaryPage: React.FC = () => {
@@ -224,15 +220,8 @@ export const DailySummaryPage: React.FC = () => {
     lines.push(`          Flock.${f.flock_no}`)
     lines.push(`        Dt.${fmtDMY2(date)}`)
     lines.push(`       Age.${ageWk}.${pad2(ageRem)}wk`)
-    lines.push(`           BIRDS`)
-    lines.push(`Op birds.${openF}+${openM}`)
-    lines.push(`Mort.${pad2(mortF)}+${pad2(mortM)}`)
-    lines.push(`Received.${pad2(recvF)}+${pad2(recvM)}`)
-    lines.push(`C/s.${pad2(cullF)}+${pad2(cullM)}`)
-    lines.push(`Clo.birds.${closeF}+${closeM}`)
-    lines.push(`            FEED `)
-    lines.push(`Feed std.—`)  // no feed-standard curve exists yet in the app
-    lines.push(`Feed Act.${Math.round(feedF)}+${Math.round(feedM)}`)
+    lines.push(`BIRDS: Op ${openF}+${openM} | Mort ${pad2(mortF)}+${pad2(mortM)} | Recv ${pad2(recvF)}+${pad2(recvM)} | C/s ${pad2(cullF)}+${pad2(cullM)} | Close ${closeF}+${closeM}`)
+    lines.push(`FEED: ${Math.round(feedF)}+${Math.round(feedM)} kg`)
     lines.push(`      PRODUCTION`)
     lines.push(`Sl.   HD      +/-   F+M`)
     for (const r of shedRows.slice().sort((a: any, b: any) => (a.sheds?.shed_no ?? '').localeCompare(b.sheds?.shed_no ?? ''))) {
@@ -245,16 +234,10 @@ export const DailySummaryPage: React.FC = () => {
     }
     lines.push(`He.Std.${std?.he_pct != null ? std.he_pct.toFixed(0) + '%' : '—'}`)
     lines.push(`He.act.${pct1(hePct)}`)
-    lines.push(`HE.${heEggs}`)
-    lines.push(`JE.${jeEggs}${' '.repeat(Math.max(1, 11 - String(jeEggs).length))}(${totalEggs > 0 ? (jeEggs / totalEggs * 100).toFixed(2) : '0.00'}%)`)
-    lines.push(`TE.${teEggs}${' '.repeat(Math.max(1, 6 - String(teEggs).length))}(${totalEggs > 0 ? (teEggs / totalEggs * 100).toFixed(2) : '0.00'}%)`)
-    lines.push(`BE.${beEggs}${' '.repeat(Math.max(1, 8 - String(beEggs).length))}(${totalEggs > 0 ? (beEggs / totalEggs * 100).toFixed(2) : '0.00'}%)`)
-    lines.push(`LE.${leEggs}${' '.repeat(Math.max(1, 8 - String(leEggs).length))}(${totalEggs > 0 ? (leEggs / totalEggs * 100).toFixed(2) : '0.00'}%)`)
-    lines.push(`T.Eggs.${totalEggs}`)
+    const pctOf = (n: number) => totalEggs > 0 ? (n / totalEggs * 100).toFixed(2) : '0.00'
+    lines.push(`Eggs: HE ${heEggs} | JE ${jeEggs}(${pctOf(jeEggs)}%) | TE ${teEggs}(${pctOf(teEggs)}%) | BE ${beEggs}(${pctOf(beEggs)}%) | LE ${leEggs}(${pctOf(leEggs)}%) | Total ${totalEggs}`)
     lines.push(`Today prd.${pct1(todayHd)} (${sign(prevHd != null ? todayHd - prevHd : 0)})`)
     lines.push(`Production Std.${std?.hen_week_pct != null ? std.hen_week_pct.toFixed(0) + '%' : '—'}`)
-    lines.push(`Eggs wt. Act.—`)  // no egg-weight tracking exists yet in the app
-    lines.push(`Eggs wt. Std.—`)
     // Group by the real medicines_master.type value instead of assuming a
     // binary "sanitizer or not" split — whatever types are actually in use
     // (medicine, vaccine, sanitizer, supplement, disinfectant, ...) each get
@@ -272,18 +255,15 @@ export const DailySummaryPage: React.FC = () => {
     const medVaccineItems = [...(typeGroups['medicine'] ?? []), ...(typeGroups['vaccine'] ?? [])]
     const otherTypes = Object.keys(typeGroups).filter(t => t !== 'medicine' && t !== 'vaccine')
 
-    lines.push('')
     lines.push(`  ${sectionLabel('medicine')}`)
-    lines.push(...numberedBlock(medVaccineItems.map((m: any) => `${m.medicines_master?.name ?? '—'}=${m.quantity ?? ''}${m.unit ?? ''}`), 5))
+    lines.push(...listOrNone(medVaccineItems.map((m: any) => `${m.medicines_master?.name ?? '—'}=${m.quantity ?? ''}${m.unit ?? ''}`)))
     for (const type of otherTypes) {
-      lines.push('')
       lines.push(`        ${sectionLabel(type)}`)
-      lines.push(...numberedBlock(typeGroups[type].map((m: any) => `${m.medicines_master?.name ?? '—'}=${m.quantity ?? ''}${m.unit ?? ''}`), 3))
+      lines.push(...listOrNone(typeGroups[type].map((m: any) => `${m.medicines_master?.name ?? '—'}=${m.quantity ?? ''}${m.unit ?? ''}`)))
     }
-    lines.push('')
     lines.push(`             SPRAY`)
     const sprays = sprayByFlock[f.id] ?? []
-    lines.push(...numberedBlock(sprays.map((s: any) => `${s.vaccine_name ?? '—'}=${s.quantity ?? ''}${s.unit ?? ''}`), 3))
+    lines.push(...listOrNone(sprays.map((s: any) => `${s.vaccine_name ?? '—'}=${s.quantity ?? ''}${s.unit ?? ''}`)))
     lines.push(...manpowerLines(f.farm_id))
     return { lines, stats: { totalEggs, heEggs, hd: todayHd, mort: mortF + mortM, feed: feedF + feedM } }
   }
