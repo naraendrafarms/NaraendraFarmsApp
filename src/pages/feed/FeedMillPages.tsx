@@ -69,18 +69,24 @@ const FinishedFeedStockTab: React.FC = () => {
   })
   const { data: adjustments = [] } = useQuery({
     queryKey: ['finished_feed_adjustments'],
-    queryFn: async () => { const { data } = await supabase.from('finished_feed_adjustments').select('*, feed_types(code,name)').order('adjustment_date', { ascending: false }); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('finished_feed_adjustments').select('*, feed_types(code,name), feed_formulas(formula_code,formula_name)').order('adjustment_date', { ascending: false }); return data ?? [] }
+  })
+  // Optional reference only — which recipe/version this opening quantity was
+  // made from. Purely informational; doesn't affect Balance or cost math.
+  const { data: formulas = [] } = useQuery({
+    queryKey: ['feed_formulas_ref'],
+    queryFn: async () => { const { data } = await supabase.from('feed_formulas').select('id,formula_code,formula_name,feed_type_id').eq('is_active',true).order('formula_code'); return data ?? [] }
   })
 
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const [form, setForm] = useState({ feed_type_id: '', adjustment_date: today(), adjustment_type: 'Opening Stock', quantity_kg: '', rate_per_kg: '', remarks: '' })
+  const [form, setForm] = useState({ feed_type_id: '', formula_id: '', adjustment_date: today(), adjustment_type: 'Opening Stock', quantity_kg: '', rate_per_kg: '', remarks: '' })
   const [deleteRow, setDeleteRow] = useState<any>(null)
 
-  const openNew = () => { setEditing(null); setForm({ feed_type_id: '', adjustment_date: today(), adjustment_type: 'Opening Stock', quantity_kg: '', rate_per_kg: '', remarks: '' }); setShowForm(true) }
+  const openNew = () => { setEditing(null); setForm({ feed_type_id: '', formula_id: '', adjustment_date: today(), adjustment_type: 'Opening Stock', quantity_kg: '', rate_per_kg: '', remarks: '' }); setShowForm(true) }
   const openEdit = (r: any) => {
     setEditing(r)
-    setForm({ feed_type_id: r.feed_type_id ?? '', adjustment_date: r.adjustment_date ?? today(), adjustment_type: r.adjustment_type ?? 'Opening Stock', quantity_kg: r.quantity_kg?.toString() ?? '', rate_per_kg: r.rate_per_kg?.toString() ?? '', remarks: r.remarks ?? '' })
+    setForm({ feed_type_id: r.feed_type_id ?? '', formula_id: r.formula_id ?? '', adjustment_date: r.adjustment_date ?? today(), adjustment_type: r.adjustment_type ?? 'Opening Stock', quantity_kg: r.quantity_kg?.toString() ?? '', rate_per_kg: r.rate_per_kg?.toString() ?? '', remarks: r.remarks ?? '' })
     setShowForm(true)
   }
 
@@ -88,7 +94,7 @@ const FinishedFeedStockTab: React.FC = () => {
     mutationFn: async () => {
       if (!form.feed_type_id || !form.adjustment_date || !form.quantity_kg) throw new Error('Feed type, date and quantity are required')
       const payload = {
-        feed_type_id: form.feed_type_id, adjustment_date: form.adjustment_date,
+        feed_type_id: form.feed_type_id, formula_id: form.formula_id || null, adjustment_date: form.adjustment_date,
         adjustment_type: form.adjustment_type, quantity_kg: parseFloat(form.quantity_kg),
         rate_per_kg: form.rate_per_kg ? parseFloat(form.rate_per_kg) : null,
         remarks: form.remarks || null,
@@ -197,12 +203,13 @@ const FinishedFeedStockTab: React.FC = () => {
         <Card padding={false}>
           <div className="px-4 pt-3 pb-1"><p className="font-semibold text-sm text-gray-700">Opening Stock / Adjustment Entries</p></div>
           <Table>
-            <thead><tr><Th>Date</Th><Th>Feed Type</Th><Th>Type</Th><Th right>Qty (kg)</Th><Th right>Rate/kg</Th><Th>Remarks</Th><Th></Th></tr></thead>
+            <thead><tr><Th>Date</Th><Th>Feed Type</Th><Th>Recipe</Th><Th>Type</Th><Th right>Qty (kg)</Th><Th right>Rate/kg</Th><Th>Remarks</Th><Th></Th></tr></thead>
             <tbody>
               {(adjustments as any[]).map((a: any) => (
                 <tr key={a.id} className="hover:bg-gray-50">
                   <Td className="text-xs">{fmtDate(a.adjustment_date)}</Td>
                   <Td className="text-sm">{a.feed_types?.code} — {a.feed_types?.name}</Td>
+                  <Td className="text-xs text-gray-500">{a.feed_formulas ? `${a.feed_formulas.formula_code} — ${a.feed_formulas.formula_name}` : '—'}</Td>
                   <Td className="text-xs">{a.adjustment_type}</Td>
                   <Td right className={a.quantity_kg < 0 ? 'text-red-600' : ''}>{Number(a.quantity_kg).toLocaleString('en-IN')}</Td>
                   <Td right className="text-xs">{a.rate_per_kg ? inr(a.rate_per_kg) : '—'}</Td>
@@ -225,7 +232,10 @@ const FinishedFeedStockTab: React.FC = () => {
           <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <Select label="Feed Type" required placeholder="— Select —" options={feedTypeOptions}
-            value={form.feed_type_id} onChange={e => setForm(f => ({ ...f, feed_type_id: e.target.value }))} />
+            value={form.feed_type_id} onChange={e => setForm(f => ({ ...f, feed_type_id: e.target.value, formula_id: '' }))} />
+          <Select label="Recipe / Formula (optional, reference only)" placeholder="— Not specified —"
+            options={(formulas as any[]).filter((fm: any) => !form.feed_type_id || fm.feed_type_id === form.feed_type_id).map((fm: any) => ({ value: fm.id, label: `${fm.formula_code} — ${fm.formula_name}` }))}
+            value={form.formula_id} onChange={e => setForm(f => ({ ...f, formula_id: e.target.value }))} />
           <div className="grid grid-cols-2 gap-3">
             <DateInput label="Date" required value={form.adjustment_date} onChange={e => setForm(f => ({ ...f, adjustment_date: e.target.value }))} />
             <Select label="Type" options={[{ value: 'Opening Stock', label: 'Opening Stock' }, { value: 'Correction', label: 'Correction' }]}
