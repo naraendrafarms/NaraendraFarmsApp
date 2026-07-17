@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, currentFY, fyRange, FY_OPTIONS } from '@/lib/utils'
 import { useFeedRates } from '@/hooks/useFeedRates'
 import {
-  Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Input
+  Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Input, SearchableSelect
 } from '@/components/ui'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts'
 import { Download } from 'lucide-react'
@@ -71,7 +71,7 @@ export const ProductionReport: React.FC = () => {
       <SectionHeader title="Production Report" subtitle="Monthly egg production & mortality by flock"
         action={monthly.length > 0 ? <Button variant="secondary" icon={<Download size={16}/>} onClick={exportExcel}>Export Excel</Button> : undefined}/>
       <div className="flex gap-3">
-        <Select label="" placeholder="— Select Flock —" options={flockOptions} value={flockId} onChange={e=>setFlockId(e.target.value)} className="w-48"/>
+        <SearchableSelect placeholder="— Select Flock —" options={flockOptions} value={flockId} onChange={v=>setFlockId(v)} className="w-48"/>
       </div>
       {!flockId && <Card><p className="text-gray-400 text-sm text-center py-8">Select a flock to view production report</p></Card>}
       {isLoading && <Spinner/>}
@@ -246,7 +246,7 @@ export const PLReport: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Flock P&L Report" subtitle="Complete revenue vs cost — all cost centres included"/>
       <div className="flex gap-3">
-        <Select label="" placeholder="— Select Flock —" options={flockOptions} value={flockId} onChange={e=>setFlockId(e.target.value)} className="w-56"/>
+        <SearchableSelect placeholder="— Select Flock —" options={flockOptions} value={flockId} onChange={v=>setFlockId(v)} className="w-56"/>
       </div>
       {!flockId && <Card><p className="text-gray-400 text-sm text-center py-8">Select a flock to view P&L</p></Card>}
       {flockId && flock && (
