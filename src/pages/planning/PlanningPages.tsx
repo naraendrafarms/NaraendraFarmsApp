@@ -665,23 +665,53 @@ const CAStatementTab: React.FC = () => {
     queryFn: async () => { const { data, error } = await supabase.from('ca_financial_statements').select('*').order('created_at', { ascending: false }); if (error) toast.error(error.message); return data ?? [] }
   })
 
+  // salary_monthly/electricity_bills are keyed by whole calendar month — if
+  // Period End falls mid-month, including that partial month's full cost
+  // against only part of its revenue overstates cost relative to Turnover.
+  // Clip the cost cutoff to the last COMPLETE month within the period.
+  const monthCutoff = useMemo(() => {
+    const d = new Date(periodEnd + 'T00:00:00')
+    const lastDayOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+    if (d.getDate() === lastDayOfMonth) return periodEnd
+    const prevMonthEnd = new Date(d.getFullYear(), d.getMonth(), 0)
+    return prevMonthEnd.toISOString().slice(0, 10)
+  }, [periodEnd])
+  const monthCutoffTruncated = monthCutoff !== periodEnd
+
+  // A row cap well above what any single farm generates in a year — supabase
+  // defaults to 1000 rows per request, which would silently truncate (not
+  // error) a full financial year's transactions and understate every total.
+  const ROW_CAP = 20000
+
   const { data: nheSales } = useQuery({
     queryKey: ['ca_nhe_sales', periodStart, periodEnd],
-    queryFn: async () => { const { data } = await supabase.from('nhe_sales').select('sale_type,amount,sale_date').gte('sale_date', periodStart).lte('sale_date', periodEnd); return data ?? [] }
+    queryFn: async () => {
+      const { data, error } = await supabase.from('nhe_sales').select('sale_type,amount,sale_date').gte('sale_date', periodStart).lte('sale_date', periodEnd).limit(ROW_CAP)
+      if (error) toast.error('NHE Sales: ' + error.message)
+      return data ?? []
+    }
   })
   const { data: heDispatch } = useQuery({
     queryKey: ['ca_he_dispatch', periodStart, periodEnd],
-    queryFn: async () => { const { data } = await supabase.from('he_dispatch').select('amount,invoice_eggs,dispatch_date').gte('dispatch_date', periodStart).lte('dispatch_date', periodEnd); return data ?? [] }
+    queryFn: async () => {
+      const { data, error } = await supabase.from('he_dispatch').select('amount,invoice_eggs,dispatch_date').gte('dispatch_date', periodStart).lte('dispatch_date', periodEnd).limit(ROW_CAP)
+      if (error) toast.error('HE Dispatch: ' + error.message)
+      return data ?? []
+    }
   })
   // Egg quantity/value per sale_type comes from nhe_sale_lines (not the
   // nhe_sales header) so a multi-type invoice attributes value per egg type
   // correctly — migration 117 backfilled a line for every historical je/te/be
   // header row, so line coverage matches the header data used for Turnover.
+  // The !inner join + dotted filter is required, not cosmetic: without
+  // !inner, an unmatched/out-of-range parent just nulls the embed instead of
+  // excluding the row, silently returning unfiltered lines.
   const { data: eggSaleLines } = useQuery({
     queryKey: ['ca_nhe_sale_lines', periodStart, periodEnd],
     queryFn: async () => {
-      const { data } = await supabase.from('nhe_sale_lines').select('sale_type,quantity,amount,nhe_sales!inner(sale_date)').in('sale_type', EGG_SALE_TYPES)
-        .gte('nhe_sales.sale_date', periodStart).lte('nhe_sales.sale_date', periodEnd)
+      const { data, error } = await supabase.from('nhe_sale_lines').select('sale_type,quantity,amount,nhe_sales!inner(sale_date)').in('sale_type', EGG_SALE_TYPES)
+        .gte('nhe_sales.sale_date', periodStart).lte('nhe_sales.sale_date', periodEnd).limit(ROW_CAP)
+      if (error) toast.error('NHE egg pricing lookup failed: ' + error.message)
       return data ?? []
     }
   })
@@ -691,40 +721,53 @@ const CAStatementTab: React.FC = () => {
   const { data: cashBookOtherIncome } = useQuery({
     queryKey: ['ca_cash_book_other', periodStart, periodEnd],
     queryFn: async () => {
-      const { data } = await supabase.from('cash_book').select('amount_in,nhe_sale_id,he_dispatch_id').eq('category', 'other')
-        .is('nhe_sale_id', null).is('he_dispatch_id', null).gte('txn_date', periodStart).lte('txn_date', periodEnd)
+      const { data, error } = await supabase.from('cash_book').select('amount_in,nhe_sale_id,he_dispatch_id').eq('category', 'other')
+        .is('nhe_sale_id', null).is('he_dispatch_id', null).gte('txn_date', periodStart).lte('txn_date', periodEnd).limit(ROW_CAP)
+      if (error) toast.error('Cash Book (other income): ' + error.message)
       return data ?? []
     }
   })
   const { data: electricityBills } = useQuery({
-    queryKey: ['ca_electricity', periodStart, periodEnd],
-    queryFn: async () => { const { data } = await supabase.from('electricity_bills').select('amount,bill_month').gte('bill_month', periodStart).lte('bill_month', periodEnd); return data ?? [] }
+    queryKey: ['ca_electricity', periodStart, monthCutoff],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('electricity_bills').select('amount,bill_month').gte('bill_month', periodStart).lte('bill_month', monthCutoff).limit(ROW_CAP)
+      if (error) toast.error('Electricity Bills: ' + error.message)
+      return data ?? []
+    }
   })
   const { data: salaryRows } = useQuery({
-    queryKey: ['ca_salary', periodStart, periodEnd],
+    queryKey: ['ca_salary', periodStart, monthCutoff],
     queryFn: async () => {
-      const { data } = await supabase.from('salary_monthly').select('earned_salary,ot_bonus,arrears,month,employees(designation)').gte('month', periodStart).lte('month', periodEnd)
+      const { data, error } = await supabase.from('salary_monthly').select('earned_salary,ot_bonus,arrears,month,employees(designation)').gte('month', periodStart).lte('month', monthCutoff).limit(ROW_CAP)
+      if (error) toast.error('Salary: ' + error.message)
       return data ?? []
     }
   })
   const { data: eggProduction } = useQuery({
     queryKey: ['ca_production_qty', periodStart, periodEnd],
-    queryFn: async () => { const { data } = await supabase.from('daily_records').select('total_eggs').gte('record_date', periodStart).lte('record_date', periodEnd); return data ?? [] }
+    queryFn: async () => {
+      const { data, error } = await supabase.from('daily_records').select('total_eggs').gte('record_date', periodStart).lte('record_date', periodEnd).limit(ROW_CAP)
+      if (error) toast.error('Daily Records: ' + error.message)
+      return data ?? []
+    }
   })
   const { data: partyBalances } = useQuery({
     queryKey: ['ca_party_ledger', periodEnd],
     queryFn: async () => {
-      const { data } = await supabase.from('v_party_ledger').select('party_id,debit,credit,parties(type)').lte('txn_date', periodEnd)
+      const { data, error } = await supabase.from('v_party_ledger').select('party_id,debit,credit,parties(type)').lte('txn_date', periodEnd).limit(ROW_CAP)
+      if (error) toast.error('Party Ledger: ' + error.message)
       return data ?? []
     }
   })
   const { data: cashBankBalance } = useQuery({
     queryKey: ['ca_cash_bank_balance', periodEnd],
     queryFn: async () => {
-      const [{ data: cb }, { data: bt }] = await Promise.all([
-        supabase.from('cash_book').select('amount_in,amount_out').lte('txn_date', periodEnd),
-        supabase.from('bank_transactions').select('txn_type,amount').lte('txn_date', periodEnd),
+      const [{ data: cb, error: e1 }, { data: bt, error: e2 }] = await Promise.all([
+        supabase.from('cash_book').select('amount_in,amount_out').lte('txn_date', periodEnd).limit(ROW_CAP),
+        supabase.from('bank_transactions').select('txn_type,amount').lte('txn_date', periodEnd).limit(ROW_CAP),
       ])
+      if (e1) toast.error('Cash Book balance: ' + e1.message)
+      if (e2) toast.error('Bank Ledger balance: ' + e2.message)
       const cashBal = (cb ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
       const bankBal = (bt ?? []).reduce((s: number, t: any) => s + (t.txn_type === 'Credit' ? (t.amount ?? 0) : -(t.amount ?? 0)), 0)
       return cashBal + bankBal
@@ -795,17 +838,20 @@ const CAStatementTab: React.FC = () => {
 
   // A blank manual field defaults to 0 in the arithmetic below, which would
   // otherwise silently understate cost / overstate liquidity with a
-  // confident-looking wrong number. Track which totals actually depend on a
-  // still-blank manual field so the UI can show "—" instead of trusting it.
-  // Unclassified wages (a designation in neither allowlist) block Gross/Net
-  // Profit the same way a blank manual field does — a new designation added
-  // in config_options can never silently shift the COP split unnoticed.
-  const copIncomplete = !entered(manual.rmConsumed) || !entered(manual.otherDirectExpenses) || unclassifiedWages > 0
-  const indirectIncomplete = !entered(manual.paymentToPromoters) || !entered(manual.otherIndirectExpenses) || !entered(manual.depreciation)
-  const netProfitIncomplete = copIncomplete || indirectIncomplete
-  const currentAssetsIncomplete = !entered(manual.inventories) || !entered(manual.loansAdvances) || !entered(manual.otherCurrentAssets)
-  const currentLiabIncomplete = !entered(manual.currentLiabilitiesExpenses)
-  const workingCapitalIncomplete = currentAssetsIncomplete || currentLiabIncomplete
+  // confident-looking wrong number. Track WHY a total is incomplete (not just
+  // whether) — unclassified wages and blank manual fields are different
+  // problems with different fixes, so the displayed reason must say which.
+  const copIncompleteReason: string | null =
+    unclassifiedWages > 0 ? 'unclassified wages — see row above'
+    : (!entered(manual.rmConsumed) || !entered(manual.otherDirectExpenses)) ? 'enter manual fields'
+    : null
+  const indirectIncompleteReason: string | null =
+    (!entered(manual.paymentToPromoters) || !entered(manual.otherIndirectExpenses) || !entered(manual.depreciation)) ? 'enter manual fields' : null
+  const netProfitIncompleteReason = copIncompleteReason ?? indirectIncompleteReason
+  const currentAssetsIncompleteReason: string | null =
+    (!entered(manual.inventories) || !entered(manual.loansAdvances) || !entered(manual.otherCurrentAssets)) ? 'enter manual fields' : null
+  const currentLiabIncompleteReason: string | null = !entered(manual.currentLiabilitiesExpenses) ? 'enter manual fields' : null
+  const workingCapitalIncompleteReason = currentAssetsIncompleteReason ?? currentLiabIncompleteReason
 
   const totalTurnover = productSales + otherIncome
   const totalCOP = num(manual.rmConsumed) + directWages + electricity + num(manual.otherDirectExpenses)
@@ -819,7 +865,7 @@ const CAStatementTab: React.FC = () => {
   const npRatio = totalTurnover > 0 ? netProfit / totalTurnover : 0
   const currentRatio = totalCurrentLiabilities > 0 ? totalCurrentAssets / totalCurrentLiabilities : 0
   const quickRatio = totalCurrentLiabilities > 0 ? (totalCurrentAssets - num(manual.inventories)) / totalCurrentLiabilities : 0
-  const dash = (incomplete: boolean, text: string) => incomplete ? '— (enter manual fields)' : text
+  const dash = (reason: string | null, text: string) => reason ? `— (${reason})` : text
   const debtorsTurnoverRatio = totalTurnover > 0 ? sundryDebtors / totalTurnover : 0
   const creditorsTurnoverRatio = totalTurnover > 0 ? creditorsGoods / totalTurnover : 0
 
@@ -858,6 +904,11 @@ const CAStatementTab: React.FC = () => {
           <DateInput label="Period Start" value={periodStart} onChange={e => setPeriodStart(e.target.value)} />
           <DateInput label="Period End" value={periodEnd} onChange={e => setPeriodEnd(e.target.value)} />
         </FormRow>
+        {monthCutoffTruncated && (
+          <div className="text-xs text-amber-600 mt-1">
+            Direct Wages / Employee Benefits / Electricity are recorded by whole calendar month — since Period End ({periodEnd}) falls mid-month, those three are cut off at the last complete month ({monthCutoff}) instead, so cost isn't counted against only part of that month's revenue.
+          </div>
+        )}
 
         <div className="overflow-x-auto mt-3">
           <Table>
@@ -877,18 +928,18 @@ const CAStatementTab: React.FC = () => {
                   <Td className="text-xs text-amber-600">Designation(s) not in the known list: {Array.from(wageBuckets.unclassifiedDesignations).join(', ')} — blocks Gross/Net Profit below until resolved.</Td></tr>
               )}
               <tr><Td>Other Direct Expenses</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherDirectExpenses} onChange={e => setM('otherDirectExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
-              <tr><Td className="font-semibold">Total Cost of Production</Td><Td right className="font-semibold">{dash(copIncomplete, inr(totalCOP))}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Total Cost of Production</Td><Td right className="font-semibold">{dash(copIncompleteReason, inr(totalCOP))}</Td><Td /></tr>
 
-              <tr><Td className="font-semibold">3. Gross Profit [1-2]</Td><Td right className="font-semibold">{dash(copIncomplete, inr(grossProfit))}</Td><Td /></tr>
+              <tr><Td className="font-semibold">3. Gross Profit [1-2]</Td><Td right className="font-semibold">{dash(copIncompleteReason, inr(grossProfit))}</Td><Td /></tr>
 
               <tr><Td className="font-semibold" colSpan={3}>4. INDIRECT EXPENSES</Td></tr>
               <tr><Td>Employee Benefits</Td><Td right>{inr(employeeBenefits)}</Td><Td className="text-xs text-gray-400">Salary (office/admin designations)</Td></tr>
               <tr><Td>Payment to Promoters</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.paymentToPromoters} onChange={e => setM('paymentToPromoters', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
               <tr><Td>Other Indirect Expenses</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherIndirectExpenses} onChange={e => setM('otherIndirectExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
               <tr><Td>Depreciation</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.depreciation} onChange={e => setM('depreciation', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — no fixed asset register yet</Td></tr>
-              <tr><Td className="font-semibold">Total Indirect Expenses</Td><Td right className="font-semibold">{dash(indirectIncomplete, inr(totalIndirect))}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Total Indirect Expenses</Td><Td right className="font-semibold">{dash(indirectIncompleteReason, inr(totalIndirect))}</Td><Td /></tr>
 
-              <tr><Td className="font-semibold">5. Net Profit [3-4]</Td><Td right className={`font-semibold ${netProfitIncomplete ? '' : netProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>{dash(netProfitIncomplete, inr(netProfit))}</Td><Td /></tr>
+              <tr><Td className="font-semibold">5. Net Profit [3-4]</Td><Td right className={`font-semibold ${netProfitIncompleteReason ? '' : netProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>{dash(netProfitIncompleteReason, inr(netProfit))}</Td><Td /></tr>
 
               <tr><Td className="font-semibold" colSpan={3}>6. QUANTITATIVE INFORMATION</Td></tr>
               <tr><Td>Total Production (Eggs)</Td><Td right>{totalProductionQty.toLocaleString('en-IN')}</Td><Td className="text-xs text-gray-400">Daily Records (produced, not sold)</Td></tr>
@@ -905,17 +956,17 @@ const CAStatementTab: React.FC = () => {
               <tr><Td>Sundry Debtors</Td><Td right>{inr(sundryDebtors)}</Td><Td className="text-xs text-gray-400">Party Ledger (buyer balances)</Td></tr>
               <tr><Td>Cash &amp; Bank</Td><Td right>{inr(cashBankBalance ?? 0)}</Td><Td className="text-xs text-gray-400">Cash Book + Bank Ledger</Td></tr>
               <tr><Td>Other Current Assets</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherCurrentAssets} onChange={e => setM('otherCurrentAssets', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
-              <tr><Td className="font-semibold">Total Current Assets</Td><Td right className="font-semibold">{dash(currentAssetsIncomplete, inr(totalCurrentAssets))}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Total Current Assets</Td><Td right className="font-semibold">{dash(currentAssetsIncompleteReason, inr(totalCurrentAssets))}</Td><Td /></tr>
               <tr><Td>Current Liabilities (Goods)</Td><Td right>{inr(creditorsGoods)}</Td><Td className="text-xs text-gray-400">Party Ledger (supplier balances)</Td></tr>
               <tr><Td>Current Liabilities (Expenses)</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.currentLiabilitiesExpenses} onChange={e => setM('currentLiabilitiesExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
-              <tr><Td className="font-semibold">Total Current Liabilities</Td><Td right className="font-semibold">{dash(currentLiabIncomplete, inr(totalCurrentLiabilities))}</Td><Td /></tr>
-              <tr><Td className="font-semibold">Working Capital [CA-CL]</Td><Td right className="font-semibold">{dash(workingCapitalIncomplete, inr(workingCapital))}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Total Current Liabilities</Td><Td right className="font-semibold">{dash(currentLiabIncompleteReason, inr(totalCurrentLiabilities))}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Working Capital [CA-CL]</Td><Td right className="font-semibold">{dash(workingCapitalIncompleteReason, inr(workingCapital))}</Td><Td /></tr>
 
               <tr><Td className="font-semibold" colSpan={3}>RATIOS</Td></tr>
-              <tr><Td>Gross Profit Ratio</Td><Td right>{dash(copIncomplete, (gpRatio * 100).toFixed(2) + '%')}</Td><Td /></tr>
-              <tr><Td>Net Profit Ratio</Td><Td right>{dash(netProfitIncomplete, (npRatio * 100).toFixed(2) + '%')}</Td><Td /></tr>
-              <tr><Td>Current Ratio</Td><Td right>{dash(workingCapitalIncomplete, currentRatio.toFixed(2))}</Td><Td /></tr>
-              <tr><Td>Quick Ratio</Td><Td right>{dash(workingCapitalIncomplete, quickRatio.toFixed(2))}</Td><Td /></tr>
+              <tr><Td>Gross Profit Ratio</Td><Td right>{dash(copIncompleteReason, (gpRatio * 100).toFixed(2) + '%')}</Td><Td /></tr>
+              <tr><Td>Net Profit Ratio</Td><Td right>{dash(netProfitIncompleteReason, (npRatio * 100).toFixed(2) + '%')}</Td><Td /></tr>
+              <tr><Td>Current Ratio</Td><Td right>{dash(workingCapitalIncompleteReason, currentRatio.toFixed(2))}</Td><Td /></tr>
+              <tr><Td>Quick Ratio</Td><Td right>{dash(workingCapitalIncompleteReason, quickRatio.toFixed(2))}</Td><Td /></tr>
               <tr><Td>Debtors Turnover Ratio</Td><Td right>{debtorsTurnoverRatio.toFixed(4)}</Td><Td className="text-xs text-gray-400">As per CA workings (÷ Total Turnover)</Td></tr>
               <tr><Td>Creditors Turnover Ratio</Td><Td right>{creditorsTurnoverRatio.toFixed(4)}</Td><Td className="text-xs text-gray-400">As per CA workings (÷ Total Turnover)</Td></tr>
             </tbody>
