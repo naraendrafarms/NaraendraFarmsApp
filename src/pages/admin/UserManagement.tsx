@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, supabaseAdmin } from '@/lib/supabase'
 import { useAuth, type Role } from '@/lib/auth'
 import {
-  Card, Button, Input, Select, FormRow, Modal,
+  Card, Button, Input, Select, FormRow, Modal, SearchableSelect,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 } from '@/components/ui'
 import { Plus, Edit2, Shield, UserCheck, UserX, Trash2, Download } from 'lucide-react'
@@ -234,8 +234,8 @@ export const UserManagement: React.FC = () => {
             value={form.role} onChange={e => s('role', e.target.value)} />
 
           {form.role === 'site_incharge' && (
-            <Select label="Assigned Site" required placeholder="— Select the site this person manages —"
-              options={farmOptions} value={form.farm_id} onChange={e => s('farm_id', e.target.value)}
+            <SearchableSelect label="Assigned Site" required placeholder="— Select the site this person manages —"
+              options={farmOptions} value={form.farm_id} onChange={v => s('farm_id', v)}
               hint="Site Incharge can only see data from this site" />
           )}
 

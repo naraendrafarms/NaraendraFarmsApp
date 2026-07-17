@@ -111,13 +111,13 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
       </FormRow>
 
       <FormRow>
-        <Select label="Rearing Farm" required placeholder="— Select —"
+        <SearchableSelect label="Rearing Farm" required placeholder="— Select —"
           options={farmOptions} value={form.rearing_farm_id}
-          onChange={e => set('rearing_farm_id', e.target.value)}
+          onChange={v => set('rearing_farm_id', v)}
           error={errors.rearing_farm_id} />
-        <Select label="Laying Farm" required placeholder="— Select —"
+        <SearchableSelect label="Laying Farm" required placeholder="— Select —"
           options={farmOptions} value={form.laying_farm_id}
-          onChange={e => set('laying_farm_id', e.target.value)}
+          onChange={v => set('laying_farm_id', v)}
           error={errors.laying_farm_id} />
       </FormRow>
 

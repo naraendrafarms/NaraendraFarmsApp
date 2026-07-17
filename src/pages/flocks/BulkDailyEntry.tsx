@@ -779,12 +779,12 @@ export const BulkDailyEntry: React.FC = () => {
           : 'Enter production data for all active flocks in one go'}
         action={
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            <Select label="" value={selectedFlock}
-              onChange={e => { setSelectedFlock(e.target.value); setSelectedFarm('') }}
+            <SearchableSelect value={selectedFlock}
+              onChange={v => { setSelectedFlock(v); setSelectedFarm('') }}
               options={flockOptions} className="w-52" />
             {!isSheedMode && (
-              <Select label="" value={selectedFarm}
-                onChange={e => setSelectedFarm(e.target.value)}
+              <SearchableSelect value={selectedFarm}
+                onChange={v => setSelectedFarm(v)}
                 options={[{ value: '', label: '— All Farms —' }, ...(farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))]}
                 className="w-44" />
             )}

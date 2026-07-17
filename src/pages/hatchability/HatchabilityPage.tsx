@@ -1140,11 +1140,11 @@ export const HatchabilityPage: React.FC = () => {
       <Card>
         <div className="flex flex-wrap items-end gap-4">
           <div className="w-48">
-            <Select
+            <SearchableSelect
               label="Flock"
               value={flockFilter}
               options={flockOptions}
-              onChange={e => setFlockFilter(e.target.value)}
+              onChange={v => setFlockFilter(v)}
             />
           </div>
 

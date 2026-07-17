@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today, fyRange, FY_OPTIONS } from '@/lib/utils'
 import {
-  Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge
+  Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge, SearchableSelect
 } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -490,12 +490,11 @@ export const EggStockPage: React.FC = () => {
 
       {/* Filters */}
       <div className="flex gap-3 flex-wrap items-end">
-        <Select
-          label=""
+        <SearchableSelect
           placeholder="All Flocks"
           options={flockOptions}
           value={flockFilter}
-          onChange={e => setFlockFilter(e.target.value)}
+          onChange={v => setFlockFilter(v)}
           className="w-44"
         />
         <label className="flex items-center gap-1.5 text-sm text-gray-600">

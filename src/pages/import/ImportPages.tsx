@@ -163,8 +163,8 @@ export const ImportDaily: React.FC = () => {
         subtitle="Upload monthly flock report Excel files (Flock_16_*.xlsx, Flock_17_*.xlsx etc.)" />
       <Card>
         <div className="space-y-4">
-          <Select label="Flock" required placeholder="— Select flock to import into —"
-            options={flockOptions} value={selectedFlock} onChange={e => setSelectedFlock(e.target.value)} />
+          <SearchableSelect label="Flock" required placeholder="— Select flock to import into —"
+            options={flockOptions} value={selectedFlock} onChange={v => setSelectedFlock(v)} />
 
           <div>
             <label className="text-sm font-medium text-gray-700">Upload Excel File(s)</label>
