@@ -1780,7 +1780,8 @@ export const VaccinationSchedulePage: React.FC = () => {
     const { headers: hdrs, rows: fileRows } = await parseFile(file)
     const norm = (h: string) => h.toLowerCase().replace(/[^a-z]/g, '')
     const idx = (name: string) => hdrs.findIndex(h => norm(h) === name)
-    const iSno = idx('sno'), iAge = idx('age'), iVaccine = idx('vaccinename'), iDose = idx('dose'), iRoute = idx('route'), iProduct = idx('product')
+    const idxAny = (...names: string[]) => names.map(idx).find(i => i >= 0) ?? -1
+    const iSno = idx('sno'), iAge = idx('age'), iVaccine = idxAny('vaccinename', 'nameofvaccine'), iDose = idx('dose'), iRoute = idx('route'), iProduct = idx('product')
     const toInsert = fileRows.map(vals => ({
       sno: iSno >= 0 && vals[iSno] ? Number(vals[iSno]) || null : null,
       age_label: (iAge >= 0 ? vals[iAge] : '')?.trim(),

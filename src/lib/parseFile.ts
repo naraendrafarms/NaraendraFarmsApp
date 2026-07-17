@@ -21,21 +21,40 @@ function splitCsvLine(line: string): string[] {
   return out.map(v => v.trim())
 }
 
+// Some real-world exports have a title row above the actual column headers
+// (e.g. a merged "RECOMMENDED VACCINATION SCHEDULE" banner in cell A1, with
+// the real "S.No / Age / ..." header in row 2). Treating row 1 as headers
+// always failed to import those. Scan the first few rows and use the first
+// one that looks like an actual header row (2+ non-empty cells) — a title
+// row's own row typically has only one. Falls back to row 0 unchanged if
+// nothing else qualifies, so normal files (header already in row 0) are
+// unaffected.
+function findHeaderRowIndex(rows: any[][]): number {
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    const nonEmpty = (rows[i] ?? []).filter(c => String(c ?? '').trim() !== '').length
+    if (nonEmpty >= 2) return i
+  }
+  return 0
+}
+
 /** Parse CSV or Excel file → { headers (lowercase), rows (string[][]) } */
 export async function parseFile(file: File): Promise<{ headers: string[]; rows: string[][] }> {
   if (file.name.toLowerCase().endsWith('.csv')) {
     const text = await file.text()
     const lines = text.split(/\r?\n/).filter(l => l.trim())
-    const headers = splitCsvLine(lines[0]).map(h => h.toLowerCase())
-    const rows = lines.slice(1).map(l => splitCsvLine(l))
+    const splitLines = lines.map(splitCsvLine)
+    const headerIdx = findHeaderRowIndex(splitLines)
+    const headers = splitLines[headerIdx].map(h => h.toLowerCase())
+    const rows = splitLines.slice(headerIdx + 1)
     return { headers, rows }
   }
   const buffer = await file.arrayBuffer()
   const wb = XLSX.read(buffer)
   const ws = wb.Sheets[wb.SheetNames[0]]
   const raw = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, raw: false, defval: '' })
-  const headers = ((raw[0] ?? []) as any[]).map((h: any) => String(h ?? '').trim().toLowerCase())
-  const rows = raw.slice(1).map((row: any[]) => row.map((v: any) => String(v ?? '').trim()))
+  const headerIdx = findHeaderRowIndex(raw)
+  const headers = ((raw[headerIdx] ?? []) as any[]).map((h: any) => String(h ?? '').trim().toLowerCase())
+  const rows = raw.slice(headerIdx + 1).map((row: any[]) => row.map((v: any) => String(v ?? '').trim()))
   return { headers, rows }
 }
 
