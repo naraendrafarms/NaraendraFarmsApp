@@ -82,6 +82,13 @@ export const ItemsMasterPage: React.FC = () => {
       }
       if (!payload.name)     throw new Error('Name is required')
       if (!payload.category) throw new Error('Category is required')
+      // Manufacturer (labeled "Make / Model" for Equipment) is only shown
+      // for Medicine/Equipment categories — require it there, since a
+      // Medicine/Equipment item with no known manufacturer is exactly the
+      // kind of item Purchase Intent/PO/GRN downstream needs it to be set on.
+      if ((MED_CATS.includes(payload.category) || EQP_CATS.includes(payload.category)) && !payload.manufacturer) {
+        throw new Error(MED_CATS.includes(payload.category) ? 'Manufacturer is required' : 'Make / Model is required')
+      }
       if (editing) {
         const { error } = await supabase.from('items').update(payload).eq('id', editing.id)
         if (error) throw error
@@ -601,7 +608,7 @@ export const ItemsMasterPage: React.FC = () => {
                 <Select label="Form / Type"
                   options={medSubOptions} value={form.sub_type}
                   onChange={e => s('sub_type', e.target.value)} placeholder="— Select —"/>
-                <Input label="Manufacturer" value={form.manufacturer}
+                <Input label="Manufacturer" required value={form.manufacturer}
                   onChange={e => s('manufacturer', e.target.value)} placeholder="e.g. Zoetis"/>
               </FormRow>
             )}
@@ -613,7 +620,7 @@ export const ItemsMasterPage: React.FC = () => {
 
             {isEqp && (
               <FormRow>
-                <Input label="Make / Model" value={form.manufacturer}
+                <Input label="Make / Model" required value={form.manufacturer}
                   onChange={e => s('manufacturer', e.target.value)} placeholder="e.g. Kirloskar"/>
                 <Input label="Description" value={form.description}
                   onChange={e => s('description', e.target.value)} placeholder="e.g. Water pump 1HP"/>
