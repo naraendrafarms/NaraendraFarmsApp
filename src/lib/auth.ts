@@ -57,6 +57,11 @@ export const can = {
   // Can delete records
   delete: (r?: Role) =>
     r === 'admin' || r === 'accounts',
+
+  // Can see/enter Planning (Flock Cost Projection, Quarterly Budget) — admin
+  // only for now; extend this single check later if a partner/CA needs it.
+  viewPlanning: (r?: Role) =>
+    r === 'admin',
 }
 
 interface AuthState {

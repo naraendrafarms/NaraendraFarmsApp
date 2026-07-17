@@ -81,6 +81,7 @@ import { ItemsMasterPage } from '@/pages/purchase/ItemsMaster'
 import { GRNPage } from '@/pages/purchase/GRNPage'
 import { PurchaseIntentPage } from '@/pages/purchase/PurchaseIntentPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
+import { PlanningPage } from '@/pages/planning/PlanningPages'
 import { Spinner } from '@/components/ui'
 
 const qc = new QueryClient({
@@ -268,6 +269,7 @@ export const App: React.FC = () => {
             <Route path="admin/users" element={<RequireRole check={can.manageUsers}><UserManagement /></RequireRole>} />
             <Route path="admin/audit" element={<RequireRole check={can.manageUsers}><AuditLogPage /></RequireRole>} />
             <Route path="admin" element={<RequireRole check={can.manageUsers}><AdminCentre /></RequireRole>} />
+            <Route path="planning" element={<RequireRole check={can.viewPlanning}><PlanningPage /></RequireRole>} />
 
             {/* Flock Management (new) */}
             <Route path="flock" element={<FlockDashboard />} />

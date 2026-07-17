@@ -3,7 +3,7 @@ import { Link, useLocation, Outlet, Navigate, useSearchParams, useNavigate } fro
 import {
   LayoutDashboard, Bird, Factory, Zap, Users, Settings,
   ChevronDown, ChevronRight, LogOut, Menu, X,
-  BarChart2, Database, Shield, ShoppingCart, BookOpen, Search, MessageCircle, ListTodo
+  BarChart2, Database, Shield, ShoppingCart, BookOpen, Search, MessageCircle, ListTodo, TrendingUp
 } from 'lucide-react'
 import { useAuth, can, type Role } from '@/lib/auth'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -194,6 +194,11 @@ const NAV: NavItem[] = [
     label: 'Help & Guide', icon: <BookOpen size={18}/>,
     roles: ['admin','management','accounts','site_manager','viewer'],
     to: '/help',
+  },
+  {
+    label: 'Planning', icon: <TrendingUp size={18}/>,
+    roles: ['admin'],
+    to: '/planning',
   },
   {
     label: 'Admin Centre', icon: <Shield size={18}/>,
