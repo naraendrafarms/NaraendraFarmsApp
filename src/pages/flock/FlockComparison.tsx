@@ -110,7 +110,7 @@ function useFlockDailyAgg(flockId: string) {
     queryFn: async (): Promise<FlockAgg> => {
       const { data } = await supabase
         .from('daily_records')
-        .select('mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,hd_pct,he_pct')
+        .select('mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,opening_female')
         .eq('flock_id', flockId)
       const rows = (data ?? []) as any[]
       const totalMortF = rows.reduce((s, r) => s + (r.mortality_female ?? 0), 0)
@@ -123,14 +123,11 @@ function useFlockDailyAgg(flockId: string) {
       const totalHE    = rows.reduce((s, r) => s + (r.he_eggs ?? 0), 0)
       const totalFeedF = rows.reduce((s, r) => s + (r.feed_female_kg ?? 0), 0)
       const totalFeedM = rows.reduce((s, r) => s + (r.feed_male_kg ?? 0), 0)
-      const hdRows = rows.filter(r => r.hd_pct != null && (r.total_eggs ?? 0) > 0)
-      const avgHdPct   = hdRows.length
-        ? hdRows.reduce((s: number, r) => s + r.hd_pct, 0) / hdRows.length
-        : null
-      const heRows = rows.filter(r => r.he_pct != null && (r.total_eggs ?? 0) > 0)
-      const avgHePct   = heRows.length
-        ? heRows.reduce((s: number, r) => s + r.he_pct, 0) / heRows.length
-        : null
+      // Weighted (sum eggs ÷ sum opening birds/eggs) — consistent with All
+      // Flocks Data / Reports, not a simple average of each day's own %.
+      const totalOpenF = rows.reduce((s, r) => s + (r.opening_female ?? 0), 0)
+      const avgHdPct = totalOpenF > 0 ? totalEggs / totalOpenF : null
+      const avgHePct = totalEggs > 0 ? totalHE / totalEggs : null
       return { totalMortF, totalMortM, peakBirds, totalEggs, avgHdPct, totalHE, avgHePct, totalFeedF, totalFeedM }
     }
   })

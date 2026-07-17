@@ -630,7 +630,7 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
     queryFn: async () => {
       const { data } = await supabase
         .from('daily_records')
-        .select('record_date,closing_female,closing_male,mortality_female,mortality_male,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct')
+        .select('record_date,opening_female,closing_female,closing_male,mortality_female,mortality_male,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct')
         .eq('flock_id', flock.id)
         .order('record_date', { ascending: false })
       return data ?? []
@@ -658,7 +658,8 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
   const byDate: Record<string, any> = {}
   for (const r of (daily ?? [])) {
     const d = r.record_date as string
-    if (!byDate[d]) byDate[d] = { record_date: d, closing_female: 0, closing_male: 0, mortality_female: 0, mortality_male: 0, total_eggs: 0, he_eggs: 0, he_grade_a: 0, he_grade_b: 0, he_grade_c: 0, wastage_eggs: 0, hd_pct_sum: 0, hd_pct_cnt: 0, he_pct_sum: 0, he_pct_cnt: 0 }
+    if (!byDate[d]) byDate[d] = { record_date: d, opening_female: 0, closing_female: 0, closing_male: 0, mortality_female: 0, mortality_male: 0, total_eggs: 0, he_eggs: 0, he_grade_a: 0, he_grade_b: 0, he_grade_c: 0, wastage_eggs: 0 }
+    byDate[d].opening_female    += r.opening_female ?? 0
     byDate[d].closing_female    += r.closing_female ?? 0
     byDate[d].closing_male      += r.closing_male ?? 0
     byDate[d].mortality_female  += r.mortality_female ?? 0
@@ -669,8 +670,6 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
     byDate[d].he_grade_b        += r.he_grade_b ?? 0
     byDate[d].he_grade_c        += r.he_grade_c ?? 0
     byDate[d].wastage_eggs      += r.wastage_eggs ?? 0
-    if (r.hd_pct != null) { byDate[d].hd_pct_sum += r.hd_pct; byDate[d].hd_pct_cnt++ }
-    if (r.he_pct != null) { byDate[d].he_pct_sum += r.he_pct; byDate[d].he_pct_cnt++ }
   }
   const dailyDates = Object.values(byDate).sort((a: any, b: any) => b.record_date.localeCompare(a.record_date))
 
@@ -686,10 +685,12 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
   const totalWaste  = dailyDates.reduce((s: number, r: any) => s + r.wastage_eggs, 0)
   const totalHEDisp = (heDispatch ?? []).reduce((s: number, r: any) => s + (r.total_dispatched ?? 0), 0)
 
-  const hdRows = dailyDates.filter((r: any) => r.hd_pct_cnt > 0 && r.total_eggs > 0)
-  const avgHD  = hdRows.length ? hdRows.reduce((s: number, r: any) => s + r.hd_pct_sum / r.hd_pct_cnt, 0) / hdRows.length : null
-  const heRows = dailyDates.filter((r: any) => r.he_pct_cnt > 0 && r.total_eggs > 0)
-  const avgHE  = heRows.length ? heRows.reduce((s: number, r: any) => s + r.he_pct_sum / r.he_pct_cnt, 0) / heRows.length : null
+  // Weighted (sum of eggs ÷ sum of the denominator) — not a simple average of
+  // each day's own %, since that diverges from the true rate whenever bird
+  // count or egg count varies day to day. Matches v_flock_summary/Reports.
+  const totalOpenF = dailyDates.reduce((s: number, r: any) => s + (r.opening_female ?? 0), 0)
+  const avgHD = totalOpenF > 0 ? totalEggs / totalOpenF : null
+  const avgHE = totalEggs > 0 ? totalHE / totalEggs : null
 
   const monthly: Record<string, { eggs: number; heEggs: number; gradeA: number; gradeB: number; gradeC: number; waste: number; mort: number; birdDays: number; days: number }> = {}
   dailyDates.forEach((r: any) => {
@@ -862,8 +863,10 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const totalEggs = filtered.reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0)
   const totalMort = filtered.reduce((s: number, r: any) => s + (r.mortality_female ?? 0) + (r.mortality_male ?? 0), 0)
-  const hdRows = filtered.filter((r: any) => r.hd_pct != null && (r.total_eggs ?? 0) > 0)
-  const avgHD  = hdRows.length ? hdRows.reduce((s: number, r: any) => s + r.hd_pct, 0) / hdRows.length : null
+  // Weighted (sum eggs ÷ sum opening birds), not a simple average of each
+  // day's %, so it stays consistent with the other HD%/HE% displays.
+  const totalOpenFForHd = filtered.reduce((s: number, r: any) => s + (r.opening_female ?? 0), 0)
+  const avgHD = totalOpenFForHd > 0 ? totalEggs / totalOpenFForHd : null
 
   const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))
   const hasFilter = fFarm || fFrom || fTo

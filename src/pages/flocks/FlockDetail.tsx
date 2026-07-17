@@ -1665,16 +1665,21 @@ export const FlockDetail: React.FC = () => {
             </Card>
           ) : (() => {
             const HH = flock.total_placed_f ?? 0
-            // Per-week totals from daily_records, keyed by week-of-age
-            type WeekAgg = { hdSum: number; hdN: number; heSum: number; heN: number; totalEggs: number; heEggs: number; depletion: number }
+            // Per-week totals from daily_records, keyed by week-of-age.
+            // HD%/HE% are weighted (sum of eggs ÷ sum of the denominator across
+            // the week), not a simple average of each day's own %, since a
+            // simple average diverges from the true rate whenever opening
+            // bird count or egg count varies day to day within the week (e.g.
+            // mortality) — matches the weighted formula already used by
+            // v_flock_summary (All Flocks Data) and the Reports page.
+            type WeekAgg = { openFSum: number; totalEggs: number; heEggs: number; depletion: number }
             const weekly: Record<number, WeekAgg> = {}
             for (const d of (daily ?? [])) {
               if (!d.record_date) continue
               const wk = flockAgeWeeks(flock.placement_date, d.record_date)
               if (wk < 0) continue
-              const row = weekly[wk] ??= { hdSum: 0, hdN: 0, heSum: 0, heN: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
-              if (d.hd_pct != null) { row.hdSum += d.hd_pct; row.hdN++ }
-              if (d.he_pct != null) { row.heSum += d.he_pct; row.heN++ }
+              const row = weekly[wk] ??= { openFSum: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
+              row.openFSum += d.opening_female ?? 0
               row.totalEggs += d.total_eggs ?? 0
               row.heEggs += d.he_eggs ?? 0
               row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
@@ -1697,8 +1702,8 @@ export const FlockDetail: React.FC = () => {
 
             const rows = stdCurve.map((s: any) => {
               const w = weekly[s.week_of_age]
-              const actualHd = w && w.hdN > 0 ? (w.hdSum / w.hdN) * 100 : null
-              const actualHe = w && w.heN > 0 ? (w.heSum / w.heN) * 100 : null
+              const actualHd = w && w.openFSum > 0 ? (w.totalEggs / w.openFSum) * 100 : null
+              const actualHe = w && w.totalEggs > 0 ? (w.heEggs / w.totalEggs) * 100 : null
               const hw = hatchWeekly[s.week_of_age]
               const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
               const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
