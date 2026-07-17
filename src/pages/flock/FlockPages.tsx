@@ -3,12 +3,12 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
-import { inr, fmtDate } from '@/lib/utils'
+import { inr, fmtDate, today } from '@/lib/utils'
 import { parseFile } from '@/lib/parseFile'
 import { useFeedRates } from '@/hooks/useFeedRates'
 import { useMedicineRates } from '@/lib/medicineRates'
 import {
-  Card, CardHeader, Button, Input, Select,
+  Card, CardHeader, Button, Input, Select, Modal, FormRow,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 , DateInput, SearchableSelect } from '@/components/ui'
 import {
@@ -1359,8 +1359,47 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 // ── FEED TAB ──────────────────────────────────────────────────────────────────
 
 const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
+  const qc = useQueryClient()
   const [fFrom, setFFrom] = useState('')
   const [fTo,   setFTo]   = useState('')
+  const [showAllocForm, setShowAllocForm] = useState(false)
+  const [allocForm, setAllocForm] = useState({ feed_type_id: '', allocation_date: today(), quantity_kg: '', rate_per_kg: '', remarks: '' })
+
+  const { data: feedTypes = [] } = useQuery({
+    queryKey: ['feed_types'],
+    queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active', true).order('sort_order'); return data ?? [] }
+  })
+
+  // Feed received by this flock — tracked separately from consumption
+  // (daily_records) so a real Received vs Used balance can be shown, the
+  // same way Medicine Allocation works.
+  const { data: allocations = [] } = useQuery({
+    queryKey: ['flock_feed_allocations', flockId],
+    queryFn: async () => {
+      const { data } = await supabase.from('feed_allocations')
+        .select('*, feed_types(code,name)').eq('flock_id', flockId).order('allocation_date', { ascending: false })
+      return data ?? []
+    }
+  })
+
+  const saveAllocMut = useMutation({
+    mutationFn: async () => {
+      if (!allocForm.feed_type_id || !allocForm.allocation_date || !allocForm.quantity_kg) throw new Error('Feed type, date and quantity are required')
+      const { error } = await supabase.from('feed_allocations').insert({
+        flock_id: flockId, feed_type_id: allocForm.feed_type_id, allocation_date: allocForm.allocation_date,
+        quantity_kg: parseFloat(allocForm.quantity_kg), rate_per_kg: allocForm.rate_per_kg ? parseFloat(allocForm.rate_per_kg) : null,
+        remarks: allocForm.remarks || null,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flock_feed_allocations', flockId] })
+      setShowAllocForm(false)
+      setAllocForm({ feed_type_id: '', allocation_date: today(), quantity_kg: '', rate_per_kg: '', remarks: '' })
+      toast.success('Saved')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
 
   // Read feed DIRECTLY from daily_records (the authoritative entry table) so the Feed
   // tab can never drift from what was actually entered. Each daily record is split into
@@ -1421,6 +1460,26 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     return s + ((r.female_kg ?? 0) + (r.male_kg ?? 0)) * rate
   }, 0)
 
+  // Received vs Used balance, by feed type — all-time (not date-filtered),
+  // same as the Medicine tab's Allocated/Used breakdown.
+  const balanceByType = React.useMemo(() => {
+    const m: Record<string, { code: string; name: string; received: number; used: number }> = {}
+    for (const a of allocations) {
+      const code = a.feed_types?.code ?? '—'
+      if (!m[code]) m[code] = { code, name: a.feed_types?.name ?? code, received: 0, used: 0 }
+      m[code].received += Number(a.quantity_kg ?? 0)
+    }
+    for (const r of (feedData ?? [])) {
+      const code = r.feed_type ?? '—'
+      const kg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
+      if (!m[code]) continue // only show feed types that were actually received
+      m[code].used += kg
+    }
+    return Object.values(m)
+  }, [allocations, feedData])
+
+  const feedTypeOptions = (feedTypes as any[]).map((ft: any) => ({ value: ft.id, label: `${ft.code} — ${ft.name}` }))
+
   return (
     <div className="space-y-4">
       <Card>
@@ -1437,11 +1496,14 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-xs text-gray-500">
-          Feed is read directly from your daily records. To add or edit feed, use Daily Entry / Bulk Daily Entry.
+          Feed usage is read directly from your daily records. To add or edit usage, use Daily Entry / Bulk Daily Entry.
         </p>
-        <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportFeed}>
-          Export
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" icon={<Plus size={14}/>} onClick={() => setShowAllocForm(true)}>Add Feed Received</Button>
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportFeed}>
+            Export
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -1449,6 +1511,30 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         <StatCard title="Total Male KG"   value={`${numFmt(Math.round(totalMaleKg))} kg`}   icon={<Package size={18}/>} color="text-blue-600" />
         <StatCard title="Cost (Recipe Rates)" value={inr(totalCostGrn)} icon={<TrendingUp size={18}/>} color="text-green-600" />
       </div>
+
+      {balanceByType.length > 0 && (
+        <Card>
+          <p className="font-semibold text-gray-700 mb-2 text-sm">Received vs Used (this flock, all-time)</p>
+          <Table>
+            <thead><tr><Th>Feed Type</Th><Th right>Received (kg)</Th><Th right>Used (kg)</Th><Th right>Balance (kg)</Th></tr></thead>
+            <tbody>
+              {balanceByType.map((r) => {
+                const balance = r.received - r.used
+                return (
+                  <tr key={r.code} className="hover:bg-gray-50">
+                    <Td><Badge color="blue">{r.code}</Badge><span className="text-sm ml-2">{r.name}</span></Td>
+                    <Td right className="text-xs">{r.received.toLocaleString('en-IN')}</Td>
+                    <Td right className="text-xs text-orange-600">{r.used.toLocaleString('en-IN')}</Td>
+                    <Td right className="text-xs font-semibold">
+                      <Badge color={balance < 0 ? 'red' : balance === 0 ? 'gray' : 'green'}>{balance.toLocaleString('en-IN')}</Badge>
+                    </Td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </Table>
+        </Card>
+      )}
 
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
@@ -1478,6 +1564,23 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           {filtered.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
         </Card>
       )}
+
+      <Modal open={showAllocForm} onClose={() => setShowAllocForm(false)} title="Add Feed Received" size="md"
+        footer={<><Button variant="secondary" onClick={() => setShowAllocForm(false)}>Cancel</Button>
+          <Button loading={saveAllocMut.isPending} onClick={() => saveAllocMut.mutate()}>Save</Button></>}>
+        <div className="space-y-4">
+          <SearchableSelect label="Feed Type" required placeholder="— Select —" options={feedTypeOptions}
+            value={allocForm.feed_type_id} onChange={v => setAllocForm(f => ({ ...f, feed_type_id: v }))} />
+          <FormRow>
+            <DateInput label="Date" required value={allocForm.allocation_date} onChange={e => setAllocForm(f => ({ ...f, allocation_date: e.target.value }))} />
+            <Input label="Quantity (kg)" required type="number" step="0.001" value={allocForm.quantity_kg}
+              onChange={e => setAllocForm(f => ({ ...f, quantity_kg: e.target.value }))} />
+          </FormRow>
+          <Input label="Rate/kg (optional)" type="number" step="0.01" value={allocForm.rate_per_kg}
+            onChange={e => setAllocForm(f => ({ ...f, rate_per_kg: e.target.value }))} />
+          <Input label="Remarks" value={allocForm.remarks} onChange={e => setAllocForm(f => ({ ...f, remarks: e.target.value }))} />
+        </div>
+      </Modal>
     </div>
   )
 }
