@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { Card, Button, Spinner, DateInput } from '@/components/ui'
+import { Card, Button, Spinner, DateInput, SearchableSelect } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Copy, CheckCircle, Download } from 'lucide-react'
 import { today as todayIST, daysBetween, exportCSV } from '@/lib/utils'
@@ -21,6 +21,7 @@ export const DailySummaryPage: React.FC = () => {
   // toISOString() is UTC — before 5:30am IST it opened on yesterday's date
   const today = todayIST()
   const [date, setDate] = useState(today)
+  const [siteId, setSiteId] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
   const prevDate = React.useMemo(() => {
     const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 1)
@@ -269,13 +270,23 @@ export const DailySummaryPage: React.FC = () => {
   }
 
   const activeSiteIds = new Set((flocks ?? []).map((f: any) => f.farm_id).filter(Boolean))
-  const flocklessSites = (farms ?? []).filter((s: any) => !activeSiteIds.has(s.id))
+  const flocklessSitesAll = (farms ?? []).filter((s: any) => !activeSiteIds.has(s.id))
 
-  const allBlocks = React.useMemo(() => {
+  const allBlocksAll = React.useMemo(() => {
     if (!flocks) return []
     return (flocks as any[]).map(f => { const { lines, stats } = buildFlockBlock(f); return { flock: f, lines, stats } })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flocks, recordsByFlockDate, prevHdByShed, prevOverallHdByFlock, medByFlock, sprayByFlock, stdCurves, manpowerBySite, date])
+
+  // Site filter (defaults to "All Sites") — one Copy button copies whatever
+  // is currently shown, filtered to the selected site if one is picked.
+  const allBlocks = siteId ? allBlocksAll.filter(b => b.flock.farm_id === siteId) : allBlocksAll
+  const flocklessSites = siteId ? flocklessSitesAll.filter((s: any) => s.id === siteId) : flocklessSitesAll
+
+  const siteOptions = [
+    { value: '', label: 'All Sites' },
+    ...((farms ?? []) as any[]).map((s: any) => ({ value: s.id, label: s.name })),
+  ]
 
   const handleExport = () => {
     if (!allBlocks.length) { toast.error('No data to export'); return }
@@ -285,19 +296,12 @@ export const DailySummaryPage: React.FC = () => {
     )
   }
 
-  const copyOne = (lines: string[], key: string) => {
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
-      setCopied(key)
-      toast.success('Copied to clipboard!')
-      setTimeout(() => setCopied(null), 3000)
-    })
-  }
-
   const copyAll = () => {
     const parts = allBlocks.map(b => b.lines.join('\n'))
     for (const site of flocklessSites) {
       parts.push([site.name.toUpperCase(), '(no active flock)', ...manpowerLines(site.id)].join('\n'))
     }
+    if (!parts.length) { toast.error('Nothing to copy for this site'); return }
     navigator.clipboard.writeText(parts.join('\n\n================================\n\n')).then(() => {
       setCopied('all')
       toast.success('Copied to clipboard!')
@@ -315,11 +319,12 @@ export const DailySummaryPage: React.FC = () => {
           <p className="text-sm text-gray-500">Copy and paste into WhatsApp — Feed Std and Egg Weight have no data source yet, shown as "—"</p>
         </div>
         <div className="flex items-center gap-2">
+          <SearchableSelect options={siteOptions} value={siteId} onChange={setSiteId} placeholder="All Sites" className="w-44" />
           <DateInput value={date} onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export</Button>
           <Button onClick={copyAll} variant={copied === 'all' ? 'secondary' : 'primary'} size="sm">
-            {copied === 'all' ? <><CheckCircle size={15} className="mr-1" />Copied!</> : <><Copy size={15} className="mr-1" />Copy All Flocks</>}
+            {copied === 'all' ? <><CheckCircle size={15} className="mr-1" />Copied!</> : <><Copy size={15} className="mr-1" />Copy</>}
           </Button>
         </div>
       </div>
@@ -329,9 +334,6 @@ export const DailySummaryPage: React.FC = () => {
           <div className="p-4">
             <div className="flex items-center justify-between mb-2">
               <span className="font-bold text-gray-900">Flock {f.flock_no} — {f.farms?.name ?? '—'}</span>
-              <Button size="sm" variant="outline" icon={copied === f.id ? <CheckCircle size={13}/> : <Copy size={13}/>} onClick={() => copyOne(lines, f.id)}>
-                {copied === f.id ? 'Copied' : 'Copy'}
-              </Button>
             </div>
             <pre className="text-xs font-mono whitespace-pre-wrap bg-gray-50 rounded-lg p-3 overflow-x-auto">{lines.join('\n')}</pre>
           </div>
