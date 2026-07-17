@@ -6,7 +6,7 @@ import { today, FY_OPTIONS, currentFY, fyRange } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Trash2, Download, Upload, Pencil, ArrowLeftRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
@@ -755,8 +755,8 @@ export const CashBookPage: React.FC = () => {
             <Input label="Reference / Cheque No" value={form.reference_no} onChange={e => sf('reference_no', e.target.value)} />
           </FormRow>
           <FormRow>
-            <Select label="Farm (optional)" placeholder="— Select Farm —" options={farmOptions} value={form.farm_id} onChange={e => sf('farm_id', e.target.value)} />
-            <Select label="Flock (optional)" placeholder="— Select Flock —" options={flockOptions} value={form.flock_id} onChange={e => sf('flock_id', e.target.value)} />
+            <SearchableSelect label="Farm (optional)" placeholder="— Select Farm —" options={farmOptions} value={form.farm_id} onChange={v => sf('farm_id', v)} />
+            <SearchableSelect label="Flock (optional)" placeholder="— Select Flock —" options={flockOptions} value={form.flock_id} onChange={v => sf('flock_id', v)} />
           </FormRow>
           <Input label="Remarks" placeholder="Optional notes" value={form.remarks} onChange={e => sf('remarks', e.target.value)} />
         </div>
