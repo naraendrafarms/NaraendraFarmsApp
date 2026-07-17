@@ -14,7 +14,7 @@ export function useItemOptionsWithAliases(opts?: { category?: string }) {
   const { data: items } = useQuery({
     queryKey: ['items_for_alias_search', opts?.category ?? null],
     queryFn: async () => {
-      let q = supabase.from('items').select('id,name,unit,category').eq('is_active', true).order('name')
+      let q = supabase.from('items').select('id,name,unit,category,manufacturer').eq('is_active', true).order('name')
       if (opts?.category) q = q.eq('category', opts.category)
       const { data, error } = await q
       if (error) throw error
@@ -40,8 +40,8 @@ export function useItemOptionsWithAliases(opts?: { category?: string }) {
 
   const options = (items ?? []).map((it: any) => ({
     value: it.id,
-    label: `${it.name}${it.unit ? ` (${it.unit})` : ''}`,
-    searchText: (aliasMap.get(it.id) ?? [it.name]).join(' '),
+    label: `${it.name}${it.manufacturer ? ` · ${it.manufacturer}` : ''}${it.unit ? ` (${it.unit})` : ''}`,
+    searchText: [...(aliasMap.get(it.id) ?? [it.name]), it.manufacturer].filter(Boolean).join(' '),
   }))
 
   return { options, items: items ?? [] }

@@ -8,6 +8,7 @@ import { useConfigValues } from '@/hooks/useConfigOptions'
 
 export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }) => {
   const [tab, setTab] = useState<'feed' | 'medicine'>('feed')
+  const [q, setQ] = useState('')
   const feedCats = useConfigValues('ingredient_category', ['grain','protein','mineral','supplement','additive','other'])
 
   const { data: ingredients, isLoading: loadIng } = useQuery({
@@ -81,6 +82,12 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
   const totalValue = stockMap.reduce((s, r) => s + (r.value ?? 0), 0)
   const isFeedLoading = loadIng || loadLedger
 
+  const qNorm = norm(q)
+  const filteredStock = qNorm ? stockMap.filter((r: any) =>
+    norm(r.name).includes(qNorm) || norm(r.short_name).includes(qNorm) || norm(r.code).includes(qNorm)) : stockMap
+  const filteredMedStock = qNorm ? (medStock ?? []).filter((r: any) =>
+    norm(r.name).includes(qNorm) || norm(r.type).includes(qNorm)) : (medStock ?? [])
+
   const tabs = [
     { key: 'feed' as const,     label: 'Feed Ingredients' },
     { key: 'medicine' as const, label: 'Medicine & Vaccine' },
@@ -110,6 +117,10 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
         </div>
       )}
 
+      <input value={q} onChange={e => setQ(e.target.value)}
+        placeholder={tab === 'feed' ? 'Search by code or ingredient name…' : 'Search by medicine/vaccine name or type…'}
+        className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-1 focus:ring-brand-500 w-72" />
+
       {tab === 'feed' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -127,7 +138,7 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
                   <Th right>Rate</Th><Th right>Stock Value</Th><Th>Last GRN</Th>
                 </tr></thead>
                 <tbody>
-                  {stockMap.map((r: any) => (
+                  {filteredStock.map((r: any) => (
                     <tr key={r.id} className="hover:bg-gray-50">
                       <Td><span className="font-mono text-xs font-bold text-brand-700">{r.code}</span></Td>
                       <Td className="font-medium">{r.short_name ?? r.name}</Td>
@@ -161,7 +172,7 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
       {tab === 'medicine' && (
         <>
           {(() => {
-            const purchased = (medStock ?? []).filter((r: any) => (r.purchased_qty ?? 0) > 0)
+            const purchased = filteredMedStock.filter((r: any) => (r.purchased_qty ?? 0) > 0)
             const inStock   = purchased.filter((r: any) => (r.balance_qty ?? 0) > 0)
             const outStock  = purchased.filter((r: any) => (r.balance_qty ?? 0) <= 0)
             return <>
