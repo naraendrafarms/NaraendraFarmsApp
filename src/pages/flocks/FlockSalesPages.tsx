@@ -3219,6 +3219,15 @@ export const MedicineEntry: React.FC = () => {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
+  // Allocation — medicine issued from the central store to a flock, tracked
+  // separately from usage (medicine_usage) so a real received-vs-used
+  // balance can be shown per flock (see "Balance" tab below).
+  const [showAllocForm, setShowAllocForm] = useState(false)
+  const [editingAlloc, setEditingAlloc] = useState<any>(null)
+  const [allocForm, setAllocForm] = useState({ flock_id: '', allocation_date: today(), medicine_id: '', quantity: '', unit: '', remarks: '' })
+  const [selAlloc, setSelAlloc] = useState<Set<string>>(new Set())
+  const [bulkConfirmAlloc, setBulkConfirmAlloc] = useState(false)
+
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
     queryFn: async () => {
@@ -3257,7 +3266,49 @@ export const MedicineEntry: React.FC = () => {
     }
   })
 
-  const [tab, setTab] = useState<'daily' | 'monthly'>('monthly')
+  const { data: allocations, isLoading: loadingAlloc } = useQuery({
+    queryKey: ['medicine_allocations', flockFilter, fromDate, toDate],
+    queryFn: async () => {
+      let q = supabase.from('medicine_allocations')
+        .select('*, flocks(flock_no), medicines_master(name,unit)')
+        .order('allocation_date', { ascending: false })
+      if (flockFilter) q = q.eq('flock_id', flockFilter)
+      if (fromDate) q = q.gte('allocation_date', fromDate)
+      if (toDate) q = q.lte('allocation_date', toDate)
+      if (!hasFilter) q = q.limit(200)
+      const { data } = await q; return data ?? []
+    }
+  })
+
+  // Balance — all-time allocated vs used per flock+medicine, regardless of
+  // the date filter above (a running balance should reflect everything).
+  const { data: allAllocations } = useQuery({
+    queryKey: ['medicine_allocations_all'],
+    queryFn: async () => { const { data } = await supabase.from('medicine_allocations').select('flock_id,medicine_id,quantity,flocks(flock_no),medicines_master(name,unit)'); return data ?? [] }
+  })
+  const { data: allUsage } = useQuery({
+    queryKey: ['medicine_usage_all'],
+    queryFn: async () => { const { data } = await supabase.from('medicine_usage').select('flock_id,medicine_id,quantity'); return data ?? [] }
+  })
+  const balanceRows = React.useMemo(() => {
+    const m: Record<string, { flockNo: any; medName: string; unit: string; allocated: number; used: number }> = {}
+    for (const a of allAllocations ?? []) {
+      if (flockFilter && a.flock_id !== flockFilter) continue
+      const key = `${a.flock_id}|${a.medicine_id}`
+      const med = a.medicines_master as any
+      if (!m[key]) m[key] = { flockNo: (a.flocks as any)?.flock_no, medName: med?.name ?? '—', unit: med?.unit ?? '', allocated: 0, used: 0 }
+      m[key].allocated += Number(a.quantity ?? 0)
+    }
+    for (const u of allUsage ?? []) {
+      if (flockFilter && u.flock_id !== flockFilter) continue
+      const key = `${u.flock_id}|${u.medicine_id}`
+      if (!m[key]) continue // only show medicines that were actually allocated to this flock
+      m[key].used += Number(u.quantity ?? 0)
+    }
+    return Object.values(m).sort((a, b) => a.medName.localeCompare(b.medName))
+  }, [allAllocations, allUsage, flockFilter])
+
+  const [tab, setTab] = useState<'daily' | 'monthly' | 'allocation' | 'balance'>('monthly')
   const [form, setForm] = useState({
     flock_id: '', usage_date: today(), medicine_id: '',
     quantity: '', unit: '', rate: '', amount: '', remarks: ''
@@ -3312,6 +3363,58 @@ export const MedicineEntry: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  const saveAllocMut = useMutation({
+    mutationFn: async () => {
+      if (!allocForm.flock_id || !allocForm.allocation_date || !allocForm.medicine_id || !allocForm.quantity) throw new Error('Flock, date, medicine and quantity are required')
+      const payload = {
+        flock_id: allocForm.flock_id, allocation_date: allocForm.allocation_date,
+        medicine_id: allocForm.medicine_id, quantity: parseFloat(allocForm.quantity),
+        unit: allocForm.unit || null, remarks: allocForm.remarks || null,
+      }
+      if (editingAlloc) {
+        const { error } = await supabase.from('medicine_allocations').update(payload).eq('id', editingAlloc.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('medicine_allocations').insert(payload)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => {
+      toast.success('Saved!')
+      qc.invalidateQueries({ queryKey: ['medicine_allocations'] })
+      qc.invalidateQueries({ queryKey: ['medicine_allocations_all'] })
+      setShowAllocForm(false); setEditingAlloc(null)
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  const delAllocMut = useMutation({
+    mutationFn: async (id: string) => { const { error } = await supabase.from('medicine_allocations').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['medicine_allocations'] }); qc.invalidateQueries({ queryKey: ['medicine_allocations_all'] }); toast.success('Deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const bulkDelMutAlloc = useMutation({
+    mutationFn: async (ids: string[]) => { const { error } = await supabase.from('medicine_allocations').delete().in('id', ids); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['medicine_allocations'] }); qc.invalidateQueries({ queryKey: ['medicine_allocations_all'] }); setSelAlloc(new Set()); setBulkConfirmAlloc(false) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const openAllocForm = (row?: any) => {
+    if (row) {
+      setEditingAlloc(row)
+      setAllocForm({
+        flock_id: row.flock_id ?? '', allocation_date: row.allocation_date ?? today(),
+        medicine_id: row.medicine_id ?? '', quantity: row.quantity?.toString() ?? '',
+        unit: row.unit ?? '', remarks: row.remarks ?? '',
+      })
+    } else {
+      setEditingAlloc(null)
+      setAllocForm({ flock_id: flockFilter, allocation_date: today(), medicine_id: '', quantity: '', unit: '', remarks: '' })
+    }
+    setShowAllocForm(true)
+  }
+
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const { options: medOptions } = useMedicineOptionsWithAliases()
   const getStockRate = useMedicineRates()
@@ -3334,15 +3437,35 @@ export const MedicineEntry: React.FC = () => {
   const toggleUsage = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAllUsage = () => setSel(s => { const n = new Set(s); allUsageSel ? usageIds.forEach((id: string) => n.delete(id)) : usageIds.forEach((id: string) => n.add(id)); return n })
 
+  const filteredAllocations = (allocations ?? []).filter((a: any) =>
+    !medSearch || (a.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
+  const allocIds = filteredAllocations.map((a: any) => a.id)
+  const allAllocSel = allocIds.length > 0 && allocIds.every((id: string) => selAlloc.has(id))
+  const someAllocSel = allocIds.some((id: string) => selAlloc.has(id))
+  const toggleAlloc = (id: string) => setSelAlloc(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAllAlloc = () => setSelAlloc(s => { const n = new Set(s); allAllocSel ? allocIds.forEach((id: string) => n.delete(id)) : allocIds.forEach((id: string) => n.add(id)); return n })
+
   const handleExportMed = () => {
-    const rows = tab === 'daily' ? filteredUsage : monthly
-    if (!rows?.length) { toast.error('No data to export'); return }
     if (tab === 'daily') {
+      if (!filteredUsage.length) { toast.error('No data to export'); return }
       exportFlatCSV(`medicine_usage.csv`,
         ['flock_no','usage_date','medicine','qty','unit','rate','amount','remarks'],
         filteredUsage.map((u:any)=>[u.flocks?.flock_no, u.usage_date, u.medicines_master?.name, u.quantity, u.unit, effectiveRate(u), effectiveAmount(u), u.remarks])
       )
+    } else if (tab === 'allocation') {
+      if (!filteredAllocations.length) { toast.error('No data to export'); return }
+      exportFlatCSV(`medicine_allocations.csv`,
+        ['flock_no','allocation_date','medicine','qty','unit','remarks'],
+        filteredAllocations.map((a:any)=>[a.flocks?.flock_no, a.allocation_date, a.medicines_master?.name, a.quantity, a.unit, a.remarks])
+      )
+    } else if (tab === 'balance') {
+      if (!balanceRows.length) { toast.error('No data to export'); return }
+      exportFlatCSV(`medicine_balance.csv`,
+        ['flock_no','medicine','unit','allocated','used','balance'],
+        balanceRows.map((r:any)=>[r.flockNo, r.medName, r.unit, r.allocated, r.used, r.allocated - r.used])
+      )
     } else {
+      if (!monthly?.length) { toast.error('No data to export'); return }
       exportFlatCSV(`medicine_monthly.csv`,
         ['flock_no','month','total_amount','remarks'],
         (monthly??[]).map((m:any)=>[m.flocks?.flock_no, m.month?.slice(0,7), m.total_amount, m.remarks])
@@ -3365,29 +3488,35 @@ export const MedicineEntry: React.FC = () => {
           <div className="flex gap-2">
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTemplateMed}>Template</Button>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportMed}>Export CSV</Button>
-            <Button icon={<Plus size={16}/>} onClick={() => setShowForm(true)}>Add Entry</Button>
+            {tab !== 'balance' && (
+              <Button icon={<Plus size={16}/>} onClick={() => { if (tab === 'allocation') openAllocForm(); else setShowForm(true) }}>Add Entry</Button>
+            )}
           </div>
         }
       />
       <div className="flex gap-3 flex-wrap items-end">
         <Select label="" placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
-        {tab === 'daily' && (
+        {(tab === 'daily' || tab === 'allocation') && (
           <Input placeholder="Search medicine…" value={medSearch} onChange={e => setMedSearch(e.target.value)} className="w-44" />
         )}
-        <label className="flex items-center gap-1.5 text-sm text-gray-600">
-          From
-          <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1 text-sm" />
-        </label>
-        <label className="flex items-center gap-1.5 text-sm text-gray-600">
-          To
-          <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1 text-sm" />
-        </label>
+        {tab !== 'balance' && (
+          <>
+            <label className="flex items-center gap-1.5 text-sm text-gray-600">
+              From
+              <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm" />
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-gray-600">
+              To
+              <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1 text-sm" />
+            </label>
+          </>
+        )}
         {(hasFilter || medSearch) && <Button variant="ghost" size="sm" onClick={() => { setFlockFilter(''); setFromDate(''); setToDate(''); setMedSearch('') }}>Clear</Button>}
         <div className="flex rounded-lg border border-gray-200 overflow-hidden ml-auto">
-          {(['monthly','daily'] as const).map(t => (
+          {(['monthly','daily','allocation','balance'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-1.5 text-sm font-medium capitalize transition-colors
                 ${tab===t ? 'bg-brand-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
@@ -3422,7 +3551,7 @@ export const MedicineEntry: React.FC = () => {
           </Table>
           {monthly?.length === 0 && <EmptyState icon={<Package size={32}/>} title="No medicine data" action={<Button onClick={() => setShowForm(true)} icon={<Plus size={16}/>}>Add Monthly Total</Button>} />}
         </Card>
-      ) : (
+      ) : tab === 'daily' ? (
         <>
           <BulkBar count={sel.size} loading={bulkDelMutMed.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
           <Card padding={false}>
@@ -3459,6 +3588,68 @@ export const MedicineEntry: React.FC = () => {
               onConfirm={() => bulkDelMutMed.mutate([...sel])} onCancel={() => setBulkConfirm(false)} />
           )}
         </>
+      ) : tab === 'allocation' ? (
+        <>
+          <BulkBar count={selAlloc.size} loading={bulkDelMutAlloc.isPending} onClear={() => setSelAlloc(new Set())} onDelete={() => setBulkConfirmAlloc(true)} />
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th><CB checked={allAllocSel} indeterminate={someAllocSel && !allAllocSel} onChange={toggleAllAlloc}/></Th>
+                <Th>Flock</Th><Th>Date</Th><Th>Medicine</Th>
+                <Th right>Qty</Th><Th>Remarks</Th><Th></Th>
+              </tr></thead>
+              <tbody>
+                {loadingAlloc ? null : filteredAllocations.map((a: any) => (
+                  <tr key={a.id} className={`hover:bg-gray-50 ${selAlloc.has(a.id) ? 'bg-red-50' : ''}`}>
+                    <Td><CB checked={selAlloc.has(a.id)} onChange={() => toggleAlloc(a.id)}/></Td>
+                    <Td><Badge color="blue">F-{a.flocks?.flock_no}</Badge></Td>
+                    <Td className="text-xs">{fmtDate(a.allocation_date)}</Td>
+                    <Td className="text-sm">{a.medicines_master?.name ?? '—'}</Td>
+                    <Td right className="text-xs">{a.quantity ?? '—'} {a.unit}</Td>
+                    <Td className="text-xs text-gray-400">{a.remarks ?? ''}</Td>
+                    <Td>
+                      <div className="flex gap-1 justify-end">
+                        <button onClick={() => openAllocForm(a)} className="p-1 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
+                        <button onClick={() => delAllocMut.mutate(a.id)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            {!loadingAlloc && filteredAllocations.length === 0 && (
+              <EmptyState icon={<Package size={32}/>} title={medSearch ? `No medicine matching "${medSearch}"` : 'No allocations yet'}
+                action={<Button onClick={() => openAllocForm()} icon={<Plus size={16}/>}>Add Allocation</Button>} />
+            )}
+          </Card>
+          {bulkConfirmAlloc && (
+            <ConfirmBulkDelete label={`Delete ${selAlloc.size} allocation record(s)? This cannot be undone.`}
+              onConfirm={() => bulkDelMutAlloc.mutate([...selAlloc])} onCancel={() => setBulkConfirmAlloc(false)} />
+          )}
+        </>
+      ) : (
+        <Card padding={false}>
+          <Table>
+            <thead><tr><Th>Flock</Th><Th>Medicine</Th><Th right>Allocated</Th><Th right>Used</Th><Th right>Balance</Th></tr></thead>
+            <tbody>
+              {balanceRows.map((r: any, i: number) => {
+                const balance = r.allocated - r.used
+                return (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <Td><Badge color="blue">F-{r.flockNo}</Badge></Td>
+                    <Td className="text-sm">{r.medName}</Td>
+                    <Td right className="text-xs">{r.allocated.toLocaleString('en-IN')} {r.unit}</Td>
+                    <Td right className="text-xs text-orange-600">{r.used.toLocaleString('en-IN')} {r.unit}</Td>
+                    <Td right className="text-xs font-semibold">
+                      <Badge color={balance < 0 ? 'red' : balance === 0 ? 'gray' : 'green'}>{balance.toLocaleString('en-IN')} {r.unit}</Badge>
+                    </Td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </Table>
+          {balanceRows.length === 0 && <EmptyState icon={<Package size={32}/>} title="No allocations recorded yet — add one in the Allocation tab" />}
+        </Card>
       )}
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add Medicine Entry" size="md"
@@ -3508,6 +3699,30 @@ export const MedicineEntry: React.FC = () => {
             <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
           </div>
         )}
+      </Modal>
+
+      <Modal open={showAllocForm} onClose={() => { setShowAllocForm(false); setEditingAlloc(null) }}
+        title={editingAlloc ? 'Edit Allocation' : 'Add Allocation'} size="md"
+        footer={<><Button variant="secondary" onClick={() => { setShowAllocForm(false); setEditingAlloc(null) }}>Cancel</Button>
+          <Button loading={saveAllocMut.isPending} onClick={() => saveAllocMut.mutate()}>Save</Button></>}>
+        <div className="space-y-4">
+          <FormRow>
+            <Select label="Flock" required placeholder="— Select —" options={flockOptions}
+              value={allocForm.flock_id} onChange={e => setAllocForm(f => ({ ...f, flock_id: e.target.value }))} />
+            <DateInput label="Date" required value={allocForm.allocation_date} onChange={e => setAllocForm(f => ({ ...f, allocation_date: e.target.value }))} />
+          </FormRow>
+          <SearchableSelect label="Medicine / Vaccine" placeholder="Search medicine…" options={medOptions}
+            value={allocForm.medicine_id} onChange={v => {
+              setAllocForm(f => ({ ...f, medicine_id: v }))
+              const med = medicines?.find((m: any) => m.id === v)
+              if (med) setAllocForm(f => ({ ...f, medicine_id: v, unit: med.unit ?? '' }))
+            }} />
+          <FormRow>
+            <Input label="Quantity" required type="number" step="0.001" value={allocForm.quantity} onChange={e => setAllocForm(f => ({ ...f, quantity: e.target.value }))} />
+            <Input label="Unit" value={allocForm.unit} onChange={e => setAllocForm(f => ({ ...f, unit: e.target.value }))} />
+          </FormRow>
+          <Input label="Remarks" value={allocForm.remarks} onChange={e => setAllocForm(f => ({ ...f, remarks: e.target.value }))} />
+        </div>
       </Modal>
     </div>
   )

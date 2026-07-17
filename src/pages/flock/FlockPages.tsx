@@ -1512,6 +1512,31 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   const getRate = useMedicineRates()
 
+  // Allocated (issued from central store to this flock) vs Used (medicine_usage
+  // above) — see Flock Management > Medicine Entry > Allocation/Balance tabs
+  // for the same numbers across all flocks.
+  const { data: allocations } = useQuery({
+    queryKey: ['flock_medicine_allocations', flockId],
+    queryFn: async () => {
+      const { data } = await supabase.from('medicine_allocations')
+        .select('medicine_id,quantity,medicines_master(name,unit)').eq('flock_id', flockId)
+      return data ?? []
+    }
+  })
+  const allocBalance = React.useMemo(() => {
+    const m: Record<string, { name: string; unit: string; allocated: number; used: number }> = {}
+    for (const a of allocations ?? []) {
+      const med = a.medicines_master as any
+      if (!m[a.medicine_id]) m[a.medicine_id] = { name: med?.name ?? '—', unit: med?.unit ?? '', allocated: 0, used: 0 }
+      m[a.medicine_id].allocated += Number(a.quantity ?? 0)
+    }
+    for (const u of usages ?? []) {
+      if (!u.medicine_id || !m[u.medicine_id]) continue
+      m[u.medicine_id].used += Number(u.quantity ?? 0)
+    }
+    return Object.values(m)
+  }, [allocations, usages])
+
   const deleteMut = useMutation({
     mutationFn: async (id: string) => { const { error } = await supabase.from('medicine_usage').delete().eq('id', id); if (error) throw error },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_medicine', flockId] }); setDeleteRow(null) },
@@ -1568,6 +1593,32 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         <StatCard title="Cost (Stock Rates)" value={inr(totalCostGrn)} icon={<FlaskConical size={18}/>} color="text-green-600" />
         <StatCard title="Cost (Excel Rates)" value={inr(totalCostExcel)} icon={<FlaskConical size={18}/>} color="text-gray-400" />
       </div>
+
+      {allocBalance.length > 0 && (
+        <Card>
+          <p className="font-semibold text-gray-700 mb-2 text-sm">Allocated vs Used (this flock)</p>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr><Th>Medicine</Th><Th right>Allocated</Th><Th right>Used</Th><Th right>Balance</Th></tr></thead>
+              <tbody>
+                {allocBalance.map((r, i) => {
+                  const balance = r.allocated - r.used
+                  return (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <Td className="text-sm">{r.name}</Td>
+                      <Td right className="text-xs">{r.allocated.toLocaleString('en-IN')} {r.unit}</Td>
+                      <Td right className="text-xs text-orange-600">{r.used.toLocaleString('en-IN')} {r.unit}</Td>
+                      <Td right className="text-xs font-semibold">
+                        <Badge color={balance < 0 ? 'red' : balance === 0 ? 'gray' : 'green'}>{balance.toLocaleString('en-IN')} {r.unit}</Badge>
+                      </Td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </Table>
+          </div>
+        </Card>
+      )}
 
       {isLoading ? <Spinner /> : (
         <>
