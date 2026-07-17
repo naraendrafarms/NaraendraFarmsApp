@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { fmtDate, today } from '@/lib/utils'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
-  Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
+  Card, Button, Input, Select, FormRow, Table, Th, Td, Badge, SearchableSelect,
   SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
 import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download, Upload, FileDown, CalendarClock } from 'lucide-react'
@@ -339,7 +339,7 @@ export const VaccinationRecordsPage: React.FC = () => {
       {/* Filters */}
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Select label="Flock" placeholder="All Flocks" options={flockOptions} value={filterFlock} onChange={e => setFilterFlock(e.target.value)} />
+          <SearchableSelect label="Flock" placeholder="All Flocks" options={flockOptions} value={filterFlock} onChange={v => setFilterFlock(v)} />
           <DateInput label="From Date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
           <DateInput label="To Date" value={filterTo} onChange={e => setFilterTo(e.target.value)} />
           <div className="flex items-end">
@@ -353,12 +353,12 @@ export const VaccinationRecordsPage: React.FC = () => {
           <p className="font-semibold text-gray-700 mb-4">{editing ? 'Edit' : 'New'} Vaccination Record</p>
           <div className="space-y-4">
             <FormRow>
-              <Select label="Flock" required placeholder="— Select Flock —" options={flockOptions} value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+              <SearchableSelect label="Flock" required placeholder="— Select Flock —" options={flockOptions} value={form.flock_id} onChange={v => s('flock_id', v)} />
               <DateInput label="Vaccine Date" required value={form.vaccine_date} onChange={e => s('vaccine_date', e.target.value)} />
             </FormRow>
             <FormRow>
-              <Select label="Site" placeholder="— All Sites —" options={farmOptions} value={form.farm_id} onChange={e => { s('farm_id', e.target.value); s('shed_id', '') }} />
-              <Select label="Shed (optional)" placeholder="— All Sheds —" options={shedOptions} value={form.shed_id} onChange={e => s('shed_id', e.target.value)} />
+              <SearchableSelect label="Site" placeholder="— All Sites —" options={farmOptions} value={form.farm_id} onChange={v => { s('farm_id', v); s('shed_id', '') }} />
+              <SearchableSelect label="Shed (optional)" placeholder="— All Sheds —" options={shedOptions} value={form.shed_id} onChange={v => s('shed_id', v)} />
             </FormRow>
             <FormRow>
               <Input label="Vaccine Name" required value={form.vaccine_name} onChange={e => s('vaccine_name', e.target.value)} placeholder="e.g. Marek's, ND LaSota…" />
@@ -456,7 +456,7 @@ export const VaccinationRecordsPage: React.FC = () => {
           <p className="font-semibold text-gray-700 text-sm">Vaccination Plan</p>
         </div>
         <div className="mb-3 max-w-xs">
-          <Select label="Flock" placeholder="— Select Flock to see its plan —" options={flockOptions} value={planFlockId} onChange={e => setPlanFlockId(e.target.value)} />
+          <SearchableSelect label="Flock" placeholder="— Select Flock to see its plan —" options={flockOptions} value={planFlockId} onChange={v => setPlanFlockId(v)} />
         </div>
         {!planFlockId ? (
           <p className="text-sm text-gray-400">Select a flock to see its due, upcoming and given vaccinations, computed from the schedule and placement date.</p>
