@@ -818,6 +818,20 @@ const ProductionTab: React.FC = () => {
     return (onOrBefore ?? list[list.length - 1]).price
   }
 
+  // Same rate source as the item-wise drill-down modal (GRN/opening/adjustment
+  // price as of production date) — used here to show Rate/kg and Total Cost
+  // directly on the main list, not just inside the modal.
+  const rowCost = (l: any) => {
+    const ings = l.feed_production_ingredients ?? []
+    let totCost = 0, totKg = 0
+    for (const i of ings) {
+      const qty = Number(i.quantity_kg ?? i.qty_used_kg ?? 0)
+      totCost += qty * ingRate(i.ingredient_name, l.production_date)
+      totKg += qty
+    }
+    return { totCost, totKg, ratePerKg: totKg > 0 ? totCost / totKg : 0 }
+  }
+
   const { data: farms = [] } = useQuery({ queryKey:['farms'], queryFn: async () => { const {data} = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[] }})
   const { data: formulas = [] } = useQuery({ queryKey:['feed_formulas'], queryFn: async () => { const {data} = await supabase.from('feed_formulas').select('id,formula_code,formula_name,feed_types(code,name)').eq('is_active',true).order('formula_code'); return data??[] }})
   const { data: allIngredients = {} } = useQuery({
@@ -960,16 +974,19 @@ const ProductionTab: React.FC = () => {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <StatCard title="Total Production" value={`${totalKg.toLocaleString()} Kg`} />
         <StatCard title="Daily Entries" value={String(logs.length)} />
+        <StatCard title="Total Cost" value={inr(logs.reduce((s: number, l: any) => s + rowCost(l).totCost, 0))} />
       </div>
 
       {isLoading ? <Spinner /> : logs.length === 0 ? <EmptyState title="No production records" /> : (
         <Table>
           <thead><tr>
             <Th><input type="checkbox" checked={allChecked} onChange={toggleAll} className="w-4 h-4 rounded accent-green-600 cursor-pointer" /></Th>
-            <Th>Date</Th><Th>Formula</Th><Th>Farm</Th><Th>Qty (Kg)</Th><Th>Ingredients</Th><Th>Remarks</Th><Th>Actions</Th>
+            <Th>Date</Th><Th>Formula</Th><Th>Farm</Th><Th>Qty (Kg)</Th><Th right>Rate/kg</Th><Th right>Total Cost</Th><Th>Ingredients</Th><Th>Remarks</Th><Th>Actions</Th>
           </tr></thead>
           <tbody>
-            {logs.map((l: any) => (
+            {logs.map((l: any) => {
+              const c = rowCost(l)
+              return (
               <tr key={l.id} className="hover:bg-gray-50">
                 <Td><input type="checkbox" checked={selected.has(l.id)} onChange={() => toggleOne(l.id)} className="w-4 h-4 rounded accent-green-600 cursor-pointer" /></Td>
                 <Td>{fmtDate(l.production_date)}</Td>
@@ -980,6 +997,8 @@ const ProductionTab: React.FC = () => {
                 </Td>
                 <Td>{l.farms?.code ?? l.farms?.name ?? '—'}</Td>
                 <Td className="font-semibold">{Number(l.quantity_kg).toLocaleString()}</Td>
+                <Td right className="text-xs">{c.totKg > 0 ? `₹${c.ratePerKg.toFixed(2)}` : <span className="text-gray-400">—</span>}</Td>
+                <Td right className="text-xs font-semibold">{c.totKg > 0 ? inr(c.totCost) : <span className="text-gray-400">—</span>}</Td>
                 <Td className="text-xs">
                   {(l.feed_production_ingredients??[]).length > 0
                     ? <button className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 active:bg-blue-100"
@@ -994,7 +1013,8 @@ const ProductionTab: React.FC = () => {
                   </div>
                 </Td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </Table>
       )}
