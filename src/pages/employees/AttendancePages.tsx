@@ -207,8 +207,8 @@ export const DailyAttendancePage: React.FC = () => {
       <SectionHeader title="Daily Attendance" subtitle="Mark attendance site-wise for a date" />
 
       <div className="flex flex-wrap gap-3 items-end">
-        <Select label="Site" required placeholder="— Select Site —" options={farmOptions}
-          value={farmId} onChange={e => setFarmId(e.target.value)} className="w-56" />
+        <SearchableSelect label="Site" required placeholder="— Select Site —" options={farmOptions}
+          value={farmId} onChange={v => setFarmId(v)} className="w-56" />
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
           <DateInput value={date} onChange={e => setDate(e.target.value)}
@@ -470,8 +470,8 @@ export const MonthAttendancePage: React.FC = () => {
         </div>} />
 
       <div className="flex flex-wrap gap-3 items-end">
-        <Select label="Site" required placeholder="— Select Site —" options={farmOptions}
-          value={farmId} onChange={e => setFarmId(e.target.value)} className="w-56" />
+        <SearchableSelect label="Site" required placeholder="— Select Site —" options={farmOptions}
+          value={farmId} onChange={v => setFarmId(v)} className="w-56" />
         <div className="flex items-center gap-2">
           <button onClick={prevMonth} className="p-2 border rounded-lg hover:bg-gray-50"><ChevronLeft size={16} /></button>
           <span className="font-semibold text-gray-800 w-28 text-center">{MONTH_NAMES[month - 1]} {year}</span>
@@ -768,7 +768,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
         <Card>
           <CardHeader title={editing ? 'Edit Advance' : 'New Advance'} />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <Select label="Site Filter" placeholder="All Sites" options={farmOptions} value={farmId} onChange={e => { setFarmId(e.target.value); s('employee_id', '') }} />
+            <SearchableSelect label="Site Filter" placeholder="All Sites" options={farmOptions} value={farmId} onChange={v => { setFarmId(v); s('employee_id', '') }} />
             <SearchableSelect label="Employee *" placeholder="— Select —" options={empOptions} value={form.employee_id} onChange={v => s('employee_id', v)} />
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Date *</label>
@@ -825,7 +825,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
-        <Select label="Site" placeholder="All Sites" options={farmOptions} value={farmId} onChange={e => setFarmId(e.target.value)} className="w-48" />
+        <SearchableSelect label="Site" placeholder="All Sites" options={farmOptions} value={farmId} onChange={v => setFarmId(v)} className="w-48" />
         <Select label="Month" options={monthOptions} value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-48" />
       </div>
 
@@ -1182,7 +1182,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"/>
         </div>
         <div className="w-48">
-          <Select label="" options={farmOptions} value={farmId} onChange={e => setFarmId(e.target.value)}/>
+          <SearchableSelect options={farmOptions} value={farmId} onChange={v => setFarmId(v)}/>
         </div>
       </div>
 
