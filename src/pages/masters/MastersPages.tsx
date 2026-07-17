@@ -5,7 +5,7 @@ import { fmtDate } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
-, DateInput, SearchableSelect } from '@/components/ui'
+, DateInput, SearchableSelect, Textarea } from '@/components/ui'
 import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
@@ -1790,16 +1790,15 @@ export const VaccinationSchedulePage: React.FC = () => {
     }) ?? null
   }
 
-  // A schedule line like "AE + FP" or "AE + IBH Combined Killed" is often
-  // two genuinely separate vaccines given together, not one combined
-  // product — a single medicine_id can't hold both. Detect the "+" combo
-  // pattern and offer to split it into one row per vaccine (same age/dose/
-  // route/product/notes on each), so each half can be linked individually.
-  const comboParts = (vaccineName: string): string[] | null => {
-    if (!vaccineName.includes('+')) return null
-    const parts = vaccineName.split('+').map(p => p.trim()).filter(Boolean)
-    return parts.length >= 2 ? parts : null
-  }
+  // A schedule line can genuinely be two (or more) separate vaccines given
+  // together (e.g. "IB MA-5 Live AND IB 4/91"), or it can just have a "+"
+  // as part of one product's own name — no fixed delimiter guess is
+  // reliable both ways, so this is a manual split: edit the line into one
+  // vaccine per row yourself, rather than the tool guessing wrong. Splits
+  // into one schedule row per non-empty line (same age/dose/route/
+  // product/notes copied to each), so each can then be linked individually.
+  const [splitEditingFor, setSplitEditingFor] = useState<any>(null)
+  const [splitText, setSplitText] = useState('')
 
   const splitComboMut = useMutation({
     mutationFn: async ({ row, parts }: { row: any; parts: string[] }) => {
@@ -1812,7 +1811,11 @@ export const VaccinationSchedulePage: React.FC = () => {
       const { error: delErr } = await supabase.from('vaccination_schedule').delete().eq('id', row.id)
       if (delErr) throw delErr
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); toast.success('Split — link each one below') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vaccination_schedule'] })
+      setSplitEditingFor(null); setSplitText('')
+      toast.success('Split — link each one below')
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -2008,7 +2011,7 @@ export const VaccinationSchedulePage: React.FC = () => {
           ) : unlinkedRows.map((r: any) => {
             const suggestion = suggestionFor(r.vaccine_name)
             const isCreating = creatingFor?.id === r.id
-            const parts = comboParts(r.vaccine_name)
+            const isSplitting = splitEditingFor?.id === r.id
             return (
               <div key={r.id} className="border border-gray-200 rounded-lg p-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
@@ -2016,28 +2019,19 @@ export const VaccinationSchedulePage: React.FC = () => {
                     <span className="text-xs text-gray-400 font-mono mr-2">{r.age_label}</span>
                     <span className="text-sm font-medium">{r.vaccine_name}</span>
                   </div>
-                  {!isCreating && (
-                    parts ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-amber-600">Looks like {parts.length} separate vaccines given together</span>
-                        <Button size="sm" variant="outline" loading={splitComboMut.isPending}
-                          onClick={() => splitComboMut.mutate({ row: r, parts })}>
-                          Split into {parts.length} — {parts.join(' / ')}
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        {suggestion ? (
-                          <>
-                            <span className="text-xs text-gray-500">Looks like <strong>{suggestion.name}</strong></span>
-                            <Button size="sm" loading={linkAliasMut.isPending} onClick={() => linkAliasMut.mutate({ scheduleId: r.id, vaccineName: r.vaccine_name, medicine: suggestion })}>Link as alias</Button>
-                          </>
-                        ) : (
-                          <span className="text-xs text-gray-400">No match found</span>
-                        )}
-                        <Button size="sm" variant="outline" onClick={() => { setCreatingFor(r); setCreateForm({ manufacturer: '', unit: 'dose' }) }}>Create New</Button>
-                      </div>
-                    )
+                  {!isCreating && !isSplitting && (
+                    <div className="flex items-center gap-2">
+                      {suggestion ? (
+                        <>
+                          <span className="text-xs text-gray-500">Looks like <strong>{suggestion.name}</strong></span>
+                          <Button size="sm" loading={linkAliasMut.isPending} onClick={() => linkAliasMut.mutate({ scheduleId: r.id, vaccineName: r.vaccine_name, medicine: suggestion })}>Link as alias</Button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-400">No match found</span>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => { setCreatingFor(r); setCreateForm({ manufacturer: '', unit: 'dose' }) }}>Create New</Button>
+                      <Button size="sm" variant="outline" onClick={() => { setSplitEditingFor(r); setSplitText(r.vaccine_name) }}>Split…</Button>
+                    </div>
                   )}
                 </div>
                 {isCreating && (
@@ -2047,6 +2041,20 @@ export const VaccinationSchedulePage: React.FC = () => {
                     <Input label="Unit" value={createForm.unit} onChange={e => setCreateForm(f => ({ ...f, unit: e.target.value }))} className="w-24" />
                     <Button size="sm" loading={createNewMut.isPending} onClick={() => createNewMut.mutate()}>Save &amp; Link</Button>
                     <Button size="sm" variant="secondary" onClick={() => setCreatingFor(null)}>Cancel</Button>
+                  </div>
+                )}
+                {isSplitting && (
+                  <div className="mt-3 bg-gray-50 rounded-lg p-3 space-y-2">
+                    <p className="text-xs text-gray-500">Edit into one vaccine per line — this is genuinely two (or more) separate vaccines only if you say so, not a guess.</p>
+                    <Textarea rows={3} value={splitText} onChange={e => setSplitText(e.target.value)} />
+                    <div className="flex gap-2 justify-end">
+                      <Button size="sm" variant="secondary" onClick={() => { setSplitEditingFor(null); setSplitText('') }}>Cancel</Button>
+                      <Button size="sm" loading={splitComboMut.isPending} onClick={() => {
+                        const parts = splitText.split('\n').map(p => p.trim()).filter(Boolean)
+                        if (parts.length < 2) { toast.error('Enter at least 2 lines to split'); return }
+                        splitComboMut.mutate({ row: r, parts })
+                      }}>Split into {splitText.split('\n').map(p => p.trim()).filter(Boolean).length || '…'} rows</Button>
+                    </div>
                   </div>
                 )}
               </div>
