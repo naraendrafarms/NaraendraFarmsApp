@@ -639,7 +639,13 @@ const QuarterlyBudgetTab: React.FC = () => {
 // manual field, not a guess.
 
 const SALE_CATEGORIES = ['he_sale', 'je_sale', 'te_sale', 'be_sale', 'bird_sale', 'litter_sale', 'bag_sale']
-const OTHER_INCOME_CATEGORIES = ['sales_collection', 'other']
+const OTHER_INCOME_CATEGORIES = ['other']
+// 'sales_collection' is deliberately excluded from both Product Sales and
+// Other Income — it's a mixed bucket (legacy/unrecognized sale types that
+// ARE product sales, backfilled by migration 080, plus buyer advances which
+// are a liability, not income at all, and would double-count against Sundry
+// Debtors below). Shown as its own unclassified line for the admin to check.
+const UNCLASSIFIED_CATEGORIES = ['sales_collection']
 // Designations treated as direct farm labour (Direct Wages) vs office/admin
 // (Employee Benefits) — same real config_options designation values used
 // elsewhere in the app (see Daily Farm Summary manpower section).
@@ -699,6 +705,7 @@ const CAStatementTab: React.FC = () => {
 
   const productSales = useMemo(() => (cashBookTxns ?? []).filter((t: any) => SALE_CATEGORIES.includes(t.category)).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [cashBookTxns])
   const otherIncome = useMemo(() => (cashBookTxns ?? []).filter((t: any) => OTHER_INCOME_CATEGORIES.includes(t.category)).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [cashBookTxns])
+  const unclassifiedInflow = useMemo(() => (cashBookTxns ?? []).filter((t: any) => UNCLASSIFIED_CATEGORIES.includes(t.category)).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [cashBookTxns])
   const electricity = useMemo(() => (electricityBills ?? []).reduce((s: number, b: any) => s + (b.amount ?? 0), 0), [electricityBills])
   const directWages = useMemo(() => (salaryRows ?? []).filter((r: any) => !OFFICE_DESIGNATIONS.includes(r.employees?.designation)).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0), [salaryRows])
   const employeeBenefits = useMemo(() => (salaryRows ?? []).filter((r: any) => OFFICE_DESIGNATIONS.includes(r.employees?.designation)).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0), [salaryRows])
@@ -727,6 +734,18 @@ const CAStatementTab: React.FC = () => {
   })
   const setM = (k: keyof typeof manual, v: string) => setManual(m => ({ ...m, [k]: v }))
   const num = (v: string) => parseFloat(v) || 0
+  const entered = (v: string) => v.trim() !== ''
+
+  // A blank manual field defaults to 0 in the arithmetic below, which would
+  // otherwise silently understate cost / overstate liquidity with a
+  // confident-looking wrong number. Track which totals actually depend on a
+  // still-blank manual field so the UI can show "—" instead of trusting it.
+  const copIncomplete = !entered(manual.rmConsumed) || !entered(manual.otherDirectExpenses)
+  const indirectIncomplete = !entered(manual.paymentToPromoters) || !entered(manual.otherIndirectExpenses) || !entered(manual.depreciation)
+  const netProfitIncomplete = copIncomplete || indirectIncomplete
+  const currentAssetsIncomplete = !entered(manual.inventories) || !entered(manual.loansAdvances) || !entered(manual.otherCurrentAssets)
+  const currentLiabIncomplete = !entered(manual.currentLiabilitiesExpenses)
+  const workingCapitalIncomplete = currentAssetsIncomplete || currentLiabIncomplete
 
   const totalTurnover = productSales + otherIncome
   const totalCOP = num(manual.rmConsumed) + directWages + electricity + num(manual.otherDirectExpenses)
@@ -741,6 +760,7 @@ const CAStatementTab: React.FC = () => {
   const npRatio = totalTurnover > 0 ? netProfit / totalTurnover : 0
   const currentRatio = totalCurrentLiabilities > 0 ? totalCurrentAssets / totalCurrentLiabilities : 0
   const quickRatio = totalCurrentLiabilities > 0 ? (totalCurrentAssets - num(manual.inventories)) / totalCurrentLiabilities : 0
+  const dash = (incomplete: boolean, text: string) => incomplete ? '— (enter manual fields)' : text
   const debtorsTurnoverRatio = totalTurnover > 0 ? sundryDebtors / totalTurnover : 0
   const creditorsTurnoverRatio = totalTurnover > 0 ? creditorsGoods / totalTurnover : 0
 
@@ -788,24 +808,28 @@ const CAStatementTab: React.FC = () => {
               <tr><Td>Product Sales</Td><Td right>{inr(productSales)}</Td><Td className="text-xs text-gray-400">Cash Book (sale categories)</Td></tr>
               <tr><Td>Other Income</Td><Td right>{inr(otherIncome)}</Td><Td className="text-xs text-gray-400">Cash Book (other categories)</Td></tr>
               <tr><Td className="font-semibold">Total Turnover</Td><Td right className="font-semibold">{inr(totalTurnover)}</Td><Td /></tr>
+              {unclassifiedInflow !== 0 && (
+                <tr><Td className="text-amber-700">Unclassified (not in Turnover above)</Td><Td right className="text-amber-700">{inr(unclassifiedInflow)}</Td>
+                  <Td className="text-xs text-amber-600">Cash Book "sales_collection" — a mix of legacy product sales and buyer advances (a liability). Not auto-included since it can't be split reliably; check this period's cash book and account for it manually.</Td></tr>
+              )}
 
               <tr><Td className="font-semibold" colSpan={3}>2. COST OF PRODUCTION</Td></tr>
               <tr><Td>RM Consumed</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.rmConsumed} onChange={e => setM('rmConsumed', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — no dedicated source yet</Td></tr>
               <tr><Td>Direct Wages</Td><Td right>{inr(directWages)}</Td><Td className="text-xs text-gray-400">Salary (site/operational designations)</Td></tr>
               <tr><Td>Electricity</Td><Td right>{inr(electricity)}</Td><Td className="text-xs text-gray-400">Electricity Bills</Td></tr>
               <tr><Td>Other Direct Expenses</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherDirectExpenses} onChange={e => setM('otherDirectExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
-              <tr><Td className="font-semibold">Total Cost of Production</Td><Td right className="font-semibold">{inr(totalCOP)}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Total Cost of Production</Td><Td right className="font-semibold">{dash(copIncomplete, inr(totalCOP))}</Td><Td /></tr>
 
-              <tr><Td className="font-semibold">3. Gross Profit [1-2]</Td><Td right className="font-semibold">{inr(grossProfit)}</Td><Td /></tr>
+              <tr><Td className="font-semibold">3. Gross Profit [1-2]</Td><Td right className="font-semibold">{dash(copIncomplete, inr(grossProfit))}</Td><Td /></tr>
 
               <tr><Td className="font-semibold" colSpan={3}>4. INDIRECT EXPENSES</Td></tr>
               <tr><Td>Employee Benefits</Td><Td right>{inr(employeeBenefits)}</Td><Td className="text-xs text-gray-400">Salary (office/admin designations)</Td></tr>
               <tr><Td>Payment to Promoters</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.paymentToPromoters} onChange={e => setM('paymentToPromoters', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
               <tr><Td>Other Indirect Expenses</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherIndirectExpenses} onChange={e => setM('otherIndirectExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
               <tr><Td>Depreciation</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.depreciation} onChange={e => setM('depreciation', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — no fixed asset register yet</Td></tr>
-              <tr><Td className="font-semibold">Total Indirect Expenses</Td><Td right className="font-semibold">{inr(totalIndirect)}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Total Indirect Expenses</Td><Td right className="font-semibold">{dash(indirectIncomplete, inr(totalIndirect))}</Td><Td /></tr>
 
-              <tr><Td className="font-semibold">5. Net Profit [3-4]</Td><Td right className={`font-semibold ${netProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>{inr(netProfit)}</Td><Td /></tr>
+              <tr><Td className="font-semibold">5. Net Profit [3-4]</Td><Td right className={`font-semibold ${netProfitIncomplete ? '' : netProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>{dash(netProfitIncomplete, inr(netProfit))}</Td><Td /></tr>
 
               <tr><Td className="font-semibold" colSpan={3}>6. QUANTITATIVE INFORMATION</Td></tr>
               <tr><Td>Total Production (Eggs)</Td><Td right>{totalProductionQty.toLocaleString('en-IN')}</Td><Td className="text-xs text-gray-400">Daily Records</Td></tr>
@@ -819,19 +843,19 @@ const CAStatementTab: React.FC = () => {
               <tr><Td>Sundry Debtors</Td><Td right>{inr(sundryDebtors)}</Td><Td className="text-xs text-gray-400">Party Ledger (buyer balances)</Td></tr>
               <tr><Td>Cash &amp; Bank</Td><Td right>{inr(cashBankBalance ?? 0)}</Td><Td className="text-xs text-gray-400">Cash Book + Bank Ledger</Td></tr>
               <tr><Td>Other Current Assets</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherCurrentAssets} onChange={e => setM('otherCurrentAssets', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
-              <tr><Td className="font-semibold">Total Current Assets</Td><Td right className="font-semibold">{inr(totalCurrentAssets)}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Total Current Assets</Td><Td right className="font-semibold">{dash(currentAssetsIncomplete, inr(totalCurrentAssets))}</Td><Td /></tr>
               <tr><Td>Current Liabilities (Goods)</Td><Td right>{inr(creditorsGoods)}</Td><Td className="text-xs text-gray-400">Party Ledger (supplier balances)</Td></tr>
               <tr><Td>Current Liabilities (Expenses)</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.currentLiabilitiesExpenses} onChange={e => setM('currentLiabilitiesExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
-              <tr><Td className="font-semibold">Total Current Liabilities</Td><Td right className="font-semibold">{inr(totalCurrentLiabilities)}</Td><Td /></tr>
-              <tr><Td className="font-semibold">Working Capital [CA-CL]</Td><Td right className="font-semibold">{inr(workingCapital)}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Total Current Liabilities</Td><Td right className="font-semibold">{dash(currentLiabIncomplete, inr(totalCurrentLiabilities))}</Td><Td /></tr>
+              <tr><Td className="font-semibold">Working Capital [CA-CL]</Td><Td right className="font-semibold">{dash(workingCapitalIncomplete, inr(workingCapital))}</Td><Td /></tr>
 
               <tr><Td className="font-semibold" colSpan={3}>RATIOS</Td></tr>
-              <tr><Td>Gross Profit Ratio</Td><Td right>{(gpRatio * 100).toFixed(2)}%</Td><Td /></tr>
-              <tr><Td>Net Profit Ratio</Td><Td right>{(npRatio * 100).toFixed(2)}%</Td><Td /></tr>
-              <tr><Td>Current Ratio</Td><Td right>{currentRatio.toFixed(2)}</Td><Td /></tr>
-              <tr><Td>Quick Ratio</Td><Td right>{quickRatio.toFixed(2)}</Td><Td /></tr>
-              <tr><Td>Debtors Turnover Ratio</Td><Td right>{debtorsTurnoverRatio.toFixed(4)}</Td><Td /></tr>
-              <tr><Td>Creditors Turnover Ratio</Td><Td right>{creditorsTurnoverRatio.toFixed(4)}</Td><Td /></tr>
+              <tr><Td>Gross Profit Ratio</Td><Td right>{dash(copIncomplete, (gpRatio * 100).toFixed(2) + '%')}</Td><Td /></tr>
+              <tr><Td>Net Profit Ratio</Td><Td right>{dash(netProfitIncomplete, (npRatio * 100).toFixed(2) + '%')}</Td><Td /></tr>
+              <tr><Td>Current Ratio</Td><Td right>{dash(workingCapitalIncomplete, currentRatio.toFixed(2))}</Td><Td /></tr>
+              <tr><Td>Quick Ratio</Td><Td right>{dash(workingCapitalIncomplete, quickRatio.toFixed(2))}</Td><Td /></tr>
+              <tr><Td>Debtors Turnover Ratio</Td><Td right>{debtorsTurnoverRatio.toFixed(4)}</Td><Td className="text-xs text-gray-400">As per CA workings (÷ Total Turnover)</Td></tr>
+              <tr><Td>Creditors Turnover Ratio</Td><Td right>{creditorsTurnoverRatio.toFixed(4)}</Td><Td className="text-xs text-gray-400">As per CA workings (÷ Total Turnover)</Td></tr>
             </tbody>
           </Table>
         </div>
