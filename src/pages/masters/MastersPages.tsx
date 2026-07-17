@@ -5,7 +5,7 @@ import { fmtDate } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
@@ -1116,7 +1116,7 @@ export const ShedsMaster: React.FC = () => {
         <SectionHeader title="Sheds" subtitle="Shed capacity per farm site"
           action={<Button icon={<Plus size={16}/>} onClick={()=>open()}>Add Shed</Button>}/>
         <div className="flex gap-3">
-          <Select label="" placeholder="All Sites" options={farmOptions} value={farmFilter} onChange={e=>setFarmFilter(e.target.value)} className="w-52"/>
+          <SearchableSelect placeholder="All Sites" options={farmOptions} value={farmFilter} onChange={v=>setFarmFilter(v)} className="w-52"/>
           {farmFilter&&<Button variant="ghost" size="sm" onClick={()=>setFarmFilter('')}>Clear</Button>}
         </div>
         {isLoading?<Spinner/>:(
@@ -1163,7 +1163,7 @@ export const ShedsMaster: React.FC = () => {
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
           <FormRow>
-            <Select label="Farm / Site" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={e=>s('farm_id',e.target.value)}/>
+            <SearchableSelect label="Farm / Site" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={v=>s('farm_id',v)}/>
             <Input label="Shed No" required value={form.shed_no} onChange={e=>s('shed_no',e.target.value)} hint="e.g. A, B, C1"/>
           </FormRow>
           <FormRow>
@@ -1510,7 +1510,7 @@ export const MetersMaster: React.FC = () => {
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Meter':'Add Meter'} size="md"
         footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
-          <Select label="Farm / Site" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={e=>s('farm_id',e.target.value)}/>
+          <SearchableSelect label="Farm / Site" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={v=>s('farm_id',v)}/>
           <Input label="Meter Name" required value={form.meter_name} onChange={e=>s('meter_name',e.target.value)} hint="e.g. Bodjanampet-1 Main"/>
           <FormRow>
             <Input label="USC No" required value={form.usc_no} onChange={e=>s('usc_no',e.target.value)} hint="From electricity bill"/>
