@@ -6,12 +6,13 @@ import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
 , DateInput } from '@/components/ui'
-import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info } from 'lucide-react'
+import { Plus, Edit2, Settings, Trash2, Merge, Download, Upload, Info, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 import { ifscError, accountNoError } from '@/lib/validators'
 import { parseGstin, GST_TYPE_OPTIONS, GST_RATE_OPTIONS } from '@/lib/gst'
 import { useConfigValues } from '@/hooks/useConfigOptions'
+import { printReport } from '@/lib/invoicePrint'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -1776,6 +1777,16 @@ export const VaccinationSchedulePage: React.FC = () => {
       toExport.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose??'', r.route??'', r.product??'']))
   }
 
+  function handlePrint() {
+    const toPrint = sel.size > 0 ? rows.filter((r: any) => sel.has(r.id)) : rows
+    printReport({
+      title: 'Vaccination Schedule',
+      subtitle: 'Recommended Schedule',
+      headers: ['S.No', 'Age', 'Vaccine / Treatment', 'Dose', 'Route', 'Product'],
+      rows: toPrint.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose ?? '', r.route ?? '', r.product ?? '']),
+    })
+  }
+
   const handleImport = async (file: File) => {
     const { headers: hdrs, rows: fileRows } = await parseFile(file)
     const norm = (h: string) => h.toLowerCase().replace(/[^a-z]/g, '')
@@ -1813,6 +1824,9 @@ export const VaccinationSchedulePage: React.FC = () => {
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImport(f)}}/>
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={handleExport}>
             {sel.size > 0 ? `Export ${sel.size}` : 'Export CSV'}
+          </Button>
+          <Button size="sm" variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>
+            {sel.size > 0 ? `Print ${sel.size}` : 'Print'}
           </Button>
           {rows.length > 0 && (
             <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setClearAll(true)}>Clear All</Button>

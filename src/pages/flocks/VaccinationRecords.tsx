@@ -7,7 +7,7 @@ import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
 , DateInput } from '@/components/ui'
-import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download, Upload, FileDown } from 'lucide-react'
+import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download, Upload, FileDown, CalendarClock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 
@@ -37,6 +37,26 @@ const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => 
   return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
 }
 
+// Parses the Vaccination Schedule's free-text "Age" column into an offset
+// (in days) from placement date — Day 1 = placement date itself (offset 0),
+// Week N starts on day (N-1)*7. Returns null for formats we can't parse
+// (shown as "—" in the plan; still listed, just without a computed date).
+function parseAgeOffsetDays(ageLabel: string): number | null {
+  const s = (ageLabel ?? '').trim().toUpperCase()
+  let m = s.match(/^DAY\s*(\d+)/)
+  if (m) return parseInt(m[1], 10) - 1
+  m = s.match(/^(\d+)\s*-\s*(\d+)\s*DAYS?$/)
+  if (m) return parseInt(m[1], 10) - 1
+  m = s.match(/^WEEK\s*(\d+)/)
+  if (m) return (parseInt(m[1], 10) - 1) * 7
+  return null
+}
+const addDays = (dateStr: string, days: number) => {
+  const d = new Date(dateStr + 'T00:00:00'); d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+const normVaccineName = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
 const empty = () => ({
   flock_id: '', shed_id: '', farm_id: '',
   vaccine_date: today(), vaccine_name: '', dose_no: '1',
@@ -62,7 +82,7 @@ export const VaccinationRecordsPage: React.FC = () => {
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all'],
-    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no,status').order('flock_no'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no,status,placement_date').order('flock_no'); return data ?? [] }
   })
   const { data: sheds } = useQuery({
     queryKey: ['sheds_all'],
@@ -74,8 +94,41 @@ export const VaccinationRecordsPage: React.FC = () => {
   })
   const { data: schedule } = useQuery({
     queryKey: ['vaccination_schedule'],
-    queryFn: async () => { const { data } = await supabase.from('vaccination_schedule').select('*').order('week_no'); return data ?? [] }
+    queryFn: async () => { const { data, error } = await supabase.from('vaccination_schedule').select('*').order('sno'); if (error) throw error; return data ?? [] }
   })
+
+  const [planFlockId, setPlanFlockId] = useState('')
+  const { data: planFlockRecords } = useQuery({
+    queryKey: ['vaccination_records_for_plan', planFlockId],
+    queryFn: async () => {
+      if (!planFlockId) return []
+      const { data } = await supabase.from('vaccination_records').select('vaccine_name,vaccine_date').eq('flock_id', planFlockId)
+      return data ?? []
+    },
+    enabled: !!planFlockId,
+  })
+  const planFlock = (flocks ?? []).find((f: any) => f.id === planFlockId)
+  const planToday = today()
+  const plan = React.useMemo(() => {
+    if (!planFlock?.placement_date) return []
+    const givenByName = new Map<string, string>()
+    for (const r of planFlockRecords ?? []) {
+      const key = normVaccineName(r.vaccine_name)
+      if (!givenByName.has(key) || r.vaccine_date > givenByName.get(key)!) givenByName.set(key, r.vaccine_date)
+    }
+    return (schedule ?? []).map((s: any) => {
+      const offset = parseAgeOffsetDays(s.age_label)
+      const dueDate = offset != null ? addDays(planFlock.placement_date, offset) : null
+      const givenDate = givenByName.get(normVaccineName(s.vaccine_name)) ?? null
+      let status: 'given' | 'overdue' | 'due_soon' | 'upcoming' | 'unknown' = 'unknown'
+      if (givenDate) status = 'given'
+      else if (dueDate == null) status = 'unknown'
+      else if (dueDate < planToday) status = 'overdue'
+      else if (dueDate <= addDays(planToday, 7)) status = 'due_soon'
+      else status = 'upcoming'
+      return { ...s, dueDate, givenDate, status }
+    })
+  }, [planFlock, schedule, planFlockRecords, planToday])
 
   const { data: records, isLoading } = useQuery({
     queryKey: ['vaccination_records', filterFlock, filterFrom, filterTo],
@@ -112,6 +165,20 @@ export const VaccinationRecordsPage: React.FC = () => {
     } else {
       setEditing(null); setForm(empty())
     }
+    setShowForm(true)
+  }
+
+  // Quick "Mark Given" from the plan — pre-fills a normal record so it goes
+  // through the same save path (and shows up back in the plan as Given).
+  const markGivenFromPlan = (s: any) => {
+    setEditing(null)
+    setForm({
+      ...empty(),
+      flock_id: planFlockId,
+      vaccine_date: today(),
+      vaccine_name: s.vaccine_name ?? '',
+      remarks: [s.dose, s.product].filter(Boolean).join(' · '),
+    })
     setShowForm(true)
   }
 
@@ -382,22 +449,70 @@ export const VaccinationRecordsPage: React.FC = () => {
         />
       )}
 
+      {/* Vaccination Plan — per-flock due list computed from the schedule + placement date */}
+      <Card>
+        <div className="flex items-center gap-2 mb-3">
+          <CalendarClock size={16} className="text-brand-600"/>
+          <p className="font-semibold text-gray-700 text-sm">Vaccination Plan</p>
+        </div>
+        <div className="mb-3 max-w-xs">
+          <Select label="Flock" placeholder="— Select Flock to see its plan —" options={flockOptions} value={planFlockId} onChange={e => setPlanFlockId(e.target.value)} />
+        </div>
+        {!planFlockId ? (
+          <p className="text-sm text-gray-400">Select a flock to see its due, upcoming and given vaccinations, computed from the schedule and placement date.</p>
+        ) : !planFlock?.placement_date ? (
+          <p className="text-sm text-red-500">This flock has no placement date recorded — can't compute a plan.</p>
+        ) : plan.length === 0 ? (
+          <p className="text-sm text-gray-400">No schedule entries found.</p>
+        ) : (
+          <Table>
+            <thead><tr>
+              <Th>Age</Th><Th>Due Date</Th><Th>Vaccine / Treatment</Th><Th>Dose</Th><Th>Route</Th><Th>Product</Th><Th>Status</Th><Th></Th>
+            </tr></thead>
+            <tbody>
+              {plan.map((s: any) => (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <Td className="text-xs font-semibold">{s.age_label}</Td>
+                  <Td className="text-xs">{s.dueDate ? fmtDate(s.dueDate) : '—'}</Td>
+                  <Td className="text-sm">{s.vaccine_name}</Td>
+                  <Td className="text-xs text-gray-500">{s.dose ?? '—'}</Td>
+                  <Td className="text-xs text-gray-500">{s.route ?? '—'}</Td>
+                  <Td className="text-xs text-gray-500">{s.product ?? '—'}</Td>
+                  <Td className="text-xs">
+                    {s.status === 'given' && <Badge color="green">Given {fmtDate(s.givenDate)}</Badge>}
+                    {s.status === 'overdue' && <Badge color="red">Overdue</Badge>}
+                    {s.status === 'due_soon' && <Badge color="yellow">Due Soon</Badge>}
+                    {s.status === 'upcoming' && <Badge color="gray">Upcoming</Badge>}
+                    {s.status === 'unknown' && <Badge color="gray">—</Badge>}
+                  </Td>
+                  <Td>
+                    {s.status !== 'given' && (
+                      <button onClick={() => markGivenFromPlan(s)} className="text-xs text-brand-600 hover:underline font-medium">Mark Given</button>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+
       {/* Vaccination Schedule reference */}
       {(schedule ?? []).length > 0 && (
         <Card>
           <p className="font-semibold text-gray-700 mb-3 text-sm">Vaccination Schedule Reference</p>
           <Table>
             <thead><tr>
-              <Th>Week</Th><Th>Vaccine</Th><Th>Route</Th><Th>Dose</Th><Th>Notes</Th>
+              <Th>Age</Th><Th>Vaccine</Th><Th>Route</Th><Th>Dose</Th><Th>Product</Th>
             </tr></thead>
             <tbody>
               {(schedule ?? []).map((s: any) => (
                 <tr key={s.id} className="hover:bg-gray-50">
-                  <Td className="text-xs font-semibold">Wk {s.week_no}</Td>
+                  <Td className="text-xs font-semibold">{s.age_label}</Td>
                   <Td className="text-sm">{s.vaccine_name}</Td>
-                  <Td className="text-xs">{s.route ? routeLabel(s.route) : '—'}</Td>
-                  <Td className="text-xs">#{s.dose_no ?? 1}</Td>
-                  <Td className="text-xs text-gray-500">{s.notes ?? '—'}</Td>
+                  <Td className="text-xs">{s.route ?? '—'}</Td>
+                  <Td className="text-xs">{s.dose ?? '—'}</Td>
+                  <Td className="text-xs text-gray-500">{s.product ?? '—'}</Td>
                 </tr>
               ))}
             </tbody>
