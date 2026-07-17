@@ -127,6 +127,14 @@ export const ReceivePaymentModal: React.FC<{
         }
       }
 
+      // Always clean up any prior ledger entries for this sale/dispatch FIRST,
+      // regardless of the new status/mode — otherwise reversing to Pending, or
+      // switching Cash<->Bank, leaves the old cash_book/bank_transactions row
+      // behind (it was previously nested inside status/mode-gated branches).
+      const linkCol = table === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id'
+      await supabase.from('cash_book').delete().eq(linkCol, sale.id)
+      await supabase.from('bank_transactions').delete().eq(linkCol, sale.id)
+
       if (isAdvance) {
         if (!selectedAdvanceId) throw new Error('Select which advance to use')
         const adv = (partyAdvances as any[]).find(a => a.id === selectedAdvanceId)
@@ -185,12 +193,6 @@ export const ReceivePaymentModal: React.FC<{
       const description = [typeLabel, flockLabel, sale.dc_no ?? sale.invoice_no ?? ''].filter(Boolean).join(' — ')
 
       if (mode === 'Cash' && amt > 0 && status !== 'Pending') {
-        // Delete any existing cash_book entry for this sale first (prevents duplicate on re-save)
-        if (table === 'he_dispatch') {
-          await supabase.from('cash_book').delete().eq('he_dispatch_id', sale.id)
-        } else {
-          await supabase.from('cash_book').delete().eq('nhe_sale_id', sale.id)
-        }
         const sourceCol = table === 'he_dispatch' ? { he_dispatch_id: sale.id } : { nhe_sale_id: sale.id }
         // Create cash_book receipt entry
         const { error: cbErr } = await supabase.from('cash_book').insert({
@@ -209,9 +211,6 @@ export const ReceivePaymentModal: React.FC<{
         })
         if (cbErr) throw new Error('Payment saved but Cash Book entry failed: ' + cbErr.message)
       } else if (mode !== 'Cash' && bankId && amt > 0 && status !== 'Pending') {
-        // Delete any existing bank_transactions entry for this sale first (prevents duplicate on re-save)
-        const linkCol = table === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id'
-        await supabase.from('bank_transactions').delete().eq(linkCol, sale.id)
         // Create bank_transactions credit entry
         await supabase.from('bank_transactions').insert({
           bank_account_id: bankId,
@@ -846,6 +845,7 @@ export const HEDispatch: React.FC = () => {
       await reverseAdvanceAdjustments(dispatches ?? [])
       // By FK CASCADE; also explicit for safety
       await supabase.from('cash_book').delete().in('he_dispatch_id', ids)
+      await supabase.from('bank_transactions').delete().in('he_dispatch_id', ids)
       // Fallback for old unlinked entries
       if (dispatches && dispatches.length > 0) {
         for (const d of dispatches) {
@@ -1072,7 +1072,7 @@ export const HEDispatch: React.FC = () => {
 
   // CSV template download
   const handleDownloadTemplate = () => {
-    const headers = 'flock_no,dispatch_date,prod_date,dc_no,grade_a,grade_b,free_eggs,rate,party_name,remarks'
+    const headers = 'flock_no,dispatch_date,prod_date,dc_no,grade_a,grade_b,grade_c,free_eggs,rate,party_name,remarks'
     const blob = new Blob([headers + '\n'], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -1095,7 +1095,8 @@ export const HEDispatch: React.FC = () => {
         const partyMatch = parties?.find((p: any) => p.name === r.party_name)
         const gradeA = parseInt(r.grade_a) || 0
         const gradeB = parseInt(r.grade_b) || 0
-        const totalDispatched = gradeA + gradeB
+        const gradeC = parseInt(r.grade_c) || 0
+        const totalDispatched = gradeA + gradeB + gradeC
         const freeEggs = parseInt(r.free_eggs) || 0
         const rate = parseFloat(r.rate) || null
         return {
@@ -1105,6 +1106,7 @@ export const HEDispatch: React.FC = () => {
           dc_no: parseInt(r.dc_no) || null,
           grade_a: gradeA,
           grade_b: gradeB,
+          grade_c: gradeC,
           total_dispatched: totalDispatched,
           free_eggs: freeEggs,
           invoice_eggs: totalDispatched - freeEggs,
@@ -1158,7 +1160,7 @@ export const HEDispatch: React.FC = () => {
         prod_date: rowsByIdx[i]?.prod_date || ins.dispatch_date,
         grade_a: ins.grade_a ?? 0,
         grade_b: ins.grade_b ?? 0,
-        grade_c: 0,
+        grade_c: rowsByIdx[i]?.grade_c ?? 0,
         rate: rowsByIdx[i]?.rate ?? null,
       }))
       if (linePayload.length) {
@@ -2032,6 +2034,12 @@ export const NHESales: React.FC = () => {
       // 1. Delete cash_book rows linked by nhe_sale_id (FK CASCADE handles this automatically,
       //    but also do it explicitly to cover rows where nhe_sale_id may be NULL from old data)
       await supabase.from('cash_book').delete().in('nhe_sale_id', ids)
+      // Also clean up bank_transactions (bank-paid sales) and employee_deductions
+      // (employee sales with a salary deduction) — previously only cash_book was
+      // cleaned here, orphaning bank ledger rows and leaving deductions active
+      // for sales that no longer exist.
+      await supabase.from('bank_transactions').delete().in('nhe_sale_id', ids)
+      await supabase.from('employee_deductions').delete().in('nhe_sale_id', ids)
 
       // 2. Fallback: delete unlinked cash_book entries that match by flock+date+reference or amount
       if (sales && sales.length > 0) {
@@ -2206,6 +2214,16 @@ export const NHESales: React.FC = () => {
         payload.received_date   = null
         payload.bank_account_id = null
         payload.payment_mode    = null
+      }
+      // Editing a refunded sale wipes the refund's bank_transactions Debit row
+      // (deleted unconditionally below by nhe_sale_id) — so the refund tracking
+      // columns must be cleared too, or they'd point at a ledger entry that no
+      // longer exists. User can re-record the refund afterward if still owed.
+      if (editing && editing.refund_bank_txn_id) {
+        payload.refund_amount = null
+        payload.refund_date = null
+        payload.refund_bank_account_id = null
+        payload.refund_bank_txn_id = null
       }
       let savedId: string | null = null
       if (editing) {
@@ -2486,7 +2504,7 @@ export const NHESales: React.FC = () => {
     const headers = 'Flock,Date,Type,Party,DC No,Qty,Unit,Rate,Amount,Remarks'
     const lines = rows.map((r: any) => [
       r.flocks?.flock_no ?? '', r.sale_date,
-      NHE_TYPES.find(t => t.value === r.sale_type)?.label ?? r.sale_type,
+      r.sale_type,
       r.parties?.name ?? '', r.dc_no ?? '',
       r.quantity ?? '', r.unit ?? '', r.rate ?? '', r.amount ?? '', r.remarks ?? ''
     ].join(','))
