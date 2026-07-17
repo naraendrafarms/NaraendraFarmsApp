@@ -208,9 +208,20 @@ function useStockRows(asOf: string) {
       }
     }
 
+    // A stock_ledger/production row with item_id = NULL (legacy entry never
+    // linked to Items Master) used to fork its own name-keyed row even when
+    // it really was the same item — norm() only lowercases+trims, so e.g.
+    // "Toxfin 360 Dry" vs "Toxfin360 Dry" (a real case) never matched. This
+    // stripped-to-alphanumeric key matches the item/alias regardless of
+    // internal spacing/punctuation, folding the row into the real item.
+    const looseKey = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const looseNameToId: Record<string, string> = {}
+    for (const item of itemsMaster ?? []) looseNameToId[looseKey(item.name)] = item.id
+    for (const a of aliases ?? []) if (!looseNameToId[looseKey(a.alias)]) looseNameToId[looseKey(a.alias)] = a.item_id
+
     // Aggregate stock_ledger movements
     for (const r of slData ?? []) {
-      const key = r.item_id ?? norm(r.item_name)
+      const key = r.item_id ?? looseNameToId[looseKey(r.item_name)] ?? norm(r.item_name)
       if (!m[key]) {
         // Item exists in ledger but not in items master (legacy GRN)
         m[key] = {
