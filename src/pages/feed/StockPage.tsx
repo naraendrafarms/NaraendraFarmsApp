@@ -55,12 +55,15 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
       if (r.item_id) {
         if (isOut) outById[r.item_id] = (outById[r.item_id] ?? 0) + q
         else { inById[r.item_id] = (inById[r.item_id] ?? 0) + q
-          if (r.txn_type === 'grn_in' && (r.txn_date ?? '') >= (dateById[r.item_id] ?? '')) { priceById[r.item_id] = Number(r.unit_price ?? 0); dateById[r.item_id] = r.txn_date } }
+          // Rate from ANY inward txn (grn_in, opening, adjustment_in) — not
+          // just GRN, so items priced only via an Inventory opening/adjustment
+          // entry still show a rate instead of "—".
+          if (r.unit_price != null && (r.txn_date ?? '') >= (dateById[r.item_id] ?? '')) { priceById[r.item_id] = Number(r.unit_price ?? 0); dateById[r.item_id] = r.txn_date } }
       }
       if (nm) {
         if (isOut) outByName[nm] = (outByName[nm] ?? 0) + q
         else { inByName[nm] = (inByName[nm] ?? 0) + q
-          if (r.txn_type === 'grn_in' && (r.txn_date ?? '') >= (dateByName[nm] ?? '')) { priceByName[nm] = Number(r.unit_price ?? 0); dateByName[nm] = r.txn_date } }
+          if (r.unit_price != null && (r.txn_date ?? '') >= (dateByName[nm] ?? '')) { priceByName[nm] = Number(r.unit_price ?? 0); dateByName[nm] = r.txn_date } }
       }
     }
 
