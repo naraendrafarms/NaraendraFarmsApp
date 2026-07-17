@@ -1717,6 +1717,7 @@ export const VaccinationSchedulePage: React.FC = () => {
   const [delId, setDelId] = useState<string|null>(null)
   const [bulkDel, setBulkDel] = useState(false)
   const [clearAll, setClearAll] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
 
   const ids = rows.map((r: any) => r.id)
   const allSel = ids.length > 0 && ids.every((id: string) => sel.has(id))
@@ -1775,10 +1776,40 @@ export const VaccinationSchedulePage: React.FC = () => {
       toExport.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose??'', r.route??'', r.product??'']))
   }
 
+  const handleImport = async (file: File) => {
+    const { headers: hdrs, rows: fileRows } = await parseFile(file)
+    const norm = (h: string) => h.toLowerCase().replace(/[^a-z]/g, '')
+    const idx = (name: string) => hdrs.findIndex(h => norm(h) === name)
+    const iSno = idx('sno'), iAge = idx('age'), iVaccine = idx('vaccinename'), iDose = idx('dose'), iRoute = idx('route'), iProduct = idx('product')
+    const toInsert = fileRows.map(vals => ({
+      sno: iSno >= 0 && vals[iSno] ? Number(vals[iSno]) || null : null,
+      age_label: (iAge >= 0 ? vals[iAge] : '')?.trim(),
+      vaccine_name: (iVaccine >= 0 ? vals[iVaccine] : '')?.trim(),
+      dose: (iDose >= 0 ? vals[iDose] : '')?.trim() || null,
+      route: (iRoute >= 0 ? vals[iRoute] : '')?.trim() || null,
+      product: (iProduct >= 0 ? vals[iProduct] : '')?.trim() || null,
+    })).filter(r => r.age_label && r.vaccine_name)
+    if (!toInsert.length) { toast.error('No valid rows — need Age and Vaccine Name columns'); return }
+    // No unique constraint on this table, so dedupe against existing rows by
+    // age_label+vaccine_name here rather than relying on an upsert onConflict.
+    const existingKeys = new Set(rows.map((r: any) => `${normalizeName(r.age_label)}|${normalizeName(r.vaccine_name)}`))
+    const newRows = toInsert.filter(r => !existingKeys.has(`${normalizeName(r.age_label)}|${normalizeName(r.vaccine_name)}`))
+    if (newRows.length) {
+      const { error } = await supabase.from('vaccination_schedule').insert(newRows)
+      if (error) { toast.error(error.message); return }
+    }
+    toast.success(`Imported ${newRows.length} new entries${toInsert.length - newRows.length ? ` (${toInsert.length - newRows.length} already existed, skipped)` : ''}`)
+    qc.invalidateQueries({ queryKey: ['vaccination_schedule'] })
+    if (importRef.current) importRef.current.value = ''
+  }
+
   return (
     <div className="space-y-4">
       <SectionHeader title="Vaccination Schedule" subtitle="Narendra Breeder — Recommended Schedule" action={
         <div className="flex gap-2">
+          <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={()=>exportCSV('vaccination_schedule_template.csv',['S.No','Age','Vaccine Name','Dose','Route','Product'],[['1','Day 1','Marek\'s Disease','0.2 ml','Subcutaneous','Nobilis Marek']])}>Template</Button>
+          <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
+          <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImport(f)}}/>
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={handleExport}>
             {sel.size > 0 ? `Export ${sel.size}` : 'Export CSV'}
           </Button>
