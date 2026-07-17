@@ -10,7 +10,7 @@ import { useMedicineRates } from '@/lib/medicineRates'
 import {
   Card, CardHeader, Button, Input, Select,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, ChevronLeft, ChevronRight,
   Package, Truck, FlaskConical, ShoppingCart, Pencil, Trash2, X, Check,
@@ -875,8 +875,8 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     <div className="space-y-4">
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
-          <Select label="Site" placeholder="All Sites" options={farmOptions}
-            value={fFarm} onChange={e => { setFFarm(e.target.value); setPage(0) }} />
+          <SearchableSelect label="Site" placeholder="All Sites" options={farmOptions}
+            value={fFarm} onChange={v => { setFFarm(v); setPage(0) }} />
           <DateInput label="Date From" value={fFrom} onChange={e => { setFFrom(e.target.value); setPage(0) }} />
           <DateInput label="Date To"   value={fTo}   onChange={e => { setFTo(e.target.value); setPage(0) }} />
           <div className="flex items-end">
@@ -2086,12 +2086,12 @@ const ShedAllocationTab: React.FC<{ flock: any }> = ({ flock }) => {
           <p className="font-semibold text-sm text-gray-700 mb-3">New Shed Allocation</p>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <Select label="Filter by Site" placeholder="All Sites" options={farmOptions}
-                value={filterFarm} onChange={e => { setFilterFarm(e.target.value); s('shed_id', '') }} />
+              <SearchableSelect label="Filter by Site" placeholder="All Sites" options={farmOptions}
+                value={filterFarm} onChange={v => { setFilterFarm(v); s('shed_id', '') }} />
               <DateInput label="Date" required value={form.allocated_date} onChange={e => s('allocated_date', e.target.value)} />
             </div>
-            <Select label="Shed" required placeholder="— Select shed —" options={shedOptions}
-              value={form.shed_id} onChange={e => s('shed_id', e.target.value)} />
+            <SearchableSelect label="Shed" required placeholder="— Select shed —" options={shedOptions}
+              value={form.shed_id} onChange={v => s('shed_id', v)} />
             <div className="grid grid-cols-2 gap-3">
               <Input label="Female Count" type="number" value={form.female_count} onChange={e => s('female_count', e.target.value)} />
               <Input label="Male Count" type="number" value={form.male_count} onChange={e => s('male_count', e.target.value)} />
