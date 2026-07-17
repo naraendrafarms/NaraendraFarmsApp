@@ -7,7 +7,7 @@ import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard, Divider
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Edit2, Egg, Trash2, Download, Upload, FileDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -461,8 +461,8 @@ export const HatchBatches: React.FC = () => {
       </div>
 
       <div className="flex gap-3 items-end">
-        <Select label="" placeholder="All Flocks" options={flockOptions}
-          value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-44" />
+        <SearchableSelect placeholder="All Flocks" options={flockOptions}
+          value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
         {flockFilter && <Button variant="ghost" size="sm" onClick={() => setFlockFilter('')}>Clear</Button>}
       </div>
 
@@ -655,8 +655,8 @@ export const HatchBatches: React.FC = () => {
         }>
         <div className="space-y-4">
           <FormRow cols={3}>
-            <Select label="Flock" placeholder="— Select or auto from invoice —" options={flockOptions}
-              value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+            <SearchableSelect label="Flock" placeholder="— Select or auto from invoice —" options={flockOptions}
+              value={form.flock_id} onChange={v => s('flock_id', v)} />
             <Input label="Hatchery Name" placeholder="e.g. Hitech Hatch Fresh Pvt Ltd"
               value={form.hatchery_name} onChange={e => s('hatchery_name', e.target.value)} />
             <Input label="Setting No" placeholder="e.g. S-2026-01"
