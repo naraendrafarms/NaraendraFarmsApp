@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
 import {
-  Card, SectionHeader, Spinner, Badge, Select, DateInput
+  Card, SectionHeader, Spinner, Badge, Select, DateInput, SearchableSelect
 } from '@/components/ui'
 import { AlertCircle, Search, Link2, X, CheckCircle2, Trash2, Pencil, Plus } from 'lucide-react'
 import { AssignTaskButton } from '@/components/tasks/AssignTaskButton'
@@ -919,11 +919,11 @@ export const PendingPaymentsPage: React.FC = () => {
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Vendor (Supplier)</label>
-                <Select label="" placeholder="Select Supplier — add new ones in Purchase > Suppliers" options={partyOptions}
-                  value={editForm.party_id} onChange={e => {
-                    const p = (parties ?? []).find((x: any) => x.id === e.target.value)
+                <SearchableSelect placeholder="Select Supplier — add new ones in Purchase > Suppliers" options={partyOptions}
+                  value={editForm.party_id} onChange={v => {
+                    const p = (parties ?? []).find((x: any) => x.id === v)
                     setEditForm(f => ({
-                      ...f, party_id: e.target.value, vendor_name: p?.name ?? f.vendor_name,
+                      ...f, party_id: v, vendor_name: p?.name ?? f.vendor_name,
                       // Auto-fill the vendor's default TDS rate on a new bill only — never
                       // overwrite a rate already set on an existing bill.
                       tds_pct: (editModal === 'new' && p?.tds_pct_default != null) ? String(p.tds_pct_default) : f.tds_pct,

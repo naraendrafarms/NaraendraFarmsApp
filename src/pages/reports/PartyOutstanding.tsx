@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, fmtDate } from '@/lib/utils'
 import {
   Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Download, ChevronDown, ChevronRight, IndianRupee } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
@@ -168,7 +168,7 @@ const DebtorsTab: React.FC = () => {
       <div className="flex flex-wrap gap-3 items-end">
         <DateInput label="From" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-40"/>
         <DateInput label="To" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40"/>
-        <Select label="Flock" placeholder="All Flocks" options={flockOptions} value={flockFilter} onChange={e => setFlockFilter(e.target.value)} className="w-40"/>
+        <SearchableSelect label="Flock" placeholder="All Flocks" options={flockOptions} value={flockFilter} onChange={v => setFlockFilter(v)} className="w-40"/>
         <Input label="Party search" placeholder="Search party..." value={partyFilter} onChange={e => setPartyFilter(e.target.value)} className="w-48"/>
         <label className="flex items-center gap-1.5 text-sm text-gray-600 pb-2">
           <input type="checkbox" checked={hideSettled} onChange={e => setHideSettled(e.target.checked)} />

@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
-import { Card, CardHeader, Button, Select, SectionHeader, Badge, Table, Th, Td } from '@/components/ui'
+import { Card, CardHeader, Button, Select, SectionHeader, Badge, Table, Th, Td, SearchableSelect } from '@/components/ui'
 import { Upload, CheckCircle, XCircle, AlertTriangle, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
@@ -710,7 +710,7 @@ export const ImportHE: React.FC = () => {
             <p>Date | DC No | Hatchery Name | Grade A | Grade B | Free Eggs | Rate | Setting Date | Hatch Date | Chicks Sold | Remarks</p>
             <button onClick={downloadTemplate} className="mt-2 text-brand-600 hover:underline font-medium">↓ Download template (CSV)</button>
           </div>
-          <Select label="Flock" required placeholder="— Select flock —" options={flockOptions} value={selectedFlock} onChange={e=>setSelectedFlock(e.target.value)}/>
+          <SearchableSelect label="Flock" required placeholder="— Select flock —" options={flockOptions} value={selectedFlock} onChange={v=>setSelectedFlock(v)}/>
           <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 transition-all" onClick={()=>fileRef.current?.click()}>
             <FileSpreadsheet size={32} className="mx-auto text-gray-300 mb-2"/>
             <p className="text-sm text-gray-500">Click to upload HE Dispatch CSV / Excel</p>

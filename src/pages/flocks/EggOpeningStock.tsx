@@ -8,7 +8,7 @@ import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Pencil, Trash2, Upload, FileDown, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -218,8 +218,8 @@ export const EggOpeningStockPage: React.FC = () => {
           <p className="font-semibold text-gray-700 mb-4">{editing ? 'Edit' : 'New'} Opening Stock Entry</p>
           <div className="space-y-4">
             <FormRow>
-              <Select label="Flock" required placeholder="— Select Flock —" options={flockOptions}
-                value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+              <SearchableSelect label="Flock" required placeholder="— Select Flock —" options={flockOptions}
+                value={form.flock_id} onChange={v => s('flock_id', v)} />
               <DateInput label="As of Date" required value={form.as_of_date} onChange={e => s('as_of_date', e.target.value)} />
             </FormRow>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">HE Eggs (Hatching)</p>

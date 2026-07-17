@@ -5,7 +5,7 @@ import { fmtDate, inr } from '@/lib/utils'
 import {
   Card, Button, Select, Input, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Bird, Egg, TrendingUp, Building2, ChevronDown, ChevronRight } from 'lucide-react'
 
 function numFmt(v: number | null | undefined) {
@@ -204,8 +204,8 @@ export const ShedPerformancePage: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
           <DateInput label="From Date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
           <DateInput label="To Date"   value={toDate}   onChange={e => setToDate(e.target.value)} />
-          <Select label="Site" placeholder="All Sites" options={farmOptions}
-            value={filterFarm} onChange={e => setFilterFarm(e.target.value)} />
+          <SearchableSelect label="Site" placeholder="All Sites" options={farmOptions}
+            value={filterFarm} onChange={v => setFilterFarm(v)} />
           <div className="flex items-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => { setFromDate(daysAgo(7));  setToDate(today()) }}>7d</Button>
             <Button variant="ghost" size="sm" onClick={() => { setFromDate(daysAgo(30)); setToDate(today()) }}>30d</Button>

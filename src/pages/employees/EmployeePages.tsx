@@ -516,7 +516,7 @@ export const EmployeeList: React.FC = () => {
             <Input label="Full Name" required value={form.name} onChange={e=>s('name',e.target.value)} />
           </FormRow>
           <FormRow>
-            <Select label="Site / Farm" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={e=>s('farm_id',e.target.value)} />
+            <SearchableSelect label="Site / Farm" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={v=>s('farm_id',v)} />
             <Select label="Designation" options={designationOptions} value={form.designation} onChange={e=>s('designation',e.target.value)} placeholder="— Select —" />
           </FormRow>
           <FormRow>

@@ -15,7 +15,7 @@ import {
   Input,
   FormRow,
   Modal,
-  DateInput } from '@/components/ui'
+  DateInput, SearchableSelect } from '@/components/ui'
 import { pct, fmtDate, today, exportCSV } from '@/lib/utils'
 import { Plus, Edit2, Trash2, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -264,7 +264,7 @@ const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows,
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Add'}</Button></>}>
         <div className="space-y-4">
           <FormRow>
-            <Select label="Flock" required options={flockOptions} value={form.flock_id} onChange={e => s('flock_id', e.target.value)} placeholder="— Select Flock —" />
+            <SearchableSelect label="Flock" required options={flockOptions} value={form.flock_id} onChange={v => s('flock_id', v)} placeholder="— Select Flock —" />
             <Input label="Hatchery" value={form.hatchery} onChange={e => s('hatchery', e.target.value)} />
           </FormRow>
           <FormRow cols={3}>
