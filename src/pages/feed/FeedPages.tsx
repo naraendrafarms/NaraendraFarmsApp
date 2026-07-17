@@ -430,8 +430,8 @@ export const GRNEntry: React.FC = () => {
       {/* Filters */}
       <Card>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
-          <Select label="Site" placeholder="All Sites" options={farmOptions}
-            value={fFarm} onChange={e => setFFarm(e.target.value)} />
+          <SearchableSelect label="Site" placeholder="All Sites" options={farmOptions}
+            value={fFarm} onChange={v => setFFarm(v)} />
           <Select label="Category" placeholder="All Categories"
             options={categoryOptions}
             value={fCat} onChange={e => setFCat(e.target.value)} />
@@ -578,8 +578,8 @@ export const GRNEntry: React.FC = () => {
           <FormRow cols={4}>
             <Input label="GRN No" required value={form.grn_no} onChange={e => s('grn_no', e.target.value)} />
             <DateInput label="GRN Date" required value={form.grn_date} onChange={e => s('grn_date', e.target.value)} />
-            <Select label="Received At" required placeholder="— Select Site —" options={farmOptions}
-              value={form.farm_id} onChange={e => s('farm_id', e.target.value)} />
+            <SearchableSelect label="Received At" required placeholder="— Select Site —" options={farmOptions}
+              value={form.farm_id} onChange={v => s('farm_id', v)} />
             <Select label="Category" required options={categoryOptions}
               value={form.category} onChange={e => s('category', e.target.value)} />
           </FormRow>
@@ -587,8 +587,8 @@ export const GRNEntry: React.FC = () => {
             <div className="relative">
               <div className="flex items-end gap-1">
                 <div className="flex-1">
-                  <Select label="Supplier / Party" placeholder="— Select —" options={partyOptions}
-                    value={form.party_id} onChange={e => s('party_id', e.target.value)} />
+                  <SearchableSelect label="Supplier / Party" placeholder="— Select —" options={partyOptions}
+                    value={form.party_id} onChange={v => s('party_id', v)} />
                 </div>
                 <QuickAddParty defaultType="supplier" onCreated={p => s('party_id', p.id)} />
               </div>
@@ -932,16 +932,16 @@ export const FeedTransfer: React.FC = () => {
         <div className="space-y-4">
           <DateInput label="Transfer Date" required value={form.transfer_date} onChange={e => s('transfer_date', e.target.value)} />
           <FormRow>
-            <Select label="From (Feed Mill)" required placeholder="— Select —" options={farmOptions}
-              value={form.from_farm_id} onChange={e => s('from_farm_id', e.target.value)} />
-            <Select label="To (Farm Site)" required placeholder="— Select —" options={farmOptions}
-              value={form.to_farm_id} onChange={e => s('to_farm_id', e.target.value)} />
+            <SearchableSelect label="From (Feed Mill)" required placeholder="— Select —" options={farmOptions}
+              value={form.from_farm_id} onChange={v => s('from_farm_id', v)} />
+            <SearchableSelect label="To (Farm Site)" required placeholder="— Select —" options={farmOptions}
+              value={form.to_farm_id} onChange={v => s('to_farm_id', v)} />
           </FormRow>
           <FormRow>
             <Select label="Feed Type" placeholder="— Select —" options={ftOptions}
               value={form.feed_type_id} onChange={e => s('feed_type_id', e.target.value)} />
-            <Select label="For Flock" placeholder="— Select —" options={flockOptions}
-              value={form.flock_id} onChange={e => s('flock_id', e.target.value)} />
+            <SearchableSelect label="For Flock" placeholder="— Select —" options={flockOptions}
+              value={form.flock_id} onChange={v => s('flock_id', v)} />
           </FormRow>
           <FormRow>
             <Input label="Quantity (kg)" required type="number" step="0.01" value={form.quantity_kg} onChange={e => s('quantity_kg', e.target.value)} />
