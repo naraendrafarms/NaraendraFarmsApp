@@ -6,7 +6,7 @@ import { inr, pct, fmtDate, statusColor } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Modal, Input, Select, FormRow, Divider,
   Table, Th, Td, Badge, Spinner, SectionHeader, EmptyState
-, DateInput } from '@/components/ui'
+, DateInput, SearchableSelect } from '@/components/ui'
 import { Plus, Bird, Eye, Trash2, CheckSquare, Edit2, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Link } from 'react-router-dom'
@@ -275,8 +275,8 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
         <Select label="Status" options={['rearing','laying','closed']} value={form.status} onChange={e=>s('status',e.target.value)}/>
       </FormRow>
       <FormRow>
-        <Select label="Rearing Farm (start site)" placeholder="— Select —" options={farmOptions} value={form.rearing_farm_id} onChange={e=>s('rearing_farm_id',e.target.value)}/>
-        <Select label="Laying Farm (transfer site)" placeholder="— Select —" options={farmOptions} value={form.laying_farm_id} onChange={e=>s('laying_farm_id',e.target.value)}/>
+        <SearchableSelect label="Rearing Farm (start site)" placeholder="— Select —" options={farmOptions} value={form.rearing_farm_id} onChange={v=>s('rearing_farm_id',v)}/>
+        <SearchableSelect label="Laying Farm (transfer site)" placeholder="— Select —" options={farmOptions} value={form.laying_farm_id} onChange={v=>s('laying_farm_id',v)}/>
       </FormRow>
       <FormRow>
         <DateInput label="Placement Date" value={form.placement_date} onChange={e=>s('placement_date',e.target.value)}/>
