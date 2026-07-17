@@ -21,10 +21,13 @@ export const CMSUploadPage: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from('pending_payments')
-        .select('*')
+        .select('*, parties(name,bank_name,branch,ifsc,account_no)')
         .or('payment_status.in.(Pending,HOLD),payment_status.is.null')
         .order('pay_before_date', { ascending: true })
-      return data ?? []
+      // Opening-balance bills are settled via "Opening Adjustment" mode with
+      // NO real bank movement (see PendingPaymentsPage.tsx) — they must never
+      // appear here as selectable for a real bank transfer file.
+      return (data ?? []).filter((p: any) => !p.is_opening)
     }
   })
 
@@ -53,7 +56,8 @@ export const CMSUploadPage: React.FC = () => {
   const selectedPayments = useMemo(() =>
     (payments ?? []).filter((p: any) => selected.has(p.id)), [payments, selected])
 
-  const totalSelected = selectedPayments.reduce((s: number, p: any) => s + (p.net_payable ?? p.invoice_amount ?? 0), 0)
+  const netPayable = (p: any) => Math.max(0, (p.net_payable ?? (p.invoice_amount ?? 0)) - (p.paid_amount ?? 0) - (p.advance_adjusted ?? 0))
+  const totalSelected = selectedPayments.reduce((s: number, p: any) => s + netPayable(p), 0)
 
   const downloadCMS = () => {
     if (!selectedPayments.length) { toast.error('Select at least one vendor to include'); return }
@@ -78,7 +82,10 @@ export const CMSUploadPage: React.FC = () => {
       const grossAmt = p.invoice_amount ?? 0
       const tdsAmt   = p.tds_amount ?? 0
       const discAmt  = p.discount_amount ?? 0
-      const payable  = p.net_payable ?? (grossAmt - tdsAmt - discAmt)
+      // Subtract whatever's already been settled (partial payment / advance
+      // adjustment) so a part-paid bill never exports its FULL amount into
+      // the bank payment file — that would risk a real over/double payment.
+      const payable  = netPayable(p)
       rows.push([
         new Date(paymentDate),
         p.payment_type ?? 'NEFT',
@@ -205,7 +212,7 @@ export const CMSUploadPage: React.FC = () => {
                       <Td className="text-xs">{p.invoice_no ?? p.grn_no ?? p.po_no ?? '—'}</Td>
                       <Td right>{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
                       <Td right className="text-xs text-orange-600">{tdsDisc > 0 ? inr(tdsDisc) : '—'}</Td>
-                      <Td right className="font-semibold">{inr(p.net_payable ?? p.invoice_amount ?? 0)}</Td>
+                      <Td right className="font-semibold">{inr(netPayable(p))}</Td>
                       <Td>
                         <span className={`text-xs ${isOD ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
                           {p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}{isOD && ' ⚠️'}

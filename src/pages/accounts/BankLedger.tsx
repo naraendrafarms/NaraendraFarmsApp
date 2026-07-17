@@ -592,7 +592,7 @@ export const BankLedgerPage: React.FC = () => {
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([])
   const [parseError, setParseError] = useState('')
   const [importing, setImporting] = useState(false)
-  const [importDone, setImportDone] = useState<{ inserted: number; autoMatched: number } | null>(null)
+  const [importDone, setImportDone] = useState<{ inserted: number; autoMatched: number; skipped?: number } | null>(null)
   const [editCats, setEditCats] = useState<Record<number, string>>({})
 
   // Load bank accounts
@@ -1191,12 +1191,32 @@ export const BankLedgerPage: React.FC = () => {
 
     const pendingList = (payments ?? []) as any[]
 
+    // Duplicate protection — re-importing the same bank statement (an easy
+    // accidental action) must not duplicate every transaction and re-trigger
+    // auto-match. Fetch existing keys first and skip rows that match, same
+    // "check existing keys, skip and report" pattern as the Electricity import
+    // (ElectricityEntry.tsx handleImport).
+    const { data: existingTxns } = await supabase
+      .from('bank_transactions')
+      .select('txn_date,amount,reference_no')
+      .eq('bank_account_id', selectedAccount)
+    const existingKeys = new Set(
+      (existingTxns ?? []).map((t: any) => `${t.txn_date}|${Number(t.amount)}|${(t.reference_no || '').trim().toLowerCase()}`)
+    )
+
     let insertedCount = 0
     let autoMatchedCount = 0
+    let skippedCount = 0
 
     for (let i = 0; i < parsedRows.length; i++) {
       const row = parsedRows[i]
       const category = editCats[i] !== undefined ? editCats[i] : row.category
+
+      const dupKey = `${row.value_date}|${Number(row.amount)}|${(row.reference || '').trim().toLowerCase()}`
+      if (existingKeys.has(dupKey)) {
+        skippedCount++
+        continue
+      }
 
       // Try auto-match for debit rows
       let linkedPaymentId: string | null = null
@@ -1209,7 +1229,19 @@ export const BankLedgerPage: React.FC = () => {
           const refMatch = row.reference && p.transaction_ref &&
             (row.reference.toLowerCase().includes(p.transaction_ref.toLowerCase()) ||
              p.transaction_ref.toLowerCase().includes(row.reference.toLowerCase()))
-          return amtMatch || refMatch
+          // Vendor-name similarity signal — does the bank narration (description)
+          // mention the vendor's name? Cheap fuzzy check: the first "real" word
+          // (3+ chars, so we skip things like "M/s") of vendor_name appears in
+          // the description, case-insensitive.
+          const vendorWords = (p.vendor_name ?? '').toLowerCase().split(/\s+/).filter((w: string) => w.length >= 3)
+          const desc = (row.description ?? '').toLowerCase()
+          const nameMatch = vendorWords.length > 0 && vendorWords.some((w: string) => desc.includes(w))
+          // Two different vendors can have similar bill amounts, so amount
+          // alone must never be sufficient to auto-settle a bill — it now
+          // only counts when corroborated by vendor-name similarity in the
+          // narration. Reference-number match remains sufficient alone since
+          // it's specific to one transaction.
+          return refMatch || (amtMatch && nameMatch)
         })
         if (matched) {
           linkedPaymentId = matched.id
@@ -1234,6 +1266,7 @@ export const BankLedgerPage: React.FC = () => {
       })
       if (!error) {
         insertedCount++
+        existingKeys.add(dupKey)
         if (matchStatus === 'auto_matched' && linkedPaymentId) {
           autoMatchedCount++
           // Mark payment as Paid
@@ -1252,7 +1285,7 @@ export const BankLedgerPage: React.FC = () => {
     }
 
     setImporting(false)
-    setImportDone({ inserted: insertedCount, autoMatched: autoMatchedCount })
+    setImportDone({ inserted: insertedCount, autoMatched: autoMatchedCount, skipped: skippedCount })
     setParsedRows([])
     qc.invalidateQueries({ queryKey: ['bank_transactions', selectedAccount] })
     qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
@@ -1616,6 +1649,11 @@ export const BankLedgerPage: React.FC = () => {
                     {importDone.inserted - importDone.autoMatched > 0 && (
                       <div className="text-green-700 mt-0.5">
                         {importDone.inserted - importDone.autoMatched} transactions moved to the <strong>Link to Bills</strong> tab
+                      </div>
+                    )}
+                    {!!importDone.skipped && (
+                      <div className="text-amber-700 mt-0.5">
+                        {importDone.skipped} row(s) skipped — already imported (same date, amount &amp; reference)
                       </div>
                     )}
                   </div>

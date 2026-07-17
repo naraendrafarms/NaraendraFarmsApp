@@ -7,7 +7,7 @@ import { Upload, CheckCircle, XCircle, AlertTriangle, FileSpreadsheet } from 'lu
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
-interface ImportResult { success: number; errors: number; messages: string[] }
+interface ImportResult { success: number; errors: number; messages: string[]; skipped?: number }
 
 const parseDate = (v: any): string | null => {
   if (!v) return null
@@ -304,7 +304,7 @@ export const ImportElectricity: React.FC = () => {
         meter: col('meter_name') >= 0 ? col('meter_name') : col('usc_no'),
         month: col('bill_month') >= 0 ? col('bill_month') : col('month'),
         units: col('units'), amount: col('amount'), acd: col('acd'),
-        deposit: col('deposit'), paid: col('paid'), remarks: col('remarks'),
+        deposit: col('deposit'), remarks: col('remarks'),
       }
       for (const r of first.slice(1)) {
         if (!r) continue
@@ -320,7 +320,6 @@ export const ImportElectricity: React.FC = () => {
           amount,
           acd_dc_due: ci.acd >= 0 ? num(r[ci.acd]) : 0,
           deposit_amount: ci.deposit >= 0 ? num(r[ci.deposit]) : 0,
-          paid_date: ci.paid >= 0 && r[ci.paid] ? (parseDate(r[ci.paid]) ?? null) : null,
           remarks: ci.remarks >= 0 ? (r[ci.remarks] ? String(r[ci.remarks]) : null) : null,
         })
       }
@@ -344,7 +343,7 @@ export const ImportElectricity: React.FC = () => {
           rows.push({
             meter_id: meterId, _meter: meters?.find((m:any)=>m.id===meterId)?.meter_name ?? nameCell,
             bill_month: monthStr, units_consumed: num(row[6]) || null, amount,
-            acd_dc_due: num(row[4]) || 0, deposit_amount: 0, paid_date: null, remarks: null,
+            acd_dc_due: num(row[4]) || 0, deposit_amount: 0, remarks: null,
           })
         }
       }
@@ -354,8 +353,13 @@ export const ImportElectricity: React.FC = () => {
   }
 
   const downloadTemplate = () => {
-    const headers = ['meter_name','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','paid_date','remarks']
-    const sample = ['Bodjanampet - 1','2026-04','1200','18500','0','0','2026-04-15','']
+    // Headers must match ElectricityEntry.tsx's own import template exactly —
+    // no paid_date. Payment is recorded only via the Electricity page's
+    // Record Payment flow (electricity_bill_payments table), never bulk-
+    // imported as a bill field — a paid_date on the bill row alone creates no
+    // ledger entry and the bill would still show Pending forever.
+    const headers = ['meter_name','bill_month','units_consumed','amount','acd_dc_due','deposit_amount','remarks']
+    const sample = ['Bodjanampet - 1','2026-04','1200','18500','0','0','']
     const csv = headers.join(',') + '\n' + sample.join(',')
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
@@ -364,16 +368,33 @@ export const ImportElectricity: React.FC = () => {
 
   const mut = useMutation({
     mutationFn: async () => {
+      // Never silently overwrite existing bills — mirrors ElectricityEntry.tsx's
+      // own import: fetch existing (meter_id, bill_month) pairs first, insert
+      // only genuinely new rows, and report skipped conflicts instead of
+      // upserting over them.
+      const meterIds = [...new Set(parsedRows.map(r => r.meter_id))]
+      const months = [...new Set(parsedRows.map(r => r.bill_month))]
+      const { data: existing, error: exErr } = await supabase
+        .from('electricity_bills').select('meter_id,bill_month')
+        .in('meter_id', meterIds).in('bill_month', months)
+      if (exErr) throw exErr
+      const existingKeys = new Set((existing ?? []).map((b: any) => `${b.meter_id}|${b.bill_month}`))
+      const newRows = parsedRows.filter(r => !existingKeys.has(`${r.meter_id}|${r.bill_month}`))
+      const skipped = parsedRows.length - newRows.length
+
       let success = 0, errors = 0; const messages: string[] = []
-      for (const row of parsedRows) {
+      for (const row of newRows) {
         const { _meter, ...clean } = row
-        const { error } = await supabase.from('electricity_bills')
-          .upsert(clean, { onConflict: 'meter_id,bill_month' })
+        const { error } = await supabase.from('electricity_bills').insert(clean)
         if (error) { errors++; messages.push(error.message) } else success++
       }
-      return { success, errors, messages }
+      return { success, errors, messages, skipped }
     },
-    onSuccess: (r) => { setResult(r); if (r.success > 0) { toast.success(`Imported ${r.success} bills!`); qc.invalidateQueries({ queryKey: ['elec_bills'] }) } },
+    onSuccess: (r) => {
+      setResult(r)
+      if (r.success > 0) { toast.success(`Imported ${r.success} bills!${r.skipped ? ` · skipped ${r.skipped} existing (not overwritten)` : ''}`); qc.invalidateQueries({ queryKey: ['elec_bills'] }) }
+      else if (r.skipped) toast.error(`All ${r.skipped} rows already exist — nothing imported (existing bills are never overwritten)`)
+    },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -384,8 +405,8 @@ export const ImportElectricity: React.FC = () => {
       <Card>
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
-            <p className="font-medium mb-1">Two formats accepted — same as the Electricity page Import:</p>
-            <p><strong>1. Template (recommended):</strong> meter_name | bill_month | units_consumed | amount | acd_dc_due | deposit_amount | paid_date | remarks</p>
+            <p className="font-medium mb-1">Two formats accepted — same columns as the Electricity page's own Import (bills only — never overwrites an existing bill, and payment is not imported here; record it via the Electricity page's Record Payment):</p>
+            <p><strong>1. Template (recommended):</strong> meter_name | bill_month | units_consumed | amount | acd_dc_due | deposit_amount | remarks</p>
             <p className="mt-1"><strong>2. Utility workbook:</strong> one sheet per month with Sl.No | Service No | Unit Name | Amount | ACD/DC Due | … | No Of Units</p>
             <p className="mt-1">Site names auto-matched: Bodjanampet-1, Bodjanampet-2, Feedmill, Kethireddypally, Potlapally</p>
             <button onClick={downloadTemplate} className="mt-2 text-brand-600 hover:underline font-medium">↓ Download template (CSV)</button>
@@ -400,7 +421,7 @@ export const ImportElectricity: React.FC = () => {
             <div className="overflow-x-auto">
               <p className="font-medium text-sm text-gray-700 mb-2">{parsedRows.length} records parsed — full preview:</p>
               <Table>
-                <thead><tr>{['Meter','Bill Month','Units','Amount','ACD/DC','Deposit','Paid Date','Remarks'].map(h=><Th key={h}>{h}</Th>)}</tr></thead>
+                <thead><tr>{['Meter','Bill Month','Units','Amount','ACD/DC','Deposit','Remarks'].map(h=><Th key={h}>{h}</Th>)}</tr></thead>
                 <tbody>
                   {parsedRows.slice(0, 20).map((r:any, i:number) => (
                     <tr key={i} className="border-t border-gray-100">
@@ -410,7 +431,6 @@ export const ImportElectricity: React.FC = () => {
                       <Td>{r.amount?.toLocaleString('en-IN')}</Td>
                       <Td>{r.acd_dc_due ?? 0}</Td>
                       <Td>{r.deposit_amount ?? 0}</Td>
-                      <Td>{r.paid_date ?? '—'}</Td>
                       <Td>{r.remarks ?? '—'}</Td>
                     </tr>
                   ))}
@@ -430,6 +450,7 @@ export const ImportElectricity: React.FC = () => {
           <div className="flex gap-4 text-sm">
             <span className="text-green-600 font-medium">✓ {result.success} imported</span>
             {result.errors > 0 && <span className="text-red-600 font-medium">✗ {result.errors} failed</span>}
+            {!!result.skipped && <span className="text-amber-600 font-medium">⚠ {result.skipped} skipped — already exists</span>}
           </div>
           {result.messages.slice(0, 5).map((m, i) => <p key={i} className="text-xs text-red-500 mt-1">{m}</p>)}
         </Card>

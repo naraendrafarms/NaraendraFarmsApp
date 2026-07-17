@@ -225,8 +225,14 @@ export const PaymentPlanningPage: React.FC = () => {
     [payments, selected]
   )
 
+  // Deducts paid_amount / advance_adjusted / discount_amount already settled
+  // against a bill, so a part-paid or advance-adjusted bill never shows/exports
+  // its full amount as still owed (real overpayment risk otherwise).
+  const netPayable = (p: any) =>
+    Math.max(0, (p.net_payable ?? (p.invoice_amount ?? 0)) - (p.discount_amount ?? 0) - (p.paid_amount ?? 0) - (p.advance_adjusted ?? 0))
+
   const totalSelected = selectedPayments.reduce((s: number, p: any) =>
-    s + (p.net_payable ?? p.invoice_amount ?? 0), 0)
+    s + netPayable(p), 0)
 
   const totalReceivable = (receivables ?? []).reduce((s, r) => s + r.amount, 0)
 
@@ -247,7 +253,9 @@ export const PaymentPlanningPage: React.FC = () => {
 
       for (const id of ids) {
         const row = (selectedPayments as any[]).find(p => p.id === id)
-        const netAmt = Math.max(0, (row?.net_payable ?? row?.invoice_amount ?? 0) - discPerRow)
+        // Consistent with Export CMS's payable figure — start from the same
+        // already-settled-aware balance, then apply this modal's own discount.
+        const netAmt = Math.max(0, (row ? netPayable(row) : 0) - discPerRow)
         const { error } = await supabase.from('pending_payments').update({
           payment_status: 'Paid',
           // Record the settled amount too — flipping only the status flag
@@ -316,8 +324,12 @@ export const PaymentPlanningPage: React.FC = () => {
     for (const p of selectedPayments) {
       const party = partiesMap?.[p.vendor_name] ?? {}
       const tdsAmt = p.tds_amount ?? 0
+      const discAmt = p.discount_amount ?? 0
       const grossAmt = p.invoice_amount ?? 0
-      const payable = p.net_payable ?? (grossAmt - tdsAmt)
+      // Same corrected formula as CMSUpload.tsx — subtract discount AND
+      // whatever's already been settled (paid_amount / advance_adjusted),
+      // so a part-paid or advance-adjusted bill never exports its full amount.
+      const payable = netPayable(p)
       rows.push([
         new Date(planDate),
         p.payment_type ?? 'NEFT',
@@ -328,7 +340,7 @@ export const PaymentPlanningPage: React.FC = () => {
         party.ifsc ?? '',
         party.account_no ?? '',
         grossAmt,
-        tdsAmt,
+        tdsAmt + discAmt,
         payable,
         p.po_raised_by ?? 'Hyderabad',
         p.payment_reference ?? p.po_no ?? '',
@@ -380,7 +392,7 @@ export const PaymentPlanningPage: React.FC = () => {
     if (!selectedPayments.length && !selectedManualItems.length) { toast.error('Select payments to print'); return }
     const totals = selectedPayments.reduce((acc: any, p: any) => {
       const invoice = p.invoice_amount ?? 0
-      const payable = p.net_payable ?? invoice
+      const payable = netPayable(p)
       acc.invoice += invoice
       acc.discTds += invoice - payable
       acc.payable += payable
@@ -396,7 +408,7 @@ export const PaymentPlanningPage: React.FC = () => {
       const party = partiesMap?.[p.vendor_name] ?? {}
       const code = party.account_no ? String(party.account_no).slice(-4) : ''
       const invoice = p.invoice_amount ?? 0
-      const payable = p.net_payable ?? invoice
+      const payable = netPayable(p)
       return {
         sno: i + 1,
         vendor_name: `${p.vendor_name}${code ? ' - ' + code : ''}`,
@@ -649,7 +661,7 @@ export const PaymentPlanningPage: React.FC = () => {
                       <Td className="text-xs">{p.grn_no ?? '—'}</Td>
                       <Td right>{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
                       <Td right className="text-xs text-orange-600">{(p.tds_amount ?? 0) > 0 ? inr(p.tds_amount) : '—'}</Td>
-                      <Td right className="font-semibold">{inr(p.net_payable ?? p.invoice_amount ?? 0)}</Td>
+                      <Td right className="font-semibold">{inr(netPayable(p))}</Td>
                       <Td>
                         <span className={`text-xs font-medium ${isOD ? 'text-red-600' : isDue ? 'text-amber-600' : 'text-gray-500'}`}>
                           {p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}
