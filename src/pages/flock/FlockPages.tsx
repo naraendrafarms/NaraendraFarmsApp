@@ -1465,7 +1465,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
                     <Td className="text-xs">{r.sex}</Td>
                     <Td className="text-xs"><Badge color="blue">{r.feed_type ?? '—'}</Badge></Td>
                     <Td right className="text-xs font-semibold">{totalKg.toFixed(1)}</Td>
-                    <Td right className="text-xs">{grnRate != null ? <span className="text-green-700">₹{grnRate}/kg</span> : <span className="text-gray-400">—</span>}</Td>
+                    <Td right className="text-xs">{grnRate != null ? <span className="text-green-700">₹{grnRate.toFixed(2)}/kg</span> : <span className="text-gray-400">—</span>}</Td>
                     <Td right className="text-xs font-semibold">{costGrn != null ? inr(costGrn) : '—'}</Td>
                   </tr>
                 )

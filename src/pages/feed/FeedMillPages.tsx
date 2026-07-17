@@ -1033,7 +1033,7 @@ const ProductionTab: React.FC = () => {
                       <tr key={i} className="hover:bg-gray-50">
                         <Td className="text-xs">{r.name}</Td>
                         <Td right className="text-xs">{r.qty.toFixed(3)}</Td>
-                        <Td right className="text-xs">{r.rate > 0 ? `₹${r.rate}` : <span className="text-gray-400">—</span>}</Td>
+                        <Td right className="text-xs">{r.rate > 0 ? `₹${r.rate.toFixed(2)}` : <span className="text-gray-400">—</span>}</Td>
                         <Td right className="text-xs font-semibold">{inr(r.cost)}</Td>
                       </tr>
                     ))}
