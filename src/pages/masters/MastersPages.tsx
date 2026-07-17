@@ -1790,6 +1790,32 @@ export const VaccinationSchedulePage: React.FC = () => {
     }) ?? null
   }
 
+  // A schedule line like "AE + FP" or "AE + IBH Combined Killed" is often
+  // two genuinely separate vaccines given together, not one combined
+  // product — a single medicine_id can't hold both. Detect the "+" combo
+  // pattern and offer to split it into one row per vaccine (same age/dose/
+  // route/product/notes on each), so each half can be linked individually.
+  const comboParts = (vaccineName: string): string[] | null => {
+    if (!vaccineName.includes('+')) return null
+    const parts = vaccineName.split('+').map(p => p.trim()).filter(Boolean)
+    return parts.length >= 2 ? parts : null
+  }
+
+  const splitComboMut = useMutation({
+    mutationFn: async ({ row, parts }: { row: any; parts: string[] }) => {
+      const newRows = parts.map(name => ({
+        sno: row.sno, age_label: row.age_label, vaccine_name: name,
+        dose: row.dose, route: row.route, product: row.product, notes: row.notes,
+      }))
+      const { error: insErr } = await supabase.from('vaccination_schedule').insert(newRows)
+      if (insErr) throw insErr
+      const { error: delErr } = await supabase.from('vaccination_schedule').delete().eq('id', row.id)
+      if (delErr) throw delErr
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); toast.success('Split — link each one below') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   const linkAliasMut = useMutation({
     mutationFn: async ({ scheduleId, vaccineName, medicine }: { scheduleId: string; vaccineName: string; medicine: any }) => {
       if (medicine.item_id) await registerItemAlias(medicine.item_id, vaccineName, 'vaccination_schedule').catch(() => {})
@@ -1982,6 +2008,7 @@ export const VaccinationSchedulePage: React.FC = () => {
           ) : unlinkedRows.map((r: any) => {
             const suggestion = suggestionFor(r.vaccine_name)
             const isCreating = creatingFor?.id === r.id
+            const parts = comboParts(r.vaccine_name)
             return (
               <div key={r.id} className="border border-gray-200 rounded-lg p-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1990,17 +2017,27 @@ export const VaccinationSchedulePage: React.FC = () => {
                     <span className="text-sm font-medium">{r.vaccine_name}</span>
                   </div>
                   {!isCreating && (
-                    <div className="flex items-center gap-2">
-                      {suggestion ? (
-                        <>
-                          <span className="text-xs text-gray-500">Looks like <strong>{suggestion.name}</strong></span>
-                          <Button size="sm" loading={linkAliasMut.isPending} onClick={() => linkAliasMut.mutate({ scheduleId: r.id, vaccineName: r.vaccine_name, medicine: suggestion })}>Link as alias</Button>
-                        </>
-                      ) : (
-                        <span className="text-xs text-gray-400">No match found</span>
-                      )}
-                      <Button size="sm" variant="outline" onClick={() => { setCreatingFor(r); setCreateForm({ manufacturer: '', unit: 'dose' }) }}>Create New</Button>
-                    </div>
+                    parts ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-amber-600">Looks like {parts.length} separate vaccines given together</span>
+                        <Button size="sm" variant="outline" loading={splitComboMut.isPending}
+                          onClick={() => splitComboMut.mutate({ row: r, parts })}>
+                          Split into {parts.length} — {parts.join(' / ')}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        {suggestion ? (
+                          <>
+                            <span className="text-xs text-gray-500">Looks like <strong>{suggestion.name}</strong></span>
+                            <Button size="sm" loading={linkAliasMut.isPending} onClick={() => linkAliasMut.mutate({ scheduleId: r.id, vaccineName: r.vaccine_name, medicine: suggestion })}>Link as alias</Button>
+                          </>
+                        ) : (
+                          <span className="text-xs text-gray-400">No match found</span>
+                        )}
+                        <Button size="sm" variant="outline" onClick={() => { setCreatingFor(r); setCreateForm({ manufacturer: '', unit: 'dose' }) }}>Create New</Button>
+                      </div>
+                    )
                   )}
                 </div>
                 {isCreating && (
