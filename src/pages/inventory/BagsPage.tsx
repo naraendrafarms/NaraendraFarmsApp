@@ -125,12 +125,20 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('bag_sales').delete().eq('id', id); if (error) throw error },
+    mutationFn: async (id: string) => {
+      await supabase.from('cash_book').delete().eq('bag_sale_id', id)
+      await supabase.from('bank_transactions').delete().eq('bag_sale_id', id)
+      const { error } = await supabase.from('bag_sales').delete().eq('id', id); if (error) throw error
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['bag_sales'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); toast.success('Deleted') },
     onError: (e: any) => toast.error(e.message),
   })
   const bulkDelMut = useMutation({
-    mutationFn: async (ids: string[]) => { const { error } = await supabase.from('bag_sales').delete().in('id', ids); if (error) throw error },
+    mutationFn: async (ids: string[]) => {
+      await supabase.from('cash_book').delete().in('bag_sale_id', ids)
+      await supabase.from('bank_transactions').delete().in('bag_sale_id', ids)
+      const { error } = await supabase.from('bag_sales').delete().in('id', ids); if (error) throw error
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['bag_sales'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); setSel(new Set()); setBulkConfirm(false); toast.success('Deleted') },
     onError: (e: any) => toast.error(e.message),
   })

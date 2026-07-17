@@ -286,7 +286,11 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('generator_diesel_purchases').delete().eq('id', id); if (error) throw error },
+    mutationFn: async (id: string) => {
+      await supabase.from('cash_book').delete().eq('diesel_purchase_id', id)
+      await supabase.from('bank_transactions').delete().eq('diesel_purchase_id', id)
+      const { error } = await supabase.from('generator_diesel_purchases').delete().eq('id', id); if (error) throw error
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_diesel_purchases'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); toast.success('Deleted') },
   })
 
