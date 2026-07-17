@@ -412,10 +412,13 @@ export const VaccinationRecordsPage: React.FC = () => {
                 const isOverdue = r.next_due_date && r.next_due_date < today_str
                 return (
                   <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-blue-50' : ''}`}>
-                    <Td><CB checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></Td>
+                    <Td>{!r.source_medicine_usage_id && <CB checked={sel.has(r.id)} onChange={() => toggle(r.id)} />}</Td>
                     <Td><Badge color="green">F-{r.flocks?.flock_no}</Badge></Td>
                     <Td className="text-xs">{fmtDate(r.vaccine_date)}</Td>
-                    <Td className="text-sm font-medium">{r.vaccine_name}</Td>
+                    <Td className="text-sm font-medium">
+                      {r.vaccine_name}
+                      {r.source_medicine_usage_id && <span className="ml-1.5 text-[10px] font-normal text-blue-500" title="Auto-added from Medicine & Vaccine entry">Auto</span>}
+                    </Td>
                     <Td className="text-xs">#{r.dose_no}</Td>
                     <Td className="text-xs">{r.route ? routeLabel(r.route) : '—'}</Td>
                     <Td className="text-xs">{r.sheds ? `Shed ${r.sheds.shed_no}` : r.farms?.name ?? '—'}</Td>
@@ -427,10 +430,14 @@ export const VaccinationRecordsPage: React.FC = () => {
                     </Td>
                     <Td className="text-xs text-gray-500">{r.administered_by ?? '—'}</Td>
                     <Td>
-                      <div className="flex gap-1">
-                        <button onClick={() => openForm(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
-                        <button onClick={() => { setSel(new Set([r.id])); setBulkConfirm(true) }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
-                      </div>
+                      {r.source_medicine_usage_id ? (
+                        <span className="text-[10px] text-gray-400" title="Edit/delete this in Medicine & Vaccine instead — it's auto-mirrored from there">via Medicine &amp; Vaccine</span>
+                      ) : (
+                        <div className="flex gap-1">
+                          <button onClick={() => openForm(r)} className="p-1 text-gray-400 hover:text-brand-600"><Pencil size={13}/></button>
+                          <button onClick={() => { setSel(new Set([r.id])); setBulkConfirm(true) }} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
+                        </div>
+                      )}
                     </Td>
                   </tr>
                 )
