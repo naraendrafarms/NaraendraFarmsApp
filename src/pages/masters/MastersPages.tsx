@@ -1697,7 +1697,7 @@ export const FeedTypesMaster: React.FC = () => {
 // ══════════════════════════════════════════════════════════════════
 // VACCINATION SCHEDULE MASTER
 // ══════════════════════════════════════════════════════════════════
-const EMPTY_VACC = { sno: '', age_label: '', vaccine_name: '', dose: '', route: '', product: '' }
+const EMPTY_VACC = { sno: '', age_label: '', vaccine_name: '', dose: '', route: '', product: '', notes: '' }
 const ROUTES = ['S/C','I/M','I/O','D/W','N/D','W/W','Spray','Eye Drop','Drinking Water']
 const routeColor: Record<string,any> = { 'S/C':'blue','I/M':'red','I/O':'green','D/W':'yellow','N/D':'orange','W/W':'gray','Spray':'purple','Eye Drop':'teal','Drinking Water':'blue' }
 
@@ -1729,7 +1729,7 @@ export const VaccinationSchedulePage: React.FC = () => {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      const p = { sno: form.sno ? Number(form.sno) : null, age_label: form.age_label, vaccine_name: form.vaccine_name, dose: form.dose||null, route: form.route||null, product: form.product||null }
+      const p = { sno: form.sno ? Number(form.sno) : null, age_label: form.age_label, vaccine_name: form.vaccine_name, dose: form.dose||null, route: form.route||null, product: form.product||null, notes: form.notes||null }
       if (editing) await supabase.from('vaccination_schedule').update(p).eq('id', editing.id)
       else await supabase.from('vaccination_schedule').insert(p)
     },
@@ -1773,8 +1773,8 @@ export const VaccinationSchedulePage: React.FC = () => {
   function handleExport() {
     const toExport = sel.size > 0 ? rows.filter((r: any) => sel.has(r.id)) : rows
     exportCSV('vaccination_schedule.csv',
-      ['S.No','Age','Vaccine Name','Dose','Route','Product'],
-      toExport.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose??'', r.route??'', r.product??'']))
+      ['S.No','Age','Vaccine Name','Dose','Route','Product','Notes'],
+      toExport.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose??'', r.route??'', r.product??'', r.notes??'']))
   }
 
   function handlePrint() {
@@ -1782,8 +1782,8 @@ export const VaccinationSchedulePage: React.FC = () => {
     printReport({
       title: 'Vaccination Schedule',
       subtitle: 'Recommended Schedule',
-      headers: ['S.No', 'Age', 'Vaccine / Treatment', 'Dose', 'Route', 'Product'],
-      rows: toPrint.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose ?? '', r.route ?? '', r.product ?? '']),
+      headers: ['S.No', 'Age', 'Vaccine / Treatment', 'Dose', 'Route', 'Product', 'Notes'],
+      rows: toPrint.map((r: any) => [r.sno, r.age_label, r.vaccine_name, r.dose ?? '', r.route ?? '', r.product ?? '', r.notes ?? '']),
     })
   }
 
@@ -1792,7 +1792,7 @@ export const VaccinationSchedulePage: React.FC = () => {
     const norm = (h: string) => h.toLowerCase().replace(/[^a-z]/g, '')
     const idx = (name: string) => hdrs.findIndex(h => norm(h) === name)
     const idxAny = (...names: string[]) => names.map(idx).find(i => i >= 0) ?? -1
-    const iSno = idx('sno'), iAge = idx('age'), iVaccine = idxAny('vaccinename', 'nameofvaccine'), iDose = idx('dose'), iRoute = idx('route'), iProduct = idx('product')
+    const iSno = idx('sno'), iAge = idx('age'), iVaccine = idxAny('vaccinename', 'nameofvaccine'), iDose = idx('dose'), iRoute = idx('route'), iProduct = idx('product'), iNotes = idx('notes')
     const toInsert = fileRows.map(vals => ({
       sno: iSno >= 0 && vals[iSno] ? Number(vals[iSno]) || null : null,
       age_label: (iAge >= 0 ? vals[iAge] : '')?.trim(),
@@ -1800,6 +1800,7 @@ export const VaccinationSchedulePage: React.FC = () => {
       dose: (iDose >= 0 ? vals[iDose] : '')?.trim() || null,
       route: (iRoute >= 0 ? vals[iRoute] : '')?.trim() || null,
       product: (iProduct >= 0 ? vals[iProduct] : '')?.trim() || null,
+      notes: (iNotes >= 0 ? vals[iNotes] : '')?.trim() || null,
     })).filter(r => r.age_label && r.vaccine_name)
     if (!toInsert.length) { toast.error('No valid rows — need Age and Vaccine Name columns'); return }
     // No unique constraint on this table, so dedupe against existing rows by
@@ -1819,7 +1820,7 @@ export const VaccinationSchedulePage: React.FC = () => {
     <div className="space-y-4">
       <SectionHeader title="Vaccination Schedule" subtitle="Narendra Breeder — Recommended Schedule" action={
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={()=>exportCSV('vaccination_schedule_template.csv',['S.No','Age','Vaccine Name','Dose','Route','Product'],[['1','Day 1','Marek\'s Disease','0.2 ml','Subcutaneous','Nobilis Marek']])}>Template</Button>
+          <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={()=>exportCSV('vaccination_schedule_template.csv',['S.No','Age','Vaccine Name','Dose','Route','Product','Notes'],[['1','Day 1','Marek\'s Disease','0.2 ml','Subcutaneous','Nobilis Marek','']])}>Template</Button>
           <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={()=>importRef.current?.click()}>Import</Button>
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)handleImport(f)}}/>
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={handleExport}>
@@ -1846,7 +1847,7 @@ export const VaccinationSchedulePage: React.FC = () => {
           <Table>
             <thead><tr>
               <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
-              <Th>S.No</Th><Th>Age</Th><Th>Vaccine / Treatment</Th><Th>Dose</Th><Th>Route</Th><Th>Product</Th><Th></Th>
+              <Th>S.No</Th><Th>Age</Th><Th>Vaccine / Treatment</Th><Th>Dose</Th><Th>Route</Th><Th>Product</Th><Th>Notes</Th><Th></Th>
             </tr></thead>
             <tbody>
               {rows.map((r: any) => (
@@ -1858,6 +1859,7 @@ export const VaccinationSchedulePage: React.FC = () => {
                   <Td className="text-sm text-gray-600">{r.dose}</Td>
                   <Td>{r.route ? <Badge color={routeColor[r.route] ?? 'gray'}>{r.route}</Badge> : null}</Td>
                   <Td className="text-sm text-gray-600">{r.product}</Td>
+                  <Td className="text-xs text-gray-400">{r.notes}</Td>
                   <Td>
                     <div className="flex gap-1">
                       <button onClick={() => openEdit(r)} className="p-1 text-blue-400 hover:text-blue-600"><Edit2 size={13}/></button>
@@ -1890,6 +1892,7 @@ export const VaccinationSchedulePage: React.FC = () => {
             </div>
           </div>
           <Input label="Product / Brand" value={form.product} onChange={f('product')} placeholder="e.g. Nobilis IB+ND" />
+          <Input label="Notes" value={form.notes} onChange={f('notes')} placeholder="e.g. Withdrawal period, storage instructions…" />
         </div>
       </Modal>
 
