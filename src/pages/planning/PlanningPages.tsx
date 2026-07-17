@@ -638,18 +638,19 @@ const QuarterlyBudgetTab: React.FC = () => {
 // Advances, Other Current Assets, Current Liabilities-Expenses) is a plain
 // manual field, not a guess.
 
-const SALE_CATEGORIES = ['he_sale', 'je_sale', 'te_sale', 'be_sale', 'bird_sale', 'litter_sale', 'bag_sale']
-const OTHER_INCOME_CATEGORIES = ['other']
-// 'sales_collection' is deliberately excluded from both Product Sales and
-// Other Income — it's a mixed bucket (legacy/unrecognized sale types that
-// ARE product sales, backfilled by migration 080, plus buyer advances which
-// are a liability, not income at all, and would double-count against Sundry
-// Debtors below). Shown as its own unclassified line for the admin to check.
-const UNCLASSIFIED_CATEGORIES = ['sales_collection']
-// Designations treated as direct farm labour (Direct Wages) vs office/admin
-// (Employee Benefits) — same real config_options designation values used
-// elsewhere in the app (see Daily Farm Summary manpower section).
+// Turnover is sourced from invoiced sales (nhe_sales header amount + he_dispatch
+// amount), not cash_book receipts — a CA's Turnover is invoiced sales, and HE
+// dispatch only hits cash_book on payment receipt (see CLAUDE.md §5), so a cash
+// figure here would disagree with the accrual Sundry Debtors below.
+const PRODUCT_SALE_TYPES = ['je', 'te', 'be', 'bird_sale', 'bird_cull', 'bird_lame', 'bird_weak', 'bird_sex_error', 'manure']
+const OTHER_INCOME_SALE_TYPES = ['gas', 'other']
+const EGG_SALE_TYPES = ['je', 'te', 'be']
+// Two explicit allowlists, no default bucket — a designation in neither list
+// (new hire, typo, a role not yet seen) goes to its own "Unclassified Wages"
+// line instead of silently defaulting into Direct Wages or Employee Benefits.
 const OFFICE_DESIGNATIONS = ['Administration Head', 'Operations Head', 'Manager Finance', 'Administrative Manager', 'Accountant']
+const DIRECT_DESIGNATIONS = ['Site Manager', 'Site Supervisor', 'Security', 'Store Keeper', 'Poultry Assistant', 'Attender', 'Driver', 'Electrician', 'Helper', 'Medium Vehicle Driver']
+const grossSalary = (r: any) => (r.earned_salary ?? 0) + (r.ot_bonus ?? 0) + (r.arrears ?? 0)
 
 const CAStatementTab: React.FC = () => {
   const qc = useQueryClient()
@@ -664,9 +665,36 @@ const CAStatementTab: React.FC = () => {
     queryFn: async () => { const { data, error } = await supabase.from('ca_financial_statements').select('*').order('created_at', { ascending: false }); if (error) toast.error(error.message); return data ?? [] }
   })
 
-  const { data: cashBookTxns } = useQuery({
-    queryKey: ['ca_cash_book', periodStart, periodEnd],
-    queryFn: async () => { const { data } = await supabase.from('cash_book').select('category,amount_in,amount_out').gte('txn_date', periodStart).lte('txn_date', periodEnd); return data ?? [] }
+  const { data: nheSales } = useQuery({
+    queryKey: ['ca_nhe_sales', periodStart, periodEnd],
+    queryFn: async () => { const { data } = await supabase.from('nhe_sales').select('sale_type,amount,sale_date').gte('sale_date', periodStart).lte('sale_date', periodEnd); return data ?? [] }
+  })
+  const { data: heDispatch } = useQuery({
+    queryKey: ['ca_he_dispatch', periodStart, periodEnd],
+    queryFn: async () => { const { data } = await supabase.from('he_dispatch').select('amount,invoice_eggs,dispatch_date').gte('dispatch_date', periodStart).lte('dispatch_date', periodEnd); return data ?? [] }
+  })
+  // Egg quantity/value per sale_type comes from nhe_sale_lines (not the
+  // nhe_sales header) so a multi-type invoice attributes value per egg type
+  // correctly — migration 117 backfilled a line for every historical je/te/be
+  // header row, so line coverage matches the header data used for Turnover.
+  const { data: eggSaleLines } = useQuery({
+    queryKey: ['ca_nhe_sale_lines', periodStart, periodEnd],
+    queryFn: async () => {
+      const { data } = await supabase.from('nhe_sale_lines').select('sale_type,quantity,amount,nhe_sales!inner(sale_date)').in('sale_type', EGG_SALE_TYPES)
+        .gte('nhe_sales.sale_date', periodStart).lte('nhe_sales.sale_date', periodEnd)
+      return data ?? []
+    }
+  })
+  // cash_book category no longer used for Product Sales/Other Income
+  // (Turnover is accrual now) — only for the pure-cash "other" misc income
+  // that has no invoice source, and for the Cash & Bank balance below.
+  const { data: cashBookOtherIncome } = useQuery({
+    queryKey: ['ca_cash_book_other', periodStart, periodEnd],
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_book').select('amount_in,nhe_sale_id,he_dispatch_id').eq('category', 'other')
+        .is('nhe_sale_id', null).is('he_dispatch_id', null).gte('txn_date', periodStart).lte('txn_date', periodEnd)
+      return data ?? []
+    }
   })
   const { data: electricityBills } = useQuery({
     queryKey: ['ca_electricity', periodStart, periodEnd],
@@ -675,7 +703,7 @@ const CAStatementTab: React.FC = () => {
   const { data: salaryRows } = useQuery({
     queryKey: ['ca_salary', periodStart, periodEnd],
     queryFn: async () => {
-      const { data } = await supabase.from('salary_monthly').select('net_salary,month,employees(designation)').gte('month', periodStart).lte('month', periodEnd)
+      const { data } = await supabase.from('salary_monthly').select('earned_salary,ot_bonus,arrears,month,employees(designation)').gte('month', periodStart).lte('month', periodEnd)
       return data ?? []
     }
   })
@@ -703,13 +731,42 @@ const CAStatementTab: React.FC = () => {
     }
   })
 
-  const productSales = useMemo(() => (cashBookTxns ?? []).filter((t: any) => SALE_CATEGORIES.includes(t.category)).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [cashBookTxns])
-  const otherIncome = useMemo(() => (cashBookTxns ?? []).filter((t: any) => OTHER_INCOME_CATEGORIES.includes(t.category)).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [cashBookTxns])
-  const unclassifiedInflow = useMemo(() => (cashBookTxns ?? []).filter((t: any) => UNCLASSIFIED_CATEGORIES.includes(t.category)).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0), [cashBookTxns])
+  const productSales = useMemo(() => {
+    const fromNhe = (nheSales ?? []).filter((t: any) => PRODUCT_SALE_TYPES.includes(t.sale_type)).reduce((s: number, t: any) => s + (t.amount ?? 0), 0)
+    const fromHe = (heDispatch ?? []).reduce((s: number, d: any) => s + (d.amount ?? 0), 0)
+    return fromNhe + fromHe
+  }, [nheSales, heDispatch])
+  const otherIncome = useMemo(() => {
+    const fromNhe = (nheSales ?? []).filter((t: any) => OTHER_INCOME_SALE_TYPES.includes(t.sale_type)).reduce((s: number, t: any) => s + (t.amount ?? 0), 0)
+    const fromCashOnly = (cashBookOtherIncome ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0), 0)
+    return fromNhe + fromCashOnly
+  }, [nheSales, cashBookOtherIncome])
   const electricity = useMemo(() => (electricityBills ?? []).reduce((s: number, b: any) => s + (b.amount ?? 0), 0), [electricityBills])
-  const directWages = useMemo(() => (salaryRows ?? []).filter((r: any) => !OFFICE_DESIGNATIONS.includes(r.employees?.designation)).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0), [salaryRows])
-  const employeeBenefits = useMemo(() => (salaryRows ?? []).filter((r: any) => OFFICE_DESIGNATIONS.includes(r.employees?.designation)).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0), [salaryRows])
+  const wageBuckets = useMemo(() => {
+    const buckets = { direct: 0, office: 0, unclassified: 0, unclassifiedDesignations: new Set<string>() }
+    for (const r of (salaryRows ?? []) as any[]) {
+      const designation = r.employees?.designation
+      const amt = grossSalary(r)
+      if (DIRECT_DESIGNATIONS.includes(designation)) buckets.direct += amt
+      else if (OFFICE_DESIGNATIONS.includes(designation)) buckets.office += amt
+      else { buckets.unclassified += amt; buckets.unclassifiedDesignations.add(designation || '(no designation)') }
+    }
+    return buckets
+  }, [salaryRows])
+  const directWages = wageBuckets.direct
+  const employeeBenefits = wageBuckets.office
+  const unclassifiedWages = wageBuckets.unclassified
   const totalProductionQty = useMemo(() => (eggProduction ?? []).reduce((s: number, r: any) => s + (r.total_eggs ?? 0), 0), [eggProduction])
+  const nheEggPricing = useMemo(() => {
+    let qty = 0, amt = 0
+    for (const l of (eggSaleLines ?? []) as any[]) { qty += l.quantity ?? 0; amt += l.amount ?? 0 }
+    return { qty, amt, avgPrice: qty > 0 ? amt / qty : 0 }
+  }, [eggSaleLines])
+  const heEggPricing = useMemo(() => {
+    const qty = (heDispatch ?? []).reduce((s: number, d: any) => s + (d.invoice_eggs ?? 0), 0)
+    const amt = (heDispatch ?? []).reduce((s: number, d: any) => s + (d.amount ?? 0), 0)
+    return { qty, amt, avgPrice: qty > 0 ? amt / qty : 0 }
+  }, [heDispatch])
   const sundryDebtors = useMemo(() => {
     const byParty: Record<string, number> = {}
     for (const r of (partyBalances ?? []) as any[]) {
@@ -740,7 +797,10 @@ const CAStatementTab: React.FC = () => {
   // otherwise silently understate cost / overstate liquidity with a
   // confident-looking wrong number. Track which totals actually depend on a
   // still-blank manual field so the UI can show "—" instead of trusting it.
-  const copIncomplete = !entered(manual.rmConsumed) || !entered(manual.otherDirectExpenses)
+  // Unclassified wages (a designation in neither allowlist) block Gross/Net
+  // Profit the same way a blank manual field does — a new designation added
+  // in config_options can never silently shift the COP split unnoticed.
+  const copIncomplete = !entered(manual.rmConsumed) || !entered(manual.otherDirectExpenses) || unclassifiedWages > 0
   const indirectIncomplete = !entered(manual.paymentToPromoters) || !entered(manual.otherIndirectExpenses) || !entered(manual.depreciation)
   const netProfitIncomplete = copIncomplete || indirectIncomplete
   const currentAssetsIncomplete = !entered(manual.inventories) || !entered(manual.loansAdvances) || !entered(manual.otherCurrentAssets)
@@ -752,7 +812,6 @@ const CAStatementTab: React.FC = () => {
   const grossProfit = totalTurnover - totalCOP
   const totalIndirect = employeeBenefits + num(manual.paymentToPromoters) + num(manual.otherIndirectExpenses) + num(manual.depreciation)
   const netProfit = grossProfit - totalIndirect
-  const avgSalesPrice = totalProductionQty > 0 ? productSales / totalProductionQty : 0
   const totalCurrentAssets = num(manual.inventories) + num(manual.loansAdvances) + sundryDebtors + (cashBankBalance ?? 0) + num(manual.otherCurrentAssets)
   const totalCurrentLiabilities = creditorsGoods + num(manual.currentLiabilitiesExpenses)
   const workingCapital = totalCurrentAssets - totalCurrentLiabilities
@@ -805,18 +864,18 @@ const CAStatementTab: React.FC = () => {
             <thead><tr><Th>Particulars</Th><Th right>Amount</Th><Th>Source</Th></tr></thead>
             <tbody>
               <tr><Td className="font-semibold" colSpan={3}>1. TURNOVER</Td></tr>
-              <tr><Td>Product Sales</Td><Td right>{inr(productSales)}</Td><Td className="text-xs text-gray-400">Cash Book (sale categories)</Td></tr>
-              <tr><Td>Other Income</Td><Td right>{inr(otherIncome)}</Td><Td className="text-xs text-gray-400">Cash Book (other categories)</Td></tr>
+              <tr><Td>Product Sales</Td><Td right>{inr(productSales)}</Td><Td className="text-xs text-gray-400">NHE Sales + HE Dispatch (invoiced, accrual basis)</Td></tr>
+              <tr><Td>Other Income</Td><Td right>{inr(otherIncome)}</Td><Td className="text-xs text-gray-400">NHE Sales (gas/other) + Cash Book misc income with no invoice</Td></tr>
               <tr><Td className="font-semibold">Total Turnover</Td><Td right className="font-semibold">{inr(totalTurnover)}</Td><Td /></tr>
-              {unclassifiedInflow !== 0 && (
-                <tr><Td className="text-amber-700">Unclassified (not in Turnover above)</Td><Td right className="text-amber-700">{inr(unclassifiedInflow)}</Td>
-                  <Td className="text-xs text-amber-600">Cash Book "sales_collection" — a mix of legacy product sales and buyer advances (a liability). Not auto-included since it can't be split reliably; check this period's cash book and account for it manually.</Td></tr>
-              )}
 
               <tr><Td className="font-semibold" colSpan={3}>2. COST OF PRODUCTION</Td></tr>
               <tr><Td>RM Consumed</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.rmConsumed} onChange={e => setM('rmConsumed', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — no dedicated source yet</Td></tr>
-              <tr><Td>Direct Wages</Td><Td right>{inr(directWages)}</Td><Td className="text-xs text-gray-400">Salary (site/operational designations)</Td></tr>
+              <tr><Td>Direct Wages</Td><Td right>{inr(directWages)}</Td><Td className="text-xs text-gray-400">Salary (gross), site/operational designations</Td></tr>
               <tr><Td>Electricity</Td><Td right>{inr(electricity)}</Td><Td className="text-xs text-gray-400">Electricity Bills</Td></tr>
+              {unclassifiedWages > 0 && (
+                <tr><Td className="text-amber-700">Unclassified Wages (not in Direct Wages/Employee Benefits above)</Td><Td right className="text-amber-700">{inr(unclassifiedWages)}</Td>
+                  <Td className="text-xs text-amber-600">Designation(s) not in the known list: {Array.from(wageBuckets.unclassifiedDesignations).join(', ')} — blocks Gross/Net Profit below until resolved.</Td></tr>
+              )}
               <tr><Td>Other Direct Expenses</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.otherDirectExpenses} onChange={e => setM('otherDirectExpenses', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual</Td></tr>
               <tr><Td className="font-semibold">Total Cost of Production</Td><Td right className="font-semibold">{dash(copIncomplete, inr(totalCOP))}</Td><Td /></tr>
 
@@ -832,8 +891,11 @@ const CAStatementTab: React.FC = () => {
               <tr><Td className="font-semibold">5. Net Profit [3-4]</Td><Td right className={`font-semibold ${netProfitIncomplete ? '' : netProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>{dash(netProfitIncomplete, inr(netProfit))}</Td><Td /></tr>
 
               <tr><Td className="font-semibold" colSpan={3}>6. QUANTITATIVE INFORMATION</Td></tr>
-              <tr><Td>Total Production (Eggs)</Td><Td right>{totalProductionQty.toLocaleString('en-IN')}</Td><Td className="text-xs text-gray-400">Daily Records</Td></tr>
-              <tr><Td>Average Sales Price (₹/egg)</Td><Td right>{avgSalesPrice.toFixed(2)}</Td><Td className="text-xs text-gray-400">Product Sales ÷ Qty</Td></tr>
+              <tr><Td>Total Production (Eggs)</Td><Td right>{totalProductionQty.toLocaleString('en-IN')}</Td><Td className="text-xs text-gray-400">Daily Records (produced, not sold)</Td></tr>
+              <tr><Td>NHE Eggs Sold (JE+TE+BE)</Td><Td right>{nheEggPricing.qty.toLocaleString('en-IN')}</Td><Td className="text-xs text-gray-400">NHE Sale Lines</Td></tr>
+              <tr><Td>Avg NHE Egg Price (₹/egg)</Td><Td right>{nheEggPricing.avgPrice.toFixed(2)}</Td><Td className="text-xs text-gray-400">NHE egg sale value ÷ eggs sold</Td></tr>
+              <tr><Td>HE Eggs Dispatched</Td><Td right>{heEggPricing.qty.toLocaleString('en-IN')}</Td><Td className="text-xs text-gray-400">HE Dispatch</Td></tr>
+              <tr><Td>Avg HE Rate (₹/egg)</Td><Td right>{heEggPricing.avgPrice.toFixed(2)}</Td><Td className="text-xs text-gray-400">HE dispatch value ÷ invoice eggs — priced on a different basis to NHE, kept separate</Td></tr>
 
               <tr><Td>Net Worth</Td><Td right><input type="number" className="w-32 text-right border rounded px-1 py-0.5 text-sm" value={manual.netWorth} onChange={e => setM('netWorth', e.target.value)} /></Td><Td className="text-xs text-amber-600">Manual — no equity ledger yet</Td></tr>
 
