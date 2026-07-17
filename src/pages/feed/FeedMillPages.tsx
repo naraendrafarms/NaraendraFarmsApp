@@ -12,7 +12,7 @@ import {
   Card, Button, Input, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
 , DateInput, SearchableSelect } from '@/components/ui'
-import { Plus, Edit2, Trash2, Download, Upload, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Edit2, Trash2, Download, Upload, ChevronDown, ChevronUp, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigValues } from '@/hooks/useConfigOptions'
 import { useFeedRates } from '@/hooks/useFeedRates'
@@ -284,6 +284,7 @@ const FormulasTab: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
+  const [dupSource, setDupSource] = useState<{ formula: any; ings: any[] } | null>(null)
   const [expanded, setExpanded] = useState<string|null>(null)
   const [editIngredient, setEditIngredient] = useState<any>(null)
   const [showAddIngredient, setShowAddIngredient] = useState<string|null>(null)
@@ -378,7 +379,7 @@ const FormulasTab: React.FC = () => {
         if (rows.length) { const { error } = await supabase.from('feed_formula_ingredients').insert(rows); if (error) throw error }
       }
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setShowForm(false); setEditing(null); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setShowForm(false); setEditing(null); setDupSource(null); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -547,7 +548,12 @@ const FormulasTab: React.FC = () => {
                   </div>
                   <div className="flex gap-2" onClick={e => e.stopPropagation()}>
                     <Button size="sm" variant="outline" title="Add ingredient" onClick={() => setShowAddIngredient(f.id)}><Plus size={13}/></Button>
-                    <Button size="sm" variant="outline" onClick={() => { setEditing(f); setShowForm(true) }}><Edit2 size={13}/></Button>
+                    <Button size="sm" variant="outline" title="Edit" onClick={() => { setEditing(f); setShowForm(true) }}><Edit2 size={13}/></Button>
+                    <Button size="sm" variant="outline" title="Duplicate" onClick={() => {
+                      setEditing(null)
+                      setDupSource({ formula: { ...f, id: undefined, formula_code: `${f.formula_code}-COPY`, version: 1 }, ings: ingredients[f.id] ?? [] })
+                      setShowForm(true)
+                    }}><Copy size={13}/></Button>
                     <Button size="sm" variant="ghost" onClick={() => { if (confirm('Delete formula and all its ingredients?')) delMut.mutate(f.id) }}><Trash2 size={13} className="text-red-500"/></Button>
                   </div>
                 </div>
@@ -596,8 +602,8 @@ const FormulasTab: React.FC = () => {
         </div>
       )}
 
-      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null) }} title={editing ? 'Edit Formula' : 'Add Formula'} size="lg">
-        <FormulaForm initial={editing} existingIngs={editing ? ingredients[editing.id] : undefined} feedTypes={feedTypes} onSave={(d: any) => saveMut.mutate(d)} loading={saveMut.isPending} />
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null); setDupSource(null) }} title={editing ? 'Edit Formula' : dupSource ? 'Duplicate Formula' : 'Add Formula'} size="lg">
+        <FormulaForm key={editing?.id ?? (dupSource ? 'dup' : 'new')} initial={editing ?? dupSource?.formula} existingIngs={editing ? ingredients[editing.id] : dupSource?.ings} feedTypes={feedTypes} onSave={(d: any) => saveMut.mutate(d)} loading={saveMut.isPending} />
       </Modal>
       <Modal open={!!showAddIngredient} onClose={() => setShowAddIngredient(null)} title="Add Ingredient" size="md">
         <IngredientForm formulaId={showAddIngredient!} initial={null} onSave={(d: any) => saveIngMut.mutate(d)} loading={saveIngMut.isPending} />

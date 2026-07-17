@@ -10,6 +10,7 @@ const LAST_UPDATED = '2026-07-17'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-17', tag: 'New',      text: 'Feed Mill → Formulas: added a Duplicate button on each formula (copy icon, next to Edit) — opens the Add Formula screen pre-filled with the source formula\'s details and all its ingredients (code suffixed "-COPY", version reset to 1) so you can create a new age/weight variant without re-typing every ingredient from scratch.' },
   { date: '2026-07-17', tag: 'Fix',      text: 'Feed Mill → Feed Stock Status: added a search box (by code/ingredient name on the Feed tab, by name/type on the Medicine & Vaccine tab) — previously there was no way to filter the list at all, unlike every other stock/master list in the app.' },
   { date: '2026-07-17', tag: 'Fix',      text: 'Purchase Intent (and every other screen using the alias-aware item picker) now shows each item\'s Manufacturer next to its name and lets you search by it — previously the picker query never fetched the manufacturer column at all, so it silently never appeared even after Items Master made it a required field for Medicine/Equipment.' },
   { date: '2026-07-17', tag: 'New',      text: 'Masters → Vaccination Schedule: added Template download and bulk Import (CSV/Excel), matching the pattern already used on other Masters pages — previously entries could only be added one at a time. Import skips rows that already match an existing Age + Vaccine Name entry instead of creating duplicates.' },
