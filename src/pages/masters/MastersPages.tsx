@@ -1973,7 +1973,15 @@ export const VaccinationSchedulePage: React.FC = () => {
           <SearchableSelect label="Link to Medicines Master (optional)" placeholder="Search medicine/vaccine…" options={medOptions}
             value={form.medicine_id} onChange={v => {
               const med = (medList as any[]).find(m => m.id === v)
-              setForm((prev: any) => ({ ...prev, medicine_id: v, vaccine_name: med ? med.name : prev.vaccine_name }))
+              // Keep whatever name is already typed — link it and register it
+              // as an alias of the picked medicine, instead of overwriting it
+              // with the master's own name. Only fall back to the master's
+              // name when nothing was typed yet.
+              setForm((prev: any) => {
+                const keptName = (prev.vaccine_name ?? '').trim() || (med ? med.name : '')
+                if (med?.item_id && (prev.vaccine_name ?? '').trim()) registerItemAlias(med.item_id, prev.vaccine_name.trim(), 'vaccination_schedule').catch(() => {})
+                return { ...prev, medicine_id: v, vaccine_name: keptName }
+              })
             }} />
           <Input label="Vaccine / Treatment Name *" value={form.vaccine_name} onChange={f('vaccine_name')} required />
           <div className="grid grid-cols-2 gap-3">

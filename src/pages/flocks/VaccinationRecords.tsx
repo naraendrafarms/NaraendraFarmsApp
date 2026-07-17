@@ -10,7 +10,7 @@ import {
 import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download, Upload, FileDown, CalendarClock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
-import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
+import { useMedicineOptionsWithAliases, registerItemAlias } from '@/lib/itemAliases'
 
 const ConfirmBulkDelete: React.FC<{ label: string; onConfirm: () => void; onCancel: () => void }> = ({ label, onConfirm, onCancel }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -365,7 +365,15 @@ export const VaccinationRecordsPage: React.FC = () => {
             <SearchableSelect label="Link to Medicines Master (optional)" placeholder="Search medicine/vaccine…" options={medOptions}
               value={form.medicine_id} onChange={v => {
                 const med = (medicines as any[]).find(m => m.id === v)
-                setForm(f => ({ ...f, medicine_id: v, vaccine_name: med ? med.name : f.vaccine_name, unit: med?.unit ?? f.unit }))
+                // Keep whatever name is already typed — link it and register
+                // it as an alias of the picked medicine, instead of
+                // overwriting it with the master's own name. Only fall back
+                // to the master's name when nothing was typed yet.
+                setForm(f => {
+                  const keptName = f.vaccine_name.trim() || (med ? med.name : '')
+                  if (med?.item_id && f.vaccine_name.trim()) registerItemAlias(med.item_id, f.vaccine_name.trim(), 'vaccination_records').catch(() => {})
+                  return { ...f, medicine_id: v, vaccine_name: keptName, unit: f.unit || med?.unit || '' }
+                })
               }} />
             <FormRow>
               <Input label="Vaccine Name" required value={form.vaccine_name} onChange={e => s('vaccine_name', e.target.value)} placeholder="e.g. Marek's, ND LaSota…" />
