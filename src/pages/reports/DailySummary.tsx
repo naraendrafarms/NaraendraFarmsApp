@@ -109,7 +109,7 @@ export const DailySummaryPage: React.FC = () => {
   // site with no active flock still gets its own manpower-only block.
   const { data: employees } = useQuery({
     queryKey: ['employees_for_manpower'],
-    queryFn: async () => { const { data } = await supabase.from('employees').select('id,designation,farm_id').eq('is_active', true); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('employees').select('id,designation,farm_id,gender').eq('is_active', true); return data ?? [] }
   })
   const { data: attendance } = useQuery({
     queryKey: ['attendance_for_manpower', date],
@@ -134,7 +134,12 @@ export const DailySummaryPage: React.FC = () => {
     const bySite: Record<string, Record<string, { p: number; h: number }>> = {}
     for (const e of (employees ?? [])) {
       const siteId = e.farm_id ?? '__none__'
-      const designation = e.designation || 'Unspecified'
+      // Helper is the one designation split by gender (Male/Female Helper) —
+      // every other designation is left alone, as requested.
+      const baseDesignation = e.designation || 'Unspecified'
+      const designation = baseDesignation.toLowerCase() === 'helper'
+        ? `Helper (${e.gender || 'Unspecified'})`
+        : baseDesignation
       const st = attByEmp.get(e.id)
       const isP = st === 'P' || st === 'OT'
       const isH = st === 'H'
@@ -146,9 +151,11 @@ export const DailySummaryPage: React.FC = () => {
     return bySite
   }, [employees, attendance])
 
+  const orderFor = (designation: string) => designationOrder.get(designation.replace(/ \((Male|Female|Unspecified)\)$/, '')) ?? 999
+
   const manpowerLines = (siteId: string) => {
     const site = manpowerBySite[siteId] ?? {}
-    const designations = Object.keys(site).sort((a, b) => (designationOrder.get(a) ?? 999) - (designationOrder.get(b) ?? 999) || a.localeCompare(b))
+    const designations = Object.keys(site).sort((a, b) => orderFor(a) - orderFor(b) || a.localeCompare(b))
     if (!designations.length) return ['(no employees mapped to this site)']
     return designations.map(d => `${d} — P:${site[d].p} H:${site[d].h}`)
   }
