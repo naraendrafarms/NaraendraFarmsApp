@@ -13,7 +13,7 @@ import { ifscError, accountNoError } from '@/lib/validators'
 import { parseGstin, GST_TYPE_OPTIONS, GST_RATE_OPTIONS } from '@/lib/gst'
 import { useConfigValues } from '@/hooks/useConfigOptions'
 import { printReport } from '@/lib/invoicePrint'
-import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
+import { useMedicineOptionsWithAliases, registerItemAlias } from '@/lib/itemAliases'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -1769,6 +1769,62 @@ export const VaccinationSchedulePage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  // ── Link Unlinked Vaccines to Medicines Master ────────────────────────────
+  // For every schedule row with no medicine_id yet, suggest an existing
+  // Medicines Master entry whose name loosely matches (ignoring spacing/
+  // punctuation/case — the same class of mismatch as "Toxfin 360 Dry" vs
+  // "Toxfin360 Dry") so a differently-worded duplicate gets linked + aliased
+  // instead of spawning a second Items Master entry for the same vaccine.
+  const [showUnlinked, setShowUnlinked] = useState(false)
+  const [creatingFor, setCreatingFor] = useState<any>(null)
+  const [createForm, setCreateForm] = useState({ manufacturer: '', unit: 'dose' })
+
+  const looseKey = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const unlinkedRows = rows.filter((r: any) => !r.medicine_id)
+  const suggestionFor = (vaccineName: string) => {
+    const key = looseKey(vaccineName)
+    if (!key) return null
+    return (medList as any[]).find(m => {
+      const mk = looseKey(m.name)
+      return mk === key || mk.includes(key) || key.includes(mk)
+    }) ?? null
+  }
+
+  const linkAliasMut = useMutation({
+    mutationFn: async ({ scheduleId, vaccineName, medicine }: { scheduleId: string; vaccineName: string; medicine: any }) => {
+      if (medicine.item_id) await registerItemAlias(medicine.item_id, vaccineName, 'vaccination_schedule').catch(() => {})
+      const { error } = await supabase.from('vaccination_schedule').update({ medicine_id: medicine.id }).eq('id', scheduleId)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vaccination_schedule'] }); toast.success('Linked') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const createNewMut = useMutation({
+    mutationFn: async () => {
+      if (!createForm.manufacturer.trim()) throw new Error('Manufacturer is required')
+      const { data: item, error: itemErr } = await supabase.from('items').insert({
+        name: creatingFor.vaccine_name.trim(), category: 'Vaccine', unit: createForm.unit || 'dose',
+        manufacturer: createForm.manufacturer.trim(), is_active: true,
+      }).select('id').single()
+      if (itemErr) throw itemErr
+      const { data: med, error: medErr } = await supabase.from('medicines_master').insert({
+        name: creatingFor.vaccine_name.trim(), type: 'vaccine', unit: createForm.unit || 'dose', item_id: item!.id, is_active: true,
+      }).select('id').single()
+      if (medErr) throw medErr
+      const { error: linkErr } = await supabase.from('vaccination_schedule').update({ medicine_id: med!.id }).eq('id', creatingFor.id)
+      if (linkErr) throw linkErr
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vaccination_schedule'] })
+      qc.invalidateQueries({ queryKey: ['medicines_for_alias_search'] })
+      qc.invalidateQueries({ queryKey: ['items_master'] })
+      setCreatingFor(null); setCreateForm({ manufacturer: '', unit: 'dose' })
+      toast.success('Created and linked')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
   const openNew  = () => { setEditing(null); setForm({...EMPTY_VACC}); setOpen(true) }
   const openEdit = (r: any) => { setEditing(r); setForm({...EMPTY_VACC,...r, sno: r.sno?.toString()??''}); setOpen(true) }
 
@@ -1831,6 +1887,9 @@ export const VaccinationSchedulePage: React.FC = () => {
           <Button size="sm" variant="outline" icon={<Printer size={14}/>} onClick={handlePrint}>
             {sel.size > 0 ? `Print ${sel.size}` : 'Print'}
           </Button>
+          {unlinkedRows.length > 0 && (
+            <Button size="sm" variant="outline" onClick={() => setShowUnlinked(true)}>Link Unlinked Vaccines ({unlinkedRows.length})</Button>
+          )}
           {rows.length > 0 && (
             <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setClearAll(true)}>Clear All</Button>
           )}
@@ -1914,6 +1973,49 @@ export const VaccinationSchedulePage: React.FC = () => {
       <Modal open={clearAll} onClose={() => setClearAll(false)} title="Clear All Schedule Entries"
         footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setClearAll(false)}>Cancel</Button><Button variant="danger" onClick={() => clearAllMut.mutate()} loading={clearAllMut.isPending}>Yes, Delete All {rows.length} Entries</Button></div>}>
         <p className="text-sm text-gray-600">This will permanently delete all <strong>{rows.length}</strong> vaccination schedule entries. You can re-enter the correct data after. This cannot be undone.</p>
+      </Modal>
+
+      <Modal open={showUnlinked} onClose={() => setShowUnlinked(false)} title={`Link Unlinked Vaccines (${unlinkedRows.length})`} size="lg">
+        <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+          {unlinkedRows.length === 0 ? (
+            <p className="text-sm text-gray-400">Everything is linked.</p>
+          ) : unlinkedRows.map((r: any) => {
+            const suggestion = suggestionFor(r.vaccine_name)
+            const isCreating = creatingFor?.id === r.id
+            return (
+              <div key={r.id} className="border border-gray-200 rounded-lg p-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="text-xs text-gray-400 font-mono mr-2">{r.age_label}</span>
+                    <span className="text-sm font-medium">{r.vaccine_name}</span>
+                  </div>
+                  {!isCreating && (
+                    <div className="flex items-center gap-2">
+                      {suggestion ? (
+                        <>
+                          <span className="text-xs text-gray-500">Looks like <strong>{suggestion.name}</strong></span>
+                          <Button size="sm" loading={linkAliasMut.isPending} onClick={() => linkAliasMut.mutate({ scheduleId: r.id, vaccineName: r.vaccine_name, medicine: suggestion })}>Link as alias</Button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-400">No match found</span>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => { setCreatingFor(r); setCreateForm({ manufacturer: '', unit: 'dose' }) }}>Create New</Button>
+                    </div>
+                  )}
+                </div>
+                {isCreating && (
+                  <div className="mt-3 flex items-end gap-2 flex-wrap bg-gray-50 rounded-lg p-3">
+                    <Input label="Manufacturer *" required value={createForm.manufacturer}
+                      onChange={e => setCreateForm(f => ({ ...f, manufacturer: e.target.value }))} placeholder="e.g. Zoetis" />
+                    <Input label="Unit" value={createForm.unit} onChange={e => setCreateForm(f => ({ ...f, unit: e.target.value }))} className="w-24" />
+                    <Button size="sm" loading={createNewMut.isPending} onClick={() => createNewMut.mutate()}>Save &amp; Link</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setCreatingFor(null)}>Cancel</Button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </Modal>
     </div>
   )
