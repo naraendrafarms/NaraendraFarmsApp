@@ -1594,8 +1594,21 @@ export const SalaryEntryPage: React.FC = () => {
   })
 
   const delMut=useMutation({
-    mutationFn:async(id:string)=>{const{error}=await supabase.from('salary_monthly').delete().eq('id',id);if(error)throw error},
-    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['salary_monthly_detail','salary_fy_summary']})},
+    mutationFn:async(id:string)=>{
+      // Deleting a Paid salary_monthly row must not orphan the ledger entries
+      // or leave employee_deductions permanently stuck at 'deducted' — mirror
+      // the Paid -> Pending un-mark logic above (~1572-1582) but triggered
+      // from delete instead.
+      await supabase.from('cash_book').delete().eq('salary_monthly_id',id)
+      await supabase.from('bank_transactions').delete().eq('salary_monthly_id',id)
+      await supabase.from('employee_deductions')
+        .update({status:'pending',deducted_at:null,salary_monthly_id:null})
+        .eq('salary_monthly_id',id).eq('status','deducted')
+      const{error}=await supabase.from('salary_monthly').delete().eq('id',id)
+      if(error)throw error
+      qc.invalidateQueries({queryKey:['employee_deductions_pending']})
+    },
+    onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['salary_monthly_detail','salary_fy_summary']});qc.invalidateQueries({queryKey:['cash_book']});qc.invalidateQueries({queryKey:['bank_transactions']})},
     onError:(e:any)=>toast.error(e.message)
   })
 
@@ -2229,6 +2242,12 @@ export const ESIPFReportPage: React.FC = () => {
       } else if(editOrigIsPaid && !isPaidNow){
         await supabase.from('cash_book').delete().eq('salary_monthly_id',editRec.id)
         await supabase.from('bank_transactions').delete().eq('salary_monthly_id',editRec.id)
+        // Restore any deductions this salary had recovered, same as the main
+        // Salary Entry form's Paid -> Pending un-mark logic (~1579-1581).
+        await supabase.from('employee_deductions')
+          .update({status:'pending',deducted_at:null,salary_monthly_id:null})
+          .eq('salary_monthly_id',editRec.id).eq('status','deducted')
+        qc.invalidateQueries({queryKey:['employee_deductions_pending']})
       }
     },
     onSuccess: () => { toast.success('Saved'); qc.invalidateQueries({queryKey:['esipf_report']}); qc.invalidateQueries({queryKey:['cash_book']}); qc.invalidateQueries({queryKey:['bank_transactions']}); setEditRec(null) },
@@ -3697,7 +3716,14 @@ export const BulkSalaryPage: React.FC = () => {
             payment_mode: toCbMode(mode), salary_monthly_id: r.id, reference_no: ref || null,
           })
         }
+        // Auto-deduct pending employee_deductions for this employee+month, same
+        // as the main Salary Entry form (~1585-1588) — otherwise a salary paid
+        // via the bulk page never recovers its pending deductions.
+        await supabase.from('employee_deductions')
+          .update({status:'deducted',deducted_at:txnDate,salary_monthly_id:r.id})
+          .eq('employee_id',r.employee_id).eq('deduction_month',monthDate).eq('status','pending')
       }
+      qc.invalidateQueries({queryKey:['employee_deductions_pending']})
     },
     onSuccess: (_d, vars) => {
       toast.success(`Marked ${vars.ids.length} employee(s) Paid`)
@@ -3724,6 +3750,12 @@ export const BulkSalaryPage: React.FC = () => {
       // (tagged via bank_txn_id, just unset above) may still cover other
       // employees, so it's left alone rather than deleted here.
       await supabase.from('bank_transactions').delete().eq('salary_monthly_id', salaryId)
+      // Restore any deductions this salary had recovered, same as the main
+      // Salary Entry form's Paid -> Pending un-mark logic (~1579-1581).
+      await supabase.from('employee_deductions')
+        .update({status:'pending',deducted_at:null,salary_monthly_id:null})
+        .eq('salary_monthly_id',salaryId).eq('status','deducted')
+      qc.invalidateQueries({queryKey:['employee_deductions_pending']})
     },
     onSuccess: () => {
       toast.success('Reverted to Pending')
