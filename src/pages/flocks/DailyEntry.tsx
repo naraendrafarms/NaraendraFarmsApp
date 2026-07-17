@@ -18,8 +18,8 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = filename; a.click()
 }
 
-const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','he_eggs','he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs','wastage_eggs','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male','lighting_hrs','age_weeks','remarks']
-const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',440,400,30,10,0,0,5,5,0,0,0,0,0,1,0,16,25,'']
+const DAILY_HEADERS = ['date','opening_female','opening_male','feed_female_kg','feed_type_f','feed_male_kg','feed_type_m','he_eggs','he_grade_a','he_grade_b','he_grade_c','je_eggs','te_eggs','be_eggs','le_eggs','wastage_eggs','wastage_he','wastage_je','wastage_te','wastage_be','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male','lighting_hrs','age_weeks','remarks']
+const DAILY_EXAMPLE = ['2026-01-01',500,20,65,'L1',3,'MALE',440,400,30,10,0,0,5,5,0,0,0,0,0,0,0,0,0,1,0,16,25,'']
 
 
 export const DailyEntry: React.FC = () => {
@@ -454,7 +454,7 @@ export const DailyEntry: React.FC = () => {
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`daily_${selectedFlockData?.flock_no}_records.csv`,
       DAILY_HEADERS,
-      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.he_eggs,r.he_grade_a,r.he_grade_b,r.he_grade_c,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.wastage_eggs,r.transfer_female??r.trcull_female,r.transfer_male??r.trcull_male,r.cull_female??0,r.cull_male??0,r.mortality_female,r.mortality_male,r.lighting_hrs,r.age_weeks,r.remarks])
+      data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.he_eggs,r.he_grade_a,r.he_grade_b,r.he_grade_c,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.wastage_eggs,r.wastage_he,r.wastage_je,r.wastage_te,r.wastage_be,r.transfer_female??r.trcull_female,r.transfer_male??r.trcull_male,r.cull_female??0,r.cull_male??0,r.mortality_female,r.mortality_male,r.lighting_hrs,r.age_weeks,r.remarks])
     )
   }
 
@@ -503,6 +503,10 @@ export const DailyEntry: React.FC = () => {
         be_eggs:          beEggs,
         le_eggs:          leEggs,
         wastage_eggs:     parseInt(r[col('wastage_eggs')]     || r[col('wastageeggs')]     || '0') || null,
+        wastage_he:       parseInt(r[col('wastage_he')]       || r[col('wastagehe')]       || '0') || null,
+        wastage_je:       parseInt(r[col('wastage_je')]       || r[col('wastageje')]       || '0') || null,
+        wastage_te:       parseInt(r[col('wastage_te')]       || r[col('wastagete')]       || '0') || null,
+        wastage_be:       parseInt(r[col('wastage_be')]       || r[col('wastagebe')]       || '0') || null,
         transfer_female:  transferF,
         transfer_male:    transferM,
         cull_female:      cullF,

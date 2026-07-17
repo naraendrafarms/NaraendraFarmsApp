@@ -325,15 +325,15 @@ export const GRNEntry: React.FC = () => {
 
   const handleExport = () => {
     exportCSV(`grn_export.csv`,
-      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','taxable_amount','gst_pct','tax_amount','total_amount','vehicle_no','remarks'],
-      grns.map((g: any) => [g.grn_no, g.grn_date, g.farms?.code, g.parties?.name, g.invoice_no, g.invoice_date, g.feed_ingredients?.name??g.item_name, g.qty, g.unit, g.bags, g.price_per_unit, g.basic_amount, g.gst_pct, g.gst_amount, g.total_amount, g.vehicle_no, g.remarks])
+      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','category','qty','unit','bags','price_per_unit','taxable_amount','gst_pct','tax_amount','total_amount','vehicle_no','remarks'],
+      grns.map((g: any) => [g.grn_no, g.grn_date, g.farms?.code, g.parties?.name, g.invoice_no, g.invoice_date, g.feed_ingredients?.name??g.item_name, g.category, g.qty, g.unit, g.bags, g.price_per_unit, g.basic_amount, g.gst_pct, g.gst_amount, g.total_amount, g.vehicle_no, g.remarks])
     )
   }
 
   const handleTemplate = () => {
     exportCSV('grn_template.csv',
-      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','qty','unit','bags','price_per_unit','gst_pct','vehicle_no','remarks'],
-      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize',10000,'kg',200,22.5,5,'TN01AB1234','']]
+      ['grn_no','grn_date','site_code','party_name','invoice_no','invoice_date','item_name','category','qty','unit','bags','price_per_unit','gst_pct','vehicle_no','remarks'],
+      [['GRN001','2025-06-01','BPS','Supplier Name','INV001','2025-06-01','Maize','Feed Ingredient',10000,'kg',200,22.5,5,'TN01AB1234','']]
     )
   }
 
@@ -375,6 +375,7 @@ export const GRNEntry: React.FC = () => {
           invoice_date: cleanDate(r.invoice_date),
           ingredient_id: ingrMap[r.item_name?.toLowerCase()] || null,
           item_name: r.item_name || null,
+          category: r.category || null,
           qty,
           unit: r.unit || 'kg',
           bags: cleanNum(r.bags) || null,

@@ -152,9 +152,9 @@ export const EggConversions: React.FC = () => {
     const data = (conversions ?? []).map((c: any) => ({
       flock_no: c.flocks?.flock_no ?? '',
       conversion_date: fmtDate(c.conversion_date),
-      from_type: typeLabel(c.from_type),
+      from_type: c.from_type,
       from_qty: c.from_qty ?? 0,
-      to_type: typeLabel(c.to_type),
+      to_type: c.to_type,
       to_qty: c.to_qty ?? 0,
       reason: c.reason ?? '',
     }))

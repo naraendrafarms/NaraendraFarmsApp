@@ -659,7 +659,7 @@ export const FlockDetail: React.FC = () => {
 
   // CSV template download
   const handleDownloadTemplate = () => {
-    const headers = 'flock_no,record_date,opening_female,opening_male,feed_female_kg,feed_male_kg,he_eggs,transfer_female,transfer_male,cull_female,cull_male,mortality_female,mortality_male'
+    const headers = 'flock_no,record_date,opening_female,opening_male,feed_female_kg,feed_male_kg,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,transfer_female,transfer_male,cull_female,cull_male,mortality_female,mortality_male'
     const blob = new Blob([headers + '\n'], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -699,6 +699,10 @@ export const FlockDetail: React.FC = () => {
           feed_male_kg: parseFloat(r.feed_male_kg) || null,
           total_eggs: heEggs + jeEggs + teEggs + beEggs + leEggs,
           he_eggs: heEggs || null,
+          je_eggs: jeEggs || null,
+          te_eggs: teEggs || null,
+          be_eggs: beEggs || null,
+          le_eggs: leEggs || null,
           transfer_female: transferF,
           transfer_male:   transferM,
           cull_female:     cullF,

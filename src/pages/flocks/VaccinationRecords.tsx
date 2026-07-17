@@ -163,8 +163,7 @@ export const VaccinationRecordsPage: React.FC = () => {
       vaccine_date: r.vaccine_date ?? '',
       vaccine_name: r.vaccine_name ?? '',
       dose_no: r.dose_no ?? '',
-      route: r.route ? routeLabel(r.route) : '',
-      shed_site: r.sheds ? `Shed ${r.sheds.shed_no}` : r.farms?.name ?? '',
+      route: r.route ?? '',
       quantity: r.quantity ?? '',
       unit: r.unit ?? '',
       cost: r.cost ?? '',
@@ -172,7 +171,7 @@ export const VaccinationRecordsPage: React.FC = () => {
       administered_by: r.administered_by ?? '',
       remarks: r.remarks ?? '',
     }))
-    const headers = ['flock_no','vaccine_date','vaccine_name','dose_no','route','shed_site','quantity','unit','cost','next_due_date','administered_by','remarks']
+    const headers = ['flock_no','vaccine_date','vaccine_name','dose_no','route','quantity','unit','cost','next_due_date','administered_by','remarks']
     const lines = [headers.join(',')]
     for (const r of (flat ?? [])) {
       lines.push(headers.map(h => `"${String((r as any)[h] ?? '').replace(/"/g,'""')}"`).join(','))

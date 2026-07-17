@@ -427,19 +427,20 @@ const FormulasTab: React.FC = () => {
   function handleExport() {
     const rows: (string|number|null|undefined)[][] = []
     formulas.forEach((f: any) => {
+      const ftCode = (f.feed_types as any)?.code ?? ''
       const ings = ingredients[f.id] ?? []
       if (ings.length === 0) {
-        rows.push([f.formula_code, f.formula_name, f.flock_type, f.age_week_from??'', f.age_week_to??'', f.version, '', '', '', '', ''])
+        rows.push([f.formula_code, f.formula_name, f.flock_type, ftCode, f.age_week_from??'', f.age_week_to??'', f.version, '', '', '', '', ''])
       } else {
-        ings.forEach((i: any) => rows.push([f.formula_code, f.formula_name, f.flock_type, f.age_week_from??'', f.age_week_to??'', f.version, i.ingredient_code??'', i.ingredient_name, i.percentage, i.kg_per_1000??'', i.sort_order]))
+        ings.forEach((i: any) => rows.push([f.formula_code, f.formula_name, f.flock_type, ftCode, f.age_week_from??'', f.age_week_to??'', f.version, i.ingredient_code??'', i.ingredient_name, i.percentage, i.kg_per_1000??'', i.sort_order]))
       }
     })
-    exportXlsx('feed_formulas.xlsx', ['formula_code','formula_name','flock_type','age_week_from','age_week_to','version','ingredient_code','ingredient_name','percentage','kg_per_1000','sort_order'], rows)
+    exportXlsx('feed_formulas.xlsx', ['formula_code','formula_name','flock_type','feed_type_code','age_week_from','age_week_to','version','ingredient_code','ingredient_name','percentage','kg_per_1000','sort_order'], rows)
   }
 
   function handleTemplate() {
-    exportXlsx('feed_formula_template.xlsx', ['formula_code','formula_name','flock_type','age_week_from','age_week_to','version','ingredient_code','ingredient_name','percentage','sort_order'], [
-      ['PS-NB','Starter (0-7th week)','Breeder',0,7,1,'11','MAIZE-12%Moisture',67.3,1]
+    exportXlsx('feed_formula_template.xlsx', ['formula_code','formula_name','flock_type','feed_type_code','age_week_from','age_week_to','version','ingredient_code','ingredient_name','percentage','sort_order'], [
+      ['PS-NB','Starter (0-7th week)','Breeder','L1',0,7,1,'11','MAIZE-12%Moisture',67.3,1]
     ])
   }
 
@@ -447,21 +448,30 @@ const FormulasTab: React.FC = () => {
     const file = e.target.files?.[0]; if (!file) return
     const { headers, rows } = await parseFile(file)
     const col = (name: string) => headers.indexOf(name)
+    const feedTypeByCode: Record<string, string> = {}
+    for (const ft of feedTypes) feedTypeByCode[String(ft.code).toLowerCase().trim()] = ft.id
     let imported = 0
+    let unmatchedFeedType = 0
     for (const vals of rows) {
       const fc = vals[col('formula_code')]?.trim()
       if (!fc) continue
+      const ftCodeRaw = col('feed_type_code') >= 0 ? vals[col('feed_type_code')]?.trim() : ''
+      const feedTypeId = ftCodeRaw ? (feedTypeByCode[ftCodeRaw.toLowerCase()] ?? null) : null
+      if (ftCodeRaw && !feedTypeId) unmatchedFeedType++
       let { data: fRows } = await supabase.from('feed_formulas').select('id').eq('formula_code', fc).limit(1)
       let fId = fRows?.[0]?.id
       if (!fId) {
         const { data: ins } = await supabase.from('feed_formulas').insert({
           formula_code: fc, formula_name: vals[col('formula_name')] || fc,
           flock_type: vals[col('flock_type')] || 'Breeder',
+          feed_type_id: feedTypeId,
           age_week_from: vals[col('age_week_from')] ? Number(vals[col('age_week_from')]) : null,
           age_week_to: vals[col('age_week_to')] ? Number(vals[col('age_week_to')]) : null,
           version: vals[col('version')] ? Number(vals[col('version')]) : 1,
         }).select('id').single()
         fId = ins?.id
+      } else if (feedTypeId) {
+        await supabase.from('feed_formulas').update({ feed_type_id: feedTypeId }).eq('id', fId)
       }
       const ingName = vals[col('ingredient_name')]?.trim()
       if (!fId || !ingName) continue
@@ -483,7 +493,7 @@ const FormulasTab: React.FC = () => {
       imported++
     }
     qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']})
-    toast.success(`Imported ${imported} ingredients`)
+    toast.success(`Imported ${imported} ingredients${unmatchedFeedType ? ` — ${unmatchedFeedType} row(s) had an unmatched feed type` : ''}`)
     e.target.value = ''
   }
 
