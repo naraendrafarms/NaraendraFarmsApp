@@ -675,6 +675,20 @@ export const GRNPage: React.FC = () => {
                 ))}
               </tbody>
               <tfoot>
+                {totalPages > 1 && (
+                  <tr className="border-t border-gray-200 bg-gray-50/60 text-gray-500">
+                    <Td colSpan={7} className="text-right text-xs">This page ({visibleRows.length} of {filtered.length})</Td>
+                    <Td className="text-right text-xs">{visibleRows.reduce((s: number, g: any) => s + (g.qty ?? 0), 0).toLocaleString('en-IN')}</Td>
+                    <Td></Td>
+                    <Td className="text-right text-xs">{visibleRows.reduce((s: number, g: any) => s + (g.bags ?? 0), 0).toLocaleString('en-IN')}</Td>
+                    <Td></Td>
+                    <Td></Td>
+                    <Td className="text-right text-xs">{inr(visibleRows.reduce((s: number, g: any) => s + (g.basic_amount ?? 0), 0))}</Td>
+                    <Td></Td>
+                    <Td className="text-right text-xs">{inr(visibleRows.reduce((s: number, g: any) => s + (g.total_amount ?? 0), 0))}</Td>
+                    <Td></Td><Td></Td><Td></Td>
+                  </tr>
+                )}
                 <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
                   <Td colSpan={7} className="text-right text-xs">TOTAL ({filtered.length}{(fFrom || fTo) ? ' in range' : ''})</Td>
                   <Td className="text-right text-xs">{filtered.reduce((s: number, g: any) => s + (g.qty ?? 0), 0).toLocaleString('en-IN')}</Td>

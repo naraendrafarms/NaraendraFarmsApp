@@ -208,6 +208,12 @@ export const SalesInvoiceRegister: React.FC = () => {
                 ))}
               </tbody>
               <tfoot>
+                {totalPages > 1 && (
+                  <tr className="text-xs text-gray-400">
+                    <td colSpan={6} className="px-3 py-1.5">This page ({visibleRows.length} of {filtered.length})</td>
+                    <td className="px-3 py-1.5 text-right">{inr(visibleRows.reduce((s, r) => s + r.amount, 0))}</td>
+                  </tr>
+                )}
                 <tr className="bg-gray-50 font-semibold text-sm">
                   <td colSpan={6} className="px-3 py-2 text-gray-600">
                     Total ({filtered.length} invoices)

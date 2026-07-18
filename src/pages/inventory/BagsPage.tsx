@@ -265,6 +265,26 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
               ))}
               {filtered.length === 0 && <tr><Td colSpan={10}><EmptyState icon={<Package size={28} />} title="No bag sales recorded yet" /></Td></tr>}
             </tbody>
+            {filtered.length > 0 && (
+              <tfoot>
+                {totalPages > 1 && (
+                  <tr className="bg-gray-50/60 text-gray-500">
+                    <Td colSpan={6} className="text-xs text-right">This page ({visibleRows.length} of {filtered.length})</Td>
+                    <Td right className="text-xs">{visibleRows.reduce((s: number, r: any) => s + (r.qty || 0), 0)}</Td>
+                    <Td></Td>
+                    <Td right className="text-xs">{inr(visibleRows.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0))}</Td>
+                    <Td></Td>
+                  </tr>
+                )}
+                <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                  <Td colSpan={6} className="text-xs text-right">TOTAL ({filtered.length})</Td>
+                  <Td right className="text-xs">{totalQty}</Td>
+                  <Td></Td>
+                  <Td right className="text-xs">{inr(totalAmt)}</Td>
+                  <Td></Td>
+                </tr>
+              </tfoot>
+            )}
           </Table>
           <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
             totalPages={totalPages} totalItems={filtered.length} className="border-t border-gray-100" />
