@@ -893,7 +893,10 @@ export const GRNPage: React.FC = () => {
               type="number"
               value={form.basic_amount}
               onChange={e => setManualAmount('basic_amount', e.target.value)}
-              hint={manualAmountFields.has('basic_amount') ? 'Manually entered — overrides auto-calc' : (basicCalc > 0 ? `Auto: ${inr(basicCalc)}` : undefined)}
+              hint={[
+                basicCalc > 0 ? `Auto-calc: ${inr(basicCalc)}` : null,
+                manualAmountFields.has('basic_amount') ? 'Manually entered — overrides auto-calc' : null,
+              ].filter(Boolean).join(' · ') || undefined}
             />
             <Input
               label="Transport / Other Charges"
@@ -909,7 +912,10 @@ export const GRNPage: React.FC = () => {
               type="number"
               value={form.total_amount}
               onChange={e => setManualAmount('total_amount', e.target.value)}
-              hint={manualAmountFields.has('total_amount') ? 'Manually entered — overrides auto-calc' : (totalCalc > 0 ? `Auto (incl. transport): ${inr(totalCalc)}` : undefined)}
+              hint={[
+                totalCalc > 0 ? `Auto-calc (incl. transport): ${inr(totalCalc)}` : null,
+                manualAmountFields.has('total_amount') ? 'Manually entered — overrides auto-calc' : null,
+              ].filter(Boolean).join(' · ') || undefined}
             />
             <Input
               label="Landed Rate / Unit"

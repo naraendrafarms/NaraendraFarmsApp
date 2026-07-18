@@ -2631,14 +2631,14 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
         if (preview.isAmendment && preview.poNo) {
           // Update existing PO lines with amended data
           for (const rec of rows) {
-            const { credit_limit_days, delivery_date, is_amendment, ...poFields } = withItemId(rec)
+            const { delivery_date, is_amendment, ...poFields } = withItemId(rec)
             const { data: existing } = await supabase.from('purchase_orders')
               .select('id').eq('po_no', rec.po_no).eq('item_name', rec.item_name).single()
             if (existing) {
               await supabase.from('purchase_orders').update({
                 rate: poFields.rate, gst_pct: poFields.gst_pct,
                 total_amount: poFields.total_amount, quantity: poFields.quantity,
-                item_id: poFields.item_id,
+                item_id: poFields.item_id, credit_limit_days: poFields.credit_limit_days ?? null,
               }).eq('id', existing.id)
             } else {
               await supabase.from('purchase_orders').insert(poFields)
@@ -2652,7 +2652,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           toast.success(`Amendment applied — ${rows.length} items updated`)
         } else {
           // New PO — insert
-          const cleanRows = rows.map(({ credit_limit_days, delivery_date, is_amendment, ...r }: any) => withItemId(r))
+          const cleanRows = rows.map(({ delivery_date, is_amendment, ...r }: any) => withItemId(r))
           const { error } = await supabase.from('purchase_orders').upsert(cleanRows, { onConflict:'po_no,item_name' })
           if (error) throw error
           // Auto-create vendor party with GST + address from PDF
