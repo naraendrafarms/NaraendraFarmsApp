@@ -460,6 +460,15 @@ export const VaccinationRecordsPage: React.FC = () => {
                 )
               })}
             </tbody>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr className="bg-gray-50 font-semibold">
+                  <Td colSpan={6} className="text-xs text-gray-500">Total ({rows.length} records)</Td>
+                  <Td right>₹{rows.reduce((s: number, r: any) => s + (r.cost ?? 0), 0).toLocaleString('en-IN')}</Td>
+                  <Td colSpan={3}></Td>
+                </tr>
+              </tfoot>
+            )}
           </Table>
           {rows.length === 0 && <EmptyState title="No vaccination records" action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Record</Button>} />}
           <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}

@@ -187,6 +187,22 @@ export const SalaryHistoryPage: React.FC = () => {
                   </tr>
                 )})}
               </tbody>
+              {(rows as any[]).length > 0 && (
+                <tfoot>
+                  <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                    <td className="px-2 py-2" colSpan={9}>Total ({(rows as any[]).length} months)</td>
+                    <td className="px-2 py-2 text-right text-orange-600">{inr((rows as any[]).reduce((s: number, r: any) => s + (r.extra_pay ?? 0), 0))}</td>
+                    <td className="px-2 py-2 text-right text-blue-700">{inr((rows as any[]).reduce((s: number, r: any) => s + (r.total_earning ?? 0), 0))}</td>
+                    <td className="px-2 py-2 text-right text-red-500">{inr((rows as any[]).reduce((s: number, r: any) => s + (r.pf_employee ?? 0), 0))}</td>
+                    <td className="px-2 py-2 text-right text-red-500">{inr((rows as any[]).reduce((s: number, r: any) => s + (r.esi_employee ?? 0), 0))}</td>
+                    <td className="px-2 py-2 text-right text-red-500">{inr((rows as any[]).reduce((s: number, r: any) => s + (r.pt ?? 0), 0))}</td>
+                    <td className="px-2 py-2 text-right text-red-500">{inr((rows as any[]).reduce((s: number, r: any) => s + (r.advance ?? 0), 0))}</td>
+                    <td className="px-2 py-2 text-right text-red-500">{inr((rows as any[]).reduce((s: number, r: any) => s + (r.other_deduction ?? 0), 0))}</td>
+                    <td className="px-2 py-2 text-right text-green-800 bg-green-100">{inr((rows as any[]).reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0))}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>

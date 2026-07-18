@@ -1121,6 +1121,14 @@ export const ConsumptionReportTab: React.FC<{ lockedCategory?: string }> = ({ lo
                 <tr><Td colSpan={2} className="text-center text-gray-400 py-6">No consumption in this range</Td></tr>
               )}
             </tbody>
+            {totalsByItem.length > 0 && (
+              <tfoot>
+                <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                  <Td>Total ({totalsByItem.length} items)</Td>
+                  <Td right className="text-orange-700">{totalsByItem.reduce((s, [, qty]) => s + qty, 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Td>
+                </tr>
+              </tfoot>
+            )}
           </Table>
         </div>
       </Card>
@@ -1147,6 +1155,14 @@ export const ConsumptionReportTab: React.FC<{ lockedCategory?: string }> = ({ lo
                   <tr><Td colSpan={5} className="text-center text-gray-400 py-6">No consumption in this range</Td></tr>
                 )}
               </tbody>
+              {filtered.length > 0 && (
+                <tfoot>
+                  <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                    <Td colSpan={4}>Total ({filtered.length} rows)</Td>
+                    <Td right className="text-orange-700">{(filtered as any[]).reduce((s, r) => s + (r.qty ?? 0), 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Td>
+                  </tr>
+                </tfoot>
+              )}
             </Table>
           </div>
         )}

@@ -271,6 +271,15 @@ export const OpeningBalancesPage: React.FC = () => {
                 <Td right>{inr(visibleRows.reduce((s, r) => s + (r.amount ?? 0), 0))}</Td>
                 <Td colSpan={3}></Td>
               </tr>
+              {totalPages > 1 && (
+                <tr className="bg-gray-100 font-bold border-t-2 border-gray-200">
+                  <Td colSpan={3} className="text-xs text-gray-700">
+                    All {filtered.length} matching — Dr: {inr(totalDr)} · Cr: {inr(totalCr)}
+                  </Td>
+                  <Td right>{inr(totalDr + totalCr)}</Td>
+                  <Td colSpan={3}></Td>
+                </tr>
+              )}
             </tfoot>
           </Table>
         )}
