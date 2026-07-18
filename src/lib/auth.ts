@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
 import type { User, Session } from '@supabase/supabase-js'
+import type { ModuleKey } from '@/lib/modules'
+
+export type PermLevel = 'hidden' | 'read_only' | 'full'
 
 export type Role = 'admin' | 'management' | 'accounts' | 'site_manager' | 'site_incharge' | 'viewer'
 
@@ -69,6 +72,11 @@ interface AuthState {
   session: Session | null
   profile: Profile | null
   loading: boolean
+  // module_key -> level for the CURRENT profile's role. Admin never reads
+  // this map (see hasModule below) — it's fail-safe by construction, not by
+  // what happens to be seeded here.
+  permissions: Record<string, PermLevel>
+  permissionsLoaded: boolean
   signIn: (email: string, password: string) => Promise<string | null>
   signOut: () => Promise<void>
   loadProfile: (userId: string) => Promise<void>
@@ -80,6 +88,8 @@ export const useAuth = create<AuthState>((set, get) => ({
   session: null,
   profile: null,
   loading: true,
+  permissions: {},
+  permissionsLoaded: false,
 
   init: async () => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -129,6 +139,51 @@ export const useAuth = create<AuthState>((set, get) => ({
       .select('*')
       .eq('id', userId)
       .single()
-    if (data) set({ profile: data as Profile })
+    if (data) {
+      set({ profile: data as Profile })
+      // Admin is hardcoded full everywhere (see hasModule) and never needs
+      // this fetch — skip it so a role_permissions outage can never affect
+      // the one role that must always be able to reach the fix-it page.
+      if ((data as Profile).role !== 'admin') {
+        const { data: perms, error } = await supabase
+          .from('role_permissions')
+          .select('module_key,level')
+          .eq('role', (data as Profile).role)
+        if (!error && perms) {
+          const map: Record<string, PermLevel> = {}
+          for (const p of perms) map[p.module_key] = p.level as PermLevel
+          set({ permissions: map, permissionsLoaded: true })
+        } else {
+          // Fetch failed — fail CLOSED (empty map = every module reads as
+          // 'hidden' below), never fail open.
+          set({ permissions: {}, permissionsLoaded: true })
+        }
+      } else {
+        set({ permissions: {}, permissionsLoaded: true })
+      }
+    }
   }
 }))
+
+// Resolves whether the CURRENT signed-in user can reach a module at all
+// (level !== 'hidden'). Admin short-circuits to true before any lookup —
+// this is the fail-safe the whole design depends on, so it must stay a
+// hardcoded role check, never a table read.
+export function hasModule(moduleKey: ModuleKey | null): boolean {
+  if (!moduleKey) return true // ungated pages (help/chat/tasks) — always visible
+  const { profile, permissions } = useAuth.getState()
+  if (profile?.role === 'admin') return true
+  return (permissions[moduleKey] ?? 'hidden') !== 'hidden'
+}
+
+// Whether the module is Full (can enter/edit) vs Read-only vs Hidden.
+// Pages can use this to disable Save/Add/Edit/Delete controls — wiring that
+// into individual forms is a follow-up; this returns the raw level so a
+// page-wide "read-only banner + disabled buttons" pattern can be added
+// incrementally without another schema change.
+export function moduleLevel(moduleKey: ModuleKey | null): PermLevel {
+  if (!moduleKey) return 'full'
+  const { profile, permissions } = useAuth.getState()
+  if (profile?.role === 'admin') return 'full'
+  return permissions[moduleKey] ?? 'hidden'
+}

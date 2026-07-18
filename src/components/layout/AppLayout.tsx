@@ -5,7 +5,8 @@ import {
   ChevronDown, ChevronRight, LogOut, Menu, X,
   BarChart2, Database, Shield, ShoppingCart, BookOpen, Search, MessageCircle, ListTodo, TrendingUp
 } from 'lucide-react'
-import { useAuth, can, type Role } from '@/lib/auth'
+import { useAuth, can, hasModule, type Role } from '@/lib/auth'
+import { resolveModuleForPath } from '@/lib/modules'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { TaskAlerts } from '@/components/tasks/TaskAlerts'
@@ -211,6 +212,7 @@ const NAV: NavItem[] = [
       { label: 'Electricity Allocation',  to: '/admin?tab=electricity' },
       { label: 'Salary Allocation',       to: '/admin?tab=salary' },
       { label: 'User Management',         to: '/admin/users' },
+      { label: 'Access Control',          to: '/admin/access' },
       { label: '🔍 Audit Log',            to: '/admin/audit' },
     ]
   },
@@ -233,12 +235,24 @@ const ROLE_COLORS: Record<Role, string> = {
   viewer:        'bg-gray-100 text-gray-600',
 }
 
+// Filters both by the existing static roles/hideRoles arrays AND by the
+// admin-editable role_permissions table (via hasModule) — a section whose
+// module has been set to Hidden for this role disappears from the nav even
+// if its old `roles` array would have allowed it, and vice versa. Children
+// are filtered individually since one parent section (e.g. "Employees") can
+// mix items from more than one module (Payroll vs Attendance).
 function filterNav(nav: NavItem[], role: Role): NavItem[] {
-  return nav.filter(item => {
-    if (item.roles && !item.roles.includes(role)) return false
-    if (item.hideRoles && item.hideRoles.includes(role)) return false
-    return true
-  })
+  return nav
+    .filter(item => {
+      if (item.roles && !item.roles.includes(role)) return false
+      if (item.hideRoles && item.hideRoles.includes(role)) return false
+      if (item.to && !hasModule(resolveModuleForPath(item.to))) return false
+      return true
+    })
+    .map(item => item.children
+      ? { ...item, children: item.children.filter(c => hasModule(resolveModuleForPath(c.to))) }
+      : item)
+    .filter(item => !item.children || item.children.length > 0)
 }
 
 const NavLink: React.FC<{ item: NavItem; collapsed: boolean }> = ({ item, collapsed }) => {
@@ -404,6 +418,32 @@ const GlobalSearch: React.FC<{ nav: NavItem[] }> = ({ nav }) => {
   )
 }
 
+// Defense-in-depth: even if a hidden nav item is never clicked, someone
+// could still type the URL directly. Blocks the page itself, not just the
+// link to it. Admin always passes (hasModule short-circuits); for everyone
+// else, wait for the permissions fetch to actually land before deciding —
+// otherwise the one render before it arrives would show "access restricted"
+// for a page that's actually allowed.
+const ModuleGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { profile, permissionsLoaded } = useAuth()
+  const location = useLocation()
+  const moduleKey = resolveModuleForPath(location.pathname)
+  if (profile?.role !== 'admin' && !permissionsLoaded) {
+    return <div className="flex justify-center p-12 text-gray-400 text-sm">Loading…</div>
+  }
+  if (!hasModule(moduleKey)) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center px-6">
+        <div className="text-5xl">🔒</div>
+        <h2 className="text-xl font-bold text-gray-800">Access Restricted</h2>
+        <p className="text-gray-500 text-sm max-w-sm">You don't have permission to view this page. Contact your administrator to request access.</p>
+        <p className="text-xs text-gray-400">Your role: <span className="font-semibold">{profile?.role ?? 'unknown'}</span></p>
+      </div>
+    )
+  }
+  return <>{children}</>
+}
+
 export const AppLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -543,7 +583,9 @@ export const AppLayout: React.FC = () => {
         </header>
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
           <ErrorBoundary key={location.pathname}>
-            <Outlet />
+            <ModuleGuard>
+              <Outlet />
+            </ModuleGuard>
           </ErrorBoundary>
         </main>
       </div>
