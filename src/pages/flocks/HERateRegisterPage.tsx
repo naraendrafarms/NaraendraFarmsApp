@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, today } from '@/lib/utils'
-import { Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, SectionHeader, Spinner, EmptyState, DateInput } from '@/components/ui'
+import { Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, SectionHeader, Spinner, EmptyState, DateInput, usePagination, PageSizeControl } from '@/components/ui'
 import { Plus, Trash2, TrendingUp, Pencil, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -58,6 +58,8 @@ const WeeklyRatesTab: React.FC = () => {
   const filtered = search.trim()
     ? rates.filter((r: any) => `${r.week_start} ${r.week_end} ${r.declared_date ?? ''} ${r.rate} ${r.remarks ?? ''}`.toLowerCase().includes(search.toLowerCase()))
     : rates
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
+  const visibleRows = filtered.slice(from, to)
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -116,7 +118,7 @@ const WeeklyRatesTab: React.FC = () => {
           <Table>
             <thead><tr><Th>Week (Sun-Sat)</Th><Th>Declared</Th><Th right>Rate</Th><Th>Remarks</Th><Th right>Actions</Th></tr></thead>
             <tbody>
-              {filtered.map((r: any) => (
+              {visibleRows.map((r: any) => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <Td className="font-medium">{r.week_start} → {r.week_end}</Td>
                   <Td>{r.declared_date ?? '—'}</Td>
@@ -133,6 +135,8 @@ const WeeklyRatesTab: React.FC = () => {
               {filtered.length === 0 && <tr><Td colSpan={5}><EmptyState icon={<TrendingUp size={28} />} title="No weekly rates found" /></Td></tr>}
             </tbody>
           </Table>
+          <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+            totalPages={totalPages} totalItems={filtered.length} className="border-t border-gray-100" />
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editingId ? 'Edit Weekly Rate' : 'Add Weekly Rate'}

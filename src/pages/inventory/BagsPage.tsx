@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, exportCSV, today } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
-  SectionHeader, Spinner, EmptyState, DateInput,
+  SectionHeader, Spinner, EmptyState, DateInput, usePagination, PageSizeControl,
 } from '@/components/ui'
 import { Plus, Trash2, Download, Package, Pencil, Upload, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -160,6 +160,8 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
 
   const totalQty = filtered.reduce((s: number, r: any) => s + (r.qty || 0), 0)
   const totalAmt = filtered.reduce((s: number, r: any) => s + (Number(r.amount) || 0), 0)
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
+  const visibleRows = filtered.slice(from, to)
 
   const exportRows = () => exportCSV(`bag_sales_${today()}.csv`, ['Date', 'Farm', 'Buyer', 'Bag Type', 'Condition', 'Qty', 'Rate', 'Amount', 'Remarks'],
     filtered.map((r: any) => [r.sale_date, r.farms?.name, r.buyer_name, r.bag_type, r.condition, r.qty, r.rate, r.amount, r.remarks]))
@@ -246,7 +248,7 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
               <Th><input type="checkbox" checked={allSel} onChange={toggleAll} className="rounded border-gray-300 text-brand-600" /></Th>
               <Th>Date</Th><Th>Farm</Th><Th>Buyer</Th><Th>Bag Type</Th><Th>Condition</Th><Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th><Th right>Actions</Th></tr></thead>
             <tbody>
-              {filtered.map((r: any) => (
+              {visibleRows.map((r: any) => (
                 <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id) ? 'bg-brand-50' : ''}`}>
                   <Td><input type="checkbox" checked={sel.has(r.id)} onChange={() => toggle(r.id)} className="rounded border-gray-300 text-brand-600" /></Td>
                   <Td>{r.sale_date}</Td><Td>{r.farms?.name ?? '—'}</Td><Td>{r.buyer_name ?? '—'}</Td>
@@ -264,6 +266,8 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
               {filtered.length === 0 && <tr><Td colSpan={10}><EmptyState icon={<Package size={28} />} title="No bag sales recorded yet" /></Td></tr>}
             </tbody>
           </Table>
+          <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+            totalPages={totalPages} totalItems={filtered.length} className="border-t border-gray-100" />
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Bag Sale' : 'Add Bag Sale'}

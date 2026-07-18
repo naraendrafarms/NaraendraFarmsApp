@@ -5,7 +5,7 @@ import { inr, fmtDate, today, fyRange, FY_OPTIONS } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, Badge,
   SectionHeader, Spinner, Table, Th, Td, StatCard
-, DateInput } from '@/components/ui'
+, DateInput, usePagination, PageSizeControl } from '@/components/ui'
 import { Plus, Download, Upload, Edit2, Trash2, CheckCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
@@ -323,6 +323,8 @@ export const InvoiceRegister: React.FC = () => {
   const totalPaid   = filtered.reduce((s: number, i: any) => s + (i.paid_amount  ?? 0), 0)
   const totalUnpaid = totalAmt - totalPaid
   const unpaidCount = filtered.filter((i: any) => i.payment_status !== 'paid').length
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
+  const visibleRows = filtered.slice(from, to)
 
   const exportExcel = () => {
     const rows = filtered.map((i: any) => ({
@@ -599,7 +601,7 @@ export const InvoiceRegister: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((inv: any) => {
+                {visibleRows.map((inv: any) => {
                   const balance = (inv.total_amount ?? 0) - (inv.paid_amount ?? 0)
                   const isOverdue = inv.payment_status !== 'paid' && inv.due_date && inv.due_date < today()
                   return (
@@ -660,6 +662,8 @@ export const InvoiceRegister: React.FC = () => {
               </tfoot>
             </Table>
           </div>
+          <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+            totalPages={totalPages} totalItems={filtered.length} className="border-t border-gray-100" />
         </Card>
       )}
 

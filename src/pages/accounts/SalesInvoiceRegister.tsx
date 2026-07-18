@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, fyRange, FY_OPTIONS } from '@/lib/utils'
 import {
   Card, Button, Select, SectionHeader, Spinner,
-  Table, Th, Td, Badge, StatCard, DateInput,
+  Table, Th, Td, Badge, StatCard, DateInput, usePagination, PageSizeControl,
 } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -106,6 +106,8 @@ export const SalesInvoiceRegister: React.FC = () => {
   })
 
   const totalValue = filtered.reduce((s, r) => s + r.amount, 0)
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
+  const visibleRows = filtered.slice(from, to)
 
   const exportExcel = () => {
     const rows = filtered.map(r => ({
@@ -189,7 +191,7 @@ export const SalesInvoiceRegister: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(r => (
+                {visibleRows.map(r => (
                   <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
                     <Td>
                       <span className="font-medium text-blue-700">{r.invoice_no}</span>
@@ -215,6 +217,8 @@ export const SalesInvoiceRegister: React.FC = () => {
               </tfoot>
             </Table>
           </div>
+          <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+            totalPages={totalPages} totalItems={filtered.length} className="border-t border-gray-100" />
         </Card>
       )}
     </div>

@@ -597,3 +597,50 @@ export const Divider: React.FC<{ label?: string }> = ({ label }) => (
     {label && <div className="relative flex justify-start"><span className="pr-3 text-xs text-gray-400 bg-white">{label}</span></div>}
   </div>
 )
+
+// ── PAGINATION ────────────────────────────────────────────────────
+// Shared page-size + Prev/Next control for any long list/table. The
+// underlying fetch/filter is untouched — this only limits how many rows
+// render onto the screen at once. Reset page to 1 whenever the filtered
+// list's identity changes (pass its length, or a join of your filter
+// values, as the `resetKey`) so switching filters doesn't strand you on a
+// page number that no longer has data.
+export function usePagination(totalItems: number, resetKey: unknown, initialPageSize = 25) {
+  const [pageSize, setPageSize] = React.useState(initialPageSize)
+  const [page, setPage] = React.useState(1)
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
+  React.useEffect(() => { setPage(1) }, [resetKey, pageSize])
+  React.useEffect(() => { if (page > totalPages) setPage(totalPages) }, [totalPages, page])
+  const from = (page - 1) * pageSize
+  const to = from + pageSize
+  return { page, setPage, pageSize, setPageSize, totalPages, from, to }
+}
+
+export const PageSizeControl: React.FC<{
+  page: number; setPage: (p: number) => void
+  pageSize: number; setPageSize: (n: number) => void
+  totalPages: number; totalItems: number
+  options?: number[]
+  className?: string
+}> = ({ page, setPage, pageSize, setPageSize, totalPages, totalItems, options = [25, 50, 75, 100], className = '' }) => {
+  if (totalItems === 0) return null
+  return (
+    <div className={`flex items-center justify-between flex-wrap gap-2 px-1 py-2 ${className}`}>
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span>Show</span>
+        <select value={pageSize} onChange={e => setPageSize(parseInt(e.target.value))}
+          className="border border-gray-300 rounded px-2 py-1 text-xs">
+          {options.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <span>per page — {totalItems} total</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button type="button" disabled={page <= 1} onClick={() => setPage(page - 1)}
+          className="text-xs border border-gray-300 rounded px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50">Prev</button>
+        <span className="text-xs text-gray-500">Page {page} of {totalPages}</span>
+        <button type="button" disabled={page >= totalPages} onClick={() => setPage(page + 1)}
+          className="text-xs border border-gray-300 rounded px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50">Next</button>
+      </div>
+    </div>
+  )
+}

@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth'
 import { fmtDate, today } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, SearchableSelect, Modal, Table, Th, Td,
-  Badge, SectionHeader, Spinner, EmptyState, DateInput, FormRow,
+  Badge, SectionHeader, Spinner, EmptyState, DateInput, FormRow, usePagination, PageSizeControl,
 } from '@/components/ui'
 import { Plus, Trash2, Pencil, ClipboardList, Printer, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -398,7 +398,9 @@ export const PurchaseIntentPage: React.FC = () => {
     }
   }
 
-  const rows = intents ?? []
+  const allRows = intents ?? []
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(allRows.length, allRows.length)
+  const rows = allRows.slice(from, to)
 
   return (
     <div className="flex flex-col gap-5">
@@ -436,7 +438,7 @@ export const PurchaseIntentPage: React.FC = () => {
         ) : (
           <Table>
             <thead><tr>
-              <Th><input type="checkbox" checked={rows.length > 0 && selectedIds.size === rows.length} onChange={toggleAllSel} /></Th>
+              <Th><input type="checkbox" checked={allRows.length > 0 && selectedIds.size === allRows.length} onChange={toggleAllSel} title="Selects/deselects across all pages" /></Th>
               <Th>Intent No.</Th>
               <Th>Date</Th>
               <Th>Site</Th>
@@ -476,6 +478,8 @@ export const PurchaseIntentPage: React.FC = () => {
             </tbody>
           </Table>
         )}
+        <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+          totalPages={totalPages} totalItems={allRows.length} className="border-t border-gray-100" />
       </Card>
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editingId ? 'Edit Purchase Intent' : 'New Purchase Intent'} size="2xl"

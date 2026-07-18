@@ -6,7 +6,7 @@ import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge, SearchableSelect,
   SectionHeader, Spinner, EmptyState
-, DateInput } from '@/components/ui'
+, DateInput, usePagination, PageSizeControl } from '@/components/ui'
 import { Plus, Pencil, Trash2, AlertTriangle, CheckCircle, Download, Upload, FileDown, CalendarClock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
@@ -225,6 +225,8 @@ export const VaccinationRecordsPage: React.FC = () => {
   const someSel = sel.size > 0 && sel.size < rows.length
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAll = () => setSel(allSel ? new Set() : new Set(rows.map((r: any) => r.id)))
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(rows.length, rows.length)
+  const visibleRows = rows.slice(from, to)
 
   const exportRows = () => {
     const flat = rows.map((r: any) => ({
@@ -422,7 +424,7 @@ export const VaccinationRecordsPage: React.FC = () => {
               <Th>Next Due</Th><Th>By</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {rows.map((r: any) => {
+              {visibleRows.map((r: any) => {
                 const isDue = r.next_due_date && r.next_due_date >= today_str && r.next_due_date <= sevenStr
                 const isOverdue = r.next_due_date && r.next_due_date < today_str
                 return (
@@ -460,6 +462,8 @@ export const VaccinationRecordsPage: React.FC = () => {
             </tbody>
           </Table>
           {rows.length === 0 && <EmptyState title="No vaccination records" action={<Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Record</Button>} />}
+          <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+            totalPages={totalPages} totalItems={rows.length} className="border-t border-gray-100" />
         </Card>
       )}
 

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
-import { Card, CardHeader, Input, Select, FormRow, Modal, EmptyState, Spinner, Td, Th, DateInput, Badge, Button } from '@/components/ui'
+import { Card, CardHeader, Input, Select, FormRow, Modal, EmptyState, Spinner, Td, Th, DateInput, Badge, Button, usePagination, PageSizeControl } from '@/components/ui'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, Edit2, Download, Upload, X, Printer } from 'lucide-react'
@@ -84,8 +84,6 @@ export const GRNPage: React.FC = () => {
   const [delId, setDelId] = useState<string | null>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkDelConfirm, setBulkDelConfirm] = useState(false)
-  const [pageSize, setPageSize] = useState(25)
-  const [page, setPage] = useState(1)
   const importRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState(emptyForm())
@@ -204,9 +202,8 @@ export const GRNPage: React.FC = () => {
   // Render a page at a time — the underlying fetch/filter above still runs
   // over the full (capped) result set, this only limits how many rows paint
   // to the screen at once so a long GRN history doesn't render 2000 rows.
-  React.useEffect(() => { setPage(1) }, [fFrom, fTo, fFarm, fCat, fItem, fParty, pageSize])
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const visibleRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, [fFrom, fTo, fFarm, fCat, fItem, fParty])
+  const visibleRows = filtered.slice(from, to)
 
   const stats = useMemo(() => {
     if (!fItem || filtered.length === 0) return null
@@ -694,23 +691,8 @@ export const GRNPage: React.FC = () => {
                 </tr>
               </tfoot>
             </table>
-            {filtered.length > 0 && (
-              <div className="flex items-center justify-between p-3 border-t border-gray-100">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span>Show</span>
-                  <select value={pageSize} onChange={e => setPageSize(parseInt(e.target.value))}
-                    className="border border-gray-300 rounded px-2 py-1 text-xs">
-                    {[25, 50, 75, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                  <span>per page — {filtered.length} total</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
-                  <span className="text-xs text-gray-500">Page {page} of {totalPages}</span>
-                  <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
-                </div>
-              </div>
-            )}
+            <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+              totalPages={totalPages} totalItems={filtered.length} className="border-t border-gray-100" />
           </div>
         )}
       </Card>
