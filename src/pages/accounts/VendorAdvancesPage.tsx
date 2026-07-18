@@ -197,8 +197,22 @@ export const VendorAdvancesPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  // An advance already adjusted against a bill (pending_payments.vendor_advance_id
+  // + advance_adjusted) can't be deleted out from under those bills — they'd
+  // be left claiming they were settled "via advance" against an advance that
+  // no longer exists, with no way to reconcile.
+  const guardAdvanceDelete = (ids: string[]) => {
+    const inUse = (advances as any[]).filter(a => ids.includes(a.id) && (a.amount_used ?? 0) > 0.01)
+    if (inUse.length) {
+      toast.error(`${inUse.length} of these advance(s) are already adjusted against bill(s) — reverse those bills first before deleting the advance`)
+      return false
+    }
+    return true
+  }
+
   const delMut = useMutation({
     mutationFn: async (id: string) => {
+      if (!guardAdvanceDelete([id])) throw new Error('Blocked — advance already in use')
       await supabase.from('cash_book').delete().eq('vendor_advance_id', id)
       await supabase.from('bank_transactions').delete().eq('vendor_advance_id', id)
       const { error } = await supabase.from('vendor_advances').delete().eq('id', id)
@@ -208,11 +222,12 @@ export const VendorAdvancesPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['vendor_advances'] })
       toast.success('Deleted')
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => { if (e.message !== 'Blocked — advance already in use') toast.error(e.message) },
   })
 
   const bulkDelMut = useMutation({
     mutationFn: async (ids: string[]) => {
+      if (!guardAdvanceDelete(ids)) throw new Error('Blocked — advance already in use')
       await supabase.from('cash_book').delete().in('vendor_advance_id', ids)
       await supabase.from('bank_transactions').delete().in('vendor_advance_id', ids)
       const { error } = await supabase.from('vendor_advances').delete().in('id', ids)
@@ -223,7 +238,7 @@ export const VendorAdvancesPage: React.FC = () => {
       setSelectedIds(new Set())
       toast.success('Selected advances deleted')
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => { if (e.message !== 'Blocked — advance already in use') toast.error(e.message) },
   })
 
   const toggleSelect = (id: string) => {

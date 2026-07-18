@@ -23,6 +23,7 @@ const EMPTY_FORM = {
   linked_payment_id: '',
   linked_nhe_sale_id: '',
   linked_he_dispatch_id: '',
+  original_amount: '',
 }
 
 const EMPTY_ACCOUNT_FORM = {
@@ -997,6 +998,7 @@ export const BankLedgerPage: React.FC = () => {
       linked_payment_id: t.linked_payment_id ?? '',
       linked_nhe_sale_id: t.nhe_sale_id ?? '',
       linked_he_dispatch_id: t.he_dispatch_id ?? '',
+      original_amount: t.amount != null ? String(t.amount) : '',
     })
     setShowModal(true)
   }
@@ -1028,6 +1030,47 @@ export const BankLedgerPage: React.FC = () => {
       if (editId) {
         const { error } = await supabase.from('bank_transactions').update(payload).eq('id', editId)
         if (error) throw error
+        // Editing an already-linked transaction (date/amount/etc.) previously
+        // only touched this bank_transactions row — the paired Cash Book
+        // entry, and the source bill/sale's own paid/received date+amount,
+        // silently kept the OLD values forever. Re-sync all of them here.
+        if (form.already_linked) {
+          const amountDelta = amount - (parseFloat(form.original_amount) || 0)
+          if (form.linked_payment_id) {
+            await supabase.from('cash_book').update({ txn_date: form.txn_date, amount_out: amount })
+              .eq('pending_payment_id', form.linked_payment_id)
+            const { data: bill } = await supabase.from('pending_payments').select('paid_amount').eq('id', form.linked_payment_id).maybeSingle()
+            if (bill) {
+              await supabase.from('pending_payments').update({
+                paid_date: form.txn_date,
+                paid_amount: Math.max(0, (bill.paid_amount ?? 0) + amountDelta),
+              }).eq('id', form.linked_payment_id)
+            }
+            qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+            qc.invalidateQueries({ queryKey: ['pending_payments'] })
+            qc.invalidateQueries({ queryKey: ['cash_book'] })
+          }
+          if (form.linked_nhe_sale_id) {
+            const { data: sale } = await supabase.from('nhe_sales').select('amount_received').eq('id', form.linked_nhe_sale_id).maybeSingle()
+            if (sale) {
+              await supabase.from('nhe_sales').update({
+                received_date: form.txn_date,
+                amount_received: Math.max(0, (sale.amount_received ?? 0) + amountDelta),
+              }).eq('id', form.linked_nhe_sale_id)
+            }
+            qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+          }
+          if (form.linked_he_dispatch_id) {
+            const { data: dispatch } = await supabase.from('he_dispatch').select('amount_received').eq('id', form.linked_he_dispatch_id).maybeSingle()
+            if (dispatch) {
+              await supabase.from('he_dispatch').update({
+                received_date: form.txn_date,
+                amount_received: Math.max(0, (dispatch.amount_received ?? 0) + amountDelta),
+              }).eq('id', form.linked_he_dispatch_id)
+            }
+            qc.invalidateQueries({ queryKey: ['he_dispatch'] })
+          }
+        }
       } else {
         const { data, error } = await supabase.from('bank_transactions').insert(payload).select('id').single()
         if (error) throw error

@@ -557,15 +557,39 @@ export const PendingPaymentsPage: React.FC = () => {
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return
-    if (!confirm(`Delete ${selectedIds.size} selected bill(s)?`)) return
+    // A Paid bill has a real Cash Book/Bank Ledger entry (and possibly a
+    // Vendor Advance adjustment) tied to it — deleting the bill directly
+    // used to orphan those instead of removing them (their FK just goes
+    // NULL, it's ON DELETE SET NULL not CASCADE). Clear the linked ledger
+    // rows the same way the Edit form does before removing the bill itself,
+    // and reverse any advance that was adjusted against it.
+    const toDelete = filtered.filter(r => selectedIds.has(r.id))
+    const paidCount = toDelete.filter(r => r.payment_status === 'Paid').length
+    if (paidCount > 0 && !confirm(`${paidCount} of the selected bill(s) are already Paid — deleting will also remove their Cash Book/Bank Ledger entries. Continue?`)) return
+    if (paidCount === 0 && !confirm(`Delete ${selectedIds.size} selected bill(s)?`)) return
     setBulkDeleting(true)
     try {
+      for (const r of toDelete) {
+        if (r.payment_status !== 'Paid') continue
+        await clearLedgerEntries(r.id)
+        if (r.vendor_advance_id && (r.advance_adjusted ?? 0) > 0) {
+          const { data: advance } = await supabase.from('vendor_advances').select('amount_used').eq('id', r.vendor_advance_id).maybeSingle()
+          if (advance) {
+            await supabase.from('vendor_advances').update({
+              amount_used: Math.max(0, (advance.amount_used ?? 0) - (r.advance_adjusted ?? 0)),
+            }).eq('id', r.vendor_advance_id)
+          }
+        }
+      }
       const { error } = await supabase.from('pending_payments').delete().in('id', [...selectedIds])
       if (error) throw error
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      qc.invalidateQueries({ queryKey: ['vendor_advances'] })
       setSelectedIds(new Set())
       toast.success('Selected bills deleted')
     } catch (e: any) {
