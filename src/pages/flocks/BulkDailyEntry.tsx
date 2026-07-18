@@ -352,8 +352,13 @@ export const BulkDailyEntry: React.FC = () => {
       const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
       const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
-      const hasData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || r.lighting_hrs || r.remarks
-      if (!hasData) continue
+      // A row with ONLY Medicine+Quantity entered (nothing else that day for
+      // this shed) must still be saved — previously `hasProductionData` (then
+      // called `hasData`) didn't check medicine, so `continue` skipped the
+      // whole row, including the medicine_usage write further down, silently.
+      const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || r.lighting_hrs || r.remarks
+      const hasMedOnly = r.med_id && r.med_qty
+      if (!hasProductionData && !hasMedOnly) continue
       const of_ = parseInt(r.opening_female) || null
       const om = parseInt(r.opening_male) || null
       // Preserve a legitimate closing of 0 — `|| null` treated 0 as "no data",
@@ -379,10 +384,17 @@ export const BulkDailyEntry: React.FC = () => {
         lighting_hrs: parseFloat(r.lighting_hrs) || null,
         remarks: r.remarks || null,
       }
-      const { error } = r.existingId
-        ? await supabase.from('daily_records').update(payload).eq('id', r.existingId)
-        : await supabase.from('daily_records').insert(payload)
-      if (error) { console.error(error); errors++ } else saved++
+      // Only write daily_records when there's real production data, or a
+      // record for this shed/day already exists (keeping it in sync with
+      // pre-filled values is harmless) — a brand-new row created just
+      // because medicine was entered would otherwise sit there as an
+      // all-zero/blank daily record that was never actually reported.
+      if (hasProductionData || r.existingId) {
+        const { error } = r.existingId
+          ? await supabase.from('daily_records').update(payload).eq('id', r.existingId)
+          : await supabase.from('daily_records').insert(payload)
+        if (error) { console.error(error); errors++ } else saved++
+      }
 
       // Accumulate feed per type across all sheds — written once after the
       // loop below (was previously upserted per-shed, so shed N's write
