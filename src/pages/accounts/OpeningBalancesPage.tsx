@@ -167,6 +167,8 @@ export const OpeningBalancesPage: React.FC = () => {
     : (rows as any[])
   const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
   const visibleRows = filtered.slice(from, to)
+  const totalDr = filtered.filter(r => r.dr_cr === 'Dr').reduce((s, r) => s + (r.amount ?? 0), 0)
+  const totalCr = filtered.filter(r => r.dr_cr === 'Cr').reduce((s, r) => s + (r.amount ?? 0), 0)
 
   return (
     <div className="p-4 space-y-4 max-w-5xl mx-auto">
@@ -189,6 +191,22 @@ export const OpeningBalancesPage: React.FC = () => {
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-56 focus:outline-none focus:ring-1 focus:ring-brand-400" />
         </div>
       </Card>
+
+      {/* Totals — reflect whatever's currently searched/shown for this FY */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Card className="p-3">
+          <div className="text-xs text-gray-500">Total Receivable (Dr)</div>
+          <div className="text-lg font-bold text-orange-600">{inr(totalDr)}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="text-xs text-gray-500">Total Payable (Cr)</div>
+          <div className="text-lg font-bold text-green-700">{inr(totalCr)}</div>
+        </Card>
+        <Card className="p-3">
+          <div className="text-xs text-gray-500">Net (Dr − Cr)</div>
+          <div className={`text-lg font-bold ${totalDr - totalCr >= 0 ? 'text-orange-600' : 'text-green-700'}`}>{inr(totalDr - totalCr)}</div>
+        </Card>
+      </div>
 
       {/* Add form */}
       <Card className="space-y-3">
@@ -245,6 +263,15 @@ export const OpeningBalancesPage: React.FC = () => {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 font-semibold">
+                <Td colSpan={3} className="text-xs text-gray-500">
+                  This page ({visibleRows.length} of {filtered.length}) — Dr: {inr(visibleRows.filter(r => r.dr_cr === 'Dr').reduce((s, r) => s + (r.amount ?? 0), 0))} · Cr: {inr(visibleRows.filter(r => r.dr_cr === 'Cr').reduce((s, r) => s + (r.amount ?? 0), 0))}
+                </Td>
+                <Td right>{inr(visibleRows.reduce((s, r) => s + (r.amount ?? 0), 0))}</Td>
+                <Td colSpan={3}></Td>
+              </tr>
+            </tfoot>
           </Table>
         )}
         <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
