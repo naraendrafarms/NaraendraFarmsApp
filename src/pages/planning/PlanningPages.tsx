@@ -698,8 +698,12 @@ const CAStatementTab: React.FC = () => {
     // Start: if not the 1st, roll forward to the 1st of the NEXT month.
     const cutoffStart = s.getDate() === 1 ? periodStart : ymd(s.getFullYear(), s.getMonth() + 1, 1)
     // End: if not the actual last day of its month, roll back to the last day of the PREVIOUS month.
+    // new Date(y, m, 0) itself correctly rolls back to that day — day 0 must
+    // go through the Date constructor, not straight into the ymd() string
+    // template (which would print the literal invalid "...-00").
     const lastDayOfEndMonth = new Date(e.getFullYear(), e.getMonth() + 1, 0).getDate()
-    const cutoffEnd = e.getDate() === lastDayOfEndMonth ? periodEnd : ymd(e.getFullYear(), e.getMonth(), 0)
+    const prevMonthEnd = new Date(e.getFullYear(), e.getMonth(), 0)
+    const cutoffEnd = e.getDate() === lastDayOfEndMonth ? periodEnd : ymd(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), prevMonthEnd.getDate())
     return { monthCutoffStart: cutoffStart, monthCutoffEnd: cutoffEnd }
   }, [periodStart, periodEnd])
   const monthCutoffTruncated = monthCutoffStart !== periodStart || monthCutoffEnd !== periodEnd
@@ -754,7 +758,10 @@ const CAStatementTab: React.FC = () => {
   const { data: salaryRows } = useQuery({
     queryKey: ['ca_salary', monthCutoffStart, monthCutoffEnd],
     queryFn: () => fetchAllPages(
-      (from, to) => supabase.from('salary_monthly').select('earned_salary,ot_bonus,arrears,month,employees(designation)').gte('month', monthCutoffStart).lte('month', monthCutoffEnd).range(from, to),
+      // salary_monthly has two FKs to employees (employee_id, and
+      // override_account_emp_id added by migration 258) — PostgREST can't
+      // pick one on its own, so the relationship must be named explicitly.
+      (from, to) => supabase.from('salary_monthly').select('earned_salary,ot_bonus,arrears,month,employees!employee_id(designation)').gte('month', monthCutoffStart).lte('month', monthCutoffEnd).range(from, to),
       'Salary'
     )
   })
@@ -765,13 +772,28 @@ const CAStatementTab: React.FC = () => {
       'Daily Records'
     )
   })
-  const { data: partyBalances } = useQuery({
+  // v_party_ledger is a VIEW — it carries no real foreign-key constraint to
+  // `parties`, so PostgREST can never auto-embed parties(type) onto it
+  // (confirmed: PartyLedgerPage.tsx queries this same view alone, never
+  // joined). Fetch party types separately and join them in JS instead.
+  const { data: partyLedgerRows } = useQuery({
     queryKey: ['ca_party_ledger', periodEnd],
     queryFn: () => fetchAllPages(
-      (from, to) => supabase.from('v_party_ledger').select('party_id,debit,credit,parties(type)').lte('txn_date', periodEnd).range(from, to),
+      (from, to) => supabase.from('v_party_ledger').select('party_id,debit,credit').lte('txn_date', periodEnd).range(from, to),
       'Party Ledger'
     )
   })
+  const { data: partyTypes } = useQuery({
+    queryKey: ['ca_party_types'],
+    queryFn: () => fetchAllPages(
+      (from, to) => supabase.from('parties').select('id,type').range(from, to),
+      'Parties'
+    )
+  })
+  const partyBalances = useMemo(() => {
+    const typeById = new Map((partyTypes ?? []).map((p: any) => [p.id, p.type]))
+    return (partyLedgerRows ?? []).map((r: any) => ({ ...r, parties: { type: typeById.get(r.party_id) } }))
+  }, [partyLedgerRows, partyTypes])
   const { data: cashBankBalance } = useQuery({
     queryKey: ['ca_cash_bank_balance', periodEnd],
     queryFn: async () => {
