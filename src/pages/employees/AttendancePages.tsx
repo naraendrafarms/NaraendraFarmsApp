@@ -1168,6 +1168,14 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
           wo_days: woDays,
           ot_days: otDays,
           ot_hours: totalOtHrs,
+          // Attendance Register (and Salary Abstract/Payslip) read
+          // days_worked specifically, not present_days — previously only
+          // Bulk Salary/Salary Entry ever set it, so saving real attendance
+          // here never reached those pages until Bulk Salary was re-run
+          // (and if that run skipped its own attendance auto-fill step,
+          // days_worked silently defaulted to the full month). Keep it in
+          // sync here too, same P/OT=1, H=0.5 convention used everywhere else.
+          days_worked: presentDays + halfDays * 0.5,
         }
       })
 
@@ -1181,6 +1189,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['bulk_daily_att'] })
       qc.invalidateQueries({ queryKey: ['attendance_day'] })
       qc.invalidateQueries({ queryKey: ['attendance_month'] })
+      qc.invalidateQueries({ queryKey: ['attendance_fy'] })  // Attendance Register reads days_worked from salary_monthly
       toast.success(`Attendance saved for ${(employees as any[]).length} employees · ${monthDate}`)
     } catch (e: any) {
       toast.error(e.message)
