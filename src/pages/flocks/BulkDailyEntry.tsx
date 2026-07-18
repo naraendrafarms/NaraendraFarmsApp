@@ -82,6 +82,10 @@ export const BulkDailyEntry: React.FC = () => {
   const [shedRows, setShedRows] = useState<Record<string, ShedRow>>({})
   // Flock-level grade breakdown (shed mode only) — he_grade_a/b/c + existing row id
   const [gradeRow, setGradeRow] = useState({ he_grade_a: '', he_grade_b: '', he_grade_c: '', existingId: null as string | null })
+  // Flock-level medicine (shed mode only) — medicine_usage has no shed_id
+  // column, so one medicine entry applies to the whole flock for the day,
+  // same as the grade breakdown above. Per-shed medicine is a future request.
+  const [medRow, setMedRow] = useState({ med_id: '', med_qty: '', existingMedId: null as string | null })
   const [showWastage, setShowWastage] = useState(false)
 
   // ── Master data ──────────────────────────────────────────────────────────────
@@ -200,7 +204,11 @@ export const BulkDailyEntry: React.FC = () => {
     enabled: !!date && date.length === 10,
     placeholderData: keepPreviousData,
     queryFn: async () => {
-      let q = supabase.from('medicine_usage').select('id,flock_id,shed_id,medicine_id,quantity').eq('usage_date', date)
+      // medicine_usage has no shed_id column — it's a flock-level table (per
+      // your call: medicine applies to the whole flock for now, shed-wise
+      // tracking is a future request, not built yet). Selecting a shed_id
+      // column that doesn't exist was silently failing this entire query.
+      let q = supabase.from('medicine_usage').select('id,flock_id,medicine_id,quantity').eq('usage_date', date)
       if (selectedFlock) q = q.eq('flock_id', selectedFlock)
       const { data } = await q; return data ?? []
     }
@@ -251,7 +259,6 @@ export const BulkDailyEntry: React.FC = () => {
     const newRows: Record<string, ShedRow> = {}
     for (const shed of flockSheds) {
       const dr = (existingDR ?? []).find((r: any) => r.shed_id === shed.id)
-      const mu = (existingMed ?? []).find((r: any) => r.shed_id === shed.id)
       const prev = (prevDR ?? []).find((r: any) => r.shed_id === shed.id)
       // opening = today's record opening, or prev day closing, or capacity
       const openF = dr?.opening_female?.toString() ?? prev?.closing_female?.toString() ?? ''
@@ -288,8 +295,8 @@ export const BulkDailyEntry: React.FC = () => {
         cull_male: dr?.cull_male?.toString() ?? '',
         closing_female: closeF, closing_male: closeM,
         lighting_hrs: dr?.lighting_hrs?.toString() ?? '', remarks: dr?.remarks ?? '',
-        med_id: mu?.medicine_id ?? '', med_qty: mu?.quantity?.toString() ?? '',
-        existingId: dr?.id ?? null, existingMedId: mu?.id ?? null,
+        med_id: '', med_qty: '',
+        existingId: dr?.id ?? null, existingMedId: null,
       }
     }
     setShedRows(newRows)
@@ -323,6 +330,18 @@ export const BulkDailyEntry: React.FC = () => {
     })
   }, [existingDR, selectedFlock])
 
+  // Init flock-level medicine row — medicine_usage has no shed_id, so this
+  // just takes whatever's on record for this flock+day (first match).
+  useEffect(() => {
+    if (!selectedFlock) return
+    const mu = (existingMed ?? []).find((r: any) => r.flock_id === selectedFlock)
+    setMedRow({
+      med_id: mu?.medicine_id ?? '',
+      med_qty: mu?.quantity?.toString() ?? '',
+      existingMedId: mu?.id ?? null,
+    })
+  }, [existingMed, selectedFlock])
+
   const updateFlockRow = (id: string, field: keyof FlockRow, val: string) =>
     setFlockRows(p => ({ ...p, [id]: { ...p[id], [field]: val } }))
 
@@ -352,13 +371,8 @@ export const BulkDailyEntry: React.FC = () => {
       const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
       const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
-      // A row with ONLY Medicine+Quantity entered (nothing else that day for
-      // this shed) must still be saved — previously `hasProductionData` (then
-      // called `hasData`) didn't check medicine, so `continue` skipped the
-      // whole row, including the medicine_usage write further down, silently.
       const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || r.lighting_hrs || r.remarks
-      const hasMedOnly = r.med_id && r.med_qty
-      if (!hasProductionData && !hasMedOnly) continue
+      if (!hasProductionData) continue
       const of_ = parseInt(r.opening_female) || null
       const om = parseInt(r.opening_male) || null
       // Preserve a legitimate closing of 0 — `|| null` treated 0 as "no data",
@@ -410,18 +424,21 @@ export const BulkDailyEntry: React.FC = () => {
         }
       }
 
-      // medicine per shed
-      if (r.med_id && r.med_qty) {
-        const medPayload = { flock_id: selectedFlock, shed_id: shed.id, usage_date: date, medicine_id: r.med_id, quantity: parseFloat(r.med_qty) || 0, unit: 'ml' }
-        const { error: me } = r.existingMedId
-          ? await supabase.from('medicine_usage').update(medPayload).eq('id', r.existingMedId)
-          : await supabase.from('medicine_usage').insert(medPayload)
-        if (me) console.error(me)
-      } else if (r.existingMedId) {
-        // Medicine cleared on a row that had one — delete the stale usage row
-        // instead of leaving it in the database forever
-        await supabase.from('medicine_usage').delete().eq('id', r.existingMedId)
-      }
+    }
+    // Medicine — flock-level (medicine_usage has no shed_id column; per your
+    // call, medicine applies to the whole flock for now, not per shed), saved
+    // once here instead of once per shed.
+    if (medRow.med_id && medRow.med_qty) {
+      const medPayload = { flock_id: selectedFlock, usage_date: date, medicine_id: medRow.med_id, quantity: parseFloat(medRow.med_qty) || 0, unit: 'ml' }
+      const { error: me } = medRow.existingMedId
+        ? await supabase.from('medicine_usage').update(medPayload).eq('id', medRow.existingMedId)
+        : await supabase.from('medicine_usage').insert(medPayload)
+      if (me) { console.error(me); errors++; toast.error('Medicine: ' + me.message) } else saved++
+    } else if (medRow.existingMedId) {
+      // Medicine cleared on a row that had one — delete the stale usage row
+      // instead of leaving it in the database forever
+      const { error: me } = await supabase.from('medicine_usage').delete().eq('id', medRow.existingMedId)
+      if (me) { console.error(me); errors++; toast.error('Medicine delete: ' + me.message) }
     }
     // Write the combined per-type feed total for the whole flock/day, once
     // per feed type, now that every shed's contribution has been summed.
@@ -672,7 +689,9 @@ export const BulkDailyEntry: React.FC = () => {
         // Flock-level grade on first row only
         'Grade A': i === 0 ? gradeRow.he_grade_a : '', 'Grade B': i === 0 ? gradeRow.he_grade_b : '', 'Grade C': i === 0 ? gradeRow.he_grade_c : '',
         'Lighting Hrs': r.lighting_hrs,
-        Medicine: r.med_id ? (medIdToName[r.med_id] ?? '') : '', 'Med Qty': r.med_qty, Remarks: r.remarks,
+        // Flock-level medicine on first row only (medicine_usage has no shed_id)
+        Medicine: i === 0 && medRow.med_id ? (medIdToName[medRow.med_id] ?? '') : '',
+        'Med Qty': i === 0 ? medRow.med_qty : '', Remarks: r.remarks,
       }
     })
     const ws = XLSX.utils.json_to_sheet(data, { header: SHED_HEADERS })
@@ -706,6 +725,16 @@ export const BulkDailyEntry: React.FC = () => {
         if (a || b || c) { gA = a || gA; gB = b || gB; gC = c || gC }
       }
       if (gA || gB || gC) setGradeRow(g => ({ ...g, he_grade_a: gA || g.he_grade_a, he_grade_b: gB || g.he_grade_b, he_grade_c: gC || g.he_grade_c }))
+      // Flock-level medicine: take from whichever row has a value (medicine_usage has no shed_id)
+      let medName = '', medQty = ''
+      for (const row of (rows as any[])) {
+        const m = gv(ci.med, row), q = gv(ci.mq, row)
+        if (m || q) { medName = m || medName; medQty = q || medQty }
+      }
+      if (medName || medQty) {
+        const mid = medName && medNameToId[medName.toLowerCase()] ? medNameToId[medName.toLowerCase()] : undefined
+        setMedRow(m => ({ ...m, med_id: mid ?? m.med_id, med_qty: medQty || m.med_qty }))
+      }
       setShedRows(prev => {
         const next = { ...prev }
         for (const row of (rows as any[])) {
@@ -715,7 +744,6 @@ export const BulkDailyEntry: React.FC = () => {
           matched++
           const g = (i: number) => i >= 0 ? String(row[i] ?? '').trim() : ''
           const cur = next[s.id] ?? emptyShedRow()
-          const medName = g(ci.med).toLowerCase()
           // Auto-calculate closing = opening − death − transfer − cull (never read from Excel)
           const openF = g(ci.of) || cur.opening_female, openM = g(ci.om) || cur.opening_male
           const dF = g(ci.df) || cur.mortality_female, dM = g(ci.dm) || cur.mortality_male
@@ -737,8 +765,7 @@ export const BulkDailyEntry: React.FC = () => {
             wastage_te: g(ci.wte) || cur.wastage_te, wastage_be: g(ci.wbe) || cur.wastage_be,
             closing_female: closeF, closing_male: closeM,
             lighting_hrs: g(ci.lt) || cur.lighting_hrs,
-            med_id: medName && medNameToId[medName] ? medNameToId[medName] : cur.med_id,
-            med_qty: g(ci.mq) || cur.med_qty, remarks: g(ci.rem) || cur.remarks,
+            remarks: g(ci.rem) || cur.remarks,
           }
         }
         return next
@@ -864,8 +891,6 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-1 py-2 text-center bg-blue-50">Close ♀</th>
                       <th className="px-1 py-2 text-center bg-blue-50">Close ♂</th>
                       <th className="px-1 py-2 text-center">Light</th>
-                      <th className="px-1 py-2 text-left" style={{ minWidth: 140 }}>Medicine</th>
-                      <th className="px-1 py-2 text-center">Med Qty</th>
                       <th className="px-1 py-2 text-left" style={{ minWidth: 100 }}>Remarks</th>
                     </tr>
                   </thead>
@@ -921,17 +946,8 @@ export const BulkDailyEntry: React.FC = () => {
                               <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_male, u('closing_male'), 'w-14', t2(7))}</td>
                               <td className="px-1 py-1">{numInput(r.lighting_hrs, u('lighting_hrs'), 'w-14', t2(8))}</td>
                               <td className="px-1 py-1">
-                                <SearchableSelect value={r.med_id} onChange={(v) => updateShedRow(shed.id, 'med_id', v)} options={medOptions} placeholder="Search medicine…" />
-                              </td>
-                              <td className="px-1 py-1">
-                                <input type="number" min="0" value={r.med_qty} placeholder="qty" disabled={!r.med_id}
-                                  tabIndex={t2(10)}
-                                  onChange={e => updateShedRow(shed.id, 'med_qty', e.target.value)}
-                                  className="w-14 text-center border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
-                              </td>
-                              <td className="px-1 py-1">
                                 <input type="text" value={r.remarks} placeholder="remarks"
-                                  tabIndex={t2(11)}
+                                  tabIndex={t2(9)}
                                   onChange={e => updateShedRow(shed.id, 'remarks', e.target.value)}
                                   className="w-24 border border-gray-200 rounded px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
                               </td>
@@ -973,7 +989,7 @@ export const BulkDailyEntry: React.FC = () => {
                         <td className="px-1 py-1.5 text-center bg-blue-50/60">{shedTotals.close_f || '—'}</td>
                         <td className="px-1 py-1.5 text-center bg-blue-50/60">{shedTotals.close_m || '—'}</td>
                         <td className="px-1 py-1.5 text-center text-gray-400">—</td>
-                        <td className="px-1 py-1.5 text-center text-gray-400" colSpan={3}>—</td>
+                        <td className="px-1 py-1.5 text-center text-gray-400">—</td>
                       </tr>
                     </tfoot>
                   )}
@@ -1028,6 +1044,18 @@ export const BulkDailyEntry: React.FC = () => {
                   </div>
                 )
               })()}
+              {/* ── Flock-level medicine (medicine_usage has no shed_id — applies to the whole flock) ── */}
+              <div className="px-4 py-3 border-t border-gray-100 bg-amber-50/40">
+                <p className="text-xs font-semibold text-amber-800 mb-2">Medicine (flock-level — applies to all sheds)</p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="w-56">
+                    <SearchableSelect value={medRow.med_id} onChange={(v) => setMedRow(m => ({ ...m, med_id: v }))} options={medOptions} placeholder="Search medicine…" />
+                  </div>
+                  <input type="number" min="0" value={medRow.med_qty} placeholder="qty" disabled={!medRow.med_id}
+                    onChange={e => setMedRow(m => ({ ...m, med_qty: e.target.value }))}
+                    className="w-24 text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
+                </div>
+              </div>
             </Card>
           )}
         </>
