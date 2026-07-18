@@ -22,6 +22,7 @@ import {
 } from 'recharts'
 import toast from 'react-hot-toast'
 import { useConfigOptions, useConfigValues } from '@/hooks/useConfigOptions'
+import { useItemOptionsWithAliases, registerItemAlias, resolveItemIdByName, useInvalidateItemAliases } from '@/lib/itemAliases'
 
 // ── constants ─────────────────────────────────────────────────────
 const PAY_STATUS_FB  = ['Paid', 'Pending', 'Not Paid', 'HOLD']
@@ -2472,8 +2473,50 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
   const [preview, setPreview] = useState<{type:'excel'|'pdf'; rows: any[]; payRows?: any[]; summary: string; isAmendment?: boolean; poNo?: string} | null>(null)
   const [editableRows, setEditableRows] = useState<any[]>([])
   const [parsing, setParsing] = useState(false)
+  // Item names come in as free text from the import — without an explicit
+  // link to Items Master, a slightly different spelling on the next import
+  // (or the next GRN) creates a duplicate item instead of resolving to the
+  // same real one. Every unique item_name in this batch must be resolved
+  // (auto-matched, manually linked, or explicitly kept as new) before import.
+  const [itemLinks, setItemLinks] = useState<Record<string, { itemId: string; keepAsNew: boolean }>>({})
+  const { options: itemOptions } = useItemOptionsWithAliases()
+  const invalidateAliases = useInvalidateItemAliases()
 
-  const reset = () => { setStep('idle'); setPreview(null); setEditableRows([]); setParsing(false) }
+  const reset = () => { setStep('idle'); setPreview(null); setEditableRows([]); setParsing(false); setItemLinks({}) }
+
+  const normName = (n: string) => (n || '').trim().toLowerCase()
+  const uniqueItemNames = useMemo(() => {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const r of editableRows) {
+      const n = normName(r.item_name)
+      if (n && !seen.has(n)) { seen.add(n); out.push(r.item_name.trim()) }
+    }
+    return out
+  }, [editableRows])
+
+  // Auto-resolve every unique item name against existing aliases as soon as
+  // the preview loads (or item names get corrected) — only genuinely
+  // unmatched ones need the admin's attention below.
+  React.useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      for (const name of uniqueItemNames) {
+        const key = normName(name)
+        if (itemLinks[key]) continue
+        const resolved = await resolveItemIdByName(name)
+        if (cancelled) return
+        if (resolved) setItemLinks(prev => ({ ...prev, [key]: { itemId: resolved, keepAsNew: false } }))
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uniqueItemNames.join('|')])
+
+  const unresolvedItemNames = uniqueItemNames.filter(n => {
+    const link = itemLinks[normName(n)]
+    return !link || (!link.itemId && !link.keepAsNew)
+  })
 
   const handleExcel = async (file: File) => {
     setParsing(true)
@@ -2506,11 +2549,41 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
     setParsing(false)
   }
 
+  // Resolves every unique item name in this batch to a real item_id —
+  // creating a new Items Master row only for names explicitly marked "Keep
+  // as new item" in the linking panel above, and registering every name as
+  // a permanent alias either way, so the exact same name is never
+  // re-created as a fresh item on a future import (the bug this whole
+  // linking step exists to fix).
+  const resolveItemLinksToIds = async (): Promise<Record<string, string>> => {
+    const nameToId: Record<string, string> = {}
+    for (const name of uniqueItemNames) {
+      const key = normName(name)
+      const link = itemLinks[key]
+      if (link?.itemId) {
+        nameToId[key] = link.itemId
+        await registerItemAlias(link.itemId, name, 'po_import')
+      } else if (link?.keepAsNew) {
+        const { data: newItem, error } = await supabase.from('items')
+          .insert({ name: name.trim(), category: 'Feed Ingredient', unit: 'Kg' })
+          .select('id').single()
+        if (error) throw new Error(`Could not create item "${name}": ${error.message}`)
+        nameToId[key] = newItem.id
+        await registerItemAlias(newItem.id, name, 'po_import')
+      }
+    }
+    invalidateAliases()
+    return nameToId
+  }
+
   const handleSave = async () => {
     if (!preview) return
+    if (unresolvedItemNames.length > 0) { toast.error('Link or mark every item name as new before importing'); return }
     setSaving(true)
     const rows = editableRows.length ? editableRows : preview.rows
     try {
+      const nameToItemId = await resolveItemLinksToIds()
+      const withItemId = (r: any) => ({ ...r, item_id: r.item_name ? (nameToItemId[normName(r.item_name)] ?? null) : null })
       if (preview.type === 'excel') {
         // Upsert PO lines — deduplicate by po_no+item_name first (Excel may have duplicate rows)
         if (rows.length > 0) {
@@ -2519,7 +2592,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
             const key = `${r.po_no}||${r.item_name}`
             if (seen.has(key)) return false
             seen.add(key); return true
-          })
+          }).map(withItemId)
           const chunks = []
           for (let i=0;i<deduped.length;i+=200) chunks.push(deduped.slice(i,i+200))
           for (const chunk of chunks) {
@@ -2552,29 +2625,20 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           const vendorRecords = uniqueVendorNames.map(name => ({ name, type: 'supplier' }))
           await supabase.from('parties').upsert(vendorRecords, { onConflict: 'name,type', ignoreDuplicates: true })
         }
-        // Auto-create items in unified items master from all imported PO rows
-        const uniqueItemNames = [...new Set(rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
-        if (uniqueItemNames.length > 0) {
-          const { data: existing } = await supabase.from('items').select('name').in('name', uniqueItemNames)
-          const existingNames = new Set((existing ?? []).map((i: any) => i.name.trim().toLowerCase()))
-          const newItems = uniqueItemNames
-            .filter((name: string) => !existingNames.has(name.toLowerCase()))
-            .map((name: string) => ({ name, category: 'Feed Ingredient', unit: 'Kg' }))
-          if (newItems.length > 0) await supabase.from('items').insert(newItems)
-        }
-        toast.success(`Imported ${rows.length} PO records · ${uniqueVendorNames.length} vendors · ${uniqueItemNames.length} items added to masters`)
+        toast.success(`Imported ${rows.length} PO records · ${uniqueVendorNames.length} vendors · ${uniqueItemNames.length} items linked to Master`)
       } else {
         // PDF import
         if (preview.isAmendment && preview.poNo) {
           // Update existing PO lines with amended data
           for (const rec of rows) {
-            const { credit_limit_days, delivery_date, is_amendment, ...poFields } = rec
+            const { credit_limit_days, delivery_date, is_amendment, ...poFields } = withItemId(rec)
             const { data: existing } = await supabase.from('purchase_orders')
               .select('id').eq('po_no', rec.po_no).eq('item_name', rec.item_name).single()
             if (existing) {
               await supabase.from('purchase_orders').update({
                 rate: poFields.rate, gst_pct: poFields.gst_pct,
                 total_amount: poFields.total_amount, quantity: poFields.quantity,
+                item_id: poFields.item_id,
               }).eq('id', existing.id)
             } else {
               await supabase.from('purchase_orders').insert(poFields)
@@ -2588,7 +2652,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           toast.success(`Amendment applied — ${rows.length} items updated`)
         } else {
           // New PO — insert
-          const cleanRows = rows.map(({ credit_limit_days, delivery_date, is_amendment, ...r }: any) => r)
+          const cleanRows = rows.map(({ credit_limit_days, delivery_date, is_amendment, ...r }: any) => withItemId(r))
           const { error } = await supabase.from('purchase_orders').upsert(cleanRows, { onConflict:'po_no,item_name' })
           if (error) throw error
           // Auto-create vendor party with GST + address from PDF
@@ -2599,17 +2663,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
               { onConflict: 'name,type', ignoreDuplicates: false }
             )
           }
-          // Auto-create items in unified items master from PDF PO rows
-          const uniquePdfItems = [...new Set(rows.map((r:any) => r.item_name?.trim()).filter(Boolean))]
-          if (uniquePdfItems.length > 0) {
-            const { data: existingPdf } = await supabase.from('items').select('name').in('name', uniquePdfItems)
-            const existingPdfNames = new Set((existingPdf ?? []).map((i: any) => i.name.trim().toLowerCase()))
-            const newPdfItems = uniquePdfItems
-              .filter((name: string) => !existingPdfNames.has(name.toLowerCase()))
-              .map((name: string) => ({ name, category: 'Feed Ingredient', unit: 'Kg' }))
-            if (newPdfItems.length > 0) await supabase.from('items').insert(newPdfItems)
-          }
-          toast.success(`PO imported — ${rows.length} items · vendor & items added to masters`)
+          toast.success(`PO imported — ${rows.length} items · vendor added, items linked to Master`)
         }
       }
       qc.invalidateQueries({ queryKey: ['purchase_orders'] })
@@ -2722,6 +2776,43 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
                 </div>
               </div>
 
+              {/* Item Master linking — every unique item name must resolve
+                  to an Items Master entry (or be explicitly kept as new)
+                  before import, so a spelling difference from a past import
+                  can't quietly create a duplicate item. */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                  Link Items to Master ({uniqueItemNames.length - unresolvedItemNames.length}/{uniqueItemNames.length} resolved)
+                </p>
+                {unresolvedItemNames.length === 0 ? (
+                  <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                    ✓ All {uniqueItemNames.length} item name(s) are linked to Items Master or explicitly marked as new.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {unresolvedItemNames.map(name => {
+                      const key = normName(name)
+                      const link = itemLinks[key]
+                      return (
+                        <div key={key} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          <span className="text-xs font-medium text-amber-800 flex-1 truncate">{name}</span>
+                          <SearchableSelect
+                            options={itemOptions} value={link?.itemId ?? ''} placeholder="Link to existing item…"
+                            onChange={v => setItemLinks(prev => ({ ...prev, [key]: { itemId: v, keepAsNew: false } }))}
+                            className="w-56"
+                          />
+                          <label className="flex items-center gap-1 text-xs text-gray-600 whitespace-nowrap">
+                            <input type="checkbox" checked={!!link?.keepAsNew}
+                              onChange={e => setItemLinks(prev => ({ ...prev, [key]: { itemId: '', keepAsNew: e.target.checked } }))} />
+                            Keep as new item
+                          </label>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* Payment records preview */}
               {preview.payRows && preview.payRows.length > 0 && (
                 <div>
@@ -2763,7 +2854,8 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
           {step === 'preview' && (
             <div className="flex gap-2">
               <Button variant="secondary" onClick={()=>{reset();onClose()}}>Cancel</Button>
-              <Button loading={saving} onClick={handleSave}>
+              <Button loading={saving} disabled={unresolvedItemNames.length > 0} onClick={handleSave}
+                title={unresolvedItemNames.length > 0 ? 'Link or mark every item name as new before importing' : undefined}>
                 {preview?.isAmendment ? 'Apply Amendment' : `Import ${preview?.rows.length} records`}
               </Button>
             </div>
