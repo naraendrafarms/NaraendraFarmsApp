@@ -847,6 +847,7 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-1 py-2 text-center">TE</th>
                       <th className="px-1 py-2 text-center">BE</th>
                       <th className="px-1 py-2 text-center">LE</th>
+                      <th className="px-1 py-2 text-center font-semibold bg-gray-100">Total</th>
                       {showWastage && <><th className="px-1 py-2 text-center bg-red-50">Wst HE</th><th className="px-1 py-2 text-center bg-red-50">Wst JE</th><th className="px-1 py-2 text-center bg-red-50">Wst TE</th><th className="px-1 py-2 text-center bg-red-50">Wst BE</th></>}
                       <th className="px-1 py-2 text-center bg-blue-50">Close ♀</th>
                       <th className="px-1 py-2 text-center bg-blue-50">Close ♂</th>
@@ -900,6 +901,9 @@ export const BulkDailyEntry: React.FC = () => {
                               <td className="px-1 py-1">{numInput(r.te_eggs, u('te_eggs'), 'w-14', t2(3))}</td>
                               <td className="px-1 py-1">{numInput(r.be_eggs, u('be_eggs'), 'w-14', t2(4))}</td>
                               <td className="px-1 py-1">{numInput(r.le_eggs, u('le_eggs'), 'w-14', t2(5))}</td>
+                              <td className="px-1 py-1 text-center font-semibold bg-gray-50">
+                                {((parseInt(r.he_eggs) || 0) + (parseInt(r.je_eggs) || 0) + (parseInt(r.te_eggs) || 0) + (parseInt(r.be_eggs) || 0) + (parseInt(r.le_eggs) || 0)).toLocaleString('en-IN')}
+                              </td>
                               {showWastage && <><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_he, u('wastage_he'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_je, u('wastage_je'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_te, u('wastage_te'))}</td><td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_be, u('wastage_be'))}</td></>}
                               <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_female, u('closing_female'), 'w-14', t2(6))}</td>
                               <td className="px-1 py-1 bg-blue-50/40">{numInput(r.closing_male, u('closing_male'), 'w-14', t2(7))}</td>
@@ -947,6 +951,7 @@ export const BulkDailyEntry: React.FC = () => {
                         <td className="px-1 py-1.5 text-center">{shedTotals.te || '—'}</td>
                         <td className="px-1 py-1.5 text-center">{shedTotals.be || '—'}</td>
                         <td className="px-1 py-1.5 text-center">{shedTotals.le || '—'}</td>
+                        <td className="px-1 py-1.5 text-center font-bold bg-gray-100">{(shedTotals.he + shedTotals.je + shedTotals.te + shedTotals.be + shedTotals.le) || '—'}</td>
                         {showWastage && <>
                           <td className="px-1 py-1.5 text-center bg-red-50/60">{shedTotals.wst_he || '—'}</td>
                           <td className="px-1 py-1.5 text-center bg-red-50/60">{shedTotals.wst_je || '—'}</td>
@@ -1045,6 +1050,7 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-2 py-2 text-center">TE</th>
                       <th className="px-2 py-2 text-center">BE</th>
                       <th className="px-2 py-2 text-center">LE</th>
+                      <th className="px-2 py-2 text-center font-semibold bg-gray-100">Total</th>
                       <th className="px-2 py-2 text-center bg-green-50">Grd A</th>
                       <th className="px-2 py-2 text-center bg-green-50">Grd B</th>
                       <th className="px-2 py-2 text-center bg-green-50">Grd C</th>
@@ -1098,6 +1104,9 @@ export const BulkDailyEntry: React.FC = () => {
                                 className="w-full text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white" />
                             </td>
                           ))}
+                          <td className="px-1 py-1 text-center font-semibold bg-gray-50">
+                            {(['he_eggs','je_eggs','te_eggs','be_eggs','le_eggs'] as const).reduce((s, f) => s + (parseInt(r[f]) || 0), 0).toLocaleString('en-IN')}
+                          </td>
                           {(['he_grade_a','he_grade_b','he_grade_c'] as const).map(field => (
                             <td key={field} className="px-1 py-1 bg-green-50/40">
                               <input type="number" min="0" value={r[field]} placeholder="0"
