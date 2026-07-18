@@ -90,8 +90,24 @@ export const GRNPage: React.FC = () => {
 
   const [form, setForm] = useState(emptyForm())
   const [itemSearch, setItemSearch] = useState('')
+  // Basic/GST/Total Amount auto-calculate from qty/rate/gst/other charges —
+  // but typing a different figure directly into one of them (rounding, a
+  // vendor invoice total that doesn't exactly match, etc.) used to be
+  // silently discarded in favor of the live calc on save. Track which of
+  // these three the user has actually touched by hand; only those stay at
+  // the typed value, everything else keeps following the live calc. Editing
+  // any of the calc INPUTS (qty/rate/gst/other charges) resets this, since
+  // that signals "recompute everything" rather than "keep my manual figure."
+  const [manualAmountFields, setManualAmountFields] = useState<Set<string>>(new Set())
 
-  const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const s = (k: string, v: string) => {
+    if (['qty', 'price_per_unit', 'gst_pct', 'other_charges'].includes(k)) setManualAmountFields(new Set())
+    setForm(f => ({ ...f, [k]: v }))
+  }
+  const setManualAmount = (k: 'basic_amount' | 'gst_amount' | 'total_amount', v: string) => {
+    setManualAmountFields(prev => new Set(prev).add(k))
+    setForm(f => ({ ...f, [k]: v }))
+  }
 
   const basicCalc = (parseFloat(form.qty) || 0) * (parseFloat(form.price_per_unit) || 0)
   const gstCalc = basicCalc * (parseFloat(form.gst_pct) || 0) / 100
@@ -220,6 +236,7 @@ export const GRNPage: React.FC = () => {
   const openAdd = () => {
     setEditing(null)
     setItemSearch('')
+    setManualAmountFields(new Set())
     setForm(emptyForm())
     setShowForm(true)
   }
@@ -227,6 +244,11 @@ export const GRNPage: React.FC = () => {
   const openEdit = (g: any) => {
     setEditing(g)
     setItemSearch('')
+    // Editing an existing GRN: whatever amounts were actually saved are the
+    // "manual" starting point (they may already differ from a fresh qty×rate
+    // calc), so keep them as-is unless qty/rate/gst/other charges are
+    // touched again in this edit session.
+    setManualAmountFields(new Set(['basic_amount', 'gst_amount', 'total_amount']))
     setForm({
       grn_no: g.grn_no ?? '',
       grn_date: g.grn_date ?? today(),
@@ -274,15 +296,15 @@ export const GRNPage: React.FC = () => {
     bags: parseInt(form.bags) || null,
     bag_type: form.bag_type || null,
     price_per_unit: parseFloat(form.price_per_unit) || null,
-    // The live qty×rate calculation now wins over the stored/manually-typed
-    // value whenever it's available — previously the stored value (which
-    // stays populated on edit even after qty/rate change) always won,
-    // silently saving stale amounts when a GRN's quantity was corrected.
-    basic_amount: (basicCalc > 0 ? basicCalc : parseFloat(form.basic_amount)) || null,
+    // The live qty×rate calculation wins over the stored value whenever it's
+    // available (so correcting qty/rate updates a stale saved amount) —
+    // UNLESS the user directly typed into that specific field this session,
+    // in which case their figure is what actually gets saved.
+    basic_amount: (manualAmountFields.has('basic_amount') ? parseFloat(form.basic_amount) : (basicCalc > 0 ? basicCalc : parseFloat(form.basic_amount))) || null,
     gst_pct: parseFloat(form.gst_pct) || 0,
-    gst_amount: (gstCalc > 0 ? +gstCalc.toFixed(2) : parseFloat(form.gst_amount)) || null,
+    gst_amount: (manualAmountFields.has('gst_amount') ? parseFloat(form.gst_amount) : (gstCalc > 0 ? +gstCalc.toFixed(2) : parseFloat(form.gst_amount))) || null,
     other_charges: otherCharges || null,
-    total_amount: (totalCalc > 0 ? totalCalc : parseFloat(form.total_amount)) || null,
+    total_amount: (manualAmountFields.has('total_amount') ? parseFloat(form.total_amount) : (totalCalc > 0 ? totalCalc : parseFloat(form.total_amount))) || null,
     batch_no: needsBatch ? (form.batch_no || null) : null,
     expiry_date: needsBatch ? (form.expiry_date || null) : null,
     flock_id: (isChick || needsBatch) ? (form.flock_id || null) : null,
@@ -870,8 +892,8 @@ export const GRNPage: React.FC = () => {
               label="Basic Amount"
               type="number"
               value={form.basic_amount}
-              onChange={e => s('basic_amount', e.target.value)}
-              hint={basicCalc > 0 ? `Auto: ${inr(basicCalc)}` : undefined}
+              onChange={e => setManualAmount('basic_amount', e.target.value)}
+              hint={manualAmountFields.has('basic_amount') ? 'Manually entered — overrides auto-calc' : (basicCalc > 0 ? `Auto: ${inr(basicCalc)}` : undefined)}
             />
             <Input
               label="Transport / Other Charges"
@@ -886,8 +908,8 @@ export const GRNPage: React.FC = () => {
               label="Total Amount"
               type="number"
               value={form.total_amount}
-              onChange={e => s('total_amount', e.target.value)}
-              hint={totalCalc > 0 ? `Auto (incl. transport): ${inr(totalCalc)}` : undefined}
+              onChange={e => setManualAmount('total_amount', e.target.value)}
+              hint={manualAmountFields.has('total_amount') ? 'Manually entered — overrides auto-calc' : (totalCalc > 0 ? `Auto (incl. transport): ${inr(totalCalc)}` : undefined)}
             />
             <Input
               label="Landed Rate / Unit"
