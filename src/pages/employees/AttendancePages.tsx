@@ -957,6 +957,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
   const [farmId, setFarmId] = useState('')
   const [grid, setGrid] = useState<Record<CellKey, string>>({})       // empId_day → status
   const [otHours, setOtHours] = useState<Record<CellKey, string>>({}) // empId_day → hours
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set())  // cells clicked locally, not yet saved
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState('')  // tracks which month+farm combo is loaded
 
@@ -1015,21 +1016,39 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     enabled: (employees as any[]).length > 0,
   })
 
-  // When attendance loads, populate the grid
+  // When attendance loads, populate the grid. A fresh month/farm switch fully
+  // rebuilds the grid from the server. Once loaded for that month/farm, later
+  // refetches (e.g. someone marked a day via Daily Attendance, or another
+  // tab/session saved this same month) still need to reach this grid — so
+  // merge in server values for every cell EXCEPT ones with an unsaved local
+  // click (tracked in dirtyKeys), instead of ignoring the refetch entirely.
   React.useEffect(() => {
     const key = `${month}_${farmId}`
-    if (!existingAtt || loaded === key) return
-    const newGrid: Record<string, string> = {}
-    const newOT: Record<string, string> = {}
-    for (const r of existingAtt as any[]) {
-      const d = parseInt(r.attendance_date.slice(8, 10))
-      const empId = r.employee_id
-      newGrid[`${empId}_${d}`] = r.status
-      if (r.status === 'OT' && r.ot_hours) newOT[`${empId}_${d}`] = String(r.ot_hours)
-    }
-    setGrid(newGrid)
-    setOtHours(newOT)
+    if (!existingAtt) return
+    const isFreshLoad = loaded !== key
+    setGrid(g => {
+      const next = isFreshLoad ? {} : { ...g }
+      for (const r of existingAtt as any[]) {
+        const d = parseInt(r.attendance_date.slice(8, 10))
+        const cellKey = `${r.employee_id}_${d}`
+        if (!isFreshLoad && dirtyKeys.has(cellKey)) continue
+        next[cellKey] = r.status
+      }
+      return next
+    })
+    setOtHours(h => {
+      const next = isFreshLoad ? {} : { ...h }
+      for (const r of existingAtt as any[]) {
+        const d = parseInt(r.attendance_date.slice(8, 10))
+        const cellKey = `${r.employee_id}_${d}`
+        if (!isFreshLoad && dirtyKeys.has(cellKey)) continue
+        if (r.status === 'OT' && r.ot_hours) next[cellKey] = String(r.ot_hours)
+      }
+      return next
+    })
+    if (isFreshLoad) setDirtyKeys(new Set())
     setLoaded(key)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingAtt, month, farmId])
 
   // Reset loaded when month/farm changes so grid reloads
@@ -1041,10 +1060,12 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     const cur = grid[key] ?? ''
     const next = STATUS_CYCLE[cur] ?? 'P'
     setGrid(g => ({ ...g, [key]: next }))
+    setDirtyKeys(s => new Set(s).add(key))
     if (next !== 'OT') setOtHours(h => { const n = { ...h }; delete n[key]; return n })
   }
 
   const setOT = (empId: string, day: number, val: string) => {
+    setDirtyKeys(s => new Set(s).add(`${empId}_${day}`))
     setOtHours(h => ({ ...h, [`${empId}_${day}`]: val }))
   }
 
@@ -1111,6 +1132,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       if (salErr) throw salErr
 
       await refetchAtt()
+      setDirtyKeys(new Set())  // just-saved cells now match the server — safe to merge on future refetches
       qc.invalidateQueries({ queryKey: ['bulk_salary'] })
       qc.invalidateQueries({ queryKey: ['bulk_daily_att'] })
       qc.invalidateQueries({ queryKey: ['attendance_day'] })
