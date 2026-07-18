@@ -1113,6 +1113,8 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       await refetchAtt()
       qc.invalidateQueries({ queryKey: ['bulk_salary'] })
       qc.invalidateQueries({ queryKey: ['bulk_daily_att'] })
+      qc.invalidateQueries({ queryKey: ['attendance_day'] })
+      qc.invalidateQueries({ queryKey: ['attendance_month'] })
       toast.success(`Attendance saved for ${(employees as any[]).length} employees · ${monthDate}`)
     } catch (e: any) {
       toast.error(e.message)
