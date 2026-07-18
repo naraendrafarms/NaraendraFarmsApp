@@ -7,10 +7,10 @@ import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Printe
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { printReport } from '@/lib/invoicePrint'
 
-const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
+const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void; disabled?: boolean }> = ({ checked, indeterminate, onChange, disabled }) => {
   const ref = useRef<HTMLInputElement>(null)
   React.useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate }, [indeterminate])
-  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} className="rounded border-gray-300 text-brand-600 cursor-pointer" />
+  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} disabled={disabled} className="rounded border-gray-300 text-brand-600 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50" />
 }
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -81,6 +81,22 @@ export const DailyAttendancePage: React.FC = () => {
 
   const empIds = employees?.map((e: any) => e.id) ?? []
 
+  // Once an employee's salary for this month has been marked paid
+  // (salary_monthly.paid_date), their attendance for that month is locked —
+  // editing it after payment would silently disagree with what was actually
+  // paid out.
+  const monthOfDate = `${date.slice(0, 7)}-01`
+  const { data: paidRows } = useQuery({
+    queryKey: ['salary_paid_status', monthOfDate, empIds.join(',')],
+    queryFn: async () => {
+      if (!empIds.length) return []
+      const { data } = await supabase.from('salary_monthly').select('employee_id,paid_date').eq('month', monthOfDate).in('employee_id', empIds)
+      return data ?? []
+    },
+    enabled: empIds.length > 0
+  })
+  const paidEmployeeIds = useMemo(() => new Set((paidRows ?? []).filter((r: any) => !!r.paid_date).map((r: any) => r.employee_id)), [paidRows])
+
   const { data: existing } = useQuery({
     queryKey: ['attendance_day', date, farmId],
     queryFn: async () => {
@@ -111,7 +127,7 @@ export const DailyAttendancePage: React.FC = () => {
   const markAll = (status: string) => {
     setLocalStatus(prev => {
       const map = { ...prev }
-      for (const e of visibleEmployees) map[e.id] = status
+      for (const e of visibleEmployees) { if (!paidEmployeeIds.has(e.id)) map[e.id] = status }
       return map
     })
   }
@@ -145,10 +161,15 @@ export const DailyAttendancePage: React.FC = () => {
     if (date > todayStr()) { toast.error("Can't save attendance for a future date"); return }
     // Plain by design — only employees you explicitly marked get written.
     // Anyone left blank is skipped entirely, not silently saved as Present.
-    const marked = employees.filter((e: any) => !!localStatus[e.id])
-    if (!marked.length) { toast.error('Mark at least one employee before saving'); return }
+    // Employees already paid for this month are excluded even if somehow
+    // still marked — attendance for a paid month is locked.
+    const markedAll = employees.filter((e: any) => !!localStatus[e.id])
+    const marked = markedAll.filter((e: any) => !paidEmployeeIds.has(e.id))
+    const skippedPaid = markedAll.length - marked.length
+    if (!marked.length) { toast.error(skippedPaid ? 'All marked employees are already paid for this month — locked' : 'Mark at least one employee before saving'); return }
     setSaving(true)
     try {
+      if (skippedPaid) toast(`${skippedPaid} employee(s) skipped — salary already paid for this month`, { icon: '🔒' })
       const rows = marked.map((e: any) => ({
         employee_id: e.id,
         farm_id: farmId || e.farm_id,
@@ -278,16 +299,17 @@ export const DailyAttendancePage: React.FC = () => {
                 {visibleEmployees.map((e: any) => {
                   const cur = localStatus[e.id] ?? ''
                   const otVal = localOT[e.id] ?? 0
+                  const isPaid = paidEmployeeIds.has(e.id)
                   return (
-                    <tr key={e.id} className={`hover:bg-gray-50 ${sel.has(e.id) ? 'bg-blue-50' : cur === 'A' ? 'bg-red-50' : cur === 'H' ? 'bg-amber-50' : !cur ? 'bg-yellow-50/40' : ''}`}>
-                      <Td><CB checked={sel.has(e.id)} onChange={() => toggle(e.id)} /></Td>
-                      <Td className="font-medium">{e.name}</Td>
+                    <tr key={e.id} className={`hover:bg-gray-50 ${isPaid ? 'opacity-60' : ''} ${sel.has(e.id) ? 'bg-blue-50' : cur === 'A' ? 'bg-red-50' : cur === 'H' ? 'bg-amber-50' : !cur ? 'bg-yellow-50/40' : ''}`}>
+                      <Td><CB checked={sel.has(e.id)} onChange={() => toggle(e.id)} disabled={isPaid} /></Td>
+                      <Td className="font-medium">{e.name} {isPaid && <span title="Salary already paid for this month — attendance locked" className="ml-1 text-xs text-amber-600">🔒</span>}</Td>
                       <Td className="text-gray-500 text-xs">{e.emp_id ?? '—'}</Td>
                       <Td className="text-gray-500 text-xs">{e.designation ?? '—'}</Td>
                       {STATUS_OPTIONS.map(s => (
                         <Td key={s}>
-                          <button onClick={() => setLocalStatus(prev => ({ ...prev, [e.id]: s }))}
-                            className={`w-9 h-8 rounded-lg border text-xs font-bold transition-all ${cur === s ? STATUS_COLORS[s] + ' ring-2 ring-offset-1 ring-current' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-400'}`}>
+                          <button disabled={isPaid} onClick={() => setLocalStatus(prev => ({ ...prev, [e.id]: s }))}
+                            className={`w-9 h-8 rounded-lg border text-xs font-bold transition-all ${isPaid ? 'cursor-not-allowed' : ''} ${cur === s ? STATUS_COLORS[s] + ' ring-2 ring-offset-1 ring-current' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-400'}`}>
                             {s}
                           </button>
                         </Td>
@@ -296,8 +318,9 @@ export const DailyAttendancePage: React.FC = () => {
                         <input type="number" min="0" max="12" step="0.5"
                           value={otVal || ''}
                           placeholder="0"
+                          disabled={isPaid}
                           onChange={e2 => setLocalOT(prev => ({ ...prev, [e.id]: parseFloat(e2.target.value) || 0 }))}
-                          className="w-14 border border-gray-300 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-14 border border-gray-300 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
                           title="Overtime hours (in addition to status)"
                         />
                       </Td>
@@ -997,6 +1020,22 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     }
   })
 
+  // Once an employee's salary for this month has been marked paid
+  // (salary_monthly.paid_date), their attendance for the whole month is
+  // locked — editing it after payment would silently disagree with what was
+  // actually paid out.
+  const { data: paidRows } = useQuery({
+    queryKey: ['salary_paid_status_grid', monthDate, (employees as any[]).map(e => e.id).join(',')],
+    queryFn: async () => {
+      const empIds = (employees as any[]).map(e => e.id)
+      if (!empIds.length) return []
+      const { data } = await supabase.from('salary_monthly').select('employee_id,paid_date').eq('month', monthDate).in('employee_id', empIds)
+      return data ?? []
+    },
+    enabled: (employees as any[]).length > 0
+  })
+  const paidEmployeeIds = useMemo(() => new Set((paidRows ?? []).filter((r: any) => !!r.paid_date).map((r: any) => r.employee_id)), [paidRows])
+
   // Load existing attendance for the month
   const { data: existingAtt, isLoading: attLoading, refetch: refetchAtt } = useQuery({
     queryKey: ['monthly_att_grid', month, farmId],
@@ -1056,6 +1095,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
 
   const toggleCell = (empId: string, day: number) => {
     if (isFutureDay(day)) return
+    if (paidEmployeeIds.has(empId)) { toast.error('Salary already paid for this month — attendance locked'); return }
     const key = `${empId}_${day}`
     const cur = grid[key] ?? ''
     const next = STATUS_CYCLE[cur] ?? 'P'
@@ -1065,6 +1105,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
   }
 
   const setOT = (empId: string, day: number, val: string) => {
+    if (paidEmployeeIds.has(empId)) return
     setDirtyKeys(s => new Set(s).add(`${empId}_${day}`))
     setOtHours(h => ({ ...h, [`${empId}_${day}`]: val }))
   }
@@ -1078,6 +1119,7 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       // entirely, never fabricated as Present.
       const rows: any[] = []
       for (const emp of employees as any[]) {
+        if (paidEmployeeIds.has(emp.id)) continue  // salary already paid this month — locked
         for (const d of days) {
           if (isFutureDay(d)) continue  // never fabricate attendance for days that haven't happened
           const key = `${emp.id}_${d}`
@@ -1102,9 +1144,11 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
         if (error) throw error
       }
 
-      // Auto-update salary_monthly absent days for each employee
+      // Auto-update salary_monthly absent days for each employee — skip
+      // anyone already paid this month, so a paid salary_monthly row is
+      // never silently recomputed out from under an already-issued payment.
       const pastDays = days.filter(d => !isFutureDay(d))
-      const salaryRows = (employees as any[]).map(emp => {
+      const salaryRows = (employees as any[]).filter(emp => !paidEmployeeIds.has(emp.id)).map(emp => {
         const absentDays = computeAbsentDays(emp.id, totalDays, grid)
         const presentDays = pastDays.filter(d => {
           const s = grid[`${emp.id}_${d}`] ?? ''
@@ -1252,11 +1296,12 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
             <tbody>
               {(employees as any[]).map((emp: any, idx: number) => {
                 const s = summary[emp.id] ?? {}
+                const isPaid = paidEmployeeIds.has(emp.id)
                 return (
-                  <tr key={emp.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                  <tr key={emp.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} ${isPaid ? 'opacity-60' : ''}`}>
                     <td className="sticky left-0 z-10 bg-inherit border-b border-r border-gray-100 px-2 py-1 text-gray-400 font-mono">{idx+1}</td>
                     <td className="sticky left-8 z-10 bg-inherit border-b border-r border-gray-100 px-2 py-1 min-w-[140px]">
-                      <div className="font-semibold text-gray-800 truncate">{emp.name}</div>
+                      <div className="font-semibold text-gray-800 truncate">{emp.name} {isPaid && <span title="Salary already paid for this month — attendance locked" className="text-amber-600">🔒</span>}</div>
                       <div className="text-gray-400">{emp.emp_id ?? ''} {emp.designation ? `· ${emp.designation}` : ''}</div>
                     </td>
                     {dayLabels.map(({ d, isSun }) => {
@@ -1268,9 +1313,9 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
                         <td key={d} className={`border-b border-r border-gray-100 p-0 text-center ${isSun ? 'bg-red-50/30' : ''}`}>
                           <button
                             onClick={() => toggleCell(emp.id, d)}
-                            disabled={future}
-                            title={future ? 'Future date — not yet marked' : STATUS_LABELS[status]}
-                            className={`w-full h-full min-h-[36px] flex flex-col items-center justify-center gap-0.5 font-bold transition-colors ${future ? 'bg-gray-50 text-gray-300 cursor-not-allowed' : CELL_COLORS[status]}`}
+                            disabled={future || isPaid}
+                            title={isPaid ? 'Salary already paid for this month — attendance locked' : future ? 'Future date — not yet marked' : STATUS_LABELS[status]}
+                            className={`w-full h-full min-h-[36px] flex flex-col items-center justify-center gap-0.5 font-bold transition-colors ${(future || isPaid) ? 'bg-gray-50 text-gray-300 cursor-not-allowed' : CELL_COLORS[status]}`}
                           >
                             <span>{future ? '—' : STATUS_SHORT[status]}</span>
                           </button>
