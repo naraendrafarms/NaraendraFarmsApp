@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
-import { Card, CardHeader, Input, Select, FormRow, Modal, EmptyState, Spinner, Td, Th, DateInput, Badge } from '@/components/ui'
+import { Card, CardHeader, Input, Select, FormRow, Modal, EmptyState, Spinner, Td, Th, DateInput, Badge, Button } from '@/components/ui'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, Edit2, Download, Upload, X, Printer } from 'lucide-react'
@@ -84,6 +84,7 @@ export const GRNPage: React.FC = () => {
   const [delId, setDelId] = useState<string | null>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkDelConfirm, setBulkDelConfirm] = useState(false)
+  const [displayLimit, setDisplayLimit] = useState(100)
   const importRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState(emptyForm())
@@ -182,6 +183,12 @@ export const GRNPage: React.FC = () => {
       return true
     })
   }, [grns, fFrom, fTo, fFarm, fCat, fItem, fParty])
+
+  // Render a page at a time — the underlying fetch/filter above still runs
+  // over the full (capped) result set, this only limits how many rows paint
+  // to the screen at once so a long GRN history doesn't render 2000 rows.
+  React.useEffect(() => { setDisplayLimit(100) }, [fFrom, fTo, fFarm, fCat, fItem, fParty])
+  const visibleRows = filtered.slice(0, displayLimit)
 
   const stats = useMemo(() => {
     if (!fItem || filtered.length === 0) return null
@@ -603,7 +610,7 @@ export const GRNPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((g: any) => (
+                {visibleRows.map((g: any) => (
                   <tr key={g.id} className="border-b hover:bg-gray-50">
                     <Td>
                       <input type="checkbox" checked={sel.has(g.id)} onChange={() => toggleSel(g.id)} />
@@ -663,6 +670,13 @@ export const GRNPage: React.FC = () => {
                 </tr>
               </tfoot>
             </table>
+            {filtered.length > displayLimit && (
+              <div className="p-3 text-center">
+                <Button variant="outline" size="sm" onClick={() => setDisplayLimit(n => n + 100)}>
+                  Show more ({filtered.length - displayLimit} remaining)
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </Card>
