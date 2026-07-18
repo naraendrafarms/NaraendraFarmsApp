@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today, fyRange, FY_OPTIONS } from '@/lib/utils'
+import { inr, fmtDate, today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
 import { Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput, Modal, FormRow } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -191,19 +191,18 @@ export const TDSPayable: React.FC = () => {
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['pending_payments_tds', dateFrom, dateTo],
-    queryFn: async () => {
+    queryFn: () => fetchAllPages<any>((from, to) => {
       // Only require tds_amount > 0 — some bills have TDS entered as a flat
       // amount (Pending Payments edit) without a tds_pct, so don't filter on rate.
       let q = supabase.from('pending_payments')
         .select('*, parties!party_id(pan_no,deductee_type), partners!partner_id(deductee_type)')
         .gt('tds_amount', 0)
         .order('grn_date', { ascending: false })
+        .range(from, to)
       if (dateFrom) q = q.gte('grn_date', dateFrom)
       if (dateTo) q = q.lte('grn_date', dateTo)
-      const { data, error } = await q
-      if (error) throw error
-      return data ?? []
-    },
+      return q
+    }, 'Pending Payments (TDS)', toast.error),
     staleTime: 60_000,
   })
 
@@ -211,17 +210,16 @@ export const TDSPayable: React.FC = () => {
   // — this report used to only cover vendor bills, so employee TDS never showed.
   const { data: salaryRows = [], isLoading: loadingSalaryTDS } = useQuery({
     queryKey: ['salary_tds', dateFrom, dateTo],
-    queryFn: async () => {
+    queryFn: () => fetchAllPages<any>((from, to) => {
       let q = supabase.from('salary_monthly')
         .select('id,month,tds,earned_salary,net_salary,is_paid,tds_section,tds_interest,tds_deposited,tds_deposit_date,tds_challan_id,employees!employee_id(name,emp_id,pan_no,farms(name))')
         .gt('tds', 0)
         .order('month', { ascending: false })
+        .range(from, to)
       if (dateFrom) q = q.gte('month', dateFrom)
       if (dateTo) q = q.lte('month', dateTo)
-      const { data, error } = await q
-      if (error) throw error
-      return data ?? []
-    },
+      return q
+    }, 'Salary TDS', toast.error),
     staleTime: 60_000,
   })
 

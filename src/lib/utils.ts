@@ -132,6 +132,33 @@ export const excelDateToISO = (serial: number): string => {
   return d.toISOString().split('T')[0]
 }
 
+// PostgREST caps a single response at its server-side "max rows" setting
+// (1000 by default) regardless of a client .limit() — a client limit only
+// sets the requested Range, the server still clamps the response. Any page
+// that SUMS/AVERAGES/computes a running BALANCE from a query must use this
+// instead of a plain .select(), or a large date range/FY/all-time view will
+// silently understate the total past that row count rather than erroring.
+// Pass a function that takes (from, to) and returns the Supabase query for
+// that page — same shape a .range(from, to) call takes.
+export const FETCH_PAGE_SIZE = 1000
+export async function fetchAllPages<T>(
+  buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  errLabel: string,
+  onError?: (message: string) => void,
+): Promise<T[]> {
+  const all: T[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await buildPage(from, from + FETCH_PAGE_SIZE - 1)
+    if (error) { (onError ?? console.error)(`${errLabel}: ${error.message}`); break }
+    const page = data ?? []
+    all.push(...page)
+    if (page.length < FETCH_PAGE_SIZE) break
+    from += FETCH_PAGE_SIZE
+  }
+  return all
+}
+
 // Shared CSV export — opens directly in Excel. One place instead of every
 // page reimplementing its own escaping/download logic.
 export function exportCSV(filename: string, headers: string[], rows: (string | number | null | undefined)[][]) {

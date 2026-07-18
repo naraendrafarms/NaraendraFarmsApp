@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, fyRange, FY_OPTIONS } from '@/lib/utils'
+import { inr, fmtDate, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
 import { Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import toast from 'react-hot-toast'
 
 const TDS_RATE_OPTIONS = [
   { value: '', label: 'All Rates' },
@@ -29,17 +30,16 @@ export const TDSReceivable: React.FC = () => {
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['he_dispatch_tds', dateFrom, dateTo],
-    queryFn: async () => {
+    queryFn: () => fetchAllPages<any>((from, to) => {
       let q = supabase.from('he_dispatch')
         .select('id,dispatch_date,invoice_no,dc_no,amount,tds_amount,tds_pct,payment_status,parties(name),flocks(flock_no)')
         .gt('tds_amount', 0)
         .order('dispatch_date', { ascending: false })
+        .range(from, to)
       if (dateFrom) q = q.gte('dispatch_date', dateFrom)
       if (dateTo) q = q.lte('dispatch_date', dateTo)
-      const { data, error } = await q
-      if (error) throw error
-      return data ?? []
-    },
+      return q
+    }, 'HE Dispatch (TDS)', toast.error),
     staleTime: 60_000,
   })
 

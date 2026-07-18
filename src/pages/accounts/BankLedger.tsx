@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, today, FY_OPTIONS, currentFY, fyRange } from '@/lib/utils'
+import { inr, today, FY_OPTIONS, currentFY, fyRange, fetchAllPages } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState, SearchableSelect } from '@/components/ui'
 import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil, X } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -835,16 +835,16 @@ export const BankLedgerPage: React.FC = () => {
   // again walking through those old rows).
   const { data: transactions, isLoading: txLoading } = useQuery({
     queryKey: ['bank_transactions', selectedAccount, fy],
-    queryFn: async () => {
-      if (!selectedAccount) return []
-      const { data } = await supabase
+    queryFn: () => {
+      if (!selectedAccount) return Promise.resolve([])
+      return fetchAllPages((from, to) => supabase
         .from('bank_transactions')
         .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type),linked_payment_id,nhe_sale_id,he_dispatch_id')
         .eq('bank_account_id', selectedAccount)
         .gte('txn_date', fyRange(fy).start)
         .order('txn_date', { ascending: true })
         .order('created_at', { ascending: true })
-      return data ?? []
+        .range(from, to), 'Bank Ledger', toast.error)
     },
     enabled: !!selectedAccount,
   })

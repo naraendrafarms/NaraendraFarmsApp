@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, inr, currentFY, fyRange, FY_OPTIONS } from '@/lib/utils'
+import { fmtDate, inr, currentFY, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
 import {
   Card, SearchableSelect, Select, Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, DateInput
 } from '@/components/ui'
@@ -54,16 +54,17 @@ export const PartyLedgerPage: React.FC = () => {
     queryKey: ['party_ledger', partyId, fromDate, toDate],
     queryFn: async () => {
       if (!partyId) return []
-      let q = supabase
-        .from('v_party_ledger')
-        .select('txn_date,txn_type,ref_no,narration,debit,credit,source_table')
-        .eq('party_id', partyId)
-        .order('txn_date', { ascending: true })
-      if (fromDate) q = q.gte('txn_date', fromDate)
-      if (toDate) q = q.lte('txn_date', toDate)
-      const { data, error } = await q
-      if (error) throw error
-      return (data ?? []) as LedgerRow[]
+      return fetchAllPages<LedgerRow>((from, to) => {
+        let q = supabase
+          .from('v_party_ledger')
+          .select('txn_date,txn_type,ref_no,narration,debit,credit,source_table')
+          .eq('party_id', partyId)
+          .order('txn_date', { ascending: true })
+          .range(from, to)
+        if (fromDate) q = q.gte('txn_date', fromDate)
+        if (toDate) q = q.lte('txn_date', toDate)
+        return q
+      }, 'Party Ledger', toast.error)
     },
     enabled: !!partyId,
   })
@@ -77,13 +78,13 @@ export const PartyLedgerPage: React.FC = () => {
     queryKey: ['party_ledger_prior_balance', partyId, fromDate],
     queryFn: async () => {
       if (!partyId || !fromDate) return 0
-      const { data, error } = await supabase
+      const rows = await fetchAllPages<any>((from, to) => supabase
         .from('v_party_ledger')
         .select('debit,credit')
         .eq('party_id', partyId)
         .lt('txn_date', fromDate)
-      if (error) throw error
-      return (data ?? []).reduce((s, r: any) => s + (r.debit ?? 0) - (r.credit ?? 0), 0)
+        .range(from, to), 'Party Ledger (prior balance)', toast.error)
+      return rows.reduce((s, r: any) => s + (r.debit ?? 0) - (r.credit ?? 0), 0)
     },
     enabled: !!partyId && !!fromDate,
   })

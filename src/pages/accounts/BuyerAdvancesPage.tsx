@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, inr, today, exportCSV } from '@/lib/utils'
+import { fmtDate, inr, today, exportCSV, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Input, Select, SearchableSelect, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, DateInput
@@ -63,15 +63,15 @@ export const BuyerAdvancesPage: React.FC = () => {
 
   const { data: advances = [], isLoading } = useQuery({
     queryKey: ['party_advances', filterParty],
-    queryFn: async () => {
+    queryFn: () => fetchAllPages<any>((from, to) => {
       let q = supabase
         .from('party_advances')
         .select('id,advance_date,party_id,amount,amount_used,payment_mode,reference_no,remarks,parties(name)')
         .order('advance_date', { ascending: false })
+        .range(from, to)
       if (filterParty) q = q.eq('party_id', filterParty)
-      const { data } = await q
-      return data ?? []
-    }
+      return q
+    }, 'Buyer Advances', toast.error)
   })
 
   const { data: bankAccounts = [] } = useQuery({

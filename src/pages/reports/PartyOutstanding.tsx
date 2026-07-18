@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate } from '@/lib/utils'
+import { inr, fmtDate, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge
 , DateInput, SearchableSelect } from '@/components/ui'
@@ -66,37 +66,33 @@ const DebtorsTab: React.FC = () => {
 
   const { data: heData, isLoading: heLoading } = useQuery({
     queryKey: ['he_dispatch_all', dateFrom, dateTo, flockFilter],
-    queryFn: async () => {
+    queryFn: () => fetchAllPages<any>((from, to) => {
       let q = supabase.from('he_dispatch')
         .select('id,dispatch_date,invoice_no,dc_no,amount,total_dispatched,free_eggs,party_id,flock_id,parties(name),flocks(flock_no),amount_received,payment_status,payment_mode,bank_account_id,received_date,utr_ref')
         .gt('amount', 0)
         .order('dispatch_date', { ascending: false })
+        .range(from, to)
       if (dateFrom) q = q.gte('dispatch_date', dateFrom)
       if (dateTo)   q = q.lte('dispatch_date', dateTo)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
-      // Descending order + a low limit silently truncated the OLDEST unpaid
-      // sales — exactly what a receivables report must show
-      const { data } = await q.limit(10000)
-      if ((data ?? []).length === 10000) toast.error('HE dispatch results truncated at 10,000 rows — totals may be understated')
-      return data ?? []
-    }
+      return q
+    }, 'HE Dispatch', toast.error)
   })
 
   const { data: nheData, isLoading: nheLoading } = useQuery({
     queryKey: ['nhe_sales_all', dateFrom, dateTo, flockFilter],
-    queryFn: async () => {
+    queryFn: () => fetchAllPages<any>((from, to) => {
       let q = supabase.from('nhe_sales')
         .select('id,sale_date,sale_type,amount,qty,party_id,flock_id,parties(name),flocks(flock_no),amount_received,payment_status,payment_mode,bank_account_id,received_date,utr_ref')
         .gt('amount', 0)
         .in('sale_type', ['je','te','be'])
         .order('sale_date', { ascending: false })
+        .range(from, to)
       if (dateFrom) q = q.gte('sale_date', dateFrom)
       if (dateTo)   q = q.lte('sale_date', dateTo)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
-      const { data } = await q.limit(10000)
-      if ((data ?? []).length === 10000) toast.error('NHE sales results truncated at 10,000 rows — totals may be understated')
-      return data ?? []
-    }
+      return q
+    }, 'NHE Sales', toast.error)
   })
 
   const refetchAll = () => {

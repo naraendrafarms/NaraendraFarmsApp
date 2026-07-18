@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, inr } from '@/lib/utils'
-import { today, FY_OPTIONS, currentFY, fyRange } from '@/lib/utils'
+import { today, FY_OPTIONS, currentFY, fyRange, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard
@@ -201,21 +201,20 @@ export const CashBookPage: React.FC = () => {
 
   const { data: txns, isLoading } = useQuery({
     queryKey: ['cash_book', filterFrom, filterTo, filterLocation, filterFlock],
-    queryFn: async () => {
+    queryFn: () => fetchAllPages((from, to) => {
       let q = supabase
         .from('cash_book')
         .select('*, farms(name,code), flocks(flock_no)')
         .order('txn_date', { ascending: true })
         .order('created_at', { ascending: true })
-        .limit(2000)
+        .range(from, to)
       if (filterFrom) q = q.gte('txn_date', filterFrom)
       if (filterTo)   q = q.lte('txn_date', filterTo)
       if (filterLocation === 'ho') q = q.is('farm_id', null)
       else if (filterLocation) q = q.eq('farm_id', filterLocation)
       if (filterFlock) q = q.eq('flock_id', filterFlock)
-      const { data } = await q
-      return data ?? []
-    }
+      return q
+    }, 'Cash Book', toast.error)
   })
 
   // Net movement between FY start and the From-date, so the running balance is
@@ -225,17 +224,19 @@ export const CashBookPage: React.FC = () => {
     queryKey: ['cash_book_prenet', fy, filterFrom, filterLocation, filterFlock],
     enabled: !!filterFrom && filterFrom > fyStart,
     queryFn: async () => {
-      let q = supabase
-        .from('cash_book')
-        .select('amount_in,amount_out')
-        .gte('txn_date', fyStart)
-        .lt('txn_date', filterFrom)
-        .limit(10000)
-      if (filterLocation === 'ho') q = q.is('farm_id', null)
-      else if (filterLocation) q = q.eq('farm_id', filterLocation)
-      if (filterFlock) q = q.eq('flock_id', filterFlock)
-      const { data } = await q
-      return (data ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
+      const rows = await fetchAllPages<any>((from, to) => {
+        let q = supabase
+          .from('cash_book')
+          .select('amount_in,amount_out')
+          .gte('txn_date', fyStart)
+          .lt('txn_date', filterFrom)
+          .range(from, to)
+        if (filterLocation === 'ho') q = q.is('farm_id', null)
+        else if (filterLocation) q = q.eq('farm_id', filterLocation)
+        if (filterFlock) q = q.eq('flock_id', filterFlock)
+        return q
+      }, 'Cash Book (opening balance)', toast.error)
+      return rows.reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
     }
   })
 

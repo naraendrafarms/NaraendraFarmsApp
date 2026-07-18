@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, currentFY, exportCSV, fmtDate } from '@/lib/utils'
+import { inr, currentFY, exportCSV, fmtDate, fetchAllPages } from '@/lib/utils'
 import { Card, CardHeader, Button, Input, Select, Table, Th, Td, Spinner, EmptyState, DateInput, Badge } from '@/components/ui'
 import { Plus, Trash2, Save, Wallet, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -29,12 +29,9 @@ export const OpeningBalancesPage: React.FC = () => {
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['opening_balances', fy],
-    queryFn: async () => {
-      const { data } = await supabase.from('opening_balances')
-        .select('id,fy,as_of_date,party_id,partner_id,amount,dr_cr,remarks,parties(name),partners(name)')
-        .eq('fy', fy).order('as_of_date')
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('opening_balances')
+      .select('id,fy,as_of_date,party_id,partner_id,amount,dr_cr,remarks,parties(name),partners(name)')
+      .eq('fy', fy).order('as_of_date').range(from, to), 'Opening Balances', toast.error)
   })
 
   const inv = () => {

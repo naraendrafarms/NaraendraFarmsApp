@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { today } from '@/lib/utils'
+import { today, fetchAllPages } from '@/lib/utils'
 import {
   Card, SectionHeader, Spinner, Badge, Select, DateInput, SearchableSelect
 } from '@/components/ui'
@@ -89,14 +89,11 @@ export const PendingPaymentsPage: React.FC = () => {
 
   const { data: records, isLoading } = useQuery({
     queryKey: ['pending_payments_page'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('pending_payments')
-        .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id,is_opening,advance_adjusted,vendor_advance_id')
-        .order('grn_date', { ascending: false })
-      if (error) throw error
-      return (data ?? []) as PayRecord[]
-    }
+    queryFn: () => fetchAllPages<PayRecord>((from, to) => supabase
+      .from('pending_payments')
+      .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id,is_opening,advance_adjusted,vendor_advance_id')
+      .order('grn_date', { ascending: false })
+      .range(from, to), 'Pending Payments', toast.error)
   })
 
   const { data: bankAccounts } = useQuery({

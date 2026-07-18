@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr } from '@/lib/utils'
+import { inr, fetchAllPages } from '@/lib/utils'
 import { useFeedRates } from '@/hooks/useFeedRates'
 import { Card, CardHeader, Button, Select, Spinner } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import toast from 'react-hot-toast'
 
 const FY_OPTIONS = [
   { value: '2024-25', label: 'FY 2024-25' },
@@ -45,18 +46,12 @@ export const FlockPLSummary: React.FC = () => {
 
   const { data: heDispatch } = useQuery({
     queryKey: ['pl_summary_he_dispatch'],
-    queryFn: async () => {
-      const { data } = await supabase.from('he_dispatch').select('flock_id,amount')
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('he_dispatch').select('flock_id,amount').range(from, to), 'HE Dispatch', toast.error)
   })
 
   const { data: nheSales } = useQuery({
     queryKey: ['pl_summary_nhe_sales'],
-    queryFn: async () => {
-      const { data } = await supabase.from('nhe_sales').select('flock_id,amount,sale_type')
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('nhe_sales').select('flock_id,amount,sale_type').range(from, to), 'NHE Sales', toast.error)
   })
 
   // Feed read from daily_records (authoritative) and costed with recipe rates — same as
@@ -64,27 +59,18 @@ export const FlockPLSummary: React.FC = () => {
   const feedRates = useFeedRates()
   const { data: dailyFeed } = useQuery({
     queryKey: ['pl_summary_daily_records_feed'],
-    queryFn: async () => {
-      const { data } = await supabase.from('daily_records')
-        .select('flock_id,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,total_eggs')
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('daily_records')
+      .select('flock_id,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,total_eggs').range(from, to), 'Daily Records', toast.error)
   })
 
   const { data: medicineUsage } = useQuery({
     queryKey: ['pl_summary_medicine_usage'],
-    queryFn: async () => {
-      const { data } = await supabase.from('medicine_usage').select('flock_id,amount')
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('medicine_usage').select('flock_id,amount').range(from, to), 'Medicine Usage', toast.error)
   })
 
   const { data: electricityAlloc } = useQuery({
     queryKey: ['pl_summary_electricity_allocation'],
-    queryFn: async () => {
-      const { data } = await supabase.from('electricity_allocation').select('flock_id,amount')
-      return data ?? []
-    }
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('electricity_allocation').select('flock_id,amount').range(from, to), 'Electricity Allocation', toast.error)
   })
 
   const isLoading = flocksLoading || !heDispatch || !nheSales || !dailyFeed || !medicineUsage || !electricityAlloc

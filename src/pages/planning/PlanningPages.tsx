@@ -5,7 +5,7 @@ import {
   Card, Button, Input, Select, FormRow, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard, DateInput, MultiSelect
 } from '@/components/ui'
-import { inr, daysBetween, today as todayIST } from '@/lib/utils'
+import { inr, daysBetween, today as todayIST, fetchAllPages } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { Plus, Save, Trash2 } from 'lucide-react'
 
@@ -22,26 +22,6 @@ async function fetchPlans(planType: 'flock_projection' | 'quarterly_budget') {
 async function fetchPlanLines(planId: string) {
   const { data } = await supabase.from('plan_lines').select('*').eq('plan_id', planId).order('period_label')
   return data ?? []
-}
-
-// PostgREST caps a single response at its server-side "max rows" setting
-// (1000 by default) regardless of a client .limit() — a client limit only
-// sets the requested range, so it does NOT reliably raise that cap. Page
-// through with .range() until a short page comes back, so a full financial
-// year's transactions can never silently truncate.
-const PAGE_SIZE = 1000
-async function fetchAllPages<T>(buildPage: (from: number, to: number) => any, errLabel: string): Promise<T[]> {
-  const all: T[] = []
-  let from = 0
-  for (;;) {
-    const { data, error } = await buildPage(from, from + PAGE_SIZE - 1)
-    if (error) { toast.error(`${errLabel}: ${error.message}`); break }
-    const page = (data ?? []) as T[]
-    all.push(...page)
-    if (page.length < PAGE_SIZE) break
-    from += PAGE_SIZE
-  }
-  return all
 }
 
 // ── Flock Cost Projection ────────────────────────────────────────────────────
@@ -712,14 +692,14 @@ const CAStatementTab: React.FC = () => {
     queryKey: ['ca_nhe_sales', periodStart, periodEnd],
     queryFn: () => fetchAllPages(
       (from, to) => supabase.from('nhe_sales').select('sale_type,amount,sale_date').gte('sale_date', periodStart).lte('sale_date', periodEnd).range(from, to),
-      'NHE Sales'
+      'NHE Sales', toast.error
     )
   })
   const { data: heDispatch } = useQuery({
     queryKey: ['ca_he_dispatch', periodStart, periodEnd],
     queryFn: () => fetchAllPages(
       (from, to) => supabase.from('he_dispatch').select('amount,invoice_eggs,dispatch_date').gte('dispatch_date', periodStart).lte('dispatch_date', periodEnd).range(from, to),
-      'HE Dispatch'
+      'HE Dispatch', toast.error
     )
   })
   // Egg quantity/value per sale_type comes from nhe_sale_lines (not the
@@ -734,7 +714,7 @@ const CAStatementTab: React.FC = () => {
     queryFn: () => fetchAllPages(
       (from, to) => supabase.from('nhe_sale_lines').select('sale_type,quantity,amount,nhe_sales!inner(sale_date)').in('sale_type', EGG_SALE_TYPES)
         .gte('nhe_sales.sale_date', periodStart).lte('nhe_sales.sale_date', periodEnd).range(from, to),
-      'NHE egg pricing lookup'
+      'NHE egg pricing lookup', toast.error
     )
   })
   // cash_book category no longer used for Product Sales/Other Income
@@ -745,14 +725,14 @@ const CAStatementTab: React.FC = () => {
     queryFn: () => fetchAllPages(
       (from, to) => supabase.from('cash_book').select('amount_in,nhe_sale_id,he_dispatch_id').eq('category', 'other')
         .is('nhe_sale_id', null).is('he_dispatch_id', null).gte('txn_date', periodStart).lte('txn_date', periodEnd).range(from, to),
-      'Cash Book (other income)'
+      'Cash Book (other income)', toast.error
     )
   })
   const { data: electricityBills } = useQuery({
     queryKey: ['ca_electricity', monthCutoffStart, monthCutoffEnd],
     queryFn: () => fetchAllPages(
       (from, to) => supabase.from('electricity_bills').select('amount,bill_month').gte('bill_month', monthCutoffStart).lte('bill_month', monthCutoffEnd).range(from, to),
-      'Electricity Bills'
+      'Electricity Bills', toast.error
     )
   })
   const { data: salaryRows } = useQuery({
@@ -762,14 +742,14 @@ const CAStatementTab: React.FC = () => {
       // override_account_emp_id added by migration 258) — PostgREST can't
       // pick one on its own, so the relationship must be named explicitly.
       (from, to) => supabase.from('salary_monthly').select('earned_salary,ot_bonus,arrears,month,employees!employee_id(designation)').gte('month', monthCutoffStart).lte('month', monthCutoffEnd).range(from, to),
-      'Salary'
+      'Salary', toast.error
     )
   })
   const { data: eggProduction } = useQuery({
     queryKey: ['ca_production_qty', periodStart, periodEnd],
     queryFn: () => fetchAllPages(
       (from, to) => supabase.from('daily_records').select('total_eggs').gte('record_date', periodStart).lte('record_date', periodEnd).range(from, to),
-      'Daily Records'
+      'Daily Records', toast.error
     )
   })
   // v_party_ledger is a VIEW — it carries no real foreign-key constraint to
@@ -780,14 +760,14 @@ const CAStatementTab: React.FC = () => {
     queryKey: ['ca_party_ledger', periodEnd],
     queryFn: () => fetchAllPages(
       (from, to) => supabase.from('v_party_ledger').select('party_id,debit,credit').lte('txn_date', periodEnd).range(from, to),
-      'Party Ledger'
+      'Party Ledger', toast.error
     )
   })
   const { data: partyTypes } = useQuery({
     queryKey: ['ca_party_types'],
     queryFn: () => fetchAllPages(
       (from, to) => supabase.from('parties').select('id,type').range(from, to),
-      'Parties'
+      'Parties', toast.error
     )
   })
   const partyBalances = useMemo(() => {
@@ -798,8 +778,8 @@ const CAStatementTab: React.FC = () => {
     queryKey: ['ca_cash_bank_balance', periodEnd],
     queryFn: async () => {
       const [cb, bt] = await Promise.all([
-        fetchAllPages<any>((from, to) => supabase.from('cash_book').select('amount_in,amount_out').lte('txn_date', periodEnd).range(from, to), 'Cash Book balance'),
-        fetchAllPages<any>((from, to) => supabase.from('bank_transactions').select('txn_type,amount').lte('txn_date', periodEnd).range(from, to), 'Bank Ledger balance'),
+        fetchAllPages<any>((from, to) => supabase.from('cash_book').select('amount_in,amount_out').lte('txn_date', periodEnd).range(from, to), 'Cash Book balance', toast.error),
+        fetchAllPages<any>((from, to) => supabase.from('bank_transactions').select('txn_type,amount').lte('txn_date', periodEnd).range(from, to), 'Bank Ledger balance', toast.error),
       ])
       const cashBal = cb.reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
       const bankBal = bt.reduce((s: number, t: any) => s + (t.txn_type === 'Credit' ? (t.amount ?? 0) : -(t.amount ?? 0)), 0)
