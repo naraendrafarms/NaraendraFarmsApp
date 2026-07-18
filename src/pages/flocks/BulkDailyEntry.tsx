@@ -83,9 +83,13 @@ export const BulkDailyEntry: React.FC = () => {
   // Flock-level grade breakdown (shed mode only) — he_grade_a/b/c + existing row id
   const [gradeRow, setGradeRow] = useState({ he_grade_a: '', he_grade_b: '', he_grade_c: '', existingId: null as string | null })
   // Flock-level medicine (shed mode only) — medicine_usage has no shed_id
-  // column, so one medicine entry applies to the whole flock for the day,
-  // same as the grade breakdown above. Per-shed medicine is a future request.
-  const [medRow, setMedRow] = useState({ med_id: '', med_qty: '', existingMedId: null as string | null })
+  // column, so entries apply to the whole flock for the day, same as the
+  // grade breakdown above. Per-shed medicine is a future request.
+  // A list, not a single row, since more than one medicine can be given the
+  // same day (e.g. a vaccine + a supplement) — each becomes its own
+  // medicine_usage row.
+  type MedEntry = { key: string; med_id: string; med_qty: string; existingMedId: string | null }
+  const [medRows, setMedRows] = useState<MedEntry[]>([{ key: 'm0', med_id: '', med_qty: '', existingMedId: null }])
   const [showWastage, setShowWastage] = useState(false)
 
   // ── Master data ──────────────────────────────────────────────────────────────
@@ -330,17 +334,20 @@ export const BulkDailyEntry: React.FC = () => {
     })
   }, [existingDR, selectedFlock])
 
-  // Init flock-level medicine row — medicine_usage has no shed_id, so this
-  // just takes whatever's on record for this flock+day (first match).
+  // Init flock-level medicine rows — medicine_usage has no shed_id, so every
+  // row on record for this flock+day is its own entry in the list.
   useEffect(() => {
     if (!selectedFlock) return
-    const mu = (existingMed ?? []).find((r: any) => r.flock_id === selectedFlock)
-    setMedRow({
-      med_id: mu?.medicine_id ?? '',
-      med_qty: mu?.quantity?.toString() ?? '',
-      existingMedId: mu?.id ?? null,
-    })
+    const rows = (existingMed ?? []).filter((r: any) => r.flock_id === selectedFlock)
+    setMedRows(rows.length
+      ? rows.map((mu: any, i: number) => ({ key: `m${i}`, med_id: mu.medicine_id, med_qty: mu.quantity?.toString() ?? '', existingMedId: mu.id }))
+      : [{ key: 'm0', med_id: '', med_qty: '', existingMedId: null }])
   }, [existingMed, selectedFlock])
+
+  const addMedRow = () => setMedRows(rows => [...rows, { key: `m${Date.now()}`, med_id: '', med_qty: '', existingMedId: null }])
+  const removeMedRow = (key: string) => setMedRows(rows => rows.filter(r => r.key !== key))
+  const updateMedRow = (key: string, field: 'med_id' | 'med_qty', val: string) =>
+    setMedRows(rows => rows.map(r => r.key === key ? { ...r, [field]: val } : r))
 
   const updateFlockRow = (id: string, field: keyof FlockRow, val: string) =>
     setFlockRows(p => ({ ...p, [id]: { ...p[id], [field]: val } }))
@@ -427,18 +434,21 @@ export const BulkDailyEntry: React.FC = () => {
     }
     // Medicine — flock-level (medicine_usage has no shed_id column; per your
     // call, medicine applies to the whole flock for now, not per shed), saved
-    // once here instead of once per shed.
-    if (medRow.med_id && medRow.med_qty) {
-      const medPayload = { flock_id: selectedFlock, usage_date: date, medicine_id: medRow.med_id, quantity: parseFloat(medRow.med_qty) || 0, unit: 'ml' }
-      const { error: me } = medRow.existingMedId
-        ? await supabase.from('medicine_usage').update(medPayload).eq('id', medRow.existingMedId)
-        : await supabase.from('medicine_usage').insert(medPayload)
-      if (me) { console.error(me); errors++; toast.error('Medicine: ' + me.message) } else saved++
-    } else if (medRow.existingMedId) {
-      // Medicine cleared on a row that had one — delete the stale usage row
-      // instead of leaving it in the database forever
-      const { error: me } = await supabase.from('medicine_usage').delete().eq('id', medRow.existingMedId)
-      if (me) { console.error(me); errors++; toast.error('Medicine delete: ' + me.message) }
+    // once here instead of once per shed. Multiple rows are allowed (e.g. a
+    // vaccine + a supplement on the same day) — each is its own usage row.
+    for (const m of medRows) {
+      if (m.med_id && m.med_qty) {
+        const medPayload = { flock_id: selectedFlock, usage_date: date, medicine_id: m.med_id, quantity: parseFloat(m.med_qty) || 0, unit: 'ml' }
+        const { error: me } = m.existingMedId
+          ? await supabase.from('medicine_usage').update(medPayload).eq('id', m.existingMedId)
+          : await supabase.from('medicine_usage').insert(medPayload)
+        if (me) { console.error(me); errors++; toast.error('Medicine: ' + me.message) } else saved++
+      } else if (m.existingMedId) {
+        // Medicine cleared on a row that had one — delete the stale usage row
+        // instead of leaving it in the database forever
+        const { error: me } = await supabase.from('medicine_usage').delete().eq('id', m.existingMedId)
+        if (me) { console.error(me); errors++; toast.error('Medicine delete: ' + me.message) }
+      }
     }
     // Write the combined per-type feed total for the whole flock/day, once
     // per feed type, now that every shed's contribution has been summed.
@@ -689,9 +699,11 @@ export const BulkDailyEntry: React.FC = () => {
         // Flock-level grade on first row only
         'Grade A': i === 0 ? gradeRow.he_grade_a : '', 'Grade B': i === 0 ? gradeRow.he_grade_b : '', 'Grade C': i === 0 ? gradeRow.he_grade_c : '',
         'Lighting Hrs': r.lighting_hrs,
-        // Flock-level medicine on first row only (medicine_usage has no shed_id)
-        Medicine: i === 0 && medRow.med_id ? (medIdToName[medRow.med_id] ?? '') : '',
-        'Med Qty': i === 0 ? medRow.med_qty : '', Remarks: r.remarks,
+        // Flock-level medicine on first row only (medicine_usage has no shed_id).
+        // Multiple medicines are semicolon-separated, in the same order, so a
+        // matching "name:qty" pair lines up positionally.
+        Medicine: i === 0 ? medRows.filter(m => m.med_id).map(m => medIdToName[m.med_id] ?? '').join('; ') : '',
+        'Med Qty': i === 0 ? medRows.filter(m => m.med_id).map(m => m.med_qty).join('; ') : '', Remarks: r.remarks,
       }
     })
     const ws = XLSX.utils.json_to_sheet(data, { header: SHED_HEADERS })
@@ -725,15 +737,24 @@ export const BulkDailyEntry: React.FC = () => {
         if (a || b || c) { gA = a || gA; gB = b || gB; gC = c || gC }
       }
       if (gA || gB || gC) setGradeRow(g => ({ ...g, he_grade_a: gA || g.he_grade_a, he_grade_b: gB || g.he_grade_b, he_grade_c: gC || g.he_grade_c }))
-      // Flock-level medicine: take from whichever row has a value (medicine_usage has no shed_id)
-      let medName = '', medQty = ''
+      // Flock-level medicine: take from whichever row has a value (medicine_usage
+      // has no shed_id). Semicolon-separated names/qtys become multiple rows.
+      let medNamesRaw = '', medQtysRaw = ''
       for (const row of (rows as any[])) {
         const m = gv(ci.med, row), q = gv(ci.mq, row)
-        if (m || q) { medName = m || medName; medQty = q || medQty }
+        if (m || q) { medNamesRaw = m || medNamesRaw; medQtysRaw = q || medQtysRaw }
       }
-      if (medName || medQty) {
-        const mid = medName && medNameToId[medName.toLowerCase()] ? medNameToId[medName.toLowerCase()] : undefined
-        setMedRow(m => ({ ...m, med_id: mid ?? m.med_id, med_qty: medQty || m.med_qty }))
+      if (medNamesRaw || medQtysRaw) {
+        const names = medNamesRaw.split(';').map(s => s.trim())
+        const qtys = medQtysRaw.split(';').map(s => s.trim())
+        const n = Math.max(names.length, qtys.length)
+        const imported: MedEntry[] = []
+        for (let i = 0; i < n; i++) {
+          const name = names[i] ?? ''
+          const mid = name && medNameToId[name.toLowerCase()] ? medNameToId[name.toLowerCase()] : ''
+          if (mid || qtys[i]) imported.push({ key: `mi${i}`, med_id: mid, med_qty: qtys[i] ?? '', existingMedId: null })
+        }
+        if (imported.length) setMedRows(imported)
       }
       setShedRows(prev => {
         const next = { ...prev }
@@ -1047,13 +1068,27 @@ export const BulkDailyEntry: React.FC = () => {
               {/* ── Flock-level medicine (medicine_usage has no shed_id — applies to the whole flock) ── */}
               <div className="px-4 py-3 border-t border-gray-100 bg-amber-50/40">
                 <p className="text-xs font-semibold text-amber-800 mb-2">Medicine (flock-level — applies to all sheds)</p>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="w-56">
-                    <SearchableSelect value={medRow.med_id} onChange={(v) => setMedRow(m => ({ ...m, med_id: v }))} options={medOptions} placeholder="Search medicine…" />
-                  </div>
-                  <input type="number" min="0" value={medRow.med_qty} placeholder="qty" disabled={!medRow.med_id}
-                    onChange={e => setMedRow(m => ({ ...m, med_qty: e.target.value }))}
-                    className="w-24 text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
+                <div className="space-y-2">
+                  {medRows.map((m, i) => (
+                    <div key={m.key} className="flex items-center gap-3 flex-wrap">
+                      <div className="w-56">
+                        <SearchableSelect value={m.med_id} onChange={(v) => updateMedRow(m.key, 'med_id', v)} options={medOptions} placeholder="Search medicine…" />
+                      </div>
+                      <input type="number" min="0" value={m.med_qty} placeholder="qty" disabled={!m.med_id}
+                        onChange={e => updateMedRow(m.key, 'med_qty', e.target.value)}
+                        className="w-24 text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
+                      {medRows.length > 1 && (
+                        <button type="button" onClick={() => removeMedRow(m.key)}
+                          className="text-xs text-red-500 hover:text-red-700 px-1" title="Remove">✕</button>
+                      )}
+                      {i === medRows.length - 1 && (
+                        <button type="button" onClick={addMedRow}
+                          className="text-xs text-brand-600 hover:text-brand-800 font-medium px-2 py-1 rounded border border-brand-200 hover:bg-brand-50">
+                          + Add another
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             </Card>
