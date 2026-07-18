@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, currentFY, exportCSV, fmtDate, fetchAllPages } from '@/lib/utils'
-import { Card, CardHeader, Button, Input, Select, Table, Th, Td, Spinner, EmptyState, DateInput, Badge } from '@/components/ui'
+import { Card, CardHeader, Button, Input, Select, Table, Th, Td, Spinner, EmptyState, DateInput, Badge, usePagination, PageSizeControl } from '@/components/ui'
 import { Plus, Trash2, Save, Wallet, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -17,6 +17,7 @@ export const OpeningBalancesPage: React.FC = () => {
   const [amount, setAmount] = useState('')
   const [drcr, setDrcr] = useState<'Dr' | 'Cr'>('Dr')
   const [remarks, setRemarks] = useState('')
+  const [search, setSearch] = useState('')
 
   const { data: parties = [] } = useQuery({
     queryKey: ['parties_all_ob'],
@@ -160,13 +161,20 @@ export const OpeningBalancesPage: React.FC = () => {
     ? (parties as any[]).map((p: any) => ({ value: p.id, label: `${p.name}${p.type ? ` (${p.type})` : ''}` }))
     : (partners as any[]).map((p: any) => ({ value: p.id, label: p.name }))
 
+  const q = search.trim().toLowerCase()
+  const filtered = q
+    ? (rows as any[]).filter(r => `${r.parties?.name ?? ''} ${r.partners?.name ?? ''} ${r.remarks ?? ''}`.toLowerCase().includes(q))
+    : (rows as any[])
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
+  const visibleRows = filtered.slice(from, to)
+
   return (
     <div className="p-4 space-y-4 max-w-5xl mx-auto">
       <CardHeader title="Opening Balances" subtitle="Enter financial-year opening dues for suppliers, buyers & partners — shows as the opening row in Party Ledger"
         action={<Button variant="outline" icon={<Download size={14}/>} onClick={() => exportCSV(
           `opening_balances_${fy}.csv`,
           ['FY','As Of','Party/Partner','Amount','Dr/Cr','Remarks'],
-          (rows as any[]).map(r => [r.fy, r.as_of_date ? fmtDate(r.as_of_date) : '', r.parties?.name ?? r.partners?.name ?? '', r.amount ?? 0, r.dr_cr ?? '', r.remarks ?? ''])
+          filtered.map(r => [r.fy, r.as_of_date ? fmtDate(r.as_of_date) : '', r.parties?.name ?? r.partners?.name ?? '', r.amount ?? 0, r.dr_cr ?? '', r.remarks ?? ''])
         )}>Export Excel</Button>} />
 
       <Card className="p-3 flex flex-wrap gap-3 items-end">
@@ -175,6 +183,11 @@ export const OpeningBalancesPage: React.FC = () => {
           <Select value={fy} onChange={e => setFy(e.target.value)} options={FY_OPTIONS.map(f => ({ value: f, label: `FY ${f}` }))} />
         </div>
         <div className="text-xs text-gray-400">Opening dated <strong>{fyStartDate(fy)}</strong></div>
+        <div className="ml-auto">
+          <label className="block text-xs text-gray-500 mb-1">Search</label>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Name or remarks…"
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-56 focus:outline-none focus:ring-1 focus:ring-brand-400" />
+        </div>
       </Card>
 
       {/* Add form */}
@@ -209,13 +222,15 @@ export const OpeningBalancesPage: React.FC = () => {
       <Card padding={false}>
         {isLoading ? <Spinner /> : !rows.length ? (
           <EmptyState icon={<Wallet size={32} />} title={`No opening balances for FY ${fy}`} subtitle="Add them above" />
+        ) : filtered.length === 0 ? (
+          <EmptyState icon={<Wallet size={32} />} title="No opening balances match your search" />
         ) : (
           <Table>
             <thead><tr>
               <Th>Date</Th><Th>Name</Th><Th>Kind</Th><Th right>Amount</Th><Th>Type</Th><Th>Remarks</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {(rows as any[]).map((r: any) => (
+              {visibleRows.map((r: any) => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <Td className="text-xs">{r.as_of_date}</Td>
                   <Td className="font-medium">{r.parties?.name ?? r.partners?.name ?? '—'}</Td>
@@ -232,6 +247,8 @@ export const OpeningBalancesPage: React.FC = () => {
             </tbody>
           </Table>
         )}
+        <PageSizeControl page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize}
+          totalPages={totalPages} totalItems={filtered.length} className="border-t border-gray-100" />
       </Card>
 
       <div className="text-xs text-gray-400 px-1 space-y-1">
