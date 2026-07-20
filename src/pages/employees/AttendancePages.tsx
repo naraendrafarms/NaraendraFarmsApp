@@ -1183,8 +1183,13 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
         .upsert(salaryRows, { onConflict: 'employee_id,month', ignoreDuplicates: false })
       if (salErr) throw salErr
 
+      // Clear dirty tracking BEFORE refetching — the merge effect keys off
+      // dirtyKeys at the moment the refetch's data lands, so clearing after
+      // await refetchAtt() left the just-saved cells marked dirty and the
+      // merge skipped them, showing stale values even though the save
+      // succeeded (confirmed correct in DB / other pages the whole time).
+      setDirtyKeys(new Set())
       await refetchAtt()
-      setDirtyKeys(new Set())  // just-saved cells now match the server — safe to merge on future refetches
       qc.invalidateQueries({ queryKey: ['bulk_salary'] })
       qc.invalidateQueries({ queryKey: ['bulk_daily_att'] })
       qc.invalidateQueries({ queryKey: ['attendance_day'] })
