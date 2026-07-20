@@ -55,14 +55,48 @@ function exportCSV(filename: string, headers: string[], rows: string[][]) {
   a.click()
 }
 
-const emptyForm = () => ({
+// ── Bill-level (header) fields — shared across every item line in one GRN
+// bill. Everything item-specific (qty, rate, category, batch...) lives on
+// ItemLine below, so a single Add GRN submit can save several line items
+// under the same GRN No/date/farm/supplier in one go.
+const emptyHeader = () => ({
   grn_no: '', grn_date: today(), farm_id: '', party_id: '',
-  invoice_no: '', invoice_date: today(), category: 'Feed Ingredient',
-  item_id: '', item_name: '', flock_id: '', po_id: '',
-  qty: '', unit: '', bags: '', bag_type: '', price_per_unit: '',
-  basic_amount: '', gst_pct: '0', gst_amount: '', other_charges: '', total_amount: '',
-  free_qty: '', batch_no: '', expiry_date: '', vehicle_no: '', remarks: ''
+  invoice_no: '', invoice_date: today(), vehicle_no: '',
 })
+
+type ItemLine = {
+  po_id: string; category: string; item_id: string; item_name: string
+  qty: string; unit: string; bags: string; bag_type: string
+  price_per_unit: string; gst_pct: string; other_charges: string
+  basic_amount: string; gst_amount: string; total_amount: string
+  free_qty: string; batch_no: string; expiry_date: string; flock_id: string
+  remarks: string; itemSearch: string
+  // Which of basic/gst/total amounts the user typed by hand this session —
+  // those stick; everything else keeps following the live qty×rate calc.
+  manualAmountFields: Set<string>
+}
+
+const emptyLine = (): ItemLine => ({
+  po_id: '', category: 'Feed Ingredient', item_id: '', item_name: '',
+  qty: '', unit: '', bags: '', bag_type: '',
+  price_per_unit: '', gst_pct: '0', other_charges: '',
+  basic_amount: '', gst_amount: '', total_amount: '',
+  free_qty: '', batch_no: '', expiry_date: '', flock_id: '',
+  remarks: '', itemSearch: '', manualAmountFields: new Set(),
+})
+
+function lineCalc(line: ItemLine) {
+  const basicCalc = (parseFloat(line.qty) || 0) * (parseFloat(line.price_per_unit) || 0)
+  const gstCalc = basicCalc * (parseFloat(line.gst_pct) || 0) / 100
+  const otherCharges = parseFloat(line.other_charges) || 0
+  const totalCalc = basicCalc + gstCalc + otherCharges
+  const landedRate = (parseFloat(line.qty) || 0) > 0
+    ? (parseFloat(line.price_per_unit) || 0) + otherCharges / (parseFloat(line.qty) || 1)
+    : (parseFloat(line.price_per_unit) || 0)
+  const isChick = line.category === 'Chicks'
+  const needsBatch = BATCH_CATS.has(line.category)
+  return { basicCalc, gstCalc, otherCharges, totalCalc, landedRate, isChick, needsBatch }
+}
 
 export const GRNPage: React.FC = () => {
   const qc = useQueryClient()
@@ -86,38 +120,25 @@ export const GRNPage: React.FC = () => {
   const [bulkDelConfirm, setBulkDelConfirm] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
 
-  const [form, setForm] = useState(emptyForm())
-  const [itemSearch, setItemSearch] = useState('')
-  // Basic/GST/Total Amount auto-calculate from qty/rate/gst/other charges —
-  // but typing a different figure directly into one of them (rounding, a
-  // vendor invoice total that doesn't exactly match, etc.) used to be
-  // silently discarded in favor of the live calc on save. Track which of
-  // these three the user has actually touched by hand; only those stay at
-  // the typed value, everything else keeps following the live calc. Editing
-  // any of the calc INPUTS (qty/rate/gst/other charges) resets this, since
-  // that signals "recompute everything" rather than "keep my manual figure."
-  const [manualAmountFields, setManualAmountFields] = useState<Set<string>>(new Set())
+  const [header, setHeader] = useState(emptyHeader())
+  const [lines, setLines] = useState<ItemLine[]>([emptyLine()])
 
-  const s = (k: string, v: string) => {
-    if (['qty', 'price_per_unit', 'gst_pct', 'other_charges'].includes(k)) setManualAmountFields(new Set())
-    setForm(f => ({ ...f, [k]: v }))
+  const hs = (k: string, v: string) => setHeader(h => ({ ...h, [k]: v }))
+
+  const updateLine = (idx: number, field: keyof ItemLine, val: string) => {
+    setLines(prev => prev.map((l, i) => {
+      if (i !== idx) return l
+      const next: ItemLine = { ...l, [field]: val } as any
+      if (['qty', 'price_per_unit', 'gst_pct', 'other_charges'].includes(field)) next.manualAmountFields = new Set()
+      return next
+    }))
   }
-  const setManualAmount = (k: 'basic_amount' | 'gst_amount' | 'total_amount', v: string) => {
-    setManualAmountFields(prev => new Set(prev).add(k))
-    setForm(f => ({ ...f, [k]: v }))
+  const setLineManualAmount = (idx: number, field: 'basic_amount' | 'gst_amount' | 'total_amount', val: string) => {
+    setLines(prev => prev.map((l, i) => i !== idx ? l : { ...l, [field]: val, manualAmountFields: new Set(l.manualAmountFields).add(field) }))
   }
-
-  const basicCalc = (parseFloat(form.qty) || 0) * (parseFloat(form.price_per_unit) || 0)
-  const gstCalc = basicCalc * (parseFloat(form.gst_pct) || 0) / 100
-  const otherCharges = parseFloat(form.other_charges) || 0
-  const totalCalc = basicCalc + gstCalc + otherCharges
-  // Landed rate/unit = material rate + transport per unit (what stock/production cost uses)
-  const landedRate = (parseFloat(form.qty) || 0) > 0
-    ? (parseFloat(form.price_per_unit) || 0) + otherCharges / (parseFloat(form.qty) || 1)
-    : (parseFloat(form.price_per_unit) || 0)
-
-  const isChick = form.category === 'Chicks'
-  const needsBatch = BATCH_CATS.has(form.category)
+  const setLinePatch = (idx: number, patch: Partial<ItemLine>) => setLines(prev => prev.map((l, i) => i !== idx ? l : { ...l, ...patch }))
+  const addLine = () => setLines(prev => [...prev, emptyLine()])
+  const removeLine = (idx: number) => setLines(prev => prev.filter((_, i) => i !== idx))
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -219,115 +240,117 @@ export const GRNPage: React.FC = () => {
     return m
   }, [itemAliasesGrn])
 
-  const filteredItems = useMemo(() => {
+  const filteredItemsFor = (line: ItemLine) => {
     if (!items) return []
+    const search = line.itemSearch.toLowerCase()
     return items.filter((i: any) => {
-      const catMatch = !form.category || i.category === form.category
-      const search = itemSearch.toLowerCase()
+      const catMatch = !line.category || i.category === line.category
       const haystack = `${i.name} ${i.code ?? ''} ${(itemAliasMapGrn[i.id] ?? []).join(' ')}`.toLowerCase()
       const nameMatch = !search || haystack.includes(search)
       return catMatch && nameMatch
     })
-  }, [items, form.category, itemSearch, itemAliasMapGrn])
+  }
 
   const openAdd = () => {
     setEditing(null)
-    setItemSearch('')
-    setManualAmountFields(new Set())
-    setForm(emptyForm())
+    setHeader(emptyHeader())
+    setLines([emptyLine()])
     setShowForm(true)
   }
 
-  const openEdit = (g: any) => {
-    setEditing(g)
-    setItemSearch('')
+  const lineFromRow = (g: any): ItemLine => ({
+    po_id: g.po_id ?? '', category: g.category ?? 'Feed Ingredient',
+    item_id: g.item_id ?? '', item_name: g.item_name ?? '',
+    qty: g.qty?.toString() ?? '', unit: g.unit ?? '', bags: g.bags?.toString() ?? '', bag_type: g.bag_type ?? '',
+    price_per_unit: g.price_per_unit?.toString() ?? '',
+    gst_pct: g.gst_pct?.toString() ?? '0', other_charges: g.other_charges?.toString() ?? '',
     // Editing an existing GRN: whatever amounts were actually saved are the
     // "manual" starting point (they may already differ from a fresh qty×rate
     // calc), so keep them as-is unless qty/rate/gst/other charges are
     // touched again in this edit session.
-    setManualAmountFields(new Set(['basic_amount', 'gst_amount', 'total_amount']))
-    setForm({
+    basic_amount: g.basic_amount?.toString() ?? '', gst_amount: g.gst_amount?.toString() ?? '',
+    total_amount: g.total_amount?.toString() ?? '',
+    free_qty: g.free_qty?.toString() ?? '', batch_no: g.batch_no ?? '', expiry_date: g.expiry_date ?? '',
+    flock_id: g.flock_id ?? '', remarks: g.remarks ?? '', itemSearch: '',
+    manualAmountFields: new Set(['basic_amount', 'gst_amount', 'total_amount']),
+  })
+
+  const openEdit = (g: any) => {
+    setEditing(g)
+    setHeader({
       grn_no: g.grn_no ?? '',
       grn_date: g.grn_date ?? today(),
       farm_id: g.farm_id ?? '',
       party_id: g.party_id ?? '',
       invoice_no: g.invoice_no ?? '',
       invoice_date: g.invoice_date ?? today(),
-      category: g.category ?? 'Feed Ingredient',
-      item_id: g.item_id ?? '',
-      item_name: g.item_name ?? '',
-      flock_id: g.flock_id ?? '',
-      po_id: g.po_id ?? '',
-      qty: g.qty?.toString() ?? '',
-      unit: g.unit ?? '',
-      bags: g.bags?.toString() ?? '',
-      bag_type: g.bag_type ?? '',
-      price_per_unit: g.price_per_unit?.toString() ?? '',
-      basic_amount: g.basic_amount?.toString() ?? '',
-      gst_pct: g.gst_pct?.toString() ?? '0',
-      gst_amount: g.gst_amount?.toString() ?? '',
-      other_charges: g.other_charges?.toString() ?? '',
-      free_qty: g.free_qty?.toString() ?? '',
-      total_amount: g.total_amount?.toString() ?? '',
-      batch_no: g.batch_no ?? '',
-      expiry_date: g.expiry_date ?? '',
       vehicle_no: g.vehicle_no ?? '',
-      remarks: g.remarks ?? ''
     })
+    setLines([lineFromRow(g)])
     setShowForm(true)
   }
 
-  const payload = () => ({
-    grn_no: form.grn_no,
-    grn_date: form.grn_date,
-    farm_id: form.farm_id,
-    party_id: form.party_id || null,
-    invoice_no: form.invoice_no || null,
-    invoice_date: form.invoice_date || null,
-    category: form.category,
-    item_id: form.item_id || null,
-    item_name: form.item_name || null,
-    po_id: form.po_id || null,
-    qty: parseFloat(form.qty) || null,
-    unit: form.unit || null,
-    bags: parseInt(form.bags) || null,
-    bag_type: form.bag_type || null,
-    price_per_unit: parseFloat(form.price_per_unit) || null,
-    // The live qty×rate calculation wins over the stored value whenever it's
-    // available (so correcting qty/rate updates a stale saved amount) —
-    // UNLESS the user directly typed into that specific field this session,
-    // in which case their figure is what actually gets saved.
-    basic_amount: (manualAmountFields.has('basic_amount') ? parseFloat(form.basic_amount) : (basicCalc > 0 ? basicCalc : parseFloat(form.basic_amount))) || null,
-    gst_pct: parseFloat(form.gst_pct) || 0,
-    gst_amount: (manualAmountFields.has('gst_amount') ? parseFloat(form.gst_amount) : (gstCalc > 0 ? +gstCalc.toFixed(2) : parseFloat(form.gst_amount))) || null,
-    other_charges: otherCharges || null,
-    total_amount: (manualAmountFields.has('total_amount') ? parseFloat(form.total_amount) : (totalCalc > 0 ? totalCalc : parseFloat(form.total_amount))) || null,
-    batch_no: needsBatch ? (form.batch_no || null) : null,
-    expiry_date: needsBatch ? (form.expiry_date || null) : null,
-    flock_id: (isChick || needsBatch) ? (form.flock_id || null) : null,
-    free_qty: isChick ? (parseInt(form.free_qty) || 0) : null,
-    vehicle_no: form.vehicle_no || null,
-    remarks: form.remarks || null
-  })
+  const linePayload = (line: ItemLine) => {
+    const { basicCalc, gstCalc, otherCharges, totalCalc, isChick, needsBatch } = lineCalc(line)
+    return {
+      grn_no: header.grn_no,
+      grn_date: header.grn_date,
+      farm_id: header.farm_id,
+      party_id: header.party_id || null,
+      invoice_no: header.invoice_no || null,
+      invoice_date: header.invoice_date || null,
+      category: line.category,
+      item_id: line.item_id || null,
+      item_name: line.item_name || null,
+      po_id: line.po_id || null,
+      qty: parseFloat(line.qty) || null,
+      unit: line.unit || null,
+      bags: parseInt(line.bags) || null,
+      bag_type: line.bag_type || null,
+      price_per_unit: parseFloat(line.price_per_unit) || null,
+      // The live qty×rate calculation wins over the stored value whenever it's
+      // available (so correcting qty/rate updates a stale saved amount) —
+      // UNLESS the user directly typed into that specific field this session,
+      // in which case their figure is what actually gets saved.
+      basic_amount: (line.manualAmountFields.has('basic_amount') ? parseFloat(line.basic_amount) : (basicCalc > 0 ? basicCalc : parseFloat(line.basic_amount))) || null,
+      gst_pct: parseFloat(line.gst_pct) || 0,
+      gst_amount: (line.manualAmountFields.has('gst_amount') ? parseFloat(line.gst_amount) : (gstCalc > 0 ? +gstCalc.toFixed(2) : parseFloat(line.gst_amount))) || null,
+      other_charges: otherCharges || null,
+      total_amount: (line.manualAmountFields.has('total_amount') ? parseFloat(line.total_amount) : (totalCalc > 0 ? totalCalc : parseFloat(line.total_amount))) || null,
+      batch_no: needsBatch ? (line.batch_no || null) : null,
+      expiry_date: needsBatch ? (line.expiry_date || null) : null,
+      flock_id: (isChick || needsBatch) ? (line.flock_id || null) : null,
+      free_qty: isChick ? (parseInt(line.free_qty) || 0) : null,
+      vehicle_no: header.vehicle_no || null,
+      remarks: line.remarks || null
+    }
+  }
 
   const mut = useMutation({
     mutationFn: async () => {
-      if (!form.grn_no || !form.grn_date || !form.farm_id) throw new Error('GRN No, date and farm are required')
-      if (isChick && !form.flock_id) throw new Error('Select the flock for this chick GRN')
-      if (form.expiry_date && form.expiry_date < form.grn_date) throw new Error('Expiry date is before the GRN date — goods already expired at receipt?')
-      const p = payload() as any
-      if (form.category === 'Feed Ingredient') normalizeFeedUnit(p)
+      if (!header.grn_no || !header.grn_date || !header.farm_id) throw new Error('GRN No, date and farm are required')
+      if (!lines.length) throw new Error('Add at least one item')
+      const payloads: any[] = []
+      for (const line of lines) {
+        const { isChick } = lineCalc(line)
+        if (!line.item_id && !line.item_name) throw new Error('Select an item for every line')
+        if (isChick && !line.flock_id) throw new Error('Select the flock for the Chicks line')
+        if (line.expiry_date && line.expiry_date < header.grn_date) throw new Error('Expiry date is before the GRN date — goods already expired at receipt?')
+        const p = linePayload(line) as any
+        if (line.category === 'Feed Ingredient') normalizeFeedUnit(p)
+        payloads.push(p)
+      }
       if (editing) {
-        const { error } = await supabase.from('grn').update(p).eq('id', editing.id)
+        const { error } = await supabase.from('grn').update(payloads[0]).eq('id', editing.id)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('grn').insert(p)
+        const { error } = await supabase.from('grn').insert(payloads)
         if (error) throw error
       }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['grns'] })
-      toast.success(editing ? 'GRN updated' : 'GRN saved')
+      toast.success(editing ? 'GRN updated' : `GRN saved (${lines.length} item${lines.length > 1 ? 's' : ''})`)
       setShowForm(false)
     },
     onError: (e: any) => toast.error(e.message)
@@ -717,21 +740,21 @@ export const GRNPage: React.FC = () => {
             <Input
               label="GRN No"
               required
-              value={form.grn_no}
-              onChange={e => s('grn_no', e.target.value)}
+              value={header.grn_no}
+              onChange={e => hs('grn_no', e.target.value)}
               placeholder={`GRN-${grnDateStr}-001`}
             />
             <DateInput
               label="GRN Date"
               required
-              value={form.grn_date}
-              onChange={e => s('grn_date', e.target.value)}
+              value={header.grn_date}
+              onChange={e => hs('grn_date', e.target.value)}
             />
             <Select
               label="Farm"
               required
-              value={form.farm_id}
-              onChange={e => s('farm_id', e.target.value)}
+              value={header.farm_id}
+              onChange={e => hs('farm_id', e.target.value)}
               options={[{ value: '', label: 'Select Farm' }, ...(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))]}
             />
           </FormRow>
@@ -739,235 +762,262 @@ export const GRNPage: React.FC = () => {
           <FormRow cols={3}>
             <Select
               label="Supplier"
-              value={form.party_id}
-              onChange={e => s('party_id', e.target.value)}
+              value={header.party_id}
+              onChange={e => hs('party_id', e.target.value)}
               options={[{ value: '', label: 'Select Supplier' }, ...(parties ?? []).map((p: any) => ({ value: p.id, label: p.name }))]}
             />
             <Input
               label="Invoice No"
-              value={form.invoice_no}
-              onChange={e => s('invoice_no', e.target.value)}
+              value={header.invoice_no}
+              onChange={e => hs('invoice_no', e.target.value)}
             />
             <DateInput
               label="Invoice Date"
-              value={form.invoice_date}
-              onChange={e => s('invoice_date', e.target.value)}
+              value={header.invoice_date}
+              onChange={e => hs('invoice_date', e.target.value)}
             />
           </FormRow>
-
-          <FormRow cols={2}>
-            <Select
-              label="Category"
-              required
-              value={form.category}
-              onChange={e => {
-                setForm(f => ({ ...f, category: e.target.value, item_id: '', item_name: '', unit: '' }))
-                setItemSearch('')
-              }}
-              options={categoryOptions}
-            />
-            <Input
-              label="Vehicle No"
-              value={form.vehicle_no}
-              onChange={e => s('vehicle_no', e.target.value)}
-            />
-          </FormRow>
-
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-gray-700">Link to Purchase Order (optional)</label>
-            <select
-              className="w-full border rounded px-2 py-1.5 text-sm"
-              value={form.po_id}
-              onChange={e => {
-                const po = (openPOs ?? []).find((p: any) => p.id === e.target.value)
-                if (po) {
-                  // Pre-fill as a convenience only — GRN's item_name stays a
-                  // separate, independently-editable field from here on. This
-                  // just sets a starting point (e.g. PO says "IBH Killed VAC
-                  // 1000 Dose"; you can still change it to the exact invoice
-                  // wording once you have the vendor's bill in hand).
-                  setForm(f => ({
-                    ...f, po_id: po.id,
-                    item_name: po.item_name ? `${po.item_name}${po.dose ? ' ' + po.dose + ' Dose' : ''}` : f.item_name,
-                    unit: po.unit || f.unit,
-                    party_id: po.party_id || f.party_id,
-                    qty: f.qty || (po.quantity != null ? String(po.quantity) : f.qty),
-                  }))
-                } else {
-                  setForm(f => ({ ...f, po_id: '' }))
-                }
-              }}
-            >
-              <option value="">— Not linked to a PO —</option>
-              {(openPOs ?? []).map((p: any) => (
-                <option key={p.id} value={p.id}>{p.po_no} — {p.item_name ?? '—'} — {p.vendor_name}{p.material_status ? ` (${p.material_status})` : ''}</option>
-              ))}
-            </select>
-            {form.po_id && <p className="text-xs text-blue-600">Linked — this GRN will be traceable back to that PO.</p>}
-          </div>
-
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-gray-700">Item</label>
-            <Input
-              placeholder="Search by name or code…"
-              value={itemSearch}
-              onChange={e => setItemSearch(e.target.value)}
-            />
-            <select
-              className="w-full border rounded px-2 py-1.5 text-sm"
-              size={5}
-              value={form.item_id}
-              onChange={e => {
-                const item = (items ?? []).find((i: any) => i.id === e.target.value)
-                if (item) {
-                  setForm(f => ({ ...f, item_id: item.id, item_name: item.name, unit: item.unit ?? f.unit }))
-                }
-              }}
-            >
-              <option value="">— select item —</option>
-              {filteredItems.map((i: any) => (
-                <option key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.name}</option>
-              ))}
-            </select>
-            {form.item_name && form.item_id && (
-              <div className="flex items-center gap-2 text-xs text-blue-700">
-                <span>Selected: <strong>{form.item_name}</strong></span>
-                <button onClick={() => setForm(f => ({ ...f, item_id: '', item_name: '', unit: '' }))}><X size={12} /></button>
-              </div>
-            )}
-            {form.item_name && !form.item_id && (
-              <div className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5">
-                <span>⚠ "{form.item_name}" is typed text, not picked from the Items Master — stock/consumption reports group by exact item name, so this will show as a separate item unless the spelling exactly matches every other GRN for it.</span>
-                <button onClick={() => setForm(f => ({ ...f, item_id: '', item_name: '', unit: '' }))} className="shrink-0"><X size={12} /></button>
-              </div>
-            )}
-          </div>
-
-          <FormRow cols={4}>
-            <Input
-              label="Qty"
-              type="number"
-              value={form.qty}
-              onChange={e => s('qty', e.target.value)}
-            />
-            <Input
-              label="Unit"
-              value={form.unit}
-              onChange={e => s('unit', e.target.value)}
-            />
-            <Input
-              label="Bags"
-              type="number"
-              value={form.bags}
-              onChange={e => s('bags', e.target.value)}
-              hint={(() => { const q = parseFloat(form.qty) || 0, b = parseInt(form.bags) || 0; return q > 0 && b > 0 ? `Avg Bag Weight: ${(q / b).toFixed(2)} ${form.unit || ''}` : undefined })()}
-            />
-            <Select
-              label="Bag Type"
-              value={form.bag_type}
-              onChange={e => s('bag_type', e.target.value)}
-              placeholder="— Select —"
-              options={bagTypeOptions}
-            />
-            <Select
-              label="GST %"
-              value={form.gst_pct}
-              onChange={e => s('gst_pct', e.target.value)}
-              options={gstOptions}
-            />
-          </FormRow>
-
-          <FormRow cols={3}>
-            <Input
-              label="Rate per Unit"
-              type="number"
-              value={form.price_per_unit}
-              onChange={e => s('price_per_unit', e.target.value)}
-            />
-            <Input
-              label="Basic Amount"
-              type="number"
-              value={form.basic_amount}
-              onChange={e => setManualAmount('basic_amount', e.target.value)}
-              hint={[
-                basicCalc > 0 ? `Auto-calc: ${inr(basicCalc)}` : null,
-                manualAmountFields.has('basic_amount') ? 'Manually entered — overrides auto-calc' : null,
-              ].filter(Boolean).join(' · ') || undefined}
-            />
-            <Input
-              label="Transport / Other Charges"
-              type="number"
-              value={form.other_charges}
-              onChange={e => s('other_charges', e.target.value)}
-              hint="Freight you pay — added to landed cost"
-            />
-          </FormRow>
-          <FormRow cols={2}>
-            <Input
-              label="Total Amount"
-              type="number"
-              value={form.total_amount}
-              onChange={e => setManualAmount('total_amount', e.target.value)}
-              hint={[
-                totalCalc > 0 ? `Auto-calc (incl. transport): ${inr(totalCalc)}` : null,
-                manualAmountFields.has('total_amount') ? 'Manually entered — overrides auto-calc' : null,
-              ].filter(Boolean).join(' · ') || undefined}
-            />
-            <Input
-              label="Landed Rate / Unit"
-              type="number"
-              value={landedRate ? landedRate.toFixed(3) : ''}
-              onChange={() => {}}
-              disabled
-              hint="Material + transport ÷ qty — used for stock & production cost"
-            />
-          </FormRow>
-
-          {needsBatch && (
-            <FormRow cols={3}>
-              <Input
-                label="Batch No"
-                value={form.batch_no}
-                onChange={e => s('batch_no', e.target.value)}
-              />
-              <DateInput
-                label="Expiry Date"
-                value={form.expiry_date}
-                onChange={e => s('expiry_date', e.target.value)}
-              />
-              <Select
-                label="Flock (optional)"
-                value={form.flock_id}
-                onChange={e => s('flock_id', e.target.value)}
-                options={[{ value: '', label: 'None' }, ...(flocks ?? []).map((f: any) => ({ value: f.id, label: f.flock_no }))]}
-              />
-            </FormRow>
-          )}
-
-          {isChick && (
-            <FormRow cols={2}>
-              <Select
-                label="Flock"
-                required
-                value={form.flock_id}
-                onChange={e => s('flock_id', e.target.value)}
-                options={[{ value: '', label: 'Select Flock' }, ...(flocks ?? []).map((f: any) => ({ value: f.id, label: f.flock_no }))]}
-              />
-              <Input
-                label="Free Chicks"
-                type="number"
-                value={form.free_qty}
-                onChange={e => s('free_qty', e.target.value)}
-                hint={`Free birds received (not charged). Total received = ${(parseInt(form.qty)||0)+(parseInt(form.free_qty)||0)}`}
-              />
-            </FormRow>
-          )}
 
           <Input
-            label="Remarks"
-            value={form.remarks}
-            onChange={e => s('remarks', e.target.value)}
+            label="Vehicle No"
+            value={header.vehicle_no}
+            onChange={e => hs('vehicle_no', e.target.value)}
           />
+
+          {!editing && (
+            <p className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+              GRN No/Date/Farm/Supplier/Invoice/Vehicle above apply to every item below — one bill, many items. Use "+ Add Another Item" for each additional line.
+            </p>
+          )}
+
+          {lines.map((line, idx) => {
+            const { basicCalc, totalCalc, landedRate, isChick, needsBatch } = lineCalc(line)
+            const lu = (k: keyof ItemLine) => (v: string) => updateLine(idx, k, v)
+            return (
+              <div key={idx} className="border border-gray-200 rounded-lg p-3 space-y-3 bg-gray-50/40">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-500">Item {idx + 1}</span>
+                  {lines.length > 1 && (
+                    <button onClick={() => removeLine(idx)} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1">
+                      <Trash2 size={12} /> Remove
+                    </button>
+                  )}
+                </div>
+
+                <FormRow cols={2}>
+                  <Select
+                    label="Category"
+                    required
+                    value={line.category}
+                    onChange={e => setLinePatch(idx, { category: e.target.value, item_id: '', item_name: '', unit: '', itemSearch: '' })}
+                    options={categoryOptions}
+                  />
+                  <div />
+                </FormRow>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-gray-700">Link to Purchase Order (optional)</label>
+                  <select
+                    className="w-full border rounded px-2 py-1.5 text-sm"
+                    value={line.po_id}
+                    onChange={e => {
+                      const po = (openPOs ?? []).find((p: any) => p.id === e.target.value)
+                      if (po) {
+                        // Pre-fill as a convenience only — GRN's item_name stays a
+                        // separate, independently-editable field from here on.
+                        setLinePatch(idx, {
+                          po_id: po.id,
+                          item_name: po.item_name ? `${po.item_name}${po.dose ? ' ' + po.dose + ' Dose' : ''}` : line.item_name,
+                          unit: po.unit || line.unit,
+                          qty: line.qty || (po.quantity != null ? String(po.quantity) : line.qty),
+                        })
+                        if (po.party_id && !header.party_id) hs('party_id', po.party_id)
+                      } else {
+                        setLinePatch(idx, { po_id: '' })
+                      }
+                    }}
+                  >
+                    <option value="">— Not linked to a PO —</option>
+                    {(openPOs ?? []).map((p: any) => (
+                      <option key={p.id} value={p.id}>{p.po_no} — {p.item_name ?? '—'} — {p.vendor_name}{p.material_status ? ` (${p.material_status})` : ''}</option>
+                    ))}
+                  </select>
+                  {line.po_id && <p className="text-xs text-blue-600">Linked — this line will be traceable back to that PO.</p>}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-gray-700">Item</label>
+                  <Input
+                    placeholder="Search by name or code…"
+                    value={line.itemSearch}
+                    onChange={e => updateLine(idx, 'itemSearch', e.target.value)}
+                  />
+                  <select
+                    className="w-full border rounded px-2 py-1.5 text-sm"
+                    size={5}
+                    value={line.item_id}
+                    onChange={e => {
+                      const item = (items ?? []).find((i: any) => i.id === e.target.value)
+                      if (item) setLinePatch(idx, { item_id: item.id, item_name: item.name, unit: item.unit ?? line.unit })
+                    }}
+                  >
+                    <option value="">— select item —</option>
+                    {filteredItemsFor(line).map((i: any) => (
+                      <option key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.name}</option>
+                    ))}
+                  </select>
+                  {line.item_name && line.item_id && (
+                    <div className="flex items-center gap-2 text-xs text-blue-700">
+                      <span>Selected: <strong>{line.item_name}</strong></span>
+                      <button onClick={() => setLinePatch(idx, { item_id: '', item_name: '', unit: '' })}><X size={12} /></button>
+                    </div>
+                  )}
+                  {line.item_name && !line.item_id && (
+                    <div className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5">
+                      <span>⚠ "{line.item_name}" is typed text, not picked from the Items Master — stock/consumption reports group by exact item name, so this will show as a separate item unless the spelling exactly matches every other GRN for it.</span>
+                      <button onClick={() => setLinePatch(idx, { item_id: '', item_name: '', unit: '' })} className="shrink-0"><X size={12} /></button>
+                    </div>
+                  )}
+                </div>
+
+                <FormRow cols={4}>
+                  <Input
+                    label="Qty"
+                    type="number"
+                    value={line.qty}
+                    onChange={e => updateLine(idx, 'qty', e.target.value)}
+                  />
+                  <Input
+                    label="Unit"
+                    value={line.unit}
+                    onChange={e => updateLine(idx, 'unit', e.target.value)}
+                  />
+                  <Input
+                    label="Bags"
+                    type="number"
+                    value={line.bags}
+                    onChange={e => updateLine(idx, 'bags', e.target.value)}
+                    hint={(() => { const q = parseFloat(line.qty) || 0, b = parseInt(line.bags) || 0; return q > 0 && b > 0 ? `Avg Bag Weight: ${(q / b).toFixed(2)} ${line.unit || ''}` : undefined })()}
+                  />
+                  <Select
+                    label="Bag Type"
+                    value={line.bag_type}
+                    onChange={e => updateLine(idx, 'bag_type', e.target.value)}
+                    placeholder="— Select —"
+                    options={bagTypeOptions}
+                  />
+                </FormRow>
+
+                <FormRow cols={3}>
+                  <Select
+                    label="GST %"
+                    value={line.gst_pct}
+                    onChange={e => updateLine(idx, 'gst_pct', e.target.value)}
+                    options={gstOptions}
+                  />
+                  <Input
+                    label="Rate per Unit"
+                    type="number"
+                    value={line.price_per_unit}
+                    onChange={e => updateLine(idx, 'price_per_unit', e.target.value)}
+                  />
+                  <Input
+                    label="Basic Amount"
+                    type="number"
+                    value={line.basic_amount}
+                    onChange={e => setLineManualAmount(idx, 'basic_amount', e.target.value)}
+                    hint={[
+                      basicCalc > 0 ? `Auto-calc: ${inr(basicCalc)}` : null,
+                      line.manualAmountFields.has('basic_amount') ? 'Manually entered — overrides auto-calc' : null,
+                    ].filter(Boolean).join(' · ') || undefined}
+                  />
+                </FormRow>
+
+                <FormRow cols={3}>
+                  <Input
+                    label="Transport / Other Charges"
+                    type="number"
+                    value={line.other_charges}
+                    onChange={e => updateLine(idx, 'other_charges', e.target.value)}
+                    hint="Freight you pay — added to landed cost"
+                  />
+                  <Input
+                    label="Total Amount"
+                    type="number"
+                    value={line.total_amount}
+                    onChange={e => setLineManualAmount(idx, 'total_amount', e.target.value)}
+                    hint={[
+                      totalCalc > 0 ? `Auto-calc (incl. transport): ${inr(totalCalc)}` : null,
+                      line.manualAmountFields.has('total_amount') ? 'Manually entered — overrides auto-calc' : null,
+                    ].filter(Boolean).join(' · ') || undefined}
+                  />
+                  <Input
+                    label="Landed Rate / Unit"
+                    type="number"
+                    value={landedRate ? landedRate.toFixed(3) : ''}
+                    onChange={() => {}}
+                    disabled
+                    hint="Material + transport ÷ qty — used for stock & production cost"
+                  />
+                </FormRow>
+
+                {needsBatch && (
+                  <FormRow cols={3}>
+                    <Input
+                      label="Batch No"
+                      value={line.batch_no}
+                      onChange={e => updateLine(idx, 'batch_no', e.target.value)}
+                    />
+                    <DateInput
+                      label="Expiry Date"
+                      value={line.expiry_date}
+                      onChange={e => updateLine(idx, 'expiry_date', e.target.value)}
+                    />
+                    <Select
+                      label="Flock (optional)"
+                      value={line.flock_id}
+                      onChange={e => updateLine(idx, 'flock_id', e.target.value)}
+                      options={[{ value: '', label: 'None' }, ...(flocks ?? []).map((f: any) => ({ value: f.id, label: f.flock_no }))]}
+                    />
+                  </FormRow>
+                )}
+
+                {isChick && (
+                  <FormRow cols={2}>
+                    <Select
+                      label="Flock"
+                      required
+                      value={line.flock_id}
+                      onChange={e => updateLine(idx, 'flock_id', e.target.value)}
+                      options={[{ value: '', label: 'Select Flock' }, ...(flocks ?? []).map((f: any) => ({ value: f.id, label: f.flock_no }))]}
+                    />
+                    <Input
+                      label="Free Chicks"
+                      type="number"
+                      value={line.free_qty}
+                      onChange={e => updateLine(idx, 'free_qty', e.target.value)}
+                      hint={`Free birds received (not charged). Total received = ${(parseInt(line.qty) || 0) + (parseInt(line.free_qty) || 0)}`}
+                    />
+                  </FormRow>
+                )}
+
+                <Input
+                  label="Remarks"
+                  value={line.remarks}
+                  onChange={e => updateLine(idx, 'remarks', e.target.value)}
+                />
+              </div>
+            )
+          })}
+
+          {!editing && (
+            <button
+              onClick={addLine}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm border border-brand-300 text-brand-700 rounded hover:bg-brand-50"
+            >
+              <Plus size={14} /> Add Another Item
+            </button>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm border rounded hover:bg-gray-50">
@@ -978,7 +1028,7 @@ export const GRNPage: React.FC = () => {
               disabled={mut.isPending}
               className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
             >
-              {mut.isPending ? 'Saving…' : editing ? 'Update' : 'Save'}
+              {mut.isPending ? 'Saving…' : editing ? 'Update' : `Save${lines.length > 1 ? ` (${lines.length} items)` : ''}`}
             </button>
           </div>
         </div>

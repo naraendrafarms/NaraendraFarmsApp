@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-07-18'
+const LAST_UPDATED = '2026-07-20'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-20', tag: 'New', text: 'Purchase → GRN → Add GRN: one bill can now hold multiple items in a single form. GRN No/Date/Farm/Supplier/Invoice/Vehicle are entered once at the top; each item (category, item, qty, rate, GST, batch/expiry, etc.) gets its own "Item N" block below, with "+ Add Another Item" to add more and a Remove button per block — Save writes one GRN record per item, all sharing the same bill details. Previously each item needed a separate Add GRN with the same GRN No typed by hand, or the bulk Import. Editing an existing GRN still edits one item at a time, same as before.' },
   { date: '2026-07-18', tag: 'New', text: 'Flocks → Bulk Daily Entry (Shed mode): the flock-level Medicine box now supports more than one medicine per flock/day — an "+ Add another" button adds another Medicine + Qty row (e.g. a vaccine and a supplement on the same day), each saved as its own entry; a ✕ button removes a row. (Flock mode still allows only one medicine per flock/day for now.)' },
   { date: '2026-07-18', tag: 'Fix', text: 'Flocks → Bulk Daily Entry (Shed mode): Medicine entered against an individual shed was silently failing to save every time — the medicine_usage table has no shed_id column at all, so the per-shed save was sending a field that doesn\'t exist and erroring on every attempt, while the app still showed "Saved successfully" because that error only went to the browser console. Medicine in Shed mode is now one flock-level entry (applies to the whole flock for the day), shown in its own box below the shed table next to HE Grade Breakdown — matching how Flock mode already worked and matching the real table design. Per-shed medicine tracking may come later as a separate change.' },
   { date: '2026-07-18', tag: 'New', text: 'Purchase → Purchase Orders → Import PO: added a "Link Items to Master" step to the import preview — every unique item name in the file is checked against Items Master, auto-matched where possible, and any that don\'t match must be explicitly linked to an existing item or marked "Keep as new item" before Import is enabled. Previously any spelling/spacing difference from a past import silently created a duplicate item.' },
