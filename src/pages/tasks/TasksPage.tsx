@@ -11,7 +11,7 @@ import { AssignTaskButton } from '@/components/tasks/AssignTaskButton'
 import { CheckCircle2, Circle, Clock, XCircle, Trash2, ListTodo, AlertTriangle, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
-  TASK_TYPE_OPTIONS, TASK_STATUS_OPTIONS, TASK_PRIORITY_OPTIONS, type TaskStatus, nextDueDate,
+  TASK_TYPE_OPTIONS, TASK_STATUS_OPTIONS, TASK_PRIORITY_OPTIONS, RECURRENCE_PRESETS, type TaskStatus, nextDueDate,
 } from '@/lib/tasks'
 
 const STATUS_BADGE: Record<TaskStatus, { color: any; label: string }> = {
@@ -77,9 +77,9 @@ export const TasksPage: React.FC = () => {
       const { error } = await supabase.from('tasks').update(payload).eq('id', task.id)
       if (error) throw error
 
-      // Compliance tasks with a recurrence rule auto-spawn the next instance
-      // when marked done, so the deadline never silently stops appearing.
-      if (status === 'done' && task.task_type === 'compliance' && task.recurrence_rule) {
+      // Any task with a recurrence rule auto-spawns the next instance when
+      // marked done, so the deadline/reminder never silently stops appearing.
+      if (status === 'done' && task.recurrence_rule) {
         const next = nextDueDate(task.due_date || today(), task.recurrence_rule)
         if (next) {
           const { error: insErr } = await supabase.from('tasks').insert({
@@ -92,6 +92,7 @@ export const TasksPage: React.FC = () => {
             due_date: next,
             priority: task.priority,
             recurrence_rule: task.recurrence_rule,
+            is_private: task.is_private,
             parent_task_id: task.id,
             created_by: profile?.id || null,
             status: 'pending',
@@ -119,6 +120,7 @@ export const TasksPage: React.FC = () => {
       title: t.title ?? '', description: t.description ?? '', task_type: t.task_type,
       assigned_to_user_id: t.assigned_to_user_id ?? '', farm_id: t.farm_id ?? '',
       team: t.team ?? '', due_date: t.due_date ?? '', priority: t.priority ?? 'normal',
+      recurrence_rule: t.recurrence_rule ?? '', is_private: !!t.is_private,
     })
   }
 
@@ -135,6 +137,8 @@ export const TasksPage: React.FC = () => {
         team: editForm.team || null,
         due_date: editForm.due_date || null,
         priority: editForm.priority,
+        recurrence_rule: editForm.recurrence_rule || null,
+        is_private: editForm.is_private,
         updated_at: new Date().toISOString(),
       }).eq('id', editTask.id)
       if (error) throw error
@@ -215,7 +219,11 @@ export const TasksPage: React.FC = () => {
                 return (
                   <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                     <Td>
-                      <div className="font-medium text-gray-900">{t.title}</div>
+                      <div className="font-medium text-gray-900 flex items-center gap-1.5">
+                        {t.title}
+                        {t.is_private && <span title="Private — only you, the assignee, and admin can see this">🔒</span>}
+                        {t.recurrence_rule && <span title="Recurring">🔁</span>}
+                      </div>
                       {t.description && <div className="text-xs text-gray-500 mt-0.5">{t.description}</div>}
                     </Td>
                     <Td><Badge color="gray">{TASK_TYPE_OPTIONS.find(o => o.value === t.task_type)?.label ?? t.task_type}</Badge></Td>
@@ -291,6 +299,12 @@ export const TasksPage: React.FC = () => {
               <Input label="Team label (optional, just a tag)" value={editForm.team} onChange={e => setEditForm((f: any) => ({ ...f, team: e.target.value }))} />
               <DateInput label="Due Date" value={editForm.due_date} onChange={e => setEditForm((f: any) => ({ ...f, due_date: e.target.value }))} />
             </FormRow>
+            <Select label="Recurrence" options={RECURRENCE_PRESETS} value={editForm.recurrence_rule} onChange={e => setEditForm((f: any) => ({ ...f, recurrence_rule: e.target.value }))} />
+            <label className="flex items-start gap-2 text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-2 cursor-pointer">
+              <input type="checkbox" className="mt-0.5" checked={editForm.is_private}
+                onChange={e => setEditForm((f: any) => ({ ...f, is_private: e.target.checked }))} />
+              <span>Private — only you, whoever it's assigned to, and admin can see this. Won't show under "All Tasks" for anyone else.</span>
+            </label>
           </div>
         </Modal>
       )}

@@ -30,6 +30,7 @@ const emptyForm = (defaultTitle?: string) => ({
   due_date: today(),
   priority: 'normal',
   recurrence_rule: '',
+  is_private: false,
 })
 
 export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
@@ -72,7 +73,8 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
         assigned_to_user_id: form.assigned_to_user_id || null,
         due_date: form.due_date || null,
         priority: form.priority,
-        recurrence_rule: form.task_type === 'compliance' ? (form.recurrence_rule || null) : null,
+        recurrence_rule: form.recurrence_rule || null,
+        is_private: form.is_private,
         linked_table: linkedTable || null,
         linked_id: linkedId || null,
         linked_label: linkedLabel || null,
@@ -135,9 +137,12 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
             <Input label="Team label (optional, just a tag — not an assignment)" value={form.team} onChange={e => s('team', e.target.value)} placeholder="e.g. Accounts / Site" />
             <DateInput label="Due Date" value={form.due_date} onChange={e => s('due_date', e.target.value)} />
           </FormRow>
-          {form.task_type === 'compliance' && (
-            <Select label="Recurrence" options={RECURRENCE_PRESETS} value={form.recurrence_rule} onChange={e => s('recurrence_rule', e.target.value)} />
-          )}
+          <Select label="Recurrence" options={RECURRENCE_PRESETS} value={form.recurrence_rule} onChange={e => s('recurrence_rule', e.target.value)} />
+          <label className="flex items-start gap-2 text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-2 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={form.is_private}
+              onChange={e => setForm(f => ({ ...f, is_private: e.target.checked }))} />
+            <span>Private — only you, whoever it's assigned to, and admin can see this. Won't show under "All Tasks" for anyone else.</span>
+          </label>
         </div>
       </Modal>
     </>

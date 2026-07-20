@@ -25,9 +25,10 @@ export const TASK_PRIORITY_OPTIONS: Array<{ value: TaskPriority; label: string }
   { value: 'urgent', label: 'Urgent' },
 ]
 
-// Recurrence rule formats: "monthly:DD", "quarterly:DD", "yearly:MM-DD"
+// Recurrence rule formats: "daily", "monthly:DD", "quarterly:DD", "yearly:MM-DD"
 export const RECURRENCE_PRESETS = [
   { value: '',              label: 'One-time (no recurrence)' },
+  { value: 'daily',         label: 'Daily' },
   { value: 'monthly:7',     label: 'Monthly — 7th (e.g. TDS payment)' },
   { value: 'monthly:15',    label: 'Monthly — 15th' },
   { value: 'monthly:20',    label: 'Monthly — 20th (e.g. GSTR-3B)' },
@@ -42,6 +43,10 @@ export function nextDueDate(currentDue: string, rule: string | null | undefined)
   const [freq, param] = rule.split(':')
   const base = currentDue ? new Date(currentDue + 'T00:00:00') : new Date()
 
+  if (freq === 'daily') {
+    const next = new Date(base.getFullYear(), base.getMonth(), base.getDate() + 1)
+    return toISODate(next)
+  }
   if (freq === 'monthly') {
     const day = parseInt(param, 10) || 1
     const next = new Date(base.getFullYear(), base.getMonth() + 1, day)
