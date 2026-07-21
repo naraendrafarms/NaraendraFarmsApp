@@ -1075,6 +1075,21 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     const key = `${month}_${farmId}`
     if (!existingAtt) return
     const isFreshLoad = loaded !== key
+    // TEMPORARY diagnostic — investigating a report that some employees'
+    // cells stay blank in this grid despite attendance_daily having correct
+    // rows for them. Logs which employee IDs the grid actually has fetched
+    // vs which ones show up in existingAtt, so we can see exactly where the
+    // data drops. Safe to remove once the root cause is confirmed.
+    if (isFreshLoad) {
+      const empIdSet = new Set((employees as any[]).map(e => e.id))
+      const attEmpIds = new Set((existingAtt as any[]).map(r => r.employee_id))
+      const missing = (employees as any[]).filter(e => !attEmpIds.has(e.id))
+      console.log('[AttendanceGrid diag]', {
+        month, farmId, employeesCount: (employees as any[]).length,
+        existingAttRows: (existingAtt as any[]).length,
+        employeesWithNoAttendanceRows: missing.map(e => ({ id: e.id, emp_id: e.emp_id, name: e.name })),
+      })
+    }
     setGrid(g => {
       const next = isFreshLoad ? {} : { ...g }
       for (const r of existingAtt as any[]) {
