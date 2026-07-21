@@ -1,5 +1,6 @@
 // Invoice print utility — opens a styled print window
 // Company details are embedded here; update if address changes.
+import { flockAgeWeeks } from './utils'
 
 const LOGO_SVG = `<svg width="30" height="30" viewBox="0 0 64 64" style="flex-shrink:0"><rect width="64" height="64" rx="10" fill="#14532d"/><text x="32" y="43" font-family="Georgia, 'Iowan Old Style', serif" font-weight="700" font-size="30" letter-spacing="-1" text-anchor="middle"><tspan fill="#f7f1e4">N</tspan><tspan fill="#d6ab5f">F</tspan></text></svg>`
 const LOGO_ROW_CSS = `<style>.co-name-row{display:flex;align-items:center;gap:8px;}</style>`
@@ -165,6 +166,7 @@ export interface HEDispatchRecord {
   invoice_no: string | null
   dc_no: number | null
   flock_no?: number
+  flock_placement_date?: string | null
   total_dispatched: number
   free_eggs: number
   invoice_eggs: number
@@ -255,6 +257,7 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[], opts: HEPr
         <tr><td class="label" style="border:none;padding:2px 4px">Date</td><td style="border:none;padding:2px 4px">${fmt(d.dispatch_date)}</td></tr>
         ${d.dc_no ? `<tr><td class="label" style="border:none;padding:2px 4px">DC No</td><td style="border:none;padding:2px 4px">${d.dc_no}</td></tr>` : ''}
         ${d.flock_no ? `<tr><td class="label" style="border:none;padding:2px 4px">Flock</td><td style="border:none;padding:2px 4px">F-${d.flock_no}</td></tr>` : ''}
+        ${d.flock_placement_date ? `<tr><td class="label" style="border:none;padding:2px 4px">Flock Age</td><td style="border:none;padding:2px 4px">${flockAgeWeeks(d.flock_placement_date, d.dispatch_date)} wks (as on ${fmt(d.dispatch_date)})</td></tr>` : ''}
       </table>
     </div>
   </div>

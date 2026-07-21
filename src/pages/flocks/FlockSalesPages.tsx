@@ -1510,7 +1510,7 @@ export const HEDispatch: React.FC = () => {
             const { data: ls } = await supabase.from('he_dispatch_lines').select('prod_date,grade_a,grade_b,grade_c,rate').eq('dispatch_id', d.id).order('prod_date')
             printHEDispatch({
               id: d.id, dispatch_date: d.dispatch_date, invoice_no: d.invoice_no,
-              dc_no: d.dc_no, flock_no: d.flocks?.flock_no, total_dispatched: d.total_dispatched,
+              dc_no: d.dc_no, flock_no: d.flocks?.flock_no, flock_placement_date: d.flocks?.placement_date, total_dispatched: d.total_dispatched,
               free_eggs: d.free_eggs ?? 0, invoice_eggs: d.invoice_eggs ?? 0,
               rate: d.rate, amount: d.amount, tds_pct: d.tds_pct, tds_amount: d.tds_amount,
               buyer_gstin: d.buyer_gstin, party_name: d.parties?.name ?? '—',
