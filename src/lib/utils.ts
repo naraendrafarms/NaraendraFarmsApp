@@ -110,6 +110,18 @@ export const flockAgeWeeks = (placementDate: string, asOf?: string): number => {
   return Math.floor((ref.getTime() - placed.getTime()) / (7 * 86400000))
 }
 
+// "58w 4d" format — weeks + remainder days, the way age is read off a
+// production register (each egg-laying day has its own age, not just one
+// age for the whole flock).
+export const flockAgeWeeksDays = (placementDate: string, asOf?: string): string => {
+  const ref = asOf ? new Date(asOf) : new Date()
+  const placed = new Date(placementDate)
+  const totalDays = Math.floor((ref.getTime() - placed.getTime()) / 86400000)
+  const weeks = Math.floor(totalDays / 7)
+  const days = totalDays % 7
+  return `${weeks}w ${days}d`
+}
+
 // Status badge color
 export const statusColor = (status: string): string => {
   const map: Record<string, string> = {

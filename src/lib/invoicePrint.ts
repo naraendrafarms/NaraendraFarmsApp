@@ -1,6 +1,6 @@
 // Invoice print utility — opens a styled print window
 // Company details are embedded here; update if address changes.
-import { flockAgeWeeks } from './utils'
+import { flockAgeWeeks, flockAgeWeeksDays } from './utils'
 
 const LOGO_SVG = `<svg width="30" height="30" viewBox="0 0 64 64" style="flex-shrink:0"><rect width="64" height="64" rx="10" fill="#14532d"/><text x="32" y="43" font-family="Georgia, 'Iowan Old Style', serif" font-weight="700" font-size="30" letter-spacing="-1" text-anchor="middle"><tspan fill="#f7f1e4">N</tspan><tspan fill="#d6ab5f">F</tspan></text></svg>`
 const LOGO_ROW_CSS = `<style>.co-name-row{display:flex;align-items:center;gap:8px;}</style>`
@@ -213,12 +213,17 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[], opts: HEPr
   const roDiff = Math.round((savedAmt - grossAmt) * 100) / 100
   const netPayable = savedAmt - (d.tds_amount ?? 0)
   const tdsLabel = d.tds_pct ? `TDS @ ${d.tds_pct}%` : 'TDS Deducted'
+  // Age is per production date, not a single flock-wide figure — a dispatch
+  // spanning several days (e.g. a weekly collection) has a different egg
+  // age on each line, matching how the production register itself reads.
+  const ageFor = (dateStr: string) => d.flock_placement_date ? flockAgeWeeksDays(d.flock_placement_date, dateStr) : '—'
   const linesHtml = lines.length > 0
     ? lines.map(l => {
         const tot = (l.grade_a || 0) + (l.grade_b || 0) + (l.grade_c || 0)
         const amt = l.rate ? tot * l.rate : null
         return `<tr>
           <td>${fmt(l.prod_date)}</td>
+          <td class="tc">${ageFor(l.prod_date)}</td>
           <td class="tc">Hatching Eggs</td>
           <td class="tc">${CO.stateCode === (d.buyer_gstin?.slice(0,2) ?? '') ? 'Intra' : 'Inter'}</td>
           <td class="tc">${(l.grade_a||0).toLocaleString('en-IN')}</td>
@@ -231,6 +236,7 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[], opts: HEPr
       }).join('')
     : `<tr>
         <td>${fmt(d.dispatch_date)}</td>
+        <td class="tc">${ageFor(d.dispatch_date)}</td>
         <td class="tc">Hatching Eggs</td>
         <td class="tc">—</td>
         <td class="tc" colspan="3">—</td>
@@ -286,7 +292,7 @@ export function printHEDispatch(d: HEDispatchRecord, lines: HELine[], opts: HEPr
   <div class="section">
     <table>
       <thead><tr>
-        <th>Prod. Date</th><th>Description</th><th>Supply</th>
+        <th>Prod. Date</th><th>Age</th><th>Description</th><th>Supply</th>
         <th>Grade A</th><th>Grade B</th><th>Grade C</th>
         <th>Total Qty</th><th>Rate (Rs)</th><th>Amount</th>
       </tr></thead>
