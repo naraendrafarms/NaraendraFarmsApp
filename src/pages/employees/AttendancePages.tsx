@@ -5,6 +5,7 @@ import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td
 import toast from 'react-hot-toast'
 import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Printer } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { fetchAllPages } from '@/lib/utils'
 import { printReport } from '@/lib/invoicePrint'
 
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void; disabled?: boolean }> = ({ checked, indeterminate, onChange, disabled }) => {
@@ -1052,15 +1053,24 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     queryFn: async () => {
       const start = `${month}-01`
       const end   = `${month}-${String(totalDays).padStart(2,'0')}`
-      let q = supabase.from('attendance_daily')
-        .select('employee_id,attendance_date,status,ot_hours')
-        .gte('attendance_date', start).lte('attendance_date', end)
-      if (farmId) {
-        const empIds = (employees as any[]).map(e => e.id)
-        if (empIds.length) q = q.in('employee_id', empIds)
-      }
-      const { data } = await q
-      return data ?? []
+      const empIds = farmId ? (employees as any[]).map(e => e.id) : null
+      // A month's worth of attendance across every employee (especially
+      // "All Sites") easily exceeds Supabase/PostgREST's default 1000-row
+      // response cap — silently truncating whichever employees/dates happen
+      // to sort last, so a large fraction of employees would show blank
+      // cells despite their attendance being saved correctly. Page through
+      // the full result set instead of trusting a single request.
+      return fetchAllPages<any>(
+        (from, to) => {
+          let q = supabase.from('attendance_daily')
+            .select('employee_id,attendance_date,status,ot_hours')
+            .gte('attendance_date', start).lte('attendance_date', end)
+            .range(from, to)
+          if (empIds && empIds.length) q = q.in('employee_id', empIds)
+          return q
+        },
+        'Monthly attendance'
+      )
     },
     enabled: (employees as any[]).length > 0,
   })
@@ -1075,21 +1085,6 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     const key = `${month}_${farmId}`
     if (!existingAtt) return
     const isFreshLoad = loaded !== key
-    // TEMPORARY diagnostic — investigating a report that some employees'
-    // cells stay blank in this grid despite attendance_daily having correct
-    // rows for them. Logs which employee IDs the grid actually has fetched
-    // vs which ones show up in existingAtt, so we can see exactly where the
-    // data drops. Safe to remove once the root cause is confirmed.
-    if (isFreshLoad) {
-      const empIdSet = new Set((employees as any[]).map(e => e.id))
-      const attEmpIds = new Set((existingAtt as any[]).map(r => r.employee_id))
-      const missing = (employees as any[]).filter(e => !attEmpIds.has(e.id))
-      console.log('[AttendanceGrid diag]', {
-        month, farmId, employeesCount: (employees as any[]).length,
-        existingAttRows: (existingAtt as any[]).length,
-        employeesWithNoAttendanceRows: missing.map(e => ({ id: e.id, emp_id: e.emp_id, name: e.name })),
-      })
-    }
     setGrid(g => {
       const next = isFreshLoad ? {} : { ...g }
       for (const r of existingAtt as any[]) {
