@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today, currentFY, fyRange } from '@/lib/utils'
+import { inr, fmtDate, today, currentFY, fyRange, fetchAllPages } from '@/lib/utils'
 import { Card, CardHeader, Button, DateInput, Input, Modal, Spinner, Table, Th, Td, Badge, StatCard, Select } from '@/components/ui'
 import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle, Printer, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -67,13 +67,18 @@ export const PaymentPlanningPage: React.FC = () => {
     }
   })
 
-  // Cash (Mandal Imprest) balance from cash_book
+  // Cash (Mandal Imprest) balance from cash_book — unfiltered, all-time, so
+  // page through the full set rather than trusting a single request
+  // (PostgREST silently caps at 1000 rows otherwise, understating cash).
   const { data: cashBalance } = useQuery({
     queryKey: ['cash_balance'],
     queryFn: async () => {
-      const { data } = await supabase.from('cash_book').select('txn_type,amount_in,amount_out')
-      const inAmt  = (data ?? []).reduce((s, r) => s + (r.amount_in  ?? 0), 0)
-      const outAmt = (data ?? []).reduce((s, r) => s + (r.amount_out ?? 0), 0)
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('cash_book').select('txn_type,amount_in,amount_out').range(from, to),
+        'Cash balance'
+      )
+      const inAmt  = data.reduce((s, r) => s + (r.amount_in  ?? 0), 0)
+      const outAmt = data.reduce((s, r) => s + (r.amount_out ?? 0), 0)
       return inAmt - outAmt
     }
   })

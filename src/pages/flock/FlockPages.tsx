@@ -3,7 +3,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import toast from 'react-hot-toast'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fetchAllPages } from '@/lib/utils'
 import { parseFile } from '@/lib/parseFile'
 import { useFeedRates } from '@/hooks/useFeedRates'
 import { useMedicineRates } from '@/lib/medicineRates'
@@ -196,44 +196,52 @@ export const FlockDashboard: React.FC = () => {
     enabled: !!flocks && flocks.length > 0
   })
 
-  // FCR data: all-time feed and egg production per flock
+  // FCR data: all-time feed and egg production per flock — unfiltered across
+  // every flock/day ever recorded, so a single request would silently cap at
+  // PostgREST's default 1000 rows once the farm has more than ~2-3 years of
+  // history. Page through the full result set instead.
   const { data: fcrStats } = useQuery({
     queryKey: ['flock_fcr_stats'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('daily_records')
+    queryFn: async () => fetchAllPages<any>(
+      (from, to) => supabase.from('daily_records')
         .select('flock_id,feed_female_kg,feed_male_kg,he_eggs,je_eggs,te_eggs,be_eggs')
-      return data ?? []
-    },
+        .range(from, to),
+      'FCR stats'
+    ),
     enabled: !!flocks && flocks.length > 0
   })
 
-  // First egg date per flock (earliest record_date where HE eggs > 0)
+  // First egg date per flock (earliest record_date where HE eggs > 0) —
+  // same unbounded-history risk as above.
   const { data: firstEggRows } = useQuery({
     queryKey: ['flock_first_egg'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('daily_records')
+    queryFn: async () => fetchAllPages<any>(
+      (from, to) => supabase.from('daily_records')
         .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
         .gt('he_eggs_a', 0)
         .order('record_date', { ascending: true })
+        .range(from, to),
       // Also try he_eggs_b, he_eggs_c — we need rows where any of them > 0
       // Supabase doesn't support OR on gt easily, so fetch all with he_eggs_a>0 first
       // We'll do a broader query below
-      return data ?? []
-    },
+      'First egg (A)'
+    ),
     enabled: !!flocks && flocks.length > 0
   })
 
-  // Broader first egg query covering all egg columns
+  // Broader first egg query covering all egg columns — unbounded across
+  // every flock/day, paged for the same reason as fcrStats above.
   const { data: firstEggRowsAll } = useQuery({
     queryKey: ['flock_first_egg_all'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('daily_records')
-        .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
-        .order('record_date', { ascending: true })
-      return (data ?? []).filter((r: any) =>
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('daily_records')
+          .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
+          .order('record_date', { ascending: true })
+          .range(from, to),
+        'First egg (all)'
+      )
+      return data.filter((r: any) =>
         ((r.he_eggs_a ?? 0) + (r.he_eggs_b ?? 0) + (r.he_eggs_c ?? 0)) > 0
       )
     },

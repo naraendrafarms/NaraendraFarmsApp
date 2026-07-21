@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { today, fyRange, FY_OPTIONS } from '@/lib/utils'
+import { today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
 import {
   Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge, SearchableSelect
 } from '@/components/ui'
@@ -37,16 +37,18 @@ export const EggStockPage: React.FC = () => {
     }
   })
 
-  // Daily records: production + wastage (all dates up to toDate)
+  // Daily records: production + wastage (all dates up to toDate) — with no
+  // lower bound this grows every day, so page through the full set rather
+  // than trusting a single request (PostgREST caps at 1000 rows otherwise).
   const { data: dailyRecs } = useQuery({
     queryKey: ['egg_stock_daily', toDate],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('daily_records')
+    queryFn: async () => fetchAllPages<any>(
+      (from, to) => supabase.from('daily_records')
         .select('flock_id, record_date, he_grade_a, he_grade_b, he_grade_c, je_eggs, te_eggs, be_eggs, le_eggs, wastage_he, wastage_je, wastage_te, wastage_be')
         .lte('record_date', toDate)
-      return data ?? []
-    },
+        .range(from, to),
+      'Egg stock daily records'
+    ),
     enabled: !!toDate
   })
 
@@ -54,12 +56,15 @@ export const EggStockPage: React.FC = () => {
   const { data: heDisp } = useQuery({
     queryKey: ['egg_stock_he_disp', toDate],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('he_dispatch_lines')
-        .select('flock_id, grade_a, grade_b, grade_c, he_dispatch!inner(flock_id, dispatch_date)')
-        .lte('he_dispatch.dispatch_date', toDate)
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('he_dispatch_lines')
+          .select('flock_id, grade_a, grade_b, grade_c, he_dispatch!inner(flock_id, dispatch_date)')
+          .lte('he_dispatch.dispatch_date', toDate)
+          .range(from, to),
+        'Egg stock HE dispatch'
+      )
       // Flatten: use line's flock_id (same as dispatch's), dispatch_date from parent
-      return (data ?? []).map((l: any) => ({
+      return data.map((l: any) => ({
         flock_id: l.flock_id,
         dispatch_date: l.he_dispatch?.dispatch_date,
         grade_a: l.grade_a ?? 0,
@@ -74,12 +79,15 @@ export const EggStockPage: React.FC = () => {
   const { data: nheSales } = useQuery({
     queryKey: ['egg_stock_nhe_sales', toDate],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('nhe_sales')
-        .select('id, flock_id, sale_date, sale_type, quantity, nhe_sale_lines(sale_type, quantity)')
-        .lte('sale_date', toDate)
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('nhe_sales')
+          .select('id, flock_id, sale_date, sale_type, quantity, nhe_sale_lines(sale_type, quantity)')
+          .lte('sale_date', toDate)
+          .range(from, to),
+        'Egg stock NHE sales'
+      )
       const rows: { flock_id: string; sale_date: string; sale_type: string; quantity: number }[] = []
-      for (const s of (data ?? [])) {
+      for (const s of data) {
         const lines: any[] = (s as any).nhe_sale_lines ?? []
         if (lines.length > 0) {
           for (const l of lines) {

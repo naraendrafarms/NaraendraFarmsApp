@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
-import { inr } from '@/lib/utils'
+import { inr, fetchAllPages } from '@/lib/utils'
 import { Card, Button, Select, SectionHeader, Spinner, Table, Th, Td } from '@/components/ui'
 import { Download, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -135,20 +135,26 @@ export const StockStatement: React.FC = () => {
       return (data ?? []).reduce((s: number, r: any) => s + (r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0), 0)
     },
   })
+  // Lifetime, unfiltered — a single request would silently cap at
+  // PostgREST's default 1000 rows once the farm has a few years of history.
   const { data: heProduced = 0 } = useQuery({
     queryKey: ['stock_stmt_he_produced'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('daily_records').select('he_eggs')
-      if (error) throw error
-      return (data ?? []).reduce((s: number, r: any) => s + (r.he_eggs ?? 0), 0)
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('daily_records').select('he_eggs').range(from, to),
+        'HE produced (lifetime)'
+      )
+      return data.reduce((s: number, r: any) => s + (r.he_eggs ?? 0), 0)
     },
   })
   const { data: heDispatched = 0 } = useQuery({
     queryKey: ['stock_stmt_he_dispatched'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('he_dispatch_lines').select('grade_a,grade_b,grade_c')
-      if (error) throw error
-      return (data ?? []).reduce((s: number, r: any) => s + (r.grade_a ?? 0) + (r.grade_b ?? 0) + (r.grade_c ?? 0), 0)
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('he_dispatch_lines').select('grade_a,grade_b,grade_c').range(from, to),
+        'HE dispatched (lifetime)'
+      )
+      return data.reduce((s: number, r: any) => s + (r.grade_a ?? 0) + (r.grade_b ?? 0) + (r.grade_c ?? 0), 0)
     },
   })
   const heClosing = heOpening + heProduced - heDispatched

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fetchAllPages } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
@@ -1910,15 +1910,22 @@ export const NHESales: React.FC = () => {
 
   const hasFilter = !!(flockFilter || empFilter || payFilter || fromDate || toDate)
 
-  // Party (buyer) dues summary across ALL non-employee sales
+  // Party (buyer) dues summary across ALL non-employee sales — unbounded
+  // history, so page through the full set rather than trusting a single
+  // request (PostgREST silently caps at 1000 rows otherwise, understating
+  // pending dues).
   const { data: partyDues } = useQuery({
     queryKey: ['nhe_party_dues'],
     queryFn: async () => {
-      const { data } = await supabase.from('nhe_sales')
-        .select('party_id,amount,amount_received,sale_type,parties(name)')
-        .or('is_employee_sale.is.null,is_employee_sale.eq.false')
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('nhe_sales')
+          .select('party_id,amount,amount_received,sale_type,parties(name)')
+          .or('is_employee_sale.is.null,is_employee_sale.eq.false')
+          .range(from, to),
+        'Party dues'
+      )
       const m: Record<string, any> = {}
-      for (const r of (data ?? [])) {
+      for (const r of data) {
         const id = r.party_id; if (!id) continue
         const e = (m[id] ??= { name: (r as any).parties?.name ?? '—', vouchers: 0, total: 0, received: 0, byType: {} as Record<string, number> })
         e.vouchers += 1
@@ -1934,15 +1941,20 @@ export const NHESales: React.FC = () => {
   })
   const [showPartyDues, setShowPartyDues] = useState(false)
 
-  // Employee dues summary across ALL employee sales (vouchers, received, pending)
+  // Employee dues summary across ALL employee sales (vouchers, received,
+  // pending) — same unbounded-history risk as partyDues above.
   const { data: empDues } = useQuery({
     queryKey: ['nhe_emp_dues'],
     queryFn: async () => {
-      const { data } = await supabase.from('nhe_sales')
-        .select('employee_id,amount,amount_received,sale_type,employees(name,emp_id)')
-        .eq('is_employee_sale', true)
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('nhe_sales')
+          .select('employee_id,amount,amount_received,sale_type,employees(name,emp_id)')
+          .eq('is_employee_sale', true)
+          .range(from, to),
+        'Employee dues'
+      )
       const m: Record<string, any> = {}
-      for (const r of (data ?? [])) {
+      for (const r of data) {
         const id = r.employee_id; if (!id) continue
         const e = (m[id] ??= { name: (r as any).employees?.name ?? '—', emp_id: (r as any).employees?.emp_id ?? '', vouchers: 0, total: 0, received: 0, byType: {} as Record<string, number> })
         e.vouchers += 1

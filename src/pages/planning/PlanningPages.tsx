@@ -426,8 +426,14 @@ const QuarterlyBudgetTab: React.FC = () => {
   const { data: currentBalance } = useQuery({
     queryKey: ['current_cash_balance'],
     queryFn: async () => {
-      const { data } = await supabase.from('cash_book').select('amount_in,amount_out')
-      return (data ?? []).reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
+      // Unfiltered, all-time — page through the full set rather than
+      // trusting a single request (PostgREST silently caps at 1000 rows
+      // otherwise, understating the current balance).
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('cash_book').select('amount_in,amount_out').range(from, to),
+        'Current cash balance'
+      )
+      return data.reduce((s: number, t: any) => s + (t.amount_in ?? 0) - (t.amount_out ?? 0), 0)
     }
   })
 

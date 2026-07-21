@@ -5,7 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 if (typeof window !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs`
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, currentFY, today } from '@/lib/utils'
+import { inr, fmtDate, currentFY, today, fetchAllPages } from '@/lib/utils'
 import { useAuth, can } from '@/lib/auth'
 import {
   Card, SectionHeader, Spinner, Table, Th, Td,
@@ -1449,17 +1449,19 @@ const RateAnalysisTab: React.FC = () => {
   const [grnItem, setGrnItem] = useState('')
   const [tableSearch, setTableSearch] = useState('')
 
-  // All PO data for analysis
+  // All PO data for analysis — unbounded across every fiscal year, so page
+  // through the full set rather than trusting a single request (PostgREST
+  // silently caps at 1000 rows otherwise, understating rate history).
   const { data: pos, isLoading } = useQuery({
     queryKey: ['po_rate_analysis'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('purchase_orders')
+    queryFn: async () => fetchAllPages<any>(
+      (from, to) => supabase.from('purchase_orders')
         .select('po_no,po_date,fiscal_year,vendor_name,item_name,material_type,quantity,unit,rate,gst_pct,total_amount')
         .not('rate', 'is', null)
         .order('po_date', { ascending: true })
-      return data ?? []
-    }
+        .range(from, to),
+      'PO rate analysis'
+    )
   })
 
   // GRN actual received rates vs PO ordered rates
@@ -1487,11 +1489,18 @@ const RateAnalysisTab: React.FC = () => {
   const { data: grnAll=[] } = useQuery({
     queryKey: ['grn_rate_trend'],
     queryFn: async () => {
-      const { data } = await supabase.from('grn')
-        .select('item_name,category,price_per_unit,other_charges,qty,grn_date,party_id,parties(name)')
-        .not('price_per_unit', 'is', null)
-        .order('grn_date', { ascending: true })
-      return (data ?? []).map((g: any) => {
+      // Unbounded across every GRN ever entered — page through the full
+      // set rather than trusting a single request (PostgREST silently caps
+      // at 1000 rows otherwise, understating rate history).
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('grn')
+          .select('item_name,category,price_per_unit,other_charges,qty,grn_date,party_id,parties(name)')
+          .not('price_per_unit', 'is', null)
+          .order('grn_date', { ascending: true })
+          .range(from, to),
+        'GRN rate trend'
+      )
+      return data.map((g: any) => {
         const qty = Number(g.qty) || 0
         const landed = Number(g.price_per_unit) + (qty > 0 ? (Number(g.other_charges) || 0) / qty : 0)
         return {

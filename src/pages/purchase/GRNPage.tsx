@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fetchAllPages } from '@/lib/utils'
 import { Card, CardHeader, Input, Select, FormRow, Modal, EmptyState, Spinner, Td, Th, DateInput, Badge, Button, usePagination, PageSizeControl } from '@/components/ui'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import toast from 'react-hot-toast'
@@ -198,12 +198,17 @@ export const GRNPage: React.FC = () => {
   const { data: grns, isLoading } = useQuery({
     queryKey: ['grns'],
     queryFn: async () => {
-      const { data } = await supabase.from('grn')
-        .select('*, farms(name), parties(name,gstin)')
-        .order('grn_date', { ascending: false })
-        .order('grn_no', { ascending: false })
-        .limit(2000)
-      return data ?? []
+      // A flat limit(2000) still silently drops everything past it once the
+      // farm accumulates more GRNs than that (years of daily feed/medicine/
+      // chick purchases) — page through the full history instead.
+      return fetchAllPages<any>(
+        (from, to) => supabase.from('grn')
+          .select('*, farms(name), parties(name,gstin)')
+          .order('grn_date', { ascending: false })
+          .order('grn_no', { ascending: false })
+          .range(from, to),
+        'GRN list'
+      )
     }
   })
 

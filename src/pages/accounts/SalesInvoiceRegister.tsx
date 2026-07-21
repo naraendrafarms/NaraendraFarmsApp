@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today, fyRange, FY_OPTIONS } from '@/lib/utils'
+import { inr, fmtDate, today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Select, SectionHeader, Spinner,
   Table, Th, Td, Badge, StatCard, DateInput, usePagination, PageSizeControl,
@@ -46,16 +46,21 @@ export const SalesInvoiceRegister: React.FC = () => {
     if (v) { const r = fyRange(v); setFilterFrom(r.start); setFilterTo(r.end) }
   }
 
-  // HE Dispatch invoices
+  // HE Dispatch invoices — every invoiced dispatch ever, unbounded, so page
+  // through the full set instead of trusting a single request (PostgREST
+  // silently caps at 1000 rows otherwise).
   const { data: heRows, isLoading: heLoading } = useQuery({
     queryKey: ['he_dispatch_invoices'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('he_dispatch')
-        .select('id,dispatch_date,invoice_no,amount,party_id,parties(name),flocks(flock_no)')
-        .not('invoice_no', 'is', null)
-        .order('dispatch_date', { ascending: false })
-      return (data ?? []).map((r: any) => ({
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('he_dispatch')
+          .select('id,dispatch_date,invoice_no,amount,party_id,parties(name),flocks(flock_no)')
+          .not('invoice_no', 'is', null)
+          .order('dispatch_date', { ascending: false })
+          .range(from, to),
+        'HE dispatch invoices'
+      )
+      return data.map((r: any) => ({
         id:         'he_' + r.id,
         date:       r.dispatch_date,
         invoice_no: r.invoice_no,
@@ -69,16 +74,19 @@ export const SalesInvoiceRegister: React.FC = () => {
     }
   })
 
-  // NHE Sales invoices
+  // NHE Sales invoices — same unbounded-history risk as HE Dispatch above.
   const { data: nheRows, isLoading: nheLoading } = useQuery({
     queryKey: ['nhe_sales_invoices'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('nhe_sales')
-        .select('id,sale_date,invoice_no,amount,sale_type,party_id,parties(name),flocks(flock_no)')
-        .not('invoice_no', 'is', null)
-        .order('sale_date', { ascending: false })
-      return (data ?? []).map((r: any) => ({
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('nhe_sales')
+          .select('id,sale_date,invoice_no,amount,sale_type,party_id,parties(name),flocks(flock_no)')
+          .not('invoice_no', 'is', null)
+          .order('sale_date', { ascending: false })
+          .range(from, to),
+        'NHE sales invoices'
+      )
+      return data.map((r: any) => ({
         id:         'nhe_' + r.id,
         date:       r.sale_date,
         invoice_no: r.invoice_no,
