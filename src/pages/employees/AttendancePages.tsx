@@ -1009,11 +1009,21 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
   })
 
   const { data: employees = [], isLoading: empLoading } = useQuery({
-    queryKey: ['employees_att_grid', farmId],
+    queryKey: ['employees_att_grid', farmId, month],
     queryFn: async () => {
+      const start = `${month}-01`
+      const end   = `${month}-${String(totalDays).padStart(2,'0')}`
+      // Currently-active employees always qualify. A resigned/deactivated
+      // employee also qualifies for any month they actually worked in
+      // (joining_date on/before month-end AND leaving_date on/after
+      // month-start, or no leaving_date recorded) — otherwise viewing a past
+      // month for someone who has since left silently dropped their row
+      // (and real attendance_daily/salary data with it) even though it's
+      // still in the database.
       let q = supabase.from('employees')
-        .select('id,emp_id,name,designation,farm_id,farms(name)')
-        .eq('is_active', true).order('emp_id', { ascending: true, nullsFirst: false })
+        .select('id,emp_id,name,designation,farm_id,farms(name),is_active,joining_date,leaving_date')
+        .or(`is_active.eq.true,and(joining_date.lte.${end},or(leaving_date.is.null,leaving_date.gte.${start}))`)
+        .order('emp_id', { ascending: true, nullsFirst: false })
       if (farmId) q = q.eq('farm_id', farmId)
       const { data } = await q
       return data ?? []
