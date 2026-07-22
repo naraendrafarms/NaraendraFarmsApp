@@ -308,14 +308,21 @@ const CreditorsTab: React.FC = () => {
 
   const { data: payments, isLoading } = useQuery({
     queryKey: ['pending_payments_all'],
-    queryFn: async () => {
-      const { data } = await supabase.from('pending_payments')
+    queryFn: async () => fetchAllPages<any>(
+      (from, to) => supabase.from('pending_payments')
         .select('*')
         .order('invoice_date', { ascending: false })
-        .limit(2000)
-      return data ?? []
-    }
+        .range(from, to),
+      'Pending payments (creditors)'
+    )
   })
+
+  // A bill's real remaining balance nets out BOTH what's been paid and any
+  // discount agreed — a bill settled partly by payment and partly by
+  // discount (e.g. paid 50%, 50% written off) was previously still counted
+  // at its full original amount here, even though Pending Payments itself
+  // already shows it as settled.
+  const getBalance = (p: any) => Math.max(0, (p.net_payable ?? p.invoice_amount ?? 0) - (p.paid_amount ?? 0) - (p.discount_amount ?? 0))
 
   const filtered = useMemo(() => {
     if (!payments) return []
@@ -323,13 +330,14 @@ const CreditorsTab: React.FC = () => {
     return payments.filter((p: any) => p.payment_status === statusFilter)
   }, [payments, statusFilter])
 
-  // Aging buckets — net each bill against partial payments already made
-  // (the full invoice amount used to be bucketed even when mostly paid)
+  // Aging buckets — net each bill against partial payments AND discounts
+  // already recorded (the full invoice amount used to be bucketed even when
+  // mostly or fully settled).
   const aging = useMemo(() => {
     const buckets: Record<string, number> = { 'Not Due': 0, '0-30d': 0, '31-60d': 0, '61-90d': 0, '90d+': 0 }
     for (const p of (payments ?? [])) {
       if (p.payment_status === 'Paid') continue
-      const bal = Math.max(0, (p.net_payable ?? p.invoice_amount ?? 0) - (p.paid_amount ?? 0))
+      const bal = getBalance(p)
       if (bal <= 0) continue
       const b = agingBucket(p.pay_before_date)
       buckets[b] = (buckets[b] ?? 0) + bal
@@ -339,13 +347,17 @@ const CreditorsTab: React.FC = () => {
 
   const totalPending = Object.entries(aging).reduce((s, [k, v]) => k === 'Not Due' ? s + v : s + v, 0)
 
-  // Group by vendor
+  // Group by vendor — same balance (net of paid + discount), not the raw
+  // bill amount, so a fully-settled bill no longer inflates a vendor's
+  // outstanding total.
   const byVendor = useMemo(() => {
     const map: Record<string, { name: string; total: number; count: number }> = {}
     for (const p of filtered) {
+      const bal = getBalance(p)
+      if (bal <= 0) continue
       const k = p.vendor_name ?? 'Unknown'
       if (!map[k]) map[k] = { name: k, total: 0, count: 0 }
-      map[k].total += p.net_payable ?? p.invoice_amount ?? 0
+      map[k].total += bal
       map[k].count++
     }
     return Object.values(map).sort((a, b) => b.total - a.total)
@@ -356,6 +368,7 @@ const CreditorsTab: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(filtered.map((p: any) => ({
       'Vendor': p.vendor_name, 'Invoice No': p.invoice_no, 'Invoice Date': p.invoice_date,
       'Invoice Amount': p.invoice_amount, 'TDS': p.tds_amount, 'Net Payable': p.net_payable,
+      'Paid': p.paid_amount, 'Discount': p.discount_amount, 'Balance Due': getBalance(p),
       'Due Date': p.pay_before_date, 'Status': p.payment_status,
       'Days Overdue': daysOverdue(p.pay_before_date) ?? 0
     })))
@@ -431,6 +444,7 @@ const CreditorsTab: React.FC = () => {
               <Th right>Invoice Amt</Th>
               <Th right>TDS</Th>
               <Th right>Net Payable</Th>
+              <Th right>Balance Due</Th>
               <Th>Due Date</Th>
               <Th>Status</Th>
               <Th right>Days Overdue</Th>
@@ -448,6 +462,7 @@ const CreditorsTab: React.FC = () => {
                   <Td right>{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
                   <Td right className="text-orange-600 text-sm">{p.tds_amount ? inr(p.tds_amount) : '—'}</Td>
                   <Td right className="font-semibold">{p.net_payable ? inr(p.net_payable) : (p.invoice_amount ? inr(p.invoice_amount) : '—')}</Td>
+                  <Td right className={getBalance(p) > 0 ? 'text-red-600 font-semibold' : 'text-green-600'}>{inr(getBalance(p))}</Td>
                   <Td className="text-sm">{p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}</Td>
                   <Td><Badge color={statusColor(p.payment_status ?? 'Pending')}>{p.payment_status ?? 'Pending'}</Badge></Td>
                   <Td right className={isOverdue ? 'text-red-600 font-semibold text-sm' : 'text-gray-400 text-sm'}>
@@ -464,6 +479,7 @@ const CreditorsTab: React.FC = () => {
                 <Td right>{inr(filtered.reduce((s: number, p: any) => s + (p.invoice_amount ?? 0), 0))}</Td>
                 <Td right>{inr(filtered.reduce((s: number, p: any) => s + (p.tds_amount ?? 0), 0))}</Td>
                 <Td right className="text-red-700">{inr(filtered.reduce((s: number, p: any) => s + (p.net_payable ?? p.invoice_amount ?? 0), 0))}</Td>
+                <Td right className="text-red-700">{inr(filtered.reduce((s: number, p: any) => s + getBalance(p), 0))}</Td>
                 <Td colSpan={3}></Td>
               </tr>
             </tfoot>
