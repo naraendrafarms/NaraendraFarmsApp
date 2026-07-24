@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-07-21'
+const LAST_UPDATED = '2026-07-22'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-22', tag: 'Improved', text: 'App-wide: if a browser tab is left open long enough for the login session to expire (the automatic background refresh can lose the race in an inactive tab), any save or page load used to fail with a raw "JWT expired" error and no way to recover except realizing you had to refresh yourself. Now shows a clear "Your session has expired — please log in again" message and takes you straight to the login page instead of leaving a broken screen.' },
   { date: '2026-07-21', tag: 'Fix', text: 'Accounts → Party Outstanding → Creditors tab: a bill settled partly by payment and partly by discount (e.g. paid 50%, 50% written off as discount) still showed its full original amount here even though Pending Payments itself already showed it as settled — the aging buckets, "By Vendor" totals, and grand total all only ever subtracted the amount paid, never the discount. Added a "Balance Due" column that nets out both paid and discount amounts (matching Pending Payments\' own calculation), and fixed aging/vendor totals to use it instead of the raw bill amount.' },
   { date: '2026-07-21', tag: 'Improved', text: 'Flocks → HE Dispatch → Print Invoice: the per-day egg production table now shows an "Age" column (e.g. "58w 4d") next to each production date, computed from the flock\'s placement date — a dispatch spanning several days now shows the correct age for each individual day, not just one age for the whole invoice.' },
   { date: '2026-07-21', tag: 'New', text: 'Flocks → HE Dispatch → Print Invoice: the printed invoice now shows "Flock Age" (in weeks, as of the dispatch date) next to the Flock number, computed from the flock\'s placement date — same age calculation already used elsewhere in the app (Flock List/Detail/P&L Summary).' },

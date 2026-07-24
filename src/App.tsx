@@ -1,7 +1,9 @@
 import React, { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
+import toast from 'react-hot-toast'
+import { supabase } from '@/lib/supabase'
 import { useAuth, can } from '@/lib/auth'
 import type { Role } from '@/lib/auth'
 import { AppLayout } from '@/components/layout/AppLayout'
@@ -85,7 +87,35 @@ import { TasksPage } from '@/pages/tasks/TasksPage'
 import { PlanningPage } from '@/pages/planning/PlanningPages'
 import { Spinner } from '@/components/ui'
 
+// A tab left open for a long time (overnight, a long shift, etc.) can outlive
+// its auth token — autoRefreshToken normally renews it in the background, but
+// browsers throttle timers in inactive tabs, so the refresh can lose the
+// race. Every query/mutation across the app then starts failing with a raw
+// "JWT expired" error and no recovery — the user just sees a broken screen
+// with no indication that logging back in fixes it. Catch it centrally
+// instead of leaving every page to handle it (or not) on its own.
+let sessionExpiredHandled = false
+const isSessionExpiredError = (error: unknown) => {
+  const msg = (error as any)?.message ?? ''
+  const code = (error as any)?.code ?? ''
+  return /jwt expired/i.test(msg) || code === 'PGRST301'
+}
+const handleSessionExpired = () => {
+  if (sessionExpiredHandled) return
+  sessionExpiredHandled = true
+  toast.error('Your session has expired — please log in again.', { duration: 6000 })
+  supabase.auth.signOut().finally(() => {
+    window.location.href = '/login'
+  })
+}
+
 const qc = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => { if (isSessionExpiredError(error)) handleSessionExpired() },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error) => { if (isSessionExpiredError(error)) handleSessionExpired() },
+  }),
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000,
