@@ -77,7 +77,7 @@ export const PendingPaymentsPage: React.FC = () => {
   const [editModal, setEditModal] = useState<PayRecord | 'new' | null>(null)
   const blankEditForm = () => ({
     vendor_name: '', party_id: '', invoice_no: '', po_no: '', grn_no: '', invoice_date: today(), grn_date: '',
-    invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', pay_before_date: '', paid_date: '', credit_limit: '',
+    invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', paid_amount: '', pay_before_date: '', paid_date: '', credit_limit: '',
     payment_status: 'Pending', account_type: 'NEFT', utr_no: '', cheque_no: '', category: '', remarks: '', bank_account_id: '',
   })
   const [editForm, setEditForm] = useState(blankEditForm())
@@ -407,6 +407,7 @@ export const PendingPaymentsPage: React.FC = () => {
       tds_pct: r.tds_pct != null ? String(r.tds_pct) : '',
       tds_amount: r.tds_amount != null ? String(r.tds_amount) : '',
       discount_amount: r.discount_amount != null ? String(r.discount_amount) : '',
+      paid_amount: r.paid_amount != null ? String(r.paid_amount) : '',
       pay_before_date: r.pay_before_date ?? '',
       paid_date: r.paid_date ?? (r.payment_status === 'Paid' ? today() : ''),
       credit_limit: r.credit_limit != null ? String(r.credit_limit) : '',
@@ -464,34 +465,23 @@ export const PendingPaymentsPage: React.FC = () => {
         category: editForm.category || null,
         remarks: editForm.remarks || null,
         bank_account_id: (editForm.account_type || '').toLowerCase() !== 'cash' ? (editForm.bank_account_id || null) : null,
-        // Status "Paid" is a flag; the Paid column/Balance read paid_amount.
-        // The edit path used to flip only the flag, leaving Paid blank and a
-        // stale Balance on the list. Record the settled amount too.
-        //
-        // The reverse direction had the matching bug: switching status AWAY
-        // from Paid (e.g. reverting a bank-import auto-match) correctly
-        // cleared the Cash Book/Bank Ledger entry below, but never reset
-        // paid_amount here — a plain object spread with {} contributes no
-        // key at all, so Supabase's partial .update() left the old (full)
-        // paid_amount sitting in the row untouched, silently zeroing the
-        // bill's balance and hiding the Pay button forever.
-        //
-        // Only reset it on an actual Paid -> non-Paid transition, never
-        // blanket-zero whenever the dropdown just happens to read
-        // Pending/HOLD — a bill can legitimately sit at Pending with a real
-        // partial paid_amount from the Pay screen, and re-saving this Edit
-        // form without touching Status must not wipe that out.
-        //
+        // Paid Amount is now a direct field the user types — saved exactly
+        // as entered, never derived from Net Payable minus Discount. That
+        // auto-derivation used to silently recompute paid_amount from
+        // whatever discount value happened to be in the form at save time,
+        // which could overwrite a real recorded payment with a fabricated
+        // number if the discount was ever briefly wrong before being
+        // corrected (confirmed on a real bill: paid_amount got stuck at a
+        // stale auto-computed value after the discount was fixed).
+        paid_amount: parseFloat(editForm.paid_amount) || 0,
         // A bill paid via the "Advance" mode also carries advance_adjusted +
-        // vendor_advance_id — the first fix (reset paid_amount only) missed
-        // these, so reverting an advance-paid bill left it still pointing at
-        // the advance with the full amount marked adjusted, even though the
-        // advance's own amount_used is given back below. Reset both too.
-        ...(editForm.payment_status === 'Paid'
-          ? { paid_amount: Math.max(0, netPayable - (parseFloat(editForm.discount_amount) || 0)) }
-          : (!isNew && editModal.payment_status === 'Paid'
-              ? { paid_amount: 0, advance_adjusted: 0, vendor_advance_id: null }
-              : {})),
+        // vendor_advance_id — reverting a Paid -> non-Paid transition on one
+        // of those must give back the advance's own amount_used (handled
+        // below) and clear these two so the bill no longer points at an
+        // advance it's not actually settled against.
+        ...(!isNew && editModal.payment_status === 'Paid' && editForm.payment_status !== 'Paid'
+          ? { advance_adjusted: 0, vendor_advance_id: null }
+          : {}),
       }
       let savedId: string
       if (isNew) {
@@ -1053,6 +1043,19 @@ export const PendingPaymentsPage: React.FC = () => {
                   <label className="text-xs font-medium text-gray-600 block mb-1">Discount</label>
                   <input type="number" value={editForm.discount_amount} onChange={e => setEditForm(f => ({ ...f, discount_amount: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">Paid Amount</label>
+                  <input type="number" value={editForm.paid_amount} onChange={e => setEditForm(f => ({ ...f, paid_amount: e.target.value }))}
+                    placeholder="0" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Balance after this: ₹{fmt(Math.max(0,
+                      (parseFloat(editForm.invoice_amount) || 0) - (parseFloat(editForm.tds_amount) || 0)
+                      - (parseFloat(editForm.paid_amount) || 0) - (parseFloat(editForm.discount_amount) || 0)
+                    ))}
+                  </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
