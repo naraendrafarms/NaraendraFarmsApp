@@ -52,6 +52,7 @@ type PayRecord = {
 type PayModal = {
   record: PayRecord
   paidAmt: string
+  discountAmt: string
   paidDate: string
   mode: string
   ref: string
@@ -180,7 +181,7 @@ export const PendingPaymentsPage: React.FC = () => {
   }
 
   const openPayModal = (r: PayRecord) => {
-    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '', advanceId: '' })
+    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), discountAmt: '', paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '', advanceId: '' })
     setErr('')
   }
 
@@ -200,21 +201,29 @@ export const PendingPaymentsPage: React.FC = () => {
 
   const handlePay = async () => {
     if (!modal) return
-    const amt = parseFloat(modal.paidAmt)
-    if (!amt || amt <= 0) { setErr('Enter valid amount'); return }
+    const amt = parseFloat(modal.paidAmt) || 0
+    const disc = parseFloat(modal.discountAmt) || 0
+    if (amt <= 0 && disc <= 0) { setErr('Enter a valid amount or discount'); return }
     const isAdvance = modal.mode === 'Advance'
     const isOpeningAdj = modal.mode === 'Opening Adjustment'
-    if (!isAdvance && !isOpeningAdj && modal.mode.toLowerCase() !== 'cash' && !modal.bankAccountId) { setErr('Select which bank account this is paid from'); return }
+    if (amt > 0 && !isAdvance && !isOpeningAdj && modal.mode.toLowerCase() !== 'cash' && !modal.bankAccountId) { setErr('Select which bank account this is paid from'); return }
     if (isAdvance && !modal.advanceId) { setErr('Select which advance to adjust against this bill'); return }
     setSaving(true); setErr('')
     try {
       const newPaid = (modal.record.paid_amount ?? 0) + amt
-      const bal = getBalance(modal.record) - amt
+      // Discount is written off against the bill in the SAME step as the
+      // payment — entering both together here (instead of a payment now and
+      // a separate Edit-form discount later) avoids the Edit form's
+      // paid_amount auto-recalculation silently overwriting whatever was
+      // just paid.
+      const newDiscount = (modal.record.discount_amount ?? 0) + disc
+      const bal = getBalance(modal.record) - amt - disc
       const newStatus = bal <= 0.01 ? 'Paid' : modal.record.payment_status
 
       if (isOpeningAdj) {
         const { error } = await supabase.from('pending_payments').update({
           paid_amount: newPaid,
+          discount_amount: newDiscount,
           paid_date: modal.paidDate,
           account_type: 'Opening Adjustment',
           remarks: modal.remarks || modal.record.remarks || null,
@@ -231,6 +240,7 @@ export const PendingPaymentsPage: React.FC = () => {
         if (amt > available + 0.01) throw new Error(`Only ₹${fmt(available)} available on this advance`)
         const { error } = await supabase.from('pending_payments').update({
           paid_amount: newPaid,
+          discount_amount: newDiscount,
           paid_date: modal.paidDate,
           account_type: 'Advance',
           transaction_ref: advance.reference_no || null,
@@ -250,6 +260,7 @@ export const PendingPaymentsPage: React.FC = () => {
       } else {
         const { error } = await supabase.from('pending_payments').update({
           paid_amount: newPaid,
+          discount_amount: newDiscount,
           paid_date: modal.paidDate,
           account_type: modal.mode,
           transaction_ref: modal.ref || null,
@@ -258,13 +269,17 @@ export const PendingPaymentsPage: React.FC = () => {
           bank_account_id: modal.mode.toLowerCase() !== 'cash' ? modal.bankAccountId : null,
         }).eq('id', modal.record.id)
         if (error) throw error
-        // Every rupee paid here — partial or final — lands in Cash Book immediately.
-        await postLedgerEntry({
-          paymentId: modal.record.id, vendorName: modal.record.vendor_name,
-          invoiceNo: modal.record.invoice_no, grnNo: modal.record.grn_no,
-          amount: amt, mode: modal.mode, date: modal.paidDate, ref: modal.ref, remarks: modal.remarks,
-          bankAccountId: modal.bankAccountId, partyId: modal.record.party_id,
-        })
+        // Every rupee actually paid — partial or final — lands in Cash Book
+        // immediately. A pure discount-only entry (amt=0) moves no cash, so
+        // there's nothing to post.
+        if (amt > 0) {
+          await postLedgerEntry({
+            paymentId: modal.record.id, vendorName: modal.record.vendor_name,
+            invoiceNo: modal.record.invoice_no, grnNo: modal.record.grn_no,
+            amount: amt, mode: modal.mode, date: modal.paidDate, ref: modal.ref, remarks: modal.remarks,
+            bankAccountId: modal.bankAccountId, partyId: modal.record.party_id,
+          })
+        }
       }
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
@@ -867,6 +882,16 @@ export const PendingPaymentsPage: React.FC = () => {
                 <label className="text-xs font-medium text-gray-600 block mb-1">Amount Paying (₹)</label>
                 <input type="number" value={modal.paidAmt} onChange={e => setModal(m => m ? { ...m, paidAmt: e.target.value } : m)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Discount / Write-off (₹) — optional</label>
+                <input type="number" value={modal.discountAmt} onChange={e => setModal(m => m ? { ...m, discountAmt: e.target.value } : m)}
+                  placeholder="0" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                {(parseFloat(modal.paidAmt) || 0) + (parseFloat(modal.discountAmt) || 0) > 0 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Remaining after this: ₹{fmt(Math.max(0, getBalance(modal.record) - (parseFloat(modal.paidAmt) || 0) - (parseFloat(modal.discountAmt) || 0)))}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Payment Date</label>
