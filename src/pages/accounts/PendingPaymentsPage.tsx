@@ -1085,7 +1085,19 @@ export const PendingPaymentsPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Status</label>
-                  <select value={editForm.payment_status} onChange={e => setEditForm(f => ({ ...f, payment_status: e.target.value }))}
+                  <select value={editForm.payment_status} onChange={e => {
+                    const status = e.target.value
+                    setEditForm(f => ({
+                      ...f, payment_status: status,
+                      // Paid Amount/Discount are now direct fields the user
+                      // controls — reversing a bill from Paid back to
+                      // Pending/HOLD must clear them, otherwise the old
+                      // amount stays put, Balance keeps showing 0/settled,
+                      // and the Pay button never reappears even though the
+                      // bill is meant to be outstanding again.
+                      ...(f.payment_status === 'Paid' && status !== 'Paid' ? { paid_amount: '', discount_amount: '' } : {}),
+                    }))
+                  }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
                     {['Pending', 'Paid', 'HOLD'].map(v => <option key={v}>{v}</option>)}
                   </select>
