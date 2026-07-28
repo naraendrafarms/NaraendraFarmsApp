@@ -83,6 +83,17 @@ export const fyRange = (fy: string): { start: string; end: string } => {
   const y = parseInt(fy.split('-')[0]); return { start: `${y}-04-01`, end: `${y + 1}-03-31` }
 }
 
+// Which FY string ("2026-27") a given YYYY-MM-DD date falls in — the
+// inverse of fyRange(), used to auto-switch a fiscal-year filter to match
+// a date the user just entered (e.g. a 01-April transaction added while an
+// older FY was still selected, which would otherwise save fine but not
+// appear anywhere in the current view).
+export const fyOfDate = (dateStr: string): string => {
+  const [y, m] = dateStr.split('-').map(Number)
+  const startYear = m >= 4 ? y : y - 1
+  return `${startYear}-${String(startYear + 1).slice(-2)}`
+}
+
 // FY months as ['YYYY-MM', ...] from Apr..Mar
 export const fyMonths = (fy: string): string[] => {
   const y = parseInt(fy.split('-')[0]); const out: string[] = []
