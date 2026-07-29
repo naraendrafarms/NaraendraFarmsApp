@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, currentFY, exportCSV, fmtDate, fetchAllPages } from '@/lib/utils'
 import { Card, CardHeader, Button, Input, Select, Table, Th, Td, Spinner, EmptyState, DateInput, Badge, usePagination, PageSizeControl } from '@/components/ui'
-import { Plus, Trash2, Save, Wallet, Download } from 'lucide-react'
+import { Plus, Trash2, Save, Wallet, Download, Pencil, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const FY_OPTIONS = ['2024-25', '2025-26', '2026-27', '2027-28']
@@ -18,6 +18,12 @@ export const OpeningBalancesPage: React.FC = () => {
   const [drcr, setDrcr] = useState<'Dr' | 'Cr'>('Dr')
   const [remarks, setRemarks] = useState('')
   const [search, setSearch] = useState('')
+  // Editing only ever touches Amount/Remarks — who it's against (party/
+  // partner) and Dr/Cr are locked once created, since changing either would
+  // mean switching which linked record (a payable bill, a vendor advance, a
+  // manual receivable line) this opening balance auto-created in the first
+  // place. Delete + re-add still covers that rarer case.
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const { data: parties = [] } = useQuery({
     queryKey: ['parties_all_ob'],
@@ -154,6 +160,65 @@ export const OpeningBalancesPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  const openEditRow = (r: any) => {
+    setEditingId(r.id)
+    setKind(r.party_id ? 'party' : 'partner')
+    setTargetId(r.party_id ?? r.partner_id ?? '')
+    setAmount(r.amount != null ? String(r.amount) : '')
+    setDrcr(r.dr_cr)
+    setRemarks(r.remarks ?? '')
+  }
+  const cancelEdit = () => {
+    setEditingId(null)
+    setTargetId(''); setAmount(''); setRemarks(''); setDrcr('Dr')
+  }
+
+  const update = useMutation({
+    mutationFn: async () => {
+      if (!editingId) return
+      const amt = parseFloat(amount) || 0
+      if (amt <= 0) throw new Error('Enter an amount')
+      const [{ data: bill }, { data: advance }, { data: manualItem }] = await Promise.all([
+        supabase.from('pending_payments').select('id,paid_amount,payment_status').eq('opening_balance_id', editingId).maybeSingle(),
+        supabase.from('vendor_advances').select('id,amount_used').eq('opening_balance_id', editingId).maybeSingle(),
+        supabase.from('payment_plan_manual_items').select('id').eq('opening_balance_id', editingId).maybeSingle(),
+      ])
+      if (bill && ((bill.paid_amount ?? 0) > 0 || bill.payment_status === 'Paid')) {
+        throw new Error('This opening balance\'s bill has already been paid/partially paid in Pending Payments — settle or reverse that first before editing the amount.')
+      }
+      if (advance && (advance.amount_used ?? 0) > 0) {
+        throw new Error('This opening balance\'s advance has already been adjusted against a bill — reverse that adjustment first before editing the amount.')
+      }
+      const { error } = await supabase.from('opening_balances').update({ amount: amt, remarks: remarks || null }).eq('id', editingId)
+      if (error) throw error
+      if (bill) {
+        const { error: ppErr } = await supabase.from('pending_payments').update({ invoice_amount: amt, net_payable: amt }).eq('id', bill.id)
+        if (ppErr) throw ppErr
+      }
+      if (advance) {
+        const { error: vaErr } = await supabase.from('vendor_advances').update({ amount: amt }).eq('id', advance.id)
+        if (vaErr) throw vaErr
+      }
+      if (manualItem) {
+        const name = kind === 'party'
+          ? (parties as any[]).find((p: any) => p.id === targetId)?.name
+          : (partners as any[]).find((p: any) => p.id === targetId)?.name
+        const { error: miErr } = await supabase.from('payment_plan_manual_items')
+          .update({ amount: amt, label: `${name ?? 'Opening'}${remarks ? ` — ${remarks}` : ''}` }).eq('id', manualItem.id)
+        if (miErr) throw miErr
+      }
+    },
+    onSuccess: () => {
+      toast.success('Opening balance updated')
+      inv()
+      qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+      qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
+      qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] })
+      cancelEdit()
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
   // Partner default is Cr (we owe them); buyer default Dr; supplier default Cr
   const onKind = (k: 'party' | 'partner') => { setKind(k); setTargetId(''); setDrcr(k === 'partner' ? 'Cr' : 'Dr') }
 
@@ -208,18 +273,23 @@ export const OpeningBalancesPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* Add form */}
+      {/* Add / Edit form */}
       <Card className="space-y-3">
+        {editingId && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700">
+            Editing an existing opening balance — only Amount and Remarks can be changed. Who it's against and Dr/Cr are locked (delete and re-add if those need to change).
+          </div>
+        )}
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
           {([['party', 'Buyer / Supplier'], ['partner', 'Partner']] as [any, string][]).map(([k, l]) => (
-            <button key={k} onClick={() => onKind(k)}
-              className={`px-3 py-1 text-xs rounded-md ${kind === k ? 'bg-white shadow font-semibold text-brand-700' : 'text-gray-500'}`}>{l}</button>
+            <button key={k} disabled={!!editingId} onClick={() => onKind(k)}
+              className={`px-3 py-1 text-xs rounded-md disabled:opacity-50 disabled:cursor-not-allowed ${kind === k ? 'bg-white shadow font-semibold text-brand-700' : 'text-gray-500'}`}>{l}</button>
           ))}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="md:col-span-2">
             <label className="block text-xs text-gray-500 mb-1">{kind === 'party' ? 'Buyer / Supplier' : 'Partner'} *</label>
-            <Select value={targetId} onChange={e => setTargetId(e.target.value)}
+            <Select value={targetId} disabled={!!editingId} onChange={e => setTargetId(e.target.value)}
               options={[{ value: '', label: '— Select —' }, ...targetOptions]} />
           </div>
           <div>
@@ -228,12 +298,21 @@ export const OpeningBalancesPage: React.FC = () => {
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Type</label>
-            <Select value={drcr} onChange={e => setDrcr(e.target.value as any)}
+            <Select value={drcr} disabled={!!editingId} onChange={e => setDrcr(e.target.value as any)}
               options={[{ value: 'Dr', label: 'Dr — they owe us (receivable)' }, { value: 'Cr', label: 'Cr — we owe them (payable)' }]} />
           </div>
         </div>
         <Input label="Remarks" value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="optional" />
-        <Button size="sm" icon={<Save size={14} />} onClick={() => save.mutate()} loading={save.isPending}>Add Opening Balance</Button>
+        <div className="flex gap-2">
+          {editingId ? (
+            <>
+              <Button size="sm" icon={<Save size={14} />} onClick={() => update.mutate()} loading={update.isPending}>Update Opening Balance</Button>
+              <Button size="sm" variant="outline" icon={<X size={14} />} onClick={cancelEdit}>Cancel Edit</Button>
+            </>
+          ) : (
+            <Button size="sm" icon={<Save size={14} />} onClick={() => save.mutate()} loading={save.isPending}>Add Opening Balance</Button>
+          )}
+        </div>
       </Card>
 
       {/* List */}
@@ -257,8 +336,12 @@ export const OpeningBalancesPage: React.FC = () => {
                   <Td><Badge color={r.dr_cr === 'Dr' ? 'orange' : 'green'}>{r.dr_cr === 'Dr' ? 'Receivable (Dr)' : 'Payable (Cr)'}</Badge></Td>
                   <Td className="text-xs text-gray-400">{r.remarks ?? '—'}</Td>
                   <Td>
-                    <button onClick={() => { if (confirm('Delete this opening balance?')) del.mutate(r.id) }}
-                      className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => openEditRow(r)}
+                        className="p-1 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-500"><Pencil size={13} /></button>
+                      <button onClick={() => { if (confirm('Delete this opening balance?')) del.mutate(r.id) }}
+                        className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+                    </div>
                   </Td>
                 </tr>
               ))}
