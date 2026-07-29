@@ -63,6 +63,16 @@ type PayModal = {
 
 import toast from 'react-hot-toast'
 
+// The raw Postgres unique-violation message is meaningless to a user —
+// translate the specific constraint this page's Add/Edit Bill can hit.
+const friendlyDbError = (e: any): string => {
+  const msg = e?.message ?? ''
+  if (msg.includes('uq_pending_payments_vendor_invoice')) {
+    return 'A bill for this vendor with this exact Invoice No already exists — check the list below, or use a different invoice number if this is genuinely a separate bill.'
+  }
+  return msg
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export const PendingPaymentsPage: React.FC = () => {
@@ -538,7 +548,7 @@ export const PendingPaymentsPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       setEditModal(null)
     } catch (e: any) {
-      setEditErr(e.message)
+      setEditErr(friendlyDbError(e))
     } finally {
       setEditSaving(false)
     }

@@ -9,6 +9,17 @@ import toast from 'react-hot-toast'
 const FY_OPTIONS = ['2024-25', '2025-26', '2026-27', '2027-28']
 const fyStartDate = (fy: string) => `${fy.split('-')[0]}-04-01`
 
+// The raw Postgres unique-violation message ("duplicate key value violates
+// unique constraint...") is meaningless to a user — translate the specific
+// constraints this page can hit into something actionable.
+const friendlyDbError = (e: any): string => {
+  const msg = e?.message ?? ''
+  if (msg.includes('uq_pending_payments_vendor_invoice')) {
+    return 'This vendor/partner already has an opening balance using the same reference — this shouldn\'t normally happen. If you were trying to fix a mistake, use the Edit (pencil) button on the existing row instead of adding another.'
+  }
+  return msg
+}
+
 export const OpeningBalancesPage: React.FC = () => {
   const qc = useQueryClient()
   const [fy, setFy] = useState(currentFY())
@@ -68,13 +79,18 @@ export const OpeningBalancesPage: React.FC = () => {
         const name = kind === 'party'
           ? (parties as any[]).find((p: any) => p.id === targetId)?.name
           : (partners as any[]).find((p: any) => p.id === targetId)?.name
+        // invoice_no must be unique per (vendor_name, invoice_no) — a fixed
+        // "OPENING-<FY>" collided the moment the SAME vendor needed a second
+        // opening balance in the same FY (e.g. several old unpaid invoices
+        // instead of one combined figure), so suffix it with this row's own
+        // opening_balances id to guarantee uniqueness per entry.
         const { error: ppErr } = await supabase.from('pending_payments').insert({
           vendor_name: name ?? 'Opening',
           party_id: kind === 'party' ? targetId : null,
           partner_id: kind === 'partner' ? targetId : null,
           is_opening: true,
           opening_balance_id: obRow.id,
-          invoice_no: `OPENING-${fy}`,
+          invoice_no: `OPENING-${fy}-${obRow.id.slice(0, 8)}`,
           invoice_amount: amt, net_payable: amt,
           invoice_date: asOf, grn_date: asOf, pay_before_date: asOf,
           payment_type: 'NEFT', payment_status: 'Pending', po_raised_by: 'Opening',
@@ -125,7 +141,7 @@ export const OpeningBalancesPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] })
       setTargetId(''); setAmount(''); setRemarks('')
     },
-    onError: (e: any) => toast.error(e.message)
+    onError: (e: any) => toast.error(friendlyDbError(e))
   })
 
   const del = useMutation({
@@ -157,7 +173,7 @@ export const OpeningBalancesPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
       qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] })
     },
-    onError: (e: any) => toast.error(e.message)
+    onError: (e: any) => toast.error(friendlyDbError(e))
   })
 
   const openEditRow = (r: any) => {
@@ -216,7 +232,7 @@ export const OpeningBalancesPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] })
       cancelEdit()
     },
-    onError: (e: any) => toast.error(e.message)
+    onError: (e: any) => toast.error(friendlyDbError(e))
   })
 
   // Partner default is Cr (we owe them); buyer default Dr; supplier default Cr
