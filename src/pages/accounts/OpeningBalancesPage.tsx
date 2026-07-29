@@ -74,60 +74,73 @@ export const OpeningBalancesPage: React.FC = () => {
       const { data: obRow, error } = await supabase.from('opening_balances').insert(payload).select('id').single()
       if (error) throw error
 
-      // Payable openings (Cr = we owe them) → create a payable bill so it can be paid & bank-linked
-      if (drcr === 'Cr' && obRow) {
-        const name = kind === 'party'
-          ? (parties as any[]).find((p: any) => p.id === targetId)?.name
-          : (partners as any[]).find((p: any) => p.id === targetId)?.name
-        // invoice_no must be unique per (vendor_name, invoice_no) — a fixed
-        // "OPENING-<FY>" collided the moment the SAME vendor needed a second
-        // opening balance in the same FY (e.g. several old unpaid invoices
-        // instead of one combined figure), so suffix it with this row's own
-        // opening_balances id to guarantee uniqueness per entry.
-        const { error: ppErr } = await supabase.from('pending_payments').insert({
-          vendor_name: name ?? 'Opening',
-          party_id: kind === 'party' ? targetId : null,
-          partner_id: kind === 'partner' ? targetId : null,
-          is_opening: true,
-          opening_balance_id: obRow.id,
-          invoice_no: `OPENING-${fy}-${obRow.id.slice(0, 8)}`,
-          invoice_amount: amt, net_payable: amt,
-          invoice_date: asOf, grn_date: asOf, pay_before_date: asOf,
-          payment_type: 'NEFT', payment_status: 'Pending', po_raised_by: 'Opening',
-        })
-        if (ppErr) throw ppErr
-      }
+      // These two inserts aren't wrapped in a real DB transaction — if either
+      // fails, the opening_balances row above has ALREADY committed. Without
+      // this try/catch, that failure orphaned the opening balance with no
+      // linked bill/advance at all (confirmed on a real vendor: a duplicate-
+      // key error on the linked bill left a ₹13,50,000 opening balance
+      // sitting invisible, with nothing to pay against it anywhere). Roll it
+      // back manually on any failure here so a failed save never leaves a
+      // half-created opening balance behind.
+      try {
+        // Payable openings (Cr = we owe them) → create a payable bill so it can be paid & bank-linked
+        if (drcr === 'Cr' && obRow) {
+          const name = kind === 'party'
+            ? (parties as any[]).find((p: any) => p.id === targetId)?.name
+            : (partners as any[]).find((p: any) => p.id === targetId)?.name
+          // invoice_no must be unique per (vendor_name, invoice_no) — a fixed
+          // "OPENING-<FY>" collided the moment the SAME vendor needed a
+          // second opening balance in the same FY (e.g. several old unpaid
+          // invoices instead of one combined figure), so suffix it with this
+          // row's own opening_balances id to guarantee uniqueness per entry.
+          const { error: ppErr } = await supabase.from('pending_payments').insert({
+            vendor_name: name ?? 'Opening',
+            party_id: kind === 'party' ? targetId : null,
+            partner_id: kind === 'partner' ? targetId : null,
+            is_opening: true,
+            opening_balance_id: obRow.id,
+            invoice_no: `OPENING-${fy}-${obRow.id.slice(0, 8)}`,
+            invoice_amount: amt, net_payable: amt,
+            invoice_date: asOf, grn_date: asOf, pay_before_date: asOf,
+            payment_type: 'NEFT', payment_status: 'Pending', po_raised_by: 'Opening',
+          })
+          if (ppErr) throw ppErr
+        }
 
-      // Dr opening on a SUPPLIER (kind='party', party.type='supplier') means
-      // money already paid to them last FY that isn't a plain receivable —
-      // it's an unused advance sitting with that vendor. Create a matching
-      // vendor_advances row (amount_used=0) so the existing "Advance (adjust
-      // against existing balance)" picker in Pending Payments can settle new
-      // GRN bills against it, the same way a real advance already can.
-      const party = kind === 'party' ? (parties as any[]).find((p: any) => p.id === targetId) : null
-      if (drcr === 'Dr' && kind === 'party' && (party?.type === 'supplier' || party?.type === 'both') && obRow) {
-        const { error: vaErr } = await supabase.from('vendor_advances').insert({
-          advance_date: asOf, party_id: targetId, amount: amt, amount_used: 0,
-          payment_mode: 'Opening Balance', remarks: remarks || 'Carried forward from prior FY',
-          opening_balance_id: obRow.id,
-        })
-        if (vaErr) throw vaErr
-      }
+        // Dr opening on a SUPPLIER (kind='party', party.type='supplier') means
+        // money already paid to them last FY that isn't a plain receivable —
+        // it's an unused advance sitting with that vendor. Create a matching
+        // vendor_advances row (amount_used=0) so the existing "Advance (adjust
+        // against existing balance)" picker in Pending Payments can settle new
+        // GRN bills against it, the same way a real advance already can.
+        const party = kind === 'party' ? (parties as any[]).find((p: any) => p.id === targetId) : null
+        if (drcr === 'Dr' && kind === 'party' && (party?.type === 'supplier' || party?.type === 'both') && obRow) {
+          const { error: vaErr } = await supabase.from('vendor_advances').insert({
+            advance_date: asOf, party_id: targetId, amount: amt, amount_used: 0,
+            payment_mode: 'Opening Balance', remarks: remarks || 'Carried forward from prior FY',
+            opening_balance_id: obRow.id,
+          })
+          if (vaErr) throw vaErr
+        }
 
-      // Dr opening on a BUYER (a customer owing us — e.g. a pending eggs
-      // amount) never showed up anywhere actionable — Daily Payment
-      // Planning's "Pending Receivables" only reads real nhe_sales/he_dispatch
-      // rows, not Opening Balances. Auto-add it to that page's Manual Items
-      // list instead (linked back so it stays in sync and cleans up if the
-      // opening balance is deleted — see migration 470's ON DELETE CASCADE).
-      if (drcr === 'Dr' && kind === 'party' && (party?.type === 'buyer' || party?.type === 'both') && obRow) {
-        const { error: miErr } = await supabase.from('payment_plan_manual_items').insert({
-          label: `${party?.name ?? 'Opening'}${remarks ? ` — ${remarks}` : ''}`,
-          amount: amt, direction: 'receivable', due_date: asOf,
-          notes: 'Opening balance carried forward from prior FY',
-          opening_balance_id: obRow.id,
-        })
-        if (miErr) throw miErr
+        // Dr opening on a BUYER (a customer owing us — e.g. a pending eggs
+        // amount) never showed up anywhere actionable — Daily Payment
+        // Planning's "Pending Receivables" only reads real nhe_sales/he_dispatch
+        // rows, not Opening Balances. Auto-add it to that page's Manual Items
+        // list instead (linked back so it stays in sync and cleans up if the
+        // opening balance is deleted — see migration 470's ON DELETE CASCADE).
+        if (drcr === 'Dr' && kind === 'party' && (party?.type === 'buyer' || party?.type === 'both') && obRow) {
+          const { error: miErr } = await supabase.from('payment_plan_manual_items').insert({
+            label: `${party?.name ?? 'Opening'}${remarks ? ` — ${remarks}` : ''}`,
+            amount: amt, direction: 'receivable', due_date: asOf,
+            notes: 'Opening balance carried forward from prior FY',
+            opening_balance_id: obRow.id,
+          })
+          if (miErr) throw miErr
+        }
+      } catch (linkedErr) {
+        await supabase.from('opening_balances').delete().eq('id', obRow.id)
+        throw linkedErr
       }
     },
     onSuccess: () => {
