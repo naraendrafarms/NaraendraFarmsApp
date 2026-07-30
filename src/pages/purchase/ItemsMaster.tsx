@@ -114,6 +114,30 @@ export const ItemsMasterPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  // All aliases, for the list's own search box below — searching by an
+  // alias (e.g. "VVND") used to find nothing here even though the same
+  // alias correctly matches the item in every OTHER picker in the app
+  // (GRN, Bulk Daily Entry, etc.), because this page's filter only ever
+  // checked name/code/short_name/manufacturer, never item_aliases.
+  const { data: allAliases } = useQuery({
+    queryKey: ['item_aliases_all'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('item_aliases').select('item_id,alias')
+      if (error) throw error
+      return data ?? []
+    },
+    staleTime: 60 * 1000,
+  })
+  const aliasesByItem = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const a of allAliases ?? []) {
+      const list = m.get(a.item_id) ?? []
+      list.push(a.alias)
+      m.set(a.item_id, list)
+    }
+    return m
+  }, [allAliases])
+
   // ── Aliases: every other name this item is known by (Purchase Intent,
   // PO, GRN, Medicine Master) — searchable everywhere via item_aliases.
   const { data: aliasesForItemRaw } = useQuery({
@@ -310,10 +334,11 @@ export const ItemsMasterPage: React.FC = () => {
     const q = search.toLowerCase()
     return (items ?? []).filter((i: any) => {
       if (catFilter && i.category !== catFilter) return false
-      if (q && !`${i.name} ${i.code ?? ''} ${i.short_name ?? ''} ${i.manufacturer ?? ''}`.toLowerCase().includes(q)) return false
+      const haystack = `${i.name} ${i.code ?? ''} ${i.short_name ?? ''} ${i.manufacturer ?? ''} ${(aliasesByItem.get(i.id) ?? []).join(' ')}`.toLowerCase()
+      if (q && !haystack.includes(q)) return false
       return true
     })
-  }, [items, search, catFilter])
+  }, [items, search, catFilter, aliasesByItem])
 
   const grouped = useMemo(() => {
     const map: Record<string, any[]> = {}
