@@ -547,7 +547,22 @@ export const ItemsMasterPage: React.FC = () => {
                         </button>
                       </Td>
                       <Td className="font-mono text-xs text-gray-500">{item.code ?? '—'}</Td>
-                      <Td className="font-medium">{item.name}</Td>
+                      <Td className="font-medium">
+                        {item.name}
+                        {(() => {
+                          const aliases = aliasesByItem.get(item.id) ?? []
+                          if (!aliases.length) return null
+                          const shown = aliases.slice(0, 2).join(', ')
+                          const more = aliases.length > 2 ? ` +${aliases.length - 2} more` : ''
+                          return (
+                            <button onClick={() => setAliasItem(item)}
+                              className="block text-xs text-purple-600 hover:text-purple-800 hover:underline font-normal text-left mt-0.5"
+                              title={aliases.join(', ')}>
+                              aka: {shown}{more}
+                            </button>
+                          )
+                        })()}
+                      </Td>
                       <Td className="text-gray-500">{item.short_name ?? '—'}</Td>
                       <Td className="text-gray-500 capitalize">{item.sub_type ?? '—'}</Td>
                       <Td>{item.unit}</Td>
