@@ -3,6 +3,7 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput, SearchableSelect } from '@/components/ui'
+import { QuickAddMedicine } from '@/components/ui/QuickAdd'
 import { Save, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import { useFeedRates } from '@/hooks/useFeedRates'
@@ -1071,9 +1072,10 @@ export const BulkDailyEntry: React.FC = () => {
                 <div className="space-y-2">
                   {medRows.map((m, i) => (
                     <div key={m.key} className="flex items-center gap-3 flex-wrap">
-                      <div className="w-56">
+                      <div className="w-56 relative">
                         <SearchableSelect value={m.med_id} onChange={(v) => updateMedRow(m.key, 'med_id', v)} options={medOptions} placeholder="Search medicine…" />
                       </div>
+                      <QuickAddMedicine onCreated={(med) => updateMedRow(m.key, 'med_id', med.id)} />
                       <input type="number" min="0" value={m.med_qty} placeholder="qty" disabled={!m.med_id}
                         onChange={e => updateMedRow(m.key, 'med_qty', e.target.value)}
                         className="w-24 text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
@@ -1197,7 +1199,12 @@ export const BulkDailyEntry: React.FC = () => {
                             </td>
                           ))}
                           <td className="px-1 py-1">
-                            <SearchableSelect value={r.med_id} onChange={(v) => updateFlockRow(flock.id, 'med_id', v)} options={medOptions} placeholder="Search medicine…" />
+                            <div className="flex items-center gap-1 relative">
+                              <div className="flex-1 min-w-0">
+                                <SearchableSelect value={r.med_id} onChange={(v) => updateFlockRow(flock.id, 'med_id', v)} options={medOptions} placeholder="Search medicine…" />
+                              </div>
+                              <QuickAddMedicine onCreated={(med) => updateFlockRow(flock.id, 'med_id', med.id)} />
+                            </div>
                           </td>
                           <td className="px-1 py-1">
                             <input type="number" min="0" value={r.med_qty} placeholder="qty" disabled={!r.med_id}

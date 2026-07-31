@@ -147,3 +147,91 @@ export const QuickAddIngredient: React.FC<QuickAddIngredientProps> = ({ onCreate
     </div>
   )
 }
+
+// ── QuickAddMedicine ──────────────────────────────────────────────────────────
+// Medicine dropdowns (Bulk Daily Entry, Daily Entry, Flock Sales, VHL) read
+// from `medicines_master`, while GRN/Items Master read from the unified
+// `items` table — the two are linked via medicines_master.item_id (migration
+// 453), but are separate rows. Adding a medicine here writes BOTH, in one
+// step, so it's immediately usable everywhere instead of only appearing in
+// whichever table a naive single insert would have hit.
+
+interface QuickAddMedicineProps {
+  onCreated: (medicine: { id: string; name: string }) => void
+  /** Item category to file this under in Items Master — default 'Medicine' */
+  defaultCategory?: string
+}
+
+export const QuickAddMedicine: React.FC<QuickAddMedicineProps> = ({ onCreated, defaultCategory = 'Medicine' }) => {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [category, setCategory] = useState(defaultCategory)
+  const [unit, setUnit] = useState('ml')
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!name.trim()) throw new Error('Name is required')
+      const trimmed = name.trim()
+      const { data: item, error: itemErr } = await supabase
+        .from('items')
+        .insert({ name: trimmed, category, unit })
+        .select('id,name')
+        .single()
+      if (itemErr) throw itemErr
+      const { data: med, error: medErr } = await supabase
+        .from('medicines_master')
+        .insert({ name: trimmed, unit, item_id: item.id })
+        .select('id,name')
+        .single()
+      if (medErr) throw medErr
+      return med
+    },
+    onSuccess: (data) => {
+      toast.success(`${data.name} added`)
+      qc.invalidateQueries({ queryKey: ['medicines_master_list'] })
+      qc.invalidateQueries({ queryKey: ['medicines_for_alias_search'] })
+      qc.invalidateQueries({ queryKey: ['items_for_alias_search'] })
+      qc.invalidateQueries({ queryKey: ['items-all'] })
+      qc.invalidateQueries({ queryKey: ['items_master'] })
+      onCreated(data)
+      setOpen(false)
+      setName(''); setCategory(defaultCategory); setUnit('ml')
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border border-dashed border-brand-400 text-brand-600 hover:bg-brand-50 transition-colors"
+        title="Add new medicine"
+      >
+        <Plus size={15} />
+      </button>
+    )
+  }
+
+  return (
+    <div className="absolute z-50 bg-white border border-gray-200 rounded-xl shadow-xl p-4 w-64 mt-1">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm font-semibold text-gray-800">Quick Add Medicine</p>
+        <button type="button" onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={15}/></button>
+      </div>
+      <div className="space-y-2">
+        <Input label="Name *" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Amoxicillin" autoFocus />
+        <Select label="Category" value={category} onChange={e => setCategory(e.target.value)}
+          options={['Medicine','Vaccine','Supplement','Sanitizer','Injectable','Disinfectant']} />
+        <Select label="Unit" value={unit} onChange={e => setUnit(e.target.value)}
+          options={['ml','Ltr','Gm','Kg','Nos','Tab']} />
+        <p className="text-xs text-gray-400">Also added to Items Master under this category, so it shows up in GRN/Purchase too.</p>
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" onClick={() => mut.mutate()} loading={mut.isPending} className="flex-1">Add</Button>
+          <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
