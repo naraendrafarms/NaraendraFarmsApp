@@ -6,7 +6,7 @@ import {
   Card, CardHeader, Button, Input, Select, Badge,
   SectionHeader, Spinner, Table, Th, Td, StatCard
 , DateInput, usePagination, PageSizeControl } from '@/components/ui'
-import { Plus, Download, Upload, Edit2, Trash2, CheckCircle } from 'lucide-react'
+import { Plus, Download, Upload, Edit2, Trash2, CheckCircle, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
@@ -300,6 +300,34 @@ export const InvoiceRegister: React.FC = () => {
     })
     setEditId(inv.id)
     setEditOrigKey({ vendor_name: inv.supplier_name || inv.party?.name || '', invoice_no: inv.invoice_no ?? '' })
+    setShowForm(true)
+  }
+
+  // For recurring bills (rent, AMC, retainer, etc. raised every month for
+  // the same vendor/amount) — pre-fills everything except the invoice
+  // number/date and payment status/amount, which are always new each time,
+  // instead of re-typing the whole bill from scratch every month.
+  const openDuplicate = (inv: any) => {
+    setForm({
+      invoice_no:     '',
+      invoice_date:   today(),
+      supplier_name:  inv.supplier_name ?? '',
+      party_id:       inv.party_id ?? '',
+      source_type:    inv.source_type ?? 'other',
+      flock_id:       inv.flock_id ?? '',
+      grn_id:         '',
+      farm_id:        inv.farm_id ?? '',
+      basic_amount:   inv.basic_amount?.toString() ?? '',
+      gst_pct:        inv.gst_pct?.toString() ?? '0',
+      gst_amount:     inv.gst_amount?.toString() ?? '',
+      total_amount:   inv.total_amount?.toString() ?? '',
+      payment_status: 'unpaid',
+      paid_amount:    '0',
+      due_date:       '',
+      remarks:        inv.remarks ?? '',
+    })
+    setEditId(null)
+    setEditOrigKey(null)
     setShowForm(true)
   }
 
@@ -643,6 +671,7 @@ export const InvoiceRegister: React.FC = () => {
                               <CheckCircle size={14} className="inline mr-0.5" />Pay
                             </button>
                           )}
+                          <button onClick={() => openDuplicate(inv)} className="text-xs text-gray-500 hover:underline" title="Duplicate — for a recurring bill (rent, AMC, etc.)"><Copy size={13}/></button>
                           <button onClick={() => openEdit(inv)} className="text-xs text-blue-600 hover:underline"><Edit2 size={13}/></button>
                           <button onClick={() => setDelId(inv.id)} className="text-xs text-red-500 hover:underline"><Trash2 size={13}/></button>
                         </div>
