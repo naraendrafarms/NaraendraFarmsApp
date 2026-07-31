@@ -3,9 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
 import { Card, CardHeader, Button, DateInput, Table, Th, Td, Badge, Spinner } from '@/components/ui'
-import { Download, FileSpreadsheet } from 'lucide-react'
+import { Download, FileSpreadsheet, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
+import { printReport } from '@/lib/invoicePrint'
 
 const COMPANY_NAME = 'Naraendra Farms'
 const COMPANY_ADDR1 = '5-9-22/21 , JVR Amrit Enclave, Roshanlal Residency ,'
@@ -132,6 +133,30 @@ export const CMSUploadPage: React.FC = () => {
     toast.success(`CMS file downloaded — ${selectedPayments.length} payments, ${inr(totalSelected)}`)
   }
 
+  // A printed, letterhead copy of the same request — for physical submission
+  // to the bank alongside (or instead of) the Excel CMS file.
+  const printCMS = () => {
+    if (!selectedPayments.length) { toast.error('Select at least one vendor to include'); return }
+    const rows = selectedPayments.map((p: any) => {
+      const party = p.parties ?? partiesMap?.[p.vendor_name] ?? {}
+      const tdsDisc = (p.tds_amount ?? 0) + (p.discount_amount ?? 0)
+      return [
+        fmtDate(paymentDate), p.payment_type ?? 'NEFT', p.vendor_name,
+        party.bank_name ?? '—', party.ifsc ?? '—', party.account_no ?? '—',
+        inr(p.invoice_amount ?? 0), tdsDisc > 0 ? inr(tdsDisc) : '—', inr(netPayable(p)),
+        p.invoice_no ?? p.grn_no ?? p.po_no ?? '—',
+      ]
+    })
+    printReport({
+      title: 'Request for RTGS / NEFT Transfer',
+      subtitle: `Payment Date: ${fmtDate(paymentDate)} · ${selectedPayments.length} beneficiary(ies)`,
+      headers: ['Date', 'Type', 'Beneficiary', 'Bank', 'IFSC', 'A/c No', 'Gross Amt', 'TDS/Disc', 'Payable', 'Ref/Invoice'],
+      rows,
+      rightAlignFrom: 6,
+      footerRow: ['', '', '', '', '', 'TOTAL', '', '', inr(totalSelected), ''],
+    })
+  }
+
   return (
     <div className="space-y-4">
       <CardHeader
@@ -140,6 +165,14 @@ export const CMSUploadPage: React.FC = () => {
         action={
           <div className="flex items-center gap-3">
             <DateInput value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
+            <Button
+              variant="outline"
+              icon={<Printer size={16} />}
+              onClick={printCMS}
+              disabled={selected.size === 0}
+            >
+              Print
+            </Button>
             <Button
               icon={<Download size={16} />}
               onClick={downloadCMS}
