@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-07-30'
+const LAST_UPDATED = '2026-07-31'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-07-31', tag: 'New', text: 'Employees → Employee Advances: added Print Voucher (per row — a signed payment-voucher layout with Employee/Prepared By/Approved By/Accounts signature lines), plus Template, Import, and Export buttons matching the pattern used on other list pages. (Edit and Delete already existed.) Note: unlike the manual Add Advance form, a bulk-imported cash advance does not post a matching Cash Book/Bank Ledger entry — reconcile those manually if needed.' },
   { date: '2026-07-30', tag: 'New', text: 'Purchase → Items Master: an item\'s known aliases now show directly under its name in the list (e.g. "aka: VVND Killed (HP) New Strain Hester, VVND HPAI White +2 more") instead of being invisible until you opened "Manage alias names" — so anyone browsing the list can see at a glance what other names an item is known by. Click it to open the alias manager directly.' },
   { date: '2026-07-30', tag: 'Fix', text: 'Purchase → Items Master: the page\'s own search box never actually checked an item\'s aliases — only name/code/short name/manufacturer — even though every other item picker in the app (GRN, Bulk Daily Entry, Feed Mill, etc.) already searches aliases correctly. Confirmed on a real item ("Inactivated Pullet ND HPAI Vaccine (W)") that already had "VVND Killed (HP) New Strain Hester" registered as an alias, yet searching "VVND" here found nothing. Items Master\'s search now checks aliases too, matching every other picker.' },
   { date: '2026-07-29', tag: 'Fix', text: 'Accounts → Opening Balances: fixed an orphaned-record bug from the duplicate-reference issue fixed yesterday — if the linked bill/advance failed to create for any reason, the opening balance itself had already been saved, leaving it sitting invisible with nothing to pay against anywhere (confirmed on a real ₹13,50,000 entry that never got a matching bill in Pending Payments). Saving now rolls back the opening balance if its linked record fails to create, so a failed save never leaves a half-created entry behind. The one real case already found has been repaired.' },

@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { Card, CardHeader, Button, Select, SectionHeader, Spinner, Table, Th, Td , DateInput, Modal, SearchableSelect } from '@/components/ui'
 import toast from 'react-hot-toast'
-import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Printer } from 'lucide-react'
+import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Printer, Upload } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { fetchAllPages } from '@/lib/utils'
-import { printReport } from '@/lib/invoicePrint'
+import { printReport, printAdvanceVoucher } from '@/lib/invoicePrint'
+import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void; disabled?: boolean }> = ({ checked, indeterminate, onChange, disabled }) => {
   const ref = useRef<HTMLInputElement>(null)
@@ -783,10 +784,85 @@ export const EmployeeAdvancesPage: React.FC = () => {
     return { value: val, label: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) }
   })
 
+  const handleExport = () => {
+    exportCSV(`Employee_Advances_${filterMonth}.csv`,
+      ['Date', 'Employee', 'Emp ID', 'Site', 'Type', 'Details', 'Amount', 'Salary Month', 'Payment Mode', 'Narration'],
+      (advances ?? []).map((r: any) => [
+        r.advance_date, r.employees?.name ?? '', r.employees?.emp_id ?? '', r.employees?.farms?.name ?? '',
+        r.advance_type, r.advance_type === 'egg' && r.egg_qty ? `${r.egg_qty} eggs x Rs.${r.egg_rate}` : '',
+        r.amount ?? 0, r.salary_month ?? '', r.payment_mode ?? '', r.narration ?? '',
+      ]))
+  }
+
+  const IMPORT_HEADERS = ['Emp ID', 'Advance Date', 'Type', 'Amount', 'Egg Qty', 'Egg Rate', 'Salary Month', 'Payment Mode', 'Narration']
+  const downloadImportTemplate = () => downloadXlsxTemplate('employee_advances_template.xlsx', IMPORT_HEADERS,
+    ['NF-001', todayStr(), 'cash', '1000', '', '', filterMonth, 'Cash', 'e.g. Advance for personal expense'])
+
+  const importRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+  // NOTE: unlike the manual Add Advance form, a bulk-imported cash advance
+  // does NOT post a matching Cash Book/Bank Ledger entry — there's no
+  // payment-mode confirmation step to safely attribute it to a specific
+  // bank account across many rows at once. Reconcile bulk-imported cash
+  // advances against Cash Book manually if needed.
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true)
+    try {
+      const { headers, rows } = await parseFile(file)
+      const col = (name: string) => headers.findIndex(h => h.toLowerCase().trim() === name.toLowerCase())
+      const ci = {
+        empId: col('Emp ID'), date: col('Advance Date'), type: col('Type'), amount: col('Amount'),
+        eggQty: col('Egg Qty'), eggRate: col('Egg Rate'), salaryMonth: col('Salary Month'),
+        payMode: col('Payment Mode'), narration: col('Narration'),
+      }
+      if (ci.empId < 0 || ci.amount < 0) { toast.error('File needs "Emp ID" and "Amount" columns'); return }
+      const empByCode = new Map((employees ?? []).map((e: any) => [String(e.emp_id ?? '').trim().toLowerCase(), e]))
+      const g = (r: string[], i: number) => i >= 0 ? String(r[i] ?? '').trim() : ''
+      let imported = 0, skipped = 0
+      for (const r of rows) {
+        if (!r.some(c => (c ?? '').toString().trim() !== '')) continue
+        const emp = empByCode.get(g(r, ci.empId).toLowerCase())
+        const amount = parseFloat(g(r, ci.amount)) || 0
+        if (!emp || amount <= 0) { skipped++; continue }
+        const type = (g(r, ci.type) || 'cash').toLowerCase()
+        const { error } = await supabase.from('employee_advances').insert({
+          employee_id: emp.id, farm_id: emp.farm_id ?? null,
+          advance_date: g(r, ci.date) || todayStr(),
+          advance_type: type,
+          amount,
+          egg_qty: type === 'egg' ? (parseInt(g(r, ci.eggQty)) || null) : null,
+          egg_rate: type === 'egg' ? (parseFloat(g(r, ci.eggRate)) || null) : null,
+          salary_month: g(r, ci.salaryMonth) || null,
+          payment_mode: type === 'cash' ? (g(r, ci.payMode) || 'Cash') : null,
+          narration: g(r, ci.narration) || null,
+        })
+        if (error) { skipped++; continue }
+        imported++
+      }
+      qc.invalidateQueries({ queryKey: ['employee_advances'] })
+      toast.success(`Imported ${imported} advance(s)${skipped ? `, skipped ${skipped} (missing/unmatched Emp ID or amount)` : ''}`)
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setImporting(false)
+      if (importRef.current) importRef.current.value = ''
+    }
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Employee Advances" subtitle="Cash, egg, and other advances deducted from salary"
-        action={<Button size="sm" onClick={() => { if (showForm) { setEditing(null); setForm({ ...EMPTY_FORM, salary_month: curMonth }) }; setShowForm(v => !v) }}><Plus size={14} className="mr-1" />{showForm ? 'Cancel' : 'Add Advance'}</Button>} />
+        action={
+          <div className="flex gap-2 flex-wrap justify-end">
+            <Button size="sm" variant="outline" icon={<Download size={14} />} onClick={downloadImportTemplate}>Template</Button>
+            <Button size="sm" variant="outline" icon={<Upload size={14} />} loading={importing} onClick={() => importRef.current?.click()}>Import</Button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFile} />
+            <Button size="sm" variant="outline" icon={<Download size={14} />} onClick={handleExport}>Export</Button>
+            <Button size="sm" onClick={() => { if (showForm) { setEditing(null); setForm({ ...EMPTY_FORM, salary_month: curMonth }) }; setShowForm(v => !v) }}><Plus size={14} className="mr-1" />{showForm ? 'Cancel' : 'Add Advance'}</Button>
+          </div>
+        } />
 
       {showForm && (
         <Card>
@@ -916,6 +992,15 @@ export const EmployeeAdvancesPage: React.FC = () => {
                   <Td className="text-xs text-gray-500">{r.salary_month ?? '—'}</Td>
                   <Td>
                     <div className="flex items-center gap-1">
+                      <button onClick={() => printAdvanceVoucher({
+                        employee_name: r.employees?.name ?? '—', emp_id: r.employees?.emp_id,
+                        farm_name: r.employees?.farms?.name, advance_date: r.advance_date,
+                        advance_type: r.advance_type, amount: r.amount ?? 0,
+                        egg_qty: r.egg_qty, egg_rate: r.egg_rate, narration: r.narration,
+                        salary_month: r.salary_month, payment_mode: r.payment_mode,
+                        bank_name: (bankAccounts ?? []).find((b: any) => b.id === r.bank_account_id)?.bank_name,
+                      })}
+                        className="text-gray-400 hover:text-blue-600 p-1" title="Print Voucher"><Printer size={14} /></button>
                       <button onClick={() => openEdit(r)}
                         className="text-gray-400 hover:text-brand-600 p-1"><Pencil size={14} /></button>
                       <button onClick={() => { setSel(new Set([r.id])); setBulkConfirm(true) }}

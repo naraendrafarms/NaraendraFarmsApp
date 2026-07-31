@@ -102,6 +102,82 @@ export function printReport(opts: {
   openPrint(html)
 }
 
+// ── Employee Advance voucher — a plain payment-voucher layout, not a
+// tabular report, for printing a single advance record for signature.
+export interface AdvanceVoucherRecord {
+  employee_name: string
+  emp_id?: string | null
+  farm_name?: string | null
+  advance_date: string
+  advance_type: string   // 'cash' | 'egg' | 'other'
+  amount: number
+  egg_qty?: number | null
+  egg_rate?: number | null
+  narration?: string | null
+  salary_month?: string | null
+  payment_mode?: string | null
+  bank_name?: string | null
+}
+export function printAdvanceVoucher(d: AdvanceVoucherRecord) {
+  const typeLabel = d.advance_type === 'cash' ? 'Cash Advance' : d.advance_type === 'egg' ? 'Egg Advance' : 'Advance'
+  const salaryMonthLabel = d.salary_month
+    ? new Date(d.salary_month + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+    : '—'
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>Advance Voucher — ${d.employee_name}</title>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+  <div class="header">
+    <div>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+      <div class="sub">${CO.addr1}</div>
+      <div class="sub">${CO.addr2}</div>
+    </div>
+    <div class="header-right">
+      <h2>${typeLabel} Voucher</h2>
+      <div class="sub">Date: ${fmt(d.advance_date)}</div>
+    </div>
+  </div>
+
+  <div class="two-col section">
+    <div>
+      <div class="label">Employee</div>
+      <div class="box">
+        <div class="bold">${d.employee_name}${d.emp_id ? ` (${d.emp_id})` : ''}</div>
+        ${d.farm_name ? `<div class="sub">${d.farm_name}</div>` : ''}
+      </div>
+    </div>
+    <div>
+      <div class="label">Deduct From Salary Month</div>
+      <div class="box">${salaryMonthLabel}</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <table>
+      <thead><tr><th>Type</th><th>Details</th><th>Amount</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="tc">${typeLabel}</td>
+          <td>${d.advance_type === 'egg' && d.egg_qty ? `${d.egg_qty} eggs × Rs.${d.egg_rate}` : (d.narration || '—')}</td>
+          <td class="tr bold">${inr(d.amount)}</td>
+        </tr>
+      </tbody>
+      <tfoot><tr class="total-row"><td colspan="2" class="tr">Total</td><td class="tr">${inr(d.amount)}</td></tr></tfoot>
+    </table>
+    ${d.advance_type === 'cash' ? `<p class="note">Paid via ${d.payment_mode ?? 'Cash'}${d.bank_name ? ` — ${d.bank_name}` : ''}</p>` : ''}
+    ${d.narration && d.advance_type !== 'egg' ? '' : ''}
+  </div>
+
+  <div class="sign-row-4">
+    <div>Employee Signature</div>
+    <div>Prepared By</div>
+    <div>Approved By</div>
+    <div>Accounts</div>
+  </div>
+  </body></html>`
+  openPrint(html)
+}
+
 // ── Side-by-side column grid print (Site-wise Designation Count, etc.) ─────────
 export function printColumnGrid(opts: {
   title: string
