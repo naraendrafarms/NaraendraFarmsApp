@@ -635,14 +635,22 @@ const HDTrendChart: React.FC<{ flockId: string }> = ({ flockId }) => {
 const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
   const { data: daily } = useQuery({
     queryKey: ['flock_daily_all', flock.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('daily_records')
+    // A flock's full lifetime of daily_records (one row per shed per day)
+    // easily exceeds Supabase/PostgREST's default 1000-row-per-request cap
+    // once a flock runs long enough — and since this orders NEWEST first
+    // with no range/pagination, a single request silently returned only the
+    // newest 1000 rows, quietly DROPPING the oldest portion of the flock's
+    // history from every total on this tab (confirmed on a real flock:
+    // Total HE Eggs/Total Eggs/Total Mortality all undercounted by the
+    // same ~27%, matching exactly how much of its history fell past the cap).
+    queryFn: async () => fetchAllPages<any>(
+      (from, to) => supabase.from('daily_records')
         .select('record_date,opening_female,closing_female,closing_male,mortality_female,mortality_male,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct')
         .eq('flock_id', flock.id)
         .order('record_date', { ascending: false })
-      return data ?? []
-    }
+        .range(from, to),
+      'Flock daily records'
+    )
   })
 
   const { data: heDispatch } = useQuery({

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, pct, fmtDate, flockAgeWeeks, exportCSV } from '@/lib/utils'
+import { inr, pct, fmtDate, flockAgeWeeks, exportCSV, fetchAllPages } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Badge, Table, Th, Td,
   SectionHeader, Spinner, StatCard, Divider, Input, Select
@@ -103,11 +103,12 @@ export const FlockDetail: React.FC = () => {
 
   const { data: daily } = useQuery({
     queryKey: ['flock_daily', id],
-    queryFn: async () => {
-      const { data } = await supabase.from('daily_records')
+    queryFn: async () => fetchAllPages<any>(
+      (from, to) => supabase.from('daily_records')
         .select('*').eq('flock_id', id!).order('record_date')
-      return data ?? []
-    }
+        .range(from, to),
+      'Flock daily records'
+    )
   })
 
   const { data: heDispatch } = useQuery({
