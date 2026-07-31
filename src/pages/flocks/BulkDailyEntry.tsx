@@ -607,6 +607,9 @@ export const BulkDailyEntry: React.FC = () => {
   }, [medicines])
 
   const importRef = useRef<HTMLInputElement>(null)
+  const multiDayImportRef = useRef<HTMLInputElement>(null)
+  const [multiDayImporting, setMultiDayImporting] = useState(false)
+  const [multiDayProgress, setMultiDayProgress] = useState('')
 
   // ── FLOCK MODE: template / export / import ───────────────────────────────────
   const FLOCK_HEADERS = ['Flock No','Feed F kg','Feed Type F','Feed M kg','Feed Type M',
@@ -803,6 +806,217 @@ export const BulkDailyEntry: React.FC = () => {
     finally { if (importRef.current) importRef.current.value = '' }
   }
 
+  // ── SHED MODE: Multi-Day Bulk Import ──────────────────────────────────────────
+  // The single-day Import above (and the whole grid/Save All flow) only ever
+  // handles ONE date at a time — there's no "Date" column in its template, and
+  // everything imported applies to whatever date is currently selected. A
+  // historical backfill spanning many dates (e.g. re-entering months of past
+  // records for a flock) had no way to load through the UI at all. This adds
+  // that: same SHED_HEADERS, plus a leading Date column, one row per shed per
+  // day, saved date-by-date using the exact same logic as a normal Save All
+  // for that day (so it stays correct with Flock P&L/Egg Stock/etc. — no
+  // separate write path to drift out of sync).
+  const MULTIDAY_HEADERS = ['Date', ...SHED_HEADERS]
+  const multiDayTemplate = () => downloadXlsxTemplate('bulk_multiday_template.xlsx', MULTIDAY_HEADERS,
+    ['23/06/2025', '1', '1000', '100', '120', 'BCM', '30', 'MALE', '0', '0', '0', '0', '2', '1', '500', '40', '20', '10', '5', '', '', '', '', '300', '150', '50', '16', '', '', 'OK'])
+
+  // Flexible date parsing — the app's own convention is DD/MM/YYYY, but Excel
+  // date cells can come back from the parser in several shapes depending on
+  // the cell's own formatting, so accept ISO, DD/MM/YYYY (or DD-MM-YYYY,
+  // DD.MM.YYYY), and fall back to native Date parsing.
+  const parseFlexDate = (s: string): string | null => {
+    if (!s) return null
+    const t = s.trim()
+    const iso = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+    if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`
+    const dmy = t.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/)
+    if (dmy) {
+      let y = dmy[3]; if (y.length === 2) y = '20' + y
+      return `${y}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`
+    }
+    const d = new Date(t)
+    if (!isNaN(d.getTime())) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return null
+  }
+
+  const handleMultiDayImport = async (file: File) => {
+    if (!selectedFlock || !flockSheds.length) { toast.error('Select a flock first'); return }
+    setMultiDayImporting(true)
+    setMultiDayProgress('Reading file…')
+    try {
+      const { headers, rows } = await parseFile(file)
+      const col = (name: string) => headers.indexOf(name.toLowerCase())
+      const ci = {
+        date: col('Date'), shed: col('Shed No'), of: col('Open F'), om: col('Open M'),
+        ff: col('Feed F kg'), ftf: col('Feed Type F'), fm: col('Feed M kg'), ftm: col('Feed Type M'),
+        trf: col('Transfer F'), trm: col('Transfer M'), cf: col('Cull F'), cm: col('Cull M'),
+        df: col('Death F'), dm: col('Death M'), he: col('HE'), je: col('JE'), te: col('TE'), be: col('BE'), le: col('LE'),
+        whe: col('Wastage HE'), wje: col('Wastage JE'), wte: col('Wastage TE'), wbe: col('Wastage BE'),
+        ga: col('Grade A'), gb: col('Grade B'), gc: col('Grade C'),
+        lt: col('Lighting Hrs'), med: col('Medicine'), mq: col('Med Qty'), rem: col('Remarks'),
+      }
+      if (ci.date < 0 || ci.shed < 0) { toast.error('File needs "Date" and "Shed No" columns'); return }
+      const g = (row: string[], i: number) => i >= 0 ? String(row[i] ?? '').trim() : ''
+      const shedByNo: Record<string, any> = {}
+      for (const s of flockSheds) shedByNo[String(s.shed_no).trim()] = s
+
+      type RawRow = { shed: any; row: string[] }
+      const byDate = new Map<string, RawRow[]>()
+      let badDates = 0, badSheds = 0
+      for (const row of (rows as any[])) {
+        if (!row.some((c: any) => (c ?? '').toString().trim() !== '')) continue
+        const dateStr = parseFlexDate(g(row, ci.date))
+        if (!dateStr) { badDates++; continue }
+        const shed = shedByNo[g(row, ci.shed)]
+        if (!shed) { badSheds++; continue }
+        const list = byDate.get(dateStr) ?? []
+        list.push({ shed, row })
+        byDate.set(dateStr, list)
+      }
+      const dates = Array.from(byDate.keys()).sort()
+      if (!dates.length) { toast.error('No valid rows found — check the Date and Shed No columns'); return }
+
+      // Pre-fetch every existing record for this flock across the WHOLE date
+      // range in two queries total, instead of one lookup per row (would be
+      // thousands of round trips for a multi-month backfill).
+      const startD = dates[0], endD = dates[dates.length - 1]
+      const { data: existingAll } = await supabase.from('daily_records')
+        .select('id,record_date,shed_id')
+        .eq('flock_id', selectedFlock).gte('record_date', startD).lte('record_date', endD)
+      const existingMap = new Map<string, string>()
+      for (const r of (existingAll ?? [])) existingMap.set(`${r.shed_id ?? 'flock'}_${r.record_date}`, r.id)
+
+      const { data: existingMedAll } = await supabase.from('medicine_usage')
+        .select('id,usage_date')
+        .eq('flock_id', selectedFlock).gte('usage_date', startD).lte('usage_date', endD)
+      const existingMedMap = new Map<string, string>()
+      for (const r of (existingMedAll ?? [])) if (!existingMedMap.has(r.usage_date)) existingMedMap.set(r.usage_date, r.id)
+
+      let savedRows = 0, errors = 0, skippedRows = 0
+      for (let di = 0; di < dates.length; di++) {
+        const d = dates[di]
+        const dayRows = byDate.get(d)!
+        setMultiDayProgress(`Saving day ${di + 1} of ${dates.length} — ${d}`)
+
+        const feedTotals: Record<string, { female_kg: number; male_kg: number }> = {}
+        const addFeed = (type: string, f: number, m: number) => {
+          const t = feedTotals[type] ?? { female_kg: 0, male_kg: 0 }
+          t.female_kg += f; t.male_kg += m; feedTotals[type] = t
+        }
+        let gA: number | null = null, gB: number | null = null, gC: number | null = null
+        let medName = '', medQty = ''
+
+        for (const { shed, row } of dayRows) {
+          const he = parseInt(g(row, ci.he)) || 0, je = parseInt(g(row, ci.je)) || 0
+          const te = parseInt(g(row, ci.te)) || 0, be = parseInt(g(row, ci.be)) || 0, le = parseInt(g(row, ci.le)) || 0
+          const whe = parseInt(g(row, ci.whe)) || null, wje = parseInt(g(row, ci.wje)) || null
+          const wte = parseInt(g(row, ci.wte)) || null, wbe = parseInt(g(row, ci.wbe)) || null
+          const mf = parseInt(g(row, ci.df)) || 0, mm = parseInt(g(row, ci.dm)) || 0
+          const ff = parseFloat(g(row, ci.ff)) || 0, fm = parseFloat(g(row, ci.fm)) || 0
+          const tf = parseInt(g(row, ci.trf)) || 0, tm = parseInt(g(row, ci.trm)) || 0
+          const cf = parseInt(g(row, ci.cf)) || 0, cm = parseInt(g(row, ci.cm)) || 0
+          const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || g(row, ci.lt) || g(row, ci.rem)
+          const existingId = existingMap.get(`${shed.id}_${d}`)
+          if (!hasProductionData && !existingId) { skippedRows++; continue }
+
+          const openF = parseInt(g(row, ci.of)) || 0, openM = parseInt(g(row, ci.om)) || 0
+          const payload: any = {
+            flock_id: selectedFlock, shed_id: shed.id, farm_id: shed.farm_id ?? farmIdForFlock ?? null,
+            record_date: d,
+            opening_female: openF || null, opening_male: openM || null,
+            he_eggs: he, je_eggs: je, te_eggs: te, be_eggs: be, le_eggs: le,
+            total_eggs: he + je + te + be + le,
+            wastage_he: whe, wastage_je: wje, wastage_te: wte, wastage_be: wbe,
+            mortality_female: mf, mortality_male: mm,
+            feed_female_kg: ff, feed_type_f: g(row, ci.ftf) || 'BCM',
+            feed_male_kg: fm, feed_type_m: g(row, ci.ftm) || 'BCM',
+            transfer_female: tf, transfer_male: tm,
+            cull_female: cf, cull_male: cm,
+            trcull_female: tf + cf, trcull_male: tm + cm,
+            // Closing is auto-calculated the same way as the single-day
+            // import (Open − Death − Transfer − Cull) — never read from the
+            // file, since it's a derived figure, not a source one.
+            closing_female: openF ? Math.max(0, openF - mf - tf - cf) : null,
+            closing_male: openM ? Math.max(0, openM - mm - tm - cm) : null,
+            lighting_hrs: parseFloat(g(row, ci.lt)) || null,
+            remarks: g(row, ci.rem) || null,
+          }
+          const { error } = existingId
+            ? await supabase.from('daily_records').update(payload).eq('id', existingId)
+            : await supabase.from('daily_records').insert(payload)
+          if (error) { console.error(error); errors++ } else savedRows++
+
+          if (ff > 0 || fm > 0) {
+            const ftF = g(row, ci.ftf) || 'BCM', ftM = g(row, ci.ftm) || 'BCM'
+            if (ftF === ftM) addFeed(ftF, ff, fm)
+            else { if (ff > 0) addFeed(ftF, ff, 0); if (fm > 0) addFeed(ftM, 0, fm) }
+          }
+          // Flock-level grade/medicine — same convention as the single-day
+          // grid (medicine_usage has no shed_id, grade is one set per flock
+          // per day) — take from whichever row on this date has a value.
+          const rga = g(row, ci.ga), rgb = g(row, ci.gb), rgc = g(row, ci.gc)
+          if ((rga || rgb || rgc) && gA === null && gB === null && gC === null) {
+            gA = parseInt(rga) || null; gB = parseInt(rgb) || null; gC = parseInt(rgc) || null
+          }
+          if (!medName && !medQty) {
+            const rmed = g(row, ci.med), rmq = g(row, ci.mq)
+            if (rmed || rmq) { medName = rmed; medQty = rmq }
+          }
+        }
+
+        for (const [feedType, totals] of Object.entries(feedTotals)) {
+          await supabase.from('daily_feed').upsert({
+            flock_id: selectedFlock, feed_date: d, feed_type: feedType,
+            female_kg: totals.female_kg, male_kg: totals.male_kg,
+            female_cost: Math.round(totals.female_kg * feedRates.rate(feedType) * 100) / 100,
+            male_cost: Math.round(totals.male_kg * feedRates.rate(feedType) * 100) / 100,
+          }, { onConflict: 'flock_id,feed_date,feed_type' })
+        }
+
+        if (gA !== null || gB !== null || gC !== null) {
+          const existingGradeId = existingMap.get(`flock_${d}`)
+          if (existingGradeId) {
+            await supabase.from('daily_records').update({ he_grade_a: gA, he_grade_b: gB, he_grade_c: gC }).eq('id', existingGradeId)
+          } else {
+            await supabase.from('daily_records').insert({
+              flock_id: selectedFlock, record_date: d, farm_id: farmIdForFlock ?? null, shed_id: null,
+              he_grade_a: gA, he_grade_b: gB, he_grade_c: gC,
+              he_eggs: 0, je_eggs: 0, te_eggs: 0, be_eggs: 0, le_eggs: 0, total_eggs: 0,
+              mortality_female: 0, mortality_male: 0,
+            })
+          }
+        }
+
+        if (medName || medQty) {
+          const mid = medName && medNameToId[medName.toLowerCase()] ? medNameToId[medName.toLowerCase()] : null
+          if (mid && medQty) {
+            const existingMedId = existingMedMap.get(d)
+            const medPayload = { flock_id: selectedFlock, usage_date: d, medicine_id: mid, quantity: parseFloat(medQty) || 0, unit: 'ml' }
+            const { error: me } = existingMedId
+              ? await supabase.from('medicine_usage').update(medPayload).eq('id', existingMedId)
+              : await supabase.from('medicine_usage').insert(medPayload)
+            if (me) { console.error(me); errors++ }
+          }
+        }
+      }
+
+      qc.invalidateQueries({ queryKey: ['bulk_existing_dr'] })
+      qc.invalidateQueries({ queryKey: ['bulk_existing_med'] })
+      qc.invalidateQueries({ queryKey: ['flock_daily_feed'] })
+      toast.success(
+        `Imported ${dates.length} day(s), ${savedRows} shed-day row(s)` +
+        (errors ? `, ${errors} error(s)` : '') +
+        (badDates || badSheds || skippedRows ? ` — skipped ${badDates} unreadable date(s), ${badSheds} unmatched shed row(s), ${skippedRows} blank row(s)` : '')
+      )
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setMultiDayImporting(false)
+      setMultiDayProgress('')
+      if (multiDayImportRef.current) multiDayImportRef.current.value = ''
+    }
+  }
+
   const isSheedMode = !!selectedFlock
   const isLoading = flocksLoading || (isSheedMode && shedsLoading)
 
@@ -878,6 +1092,27 @@ export const BulkDailyEntry: React.FC = () => {
         <Button size="sm" variant="ghost" icon={<FileSpreadsheet size={14}/>} onClick={isSheedMode ? shedTemplate : flockTemplate}>Template</Button>
         <span className="text-xs text-gray-400">Import fills the grid — review, then click <strong>Save All</strong>.</span>
       </div>
+
+      {/* Multi-Day Bulk Import (shed-mode only) — for a historical backfill
+          spanning many dates at once, saved straight to the database day by
+          day (bypasses the single-day grid entirely, since the grid only
+          ever holds one date at a time). */}
+      {isSheedMode && (
+        <div className="flex flex-wrap gap-2 items-center border-t border-gray-100 pt-2">
+          <input ref={multiDayImportRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleMultiDayImport(f) }} />
+          <span className="text-xs text-gray-400 mr-1">Historical backfill (many dates at once):</span>
+          <Button size="sm" variant="outline" icon={<FileSpreadsheet size={14}/>} onClick={multiDayTemplate} disabled={multiDayImporting}>
+            Multi-Day Template
+          </Button>
+          <Button size="sm" variant="outline" icon={<Upload size={14}/>} loading={multiDayImporting}
+            onClick={() => multiDayImportRef.current?.click()}>
+            Multi-Day Import
+          </Button>
+          {multiDayProgress && <span className="text-xs text-brand-600 font-medium">{multiDayProgress}</span>}
+          <span className="text-xs text-gray-400">Saves straight to the database as it goes — no need to click Save All.</span>
+        </div>
+      )}
 
       {existingFetching && <div className="text-center py-2 text-xs text-gray-400">Loading records for {date}…</div>}
 
