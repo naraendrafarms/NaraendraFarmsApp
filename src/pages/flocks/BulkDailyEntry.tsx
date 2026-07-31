@@ -106,12 +106,18 @@ export const BulkDailyEntry: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
   })
 
+  // Closed flocks are hidden by default (keeps the day-to-day picker short),
+  // but a historical backfill often needs to enter/correct data for a flock
+  // that's since been closed — this toggle lets that flock show up too.
+  const [includeClosed, setIncludeClosed] = useState(false)
   const { data: allFlocks, isLoading: flocksLoading } = useQuery({
-    queryKey: ['bulk_daily_flocks'],
+    queryKey: ['bulk_daily_flocks', includeClosed],
     queryFn: async () => {
-      const { data } = await supabase.from('flocks')
+      let q = supabase.from('flocks')
         .select('id,flock_no,breed,status,laying_farm_id,rearing_farm_id,laying_farm:farms!laying_farm_id(name,code)')
-        .neq('status', 'closed').eq('is_vhl_contract', false).order('flock_no', { ascending: true })
+        .eq('is_vhl_contract', false).order('flock_no', { ascending: true })
+      if (!includeClosed) q = q.neq('status', 'closed')
+      const { data } = await q
       return data ?? []
     }
   })
@@ -585,7 +591,7 @@ export const BulkDailyEntry: React.FC = () => {
   ]
   const flockOptions = [
     { value: '', label: '— All Flocks (by farm) —' },
-    ...(allFlocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}${f.breed ? ` · ${f.breed}` : ''}` }))
+    ...(allFlocks ?? []).map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}${f.breed ? ` · ${f.breed}` : ''}${f.status === 'closed' ? ' (closed)' : ''}` }))
   ]
 
   // Medicine name <-> id maps (for Excel import/export by name)
@@ -840,6 +846,10 @@ export const BulkDailyEntry: React.FC = () => {
           : 'Enter production data for all active flocks in one go'}
         action={
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            <label className="flex items-center gap-1.5 text-xs text-gray-500 whitespace-nowrap">
+              <input type="checkbox" checked={includeClosed} onChange={e => setIncludeClosed(e.target.checked)} />
+              Show closed flocks
+            </label>
             <SearchableSelect value={selectedFlock}
               onChange={v => { setSelectedFlock(v); setSelectedFarm('') }}
               options={flockOptions} className="w-52" />
