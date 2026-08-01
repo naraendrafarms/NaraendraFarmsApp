@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { Input, Select, Button } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Plus, X } from 'lucide-react'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 // ── QuickAddParty ─────────────────────────────────────────────────────────────
 
@@ -168,6 +169,15 @@ export const QuickAddMedicine: React.FC<QuickAddMedicineProps> = ({ onCreated, d
   const [name, setName] = useState('')
   const [category, setCategory] = useState(defaultCategory)
   const [unit, setUnit] = useState('ml')
+  const categoryOptions = useConfigOptions('item_category', [
+    { value: 'Medicine', label: 'Medicine' }, { value: 'Vaccine', label: 'Vaccine' },
+    { value: 'Supplement', label: 'Supplement' }, { value: 'Sanitizer', label: 'Sanitizer' },
+    { value: 'Injectable', label: 'Injectable' }, { value: 'Disinfectant', label: 'Disinfectant' },
+  ]).filter(o => ['Medicine','Vaccine','Supplement','Sanitizer','Injectable','Disinfectant'].includes(o.value))
+  const unitOptions = useConfigOptions('unit', [
+    { value: 'ml', label: 'ml' }, { value: 'Ltr', label: 'Ltr' }, { value: 'Gm', label: 'Gm' },
+    { value: 'Kg', label: 'Kg' }, { value: 'Nos', label: 'Nos' }, { value: 'Tab', label: 'Tab' },
+  ])
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -223,9 +233,9 @@ export const QuickAddMedicine: React.FC<QuickAddMedicineProps> = ({ onCreated, d
       <div className="space-y-2">
         <Input label="Name *" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Amoxicillin" autoFocus />
         <Select label="Category" value={category} onChange={e => setCategory(e.target.value)}
-          options={['Medicine','Vaccine','Supplement','Sanitizer','Injectable','Disinfectant']} />
+          options={categoryOptions} />
         <Select label="Unit" value={unit} onChange={e => setUnit(e.target.value)}
-          options={['ml','Ltr','Gm','Kg','Nos','Tab']} />
+          options={unitOptions} />
         <p className="text-xs text-gray-400">Also added to Items Master under this category, so it shows up in GRN/Purchase too.</p>
         <div className="flex gap-2 pt-1">
           <Button size="sm" onClick={() => mut.mutate()} loading={mut.isPending} className="flex-1">Add</Button>
