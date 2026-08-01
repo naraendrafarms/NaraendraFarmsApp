@@ -438,6 +438,29 @@ export const PendingPaymentsPage: React.FC = () => {
     if (editForm.payment_status === 'Paid' && editForm.account_type.toLowerCase() !== 'cash' && !editForm.bank_account_id) {
       setEditErr('Select which bank account this is paid from'); return
     }
+    // Permanent guard against the exact mistake found twice this session
+    // (Ventri Biologicals, Sunways Bio Science): Status set to "Paid" while
+    // Paid Amount + Discount don't actually add up to Net Payable, leaving a
+    // phantom balance on a bill that LOOKS settled — and, since Paid Amount
+    // is what gets re-posted to Cash Book/Bank Ledger, a wrong figure here
+    // silently carries into the ledger too. Catch it at save time instead of
+    // relying on someone noticing later.
+    if (editForm.payment_status === 'Paid') {
+      const invAmtChk = parseFloat(editForm.invoice_amount) || 0
+      const tdsChk = editForm.tds_amount !== '' ? (parseFloat(editForm.tds_amount) || 0)
+        : editForm.tds_pct !== '' ? roundTds(invAmtChk * (parseFloat(editForm.tds_pct) || 0) / 100) : 0
+      const netChk = invAmtChk - tdsChk
+      const paidChk = parseFloat(editForm.paid_amount) || 0
+      const discChk = parseFloat(editForm.discount_amount) || 0
+      const gap = Math.round((netChk - paidChk - discChk) * 100) / 100
+      if (Math.abs(gap) > 0.5) {
+        const proceed = confirm(
+          `Paid Amount (₹${paidChk.toLocaleString('en-IN')}) + Discount (₹${discChk.toLocaleString('en-IN')}) don't add up to Net Payable (₹${netChk.toLocaleString('en-IN')}) — off by ₹${gap.toLocaleString('en-IN')}.\n\n` +
+          `This bill will show a balance even though Status is "Paid". Save anyway?`
+        )
+        if (!proceed) return
+      }
+    }
     setEditSaving(true); setEditErr('')
     try {
       const isNew = editModal === 'new'
