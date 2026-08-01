@@ -514,7 +514,13 @@ export const PendingPaymentsPage: React.FC = () => {
       const newStatus = editForm.payment_status
       if (newStatus === 'Paid') {
         if (oldStatus === 'Paid') await clearLedgerEntries(savedId)
-        const amount = isNew || oldStatus === 'Paid' ? netPayable : Math.max(0, getBalance(editModal))
+        // Re-posting for a bill that's Paid (new or re-edited) must use the
+        // actual Paid Amount field, not the gross Net Payable — using
+        // netPayable here ignored both the discount and whatever the user
+        // actually typed into Paid Amount, so editing an already-Paid bill's
+        // Paid Amount down (e.g. after a discount) silently kept re-posting
+        // the old full amount to Cash Book/Bank Ledger on every save.
+        const amount = isNew || oldStatus === 'Paid' ? payload.paid_amount : Math.max(0, getBalance(editModal))
         await postLedgerEntry({
           paymentId: savedId, vendorName: payload.vendor_name, invoiceNo: payload.invoice_no, grnNo: payload.grn_no,
           amount, mode: payload.account_type ?? 'NEFT', date: payload.paid_date || todayStr,
