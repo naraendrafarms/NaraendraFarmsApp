@@ -9,10 +9,11 @@ import {
 , DateInput } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, ArrowLeft, Calendar,
-  BarChart2, DollarSign, Package, Trash2, Upload, Download
+  BarChart2, DollarSign, Package, Trash2, Upload, Download, Printer
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
+import { printReport } from '@/lib/invoicePrint'
 
 // ── Bulk selection helpers ─────────────────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
@@ -640,6 +641,69 @@ export const FlockDetail: React.FC = () => {
     return acc
   }, []) ?? []
 
+  // Same rows as monthlyData, plus the per-month feed/mortality/avg-birds
+  // figures the Monthly tab already computes inline in its render — shared
+  // here so Export/Print use the exact same numbers shown on screen.
+  const monthlyRows = monthlyData.map((m: any) => {
+    const monthDaily = daily?.filter(d => d.record_date.startsWith(m.month)) ?? []
+    const avgF = monthDaily.reduce((s, d) => s + (d.opening_female ?? 0), 0) / Math.max(monthDaily.length, 1)
+    const feedF = monthDaily.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0)
+    const feedM = monthDaily.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0)
+    const mortF = monthDaily.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
+    return { ...m, days: monthDaily.length, avgF, feedF, feedM, mortF }
+  })
+
+  // vs Standard tab's actual-vs-Venco-curve rows, duplicated here (same pure
+  // computation as the tab's own render) purely so Export/Print can build
+  // rows without needing the tab's JSX to have already rendered.
+  const stdExportRows = useMemo(() => {
+    if (!flock?.laying_season || !stdCurve || stdCurve.length === 0) return []
+    const HH = flock.total_placed_f ?? 0
+    type WeekAgg = { openFSum: number; totalEggs: number; heEggs: number; depletion: number }
+    const weekly: Record<number, WeekAgg> = {}
+    for (const d of (daily ?? [])) {
+      if (!d.record_date) continue
+      const wk = flockAgeWeeks(flock.placement_date, d.record_date)
+      if (wk < 0) continue
+      const row = weekly[wk] ??= { openFSum: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
+      row.openFSum += d.opening_female ?? 0
+      row.totalEggs += d.total_eggs ?? 0
+      row.heEggs += d.he_eggs ?? 0
+      row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
+    }
+    const hatchWeekly: Record<number, { sum: number; n: number }> = {}
+    for (const h of (heDispatch ?? [])) {
+      if (!h.dispatch_date || h.hatch_pct == null) continue
+      const wk = flockAgeWeeks(flock.placement_date, h.dispatch_date)
+      if (wk < 0) continue
+      const row = hatchWeekly[wk] ??= { sum: 0, n: 0 }
+      row.sum += h.hatch_pct; row.n++
+    }
+    const variance = (actual: number | null, std: number | null) =>
+      actual == null || std == null ? null : actual - std
+    let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0
+    return stdCurve.map((s: any) => {
+      const w = weekly[s.week_of_age]
+      const actualHd = w && w.openFSum > 0 ? (w.totalEggs / w.openFSum) * 100 : null
+      const actualHe = w && w.totalEggs > 0 ? (w.heEggs / w.totalEggs) * 100 : null
+      const hw = hatchWeekly[s.week_of_age]
+      const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
+      const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
+      const weeklyHeHh = w && HH > 0 ? w.heEggs / HH : null
+      const weeklyDepletionPct = w && HH > 0 ? (w.depletion / HH) * 100 : null
+      if (w) { cumDepletion += weeklyDepletionPct ?? 0; cumTeHh += weeklyTeHh ?? 0; cumHeHh += weeklyHeHh ?? 0 }
+      return {
+        s, actualHd, actualHe, actualHatch, weeklyTeHh, weeklyHeHh,
+        cumDepletion: w ? cumDepletion : null, cumTeHh: w ? cumTeHh : null, cumHeHh: w ? cumHeHh : null,
+        vDepletion: variance(w ? cumDepletion : null, s.cum_depletion_pct),
+        vHd: variance(actualHd, s.hen_week_pct), vHe: variance(actualHe, s.he_pct),
+        vTeHh: variance(weeklyTeHh, s.weekly_te_hh), vCumTeHh: variance(w ? cumTeHh : null, s.cum_te_hh),
+        vHeHh: variance(weeklyHeHh, s.weekly_he_hh), vCumHeHh: variance(w ? cumHeHh : null, s.cum_he_hh),
+        vHatch: variance(actualHatch, s.hatch_pct),
+      }
+    })
+  }, [flock?.laying_season, flock?.total_placed_f, flock?.placement_date, stdCurve, daily, heDispatch])
+
   // Aggregate the most recent date's records across all sheds
   const lastDate = daily?.length ? daily[daily.length - 1].record_date : null
   const lastDateRecords = daily?.filter(d => d.record_date === lastDate) ?? []
@@ -657,6 +721,151 @@ export const FlockDetail: React.FC = () => {
     feed_male_kg:   lastDateRecords.reduce((s, d) => s + (d.feed_male_kg   ?? 0), 0),
   } : null
   const ageWeeks = flockAgeWeeks(flock.placement_date)
+
+  // Builds the headers/rows for whichever tab is currently active, shared by
+  // both the generic Export (CSV) and Print buttons in the tab bar below.
+  const getTabExportData = (): { title: string; headers: string[]; rows: (string|number)[][]; rightAlignFrom?: number } | null => {
+    switch (tab) {
+      case 'overview':
+        return {
+          title: `Flock ${flock.flock_no} — Overview`,
+          headers: ['Metric', 'Value'],
+          rightAlignFrom: 1,
+          rows: [
+            ['Placed (Paid)', `${flock.paid_female?.toLocaleString('en-IN')} F + ${flock.paid_male?.toLocaleString('en-IN')} M`],
+            ['Placed (Free)', `${flock.free_female?.toLocaleString('en-IN')} F + ${flock.free_male?.toLocaleString('en-IN')} M`],
+            ['Total Placed', `${flock.total_placed_f?.toLocaleString('en-IN')} F + ${flock.total_placed_m?.toLocaleString('en-IN')} M`],
+            ['Transfers', `${totalTrF.toLocaleString('en-IN')} F + ${totalTrM.toLocaleString('en-IN')} M`],
+            ['Culls Removed', `${totalCullF.toLocaleString('en-IN')} F + ${totalCullM.toLocaleString('en-IN')} M`],
+            ['Mortality (C15/C16)', `${totalMortF.toLocaleString('en-IN')} F + ${totalMortM.toLocaleString('en-IN')} M`],
+            ['Closing Alive', `${(lastRecord?.closing_female??0).toLocaleString('en-IN')} F + ${(lastRecord?.closing_male??0).toLocaleString('en-IN')} M`],
+            ['Total Eggs', totalEggs.toLocaleString('en-IN')],
+            ['Hatching Eggs (HE)', totalHE.toLocaleString('en-IN')],
+            ['HE %', pct(hePct)],
+            ['HE Dispatched', (heDispatch?.reduce((s,d)=>s+(d.total_dispatched??0),0)??0).toLocaleString('en-IN')],
+            ['Free Eggs (2%)', (heDispatch?.reduce((s,d)=>s+(d.free_eggs??0),0)??0).toLocaleString('en-IN')],
+            ['Feed ♀ (kg)', totalFeedF.toLocaleString('en-IN')],
+            ['Feed ♂ (kg)', totalFeedM.toLocaleString('en-IN')],
+            ['Placement', fmtDate(flock.placement_date)],
+            ['Laying Start', fmtDate(flock.laying_start_date)],
+          ],
+        }
+      case 'daily':
+        return {
+          title: `Flock ${flock.flock_no} — Daily Records`,
+          headers: ['Date','Week/Day','Open ♀','Open ♂','Feed ♀','Feed ♂','Eggs','HD%','HE','HE%','Tr ♀','Cull ♀','Mort ♀','Mort ♂','Close ♀','Close ♂'],
+          rightAlignFrom: 2,
+          rows: displayDaily.map((d: any) => {
+            const dayAge = flock.placement_date
+              ? Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
+              : (dailyIndexMap.get(d.record_date) ?? 0)
+            const weekNum = Math.floor(dayAge / 7) + 1
+            const dayInWeek = (dayAge % 7) + 1
+            return [
+              fmtDate(d.record_date), `W${weekNum} D${dayInWeek}`,
+              d.opening_female ?? 0, d.opening_male ?? 0, d.feed_female_kg ?? 0, d.feed_male_kg ?? 0,
+              d.total_eggs ?? 0, d.hd_pct != null ? pct(d.hd_pct,1) : '—',
+              d.he_eggs ?? 0, d.he_pct != null ? pct(d.he_pct,1) : '—',
+              (d.transfer_female??d.trcull_female??0) || '—', d.cull_female || '—',
+              d.mortality_female || '—', d.mortality_male || '—', d.closing_female ?? 0, d.closing_male ?? 0,
+            ]
+          }),
+        }
+      case 'weekly':
+        return {
+          title: `Flock ${flock.flock_no} — Weekly Report`,
+          headers: ['Week','Date Range','Days Logged','Open ♀','Close ♀','Close ♂','Total Eggs','HD%','HE','HE%','Mort ♀','Mort ♂','Feed ♀','Feed ♂'],
+          rightAlignFrom: 2,
+          rows: weeklyAgg.map((w: any) => [
+            `Week ${w.weekNum}`, `${fmtDate(w.firstDate)} – ${fmtDate(w.lastDate)}`, `${w.days}/7`,
+            w.openF, w.closeF, w.closeM, w.totalEggs, w.hdPct != null ? pct(w.hdPct,1) : '—',
+            w.totalHE, w.hePct != null ? pct(w.hePct,1) : '—', w.mortF || '—', w.mortM || '—', w.feedF, w.feedM,
+          ]),
+        }
+      case 'monthly':
+        return {
+          title: `Flock ${flock.flock_no} — Monthly Report`,
+          headers: ['Month','Days','Eggs','HE','HE%','Avg Open ♀','Mort ♀','Feed ♀ kg','Feed ♂ kg'],
+          rightAlignFrom: 1,
+          rows: monthlyRows.map((m: any) => [
+            m.month, m.days, m.eggs, m.he, m.eggs > 0 ? pct(m.he/m.eggs) : '—',
+            Math.round(m.avgF), m.mortF || '—', m.feedF, m.feedM,
+          ]),
+        }
+      case 'placements':
+        return {
+          title: `Flock ${flock.flock_no} — Chick Placements`,
+          headers: ['Date','Shed','Female','Male','Total Birds','Notes'],
+          rightAlignFrom: 2,
+          rows: (placements ?? []).map((p: any) => [
+            fmtDate(p.allocated_date), p.shed ? `${p.shed.shed_no}${p.shed.shed_name ? ' — '+p.shed.shed_name : ''}` : '—',
+            p.female_count ?? 0, p.male_count ?? 0, (p.female_count??0)+(p.male_count??0), p.notes ?? '—',
+          ]),
+        }
+      case 'transfers':
+        return {
+          title: `Flock ${flock.flock_no} — Transfers`,
+          headers: ['Date','From','To','♀ Transferred','♂ Transferred','Sex Errors','Sold','Notes','Status'],
+          rightAlignFrom: 3,
+          rows: (transfers ?? []).map((t: any) => [
+            fmtDate(t.transfer_date), t.from_farm?.name ?? 'KRP', t.to_farm?.name ?? '—',
+            t.female_count ?? 0, t.male_count ?? 0,
+            `${t.sex_error_female||0}♀ ${t.sex_error_male||0}♂`, `${t.sold_female||0}♀ ${t.sold_male||0}♂`,
+            t.notes ?? '—', t.is_final_transfer ? 'Final' : 'Partial',
+          ]),
+        }
+      case 'financial':
+        return {
+          title: `Flock ${flock.flock_no} — Financial Summary`,
+          headers: ['Item', 'Amount'],
+          rightAlignFrom: 1,
+          rows: [
+            ['HE Revenue', inr(heRevenue)],
+            ...Object.entries(nheSales?.reduce((acc: any, s: any) => {
+              if (s.nhe_sale_lines?.length > 0) s.nhe_sale_lines.forEach((l: any) => { acc[l.sale_type] = (acc[l.sale_type] ?? 0) + (l.amount ?? 0) })
+              else acc[s.sale_type] = (acc[s.sale_type] ?? 0) + (s.amount ?? 0)
+              return acc
+            }, {}) ?? {}).map(([type, amt]: any) => [`• ${NHE_LABEL[type] ?? type}`, inr(amt)]),
+            ['TOTAL REVENUE', inr(totalRevenue)],
+            ['Chick Cost', inr(chickCost)],
+            ['Medicine & Vaccine', inr(medCost)],
+            ['Partial Cost (no feed/salary/elec)', inr(totalCost)],
+            ['', ''],
+            ...displayHeDispatch.map((d: any) => [
+              `HE Dispatch ${fmtDate(d.dispatch_date)} (DC ${d.dc_no ?? '—'})`,
+              d.amount ? inr(d.amount) : '—',
+            ]),
+          ],
+        }
+      case 'std':
+        return {
+          title: `Flock ${flock.flock_no} — Actual vs ${flock.laying_season ?? ''} Standard`,
+          headers: ['Age (wk)','Std Cum Depl%','Actual','Var','Std Hen Wk%','Actual','Var','Std HE%','Actual','Var','Std Hatch%','Actual','Var'],
+          rightAlignFrom: 1,
+          rows: stdExportRows.map((r: any) => {
+            const f = (v: number|null, d=1) => v != null ? v.toFixed(d) : '—'
+            return [
+              r.s.week_of_age, f(r.s.cum_depletion_pct), f(r.cumDepletion), f(r.vDepletion),
+              f(r.s.hen_week_pct), f(r.actualHd), f(r.vHd),
+              f(r.s.he_pct), f(r.actualHe), f(r.vHe),
+              f(r.s.hatch_pct), f(r.actualHatch), f(r.vHatch),
+            ]
+          }),
+        }
+      default:
+        return null
+    }
+  }
+  const handleTabExport = () => {
+    const d = getTabExportData()
+    if (!d) return
+    exportCSV(`flock_${flock.flock_no}_${tab}.csv`, d.headers, d.rows)
+  }
+  const handleTabPrint = () => {
+    const d = getTabExportData()
+    if (!d) return
+    printReport({ title: d.title, headers: d.headers, rows: d.rows, rightAlignFrom: d.rightAlignFrom })
+  }
 
   // CSV template download
   const handleDownloadTemplate = () => {
@@ -780,6 +989,16 @@ export const FlockDetail: React.FC = () => {
             {t === 'std' ? 'vs Standard' : t}
           </button>
         ))}
+      </div>
+
+      {/* Export/Print — same data as whichever tab is active. Daily has its
+          own Export Excel already (date-range aware), so skip the generic
+          one there to avoid two differently-scoped Export buttons. */}
+      <div className="flex justify-end gap-2">
+        {tab !== 'daily' && (
+          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleTabExport}>Export</Button>
+        )}
+        <Button variant="outline" size="sm" icon={<Printer size={14}/>} onClick={handleTabPrint}>Print</Button>
       </div>
 
       {/* OVERVIEW TAB */}
@@ -1098,16 +1317,10 @@ export const FlockDetail: React.FC = () => {
               <Th right>Feed ♀ kg</Th><Th right>Feed ♂ kg</Th>
             </tr></thead>
             <tbody>
-              {monthlyData.map((m: any) => {
-                const monthDaily = daily?.filter(d => d.record_date.startsWith(m.month)) ?? []
-                const avgF = monthDaily.reduce((s, d) => s + (d.opening_female ?? 0), 0) / Math.max(monthDaily.length, 1)
-                const feedF = monthDaily.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0)
-                const feedM = monthDaily.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0)
-                const mortF = monthDaily.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
-                return (
+              {monthlyRows.map((m: any) => (
                   <tr key={m.month} className="hover:bg-gray-50">
                     <Td className="font-medium">{m.month}</Td>
-                    <Td right>{monthDaily.length}</Td>
+                    <Td right>{m.days}</Td>
                     <Td right className="font-medium">{m.eggs.toLocaleString('en-IN')}</Td>
                     <Td right className="text-blue-600 font-medium">{m.he.toLocaleString('en-IN')}</Td>
                     <Td right>
@@ -1115,13 +1328,12 @@ export const FlockDetail: React.FC = () => {
                         {m.eggs > 0 ? pct(m.he/m.eggs) : '—'}
                       </span>
                     </Td>
-                    <Td right>{Math.round(avgF).toLocaleString('en-IN')}</Td>
-                    <Td right className="text-red-500">{mortF > 0 ? mortF : '—'}</Td>
-                    <Td right>{feedF.toLocaleString('en-IN')}</Td>
-                    <Td right>{feedM.toLocaleString('en-IN')}</Td>
+                    <Td right>{Math.round(m.avgF).toLocaleString('en-IN')}</Td>
+                    <Td right className="text-red-500">{m.mortF > 0 ? m.mortF : '—'}</Td>
+                    <Td right>{m.feedF.toLocaleString('en-IN')}</Td>
+                    <Td right>{m.feedM.toLocaleString('en-IN')}</Td>
                   </tr>
-                )
-              })}
+              ))}
             </tbody>
           </Table>
         </Card>
