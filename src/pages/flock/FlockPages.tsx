@@ -904,7 +904,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         </div>
       </Card>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard title="Total Eggs" value={numFmt(totalEggs)} icon={<Egg size={18}/>} color="text-yellow-600" />
         <StatCard title="Total Mortality" value={numFmt(totalMort)} icon={<Bird size={18}/>} color="text-red-600" />
         <StatCard title="Avg HD%" value={avgHD != null ? pctFmt(avgHD) : '—'} icon={<TrendingUp size={18}/>} color="text-green-600" />
@@ -1280,7 +1280,7 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         </div>
       </Card>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard title="Total Dispatched" value={numFmt(totalDisp)} icon={<Egg size={18}/>} color="text-green-600" />
         <StatCard title="Total Amount" value={inr(totalAmount)} icon={<TrendingUp size={18}/>} color="text-brand-600" />
         <StatCard title="Trip Count" value={dispatches.length.toString()} icon={<Truck size={18}/>} color="text-blue-600" />

@@ -283,17 +283,17 @@ export const EggConversions: React.FC = () => {
             <DateInput label="Date" required value={form.conversion_date}
               onChange={e => s('conversion_date', e.target.value)} />
           </FormRow>
-          <div className="grid grid-cols-5 gap-3 items-end">
-            <div className="col-span-2 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+            <div className="sm:col-span-2 space-y-3">
               <Select label="From Type" options={EGG_TYPES} value={form.from_type}
                 onChange={e => s('from_type', e.target.value)} />
               <Input label="From Qty" required type="number" value={form.from_qty}
                 onChange={e => s('from_qty', e.target.value)} />
             </div>
             <div className="flex items-center justify-center pb-2">
-              <ArrowRight size={20} className="text-gray-400"/>
+              <ArrowRight size={20} className="text-gray-400 rotate-90 sm:rotate-0"/>
             </div>
-            <div className="col-span-2 space-y-3">
+            <div className="sm:col-span-2 space-y-3">
               <Select label="To Type" options={EGG_TYPES} value={form.to_type}
                 onChange={e => s('to_type', e.target.value)} />
               <Input label="To Qty" required type="number" value={form.to_qty}

@@ -223,13 +223,13 @@ export const EggOpeningStockPage: React.FC = () => {
               <DateInput label="As of Date" required value={form.as_of_date} onChange={e => s('as_of_date', e.target.value)} />
             </FormRow>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">HE Eggs (Hatching)</p>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Input label="Grade A" type="number" value={form.he_grade_a} onChange={e => s('he_grade_a', e.target.value)} />
               <Input label="Grade B" type="number" value={form.he_grade_b} onChange={e => s('he_grade_b', e.target.value)} />
               <Input label="Grade C" type="number" value={form.he_grade_c} onChange={e => s('he_grade_c', e.target.value)} />
             </div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">NHE Eggs</p>
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Input label="Jumbo (JE)" type="number" value={form.je_eggs} onChange={e => s('je_eggs', e.target.value)} />
               <Input label="Table (TE)" type="number" value={form.te_eggs} onChange={e => s('te_eggs', e.target.value)} />
               <Input label="Broken (BE)" type="number" value={form.be_eggs} onChange={e => s('be_eggs', e.target.value)} />

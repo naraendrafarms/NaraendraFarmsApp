@@ -1274,7 +1274,7 @@ export const HEDispatch: React.FC = () => {
 
       {/* Summary */}
       {dispatches && dispatches.length > 0 && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatCard title="Total Dispatched" value={totalDisp.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-brand-600" />
           <StatCard title="Free Eggs" value={totalFree.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-yellow-600" />
           <StatCard title="Total Revenue" value={inr(totalAmt)} icon={<Package size={18}/>} color="text-green-600" />
@@ -2744,7 +2744,7 @@ export const NHESales: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard title="Total Sales" value={inr(payTotSale)} icon={<Package size={18}/>} color="text-blue-600" />
         <StatCard title="Received (Paid)" value={inr(payTotRecd)} icon={<Package size={18}/>} color="text-green-600" />
         <StatCard title="Due" value={inr(payTotDue)} icon={<AlertCircle size={18}/>} color="text-red-600" />
