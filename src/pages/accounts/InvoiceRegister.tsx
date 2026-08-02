@@ -710,8 +710,8 @@ export const InvoiceRegister: React.FC = () => {
         const inv = (invoices ?? []).find((i: any) => i.id === markPayId)
         if (!inv) return null
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl p-6 w-96">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-96">
               <p className="font-semibold text-gray-900 mb-1">Record Payment</p>
               <p className="text-sm text-gray-500 mb-1">Invoice: <strong>{inv.invoice_no}</strong></p>
               <p className="text-sm text-gray-500 mb-4">Total: <strong>{inr(inv.total_amount)}</strong></p>

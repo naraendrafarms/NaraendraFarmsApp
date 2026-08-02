@@ -577,8 +577,8 @@ const PaidStatus: React.FC = () => {
       })}
 
       {payRow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-96">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-96">
             <p className="font-semibold text-gray-900 mb-1">Record Payment</p>
             <p className="text-sm text-gray-500 mb-4">
               {payRow.vendor_name} — <strong>{inr(payRow.net_payable ?? payRow.invoice_amount ?? 0)}</strong>
