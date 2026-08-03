@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth'
 import { MessageCircle, X, Send, Paperclip, Plus, ArrowLeft, Users as UsersIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { ChatReplyToast } from '@/components/chat/ChatReplyToast'
+import { sendBrowserNotification } from '@/lib/browserNotify'
 
 interface ChatUser { id: string; full_name: string | null; email: string | null }
 interface ChatGroupRow { id: string; name: string | null; is_dm: boolean }
@@ -309,6 +310,11 @@ export const ChatPanel: React.FC = () => {
         const msg = payload.new
         if (msg.sender_id === myId || !myGroupIds.includes(msg.group_id)) return
         const { data: sender } = await supabase.from('profiles').select('full_name').eq('id', msg.sender_id).single()
+        sendBrowserNotification(sender?.full_name ?? 'New message', {
+          body: msg.body || (msg.attachment_name ? `📎 ${msg.attachment_name}` : ''),
+          tag: `chat_${msg.group_id}`,
+          onClick: () => { setOpenGroupId(msg.group_id); setOpen(true) },
+        })
         toast.custom((t) => (
           <ChatReplyToast
             toastId={t.id}

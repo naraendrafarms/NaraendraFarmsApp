@@ -11,6 +11,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { TaskAlerts } from '@/components/tasks/TaskAlerts'
 import { LogoChip } from '@/components/Logo'
+import { NotificationBanner } from '@/components/NotificationBanner'
 import { useQuery } from '@tanstack/react-query'
 import { searchAppData, type SearchHit } from '@/lib/globalSearch'
 
@@ -581,6 +582,7 @@ export const AppLayout: React.FC = () => {
             {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday:'long', day:'2-digit', month:'long', year:'numeric' })}
           </span>
         </header>
+        <NotificationBanner />
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
           <ErrorBoundary key={location.pathname}>
             <ModuleGuard>

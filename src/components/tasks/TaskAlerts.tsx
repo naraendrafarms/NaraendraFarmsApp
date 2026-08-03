@@ -4,6 +4,11 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth'
 import toast from 'react-hot-toast'
 import { useNavigate } from 'react-router-dom'
+import { sendBrowserNotification } from '@/lib/browserNotify'
+import { OPEN_TASK_STATUSES } from '@/lib/tasks'
+
+const DUE_NOTIFIED_KEY = 'nf_due_task_notified'
+const today = () => new Date().toISOString().slice(0, 10)
 
 // Global, always-on realtime subscription (mounted once in AppLayout,
 // independent of whether the Tasks page is open) — the instant a task is
@@ -30,6 +35,7 @@ export const TaskAlerts: React.FC = () => {
         ),
         { icon: '📋', duration: 5000 }
       )
+      sendBrowserNotification('New task assigned', { body: title, tag: `task_${taskId}`, onClick: () => navigate('/tasks') })
       qc.invalidateQueries({ queryKey: ['tasks'] })
       qc.invalidateQueries({ queryKey: ['my_tasks_widget', myId] })
     }
@@ -53,6 +59,41 @@ export const TaskAlerts: React.FC = () => {
 
     return () => { supabase.removeChannel(ch) }
   }, [myId, qc, navigate])
+
+  // Due-date reminders — nothing fires a DB event when a due date simply
+  // arrives, so this polls periodically instead. Notifies at most once per
+  // task per day (tracked in localStorage) so it doesn't repeat every poll.
+  useEffect(() => {
+    if (!myId) return
+
+    const checkDueTasks = async () => {
+      const { data } = await supabase.from('tasks')
+        .select('id,title,due_date')
+        .eq('assigned_to_user_id', myId)
+        .in('status', OPEN_TASK_STATUSES)
+        .lte('due_date', today())
+        .not('due_date', 'is', null)
+      if (!data?.length) return
+      const notifiedRaw = localStorage.getItem(DUE_NOTIFIED_KEY)
+      const notified: Record<string, string> = notifiedRaw ? JSON.parse(notifiedRaw) : {}
+      const todayStr = today()
+      let changed = false
+      for (const t of data) {
+        if (notified[t.id] === todayStr) continue
+        const overdue = t.due_date < todayStr
+        sendBrowserNotification(overdue ? 'Task overdue' : 'Task due today', {
+          body: t.title, tag: `due_${t.id}_${todayStr}`, onClick: () => navigate('/tasks'),
+        })
+        notified[t.id] = todayStr
+        changed = true
+      }
+      if (changed) localStorage.setItem(DUE_NOTIFIED_KEY, JSON.stringify(notified))
+    }
+
+    checkDueTasks()
+    const interval = setInterval(checkDueTasks, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [myId, navigate])
 
   return null
 }
