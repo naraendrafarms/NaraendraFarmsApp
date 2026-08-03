@@ -346,8 +346,16 @@ export const GRNPage: React.FC = () => {
         payloads.push(p)
       }
       if (editing) {
+        // The first line is always the pre-existing item being edited in
+        // place; anything added afterwards via "+ Add Another Item" is a
+        // brand new item under this same GRN (same grn_no/date/farm/etc.,
+        // just a new row) — not a second edit target.
         const { error } = await supabase.from('grn').update(payloads[0]).eq('id', editing.id)
         if (error) throw error
+        if (payloads.length > 1) {
+          const { error: insErr } = await supabase.from('grn').insert(payloads.slice(1))
+          if (insErr) throw insErr
+        }
       } else {
         const { error } = await supabase.from('grn').insert(payloads)
         if (error) throw error
@@ -355,7 +363,9 @@ export const GRNPage: React.FC = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['grns'] })
-      toast.success(editing ? 'GRN updated' : `GRN saved (${lines.length} item${lines.length > 1 ? 's' : ''})`)
+      toast.success(editing
+        ? (lines.length > 1 ? `GRN updated (+${lines.length - 1} new item${lines.length > 2 ? 's' : ''})` : 'GRN updated')
+        : `GRN saved (${lines.length} item${lines.length > 1 ? 's' : ''})`)
       setShowForm(false)
     },
     onError: (e: any) => toast.error(e.message)
@@ -789,11 +799,11 @@ export const GRNPage: React.FC = () => {
             onChange={e => hs('vehicle_no', e.target.value)}
           />
 
-          {!editing && (
-            <p className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-              GRN No/Date/Farm/Supplier/Invoice/Vehicle above apply to every item below — one bill, many items. Use "+ Add Another Item" for each additional line.
-            </p>
-          )}
+          <p className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+            {editing
+              ? 'Item 1 is the existing item you\'re editing. Use "+ Add Another Item" below to add a new item to this same GRN (same GRN No/Date/Farm/Supplier/Invoice/Vehicle) without retyping the header.'
+              : 'GRN No/Date/Farm/Supplier/Invoice/Vehicle above apply to every item below — one bill, many items. Use "+ Add Another Item" for each additional line.'}
+          </p>
 
           {lines.map((line, idx) => {
             const { basicCalc, totalCalc, landedRate, isChick, needsBatch } = lineCalc(line)
@@ -1015,14 +1025,12 @@ export const GRNPage: React.FC = () => {
             )
           })}
 
-          {!editing && (
-            <button
-              onClick={addLine}
-              className="flex items-center gap-1 px-3 py-1.5 text-sm border border-brand-300 text-brand-700 rounded hover:bg-brand-50"
-            >
-              <Plus size={14} /> Add Another Item
-            </button>
-          )}
+          <button
+            onClick={addLine}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm border border-brand-300 text-brand-700 rounded hover:bg-brand-50"
+          >
+            <Plus size={14} /> Add Another Item
+          </button>
 
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm border rounded hover:bg-gray-50">

@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-08-02'
+const LAST_UPDATED = '2026-08-03'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-08-03', tag: 'New', text: 'Purchase → GRN → Edit GRN: "+ Add Another Item" now works while editing an existing GRN, not just when adding a new one — so if you forgot an item on a bill, you no longer have to redo the whole GRN (No/Date/Farm/Supplier/Invoice/Vehicle) from scratch just to add one more line. Item 1 stays the existing item being edited; anything added below it saves as a new item under that same GRN.' },
   { date: '2026-08-02', tag: 'Fix', text: 'Accounts → Pending Payments → Edit Bill: picking a TDS % preset (or typing a custom %) always overwrote the TDS Amount field with the %-calculated figure, even if a manual custom amount had already been typed in — so entering a real ₹494 TDS by hand, then touching the % dropdown for any reason, silently replaced it with a computed 0.1% figure (₹2,296) instead. TDS Amount now only auto-fills from % when it\'s still blank, matching its own "Auto from % if left blank" placeholder text. One known-affected bill (Sachin International Proteins, Inv SIPPL/26-27/739) has been corrected.' },
   { date: '2026-08-01', tag: 'Fix', text: 'Mobile — Flock Management: HE Dispatch, NHE Sales, the Flock Management dashboard\'s Overview/HE Dispatch tabs, Egg Conversions, and Egg Opening Stock all had 3–5 stat cards or number fields forced into one fixed row (grid-cols-3/4/5) with no allowance for a narrow phone screen, clipping large numbers off the right edge (e.g. HE Dispatch\'s Total Revenue showing "Rs 2,90,43,3…" cut off) and squeezing form fields unusably small. All now stack into a single column on phones and expand to the full row on wider screens. First of an ongoing page-by-page mobile pass — reported from real screenshots.' },
   { date: '2026-08-01', tag: 'Fix', text: 'Mobile: two "Record Payment" popups (Partner Remuneration, Purchase Invoice Register) were a fixed 384px wide, wider than a typical phone screen (375px on an iPhone SE/mini), clipping their right edge off-screen. Both now shrink to fit the screen with a margin instead of a fixed width. Swept the rest of the app for the same fixed-width-modal and unwrapped-wide-table patterns — everything else already scrolls/resizes correctly.' },
