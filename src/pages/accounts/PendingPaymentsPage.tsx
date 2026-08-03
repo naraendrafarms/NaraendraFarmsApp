@@ -1054,7 +1054,12 @@ export const PendingPaymentsPage: React.FC = () => {
                       const pct = e.target.value === 'custom' ? '' : e.target.value
                       const invAmt = parseFloat(editForm.invoice_amount) || 0
                       const autoAmt = pct !== '' ? String(roundTds(invAmt * (parseFloat(pct) || 0) / 100)) : ''
-                      setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: autoAmt }))
+                      // Only auto-fill TDS Amount when it's still blank — a %
+                      // pick used to always overwrite it, silently discarding
+                      // a manually-typed custom amount (e.g. a real ₹494 TDS
+                      // entered by hand got replaced with the auto-calculated
+                      // 0.1% figure the moment the % dropdown was touched).
+                      setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: f.tds_amount === '' ? autoAmt : f.tds_amount }))
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
                     {TDS_PCT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -1066,7 +1071,9 @@ export const PendingPaymentsPage: React.FC = () => {
                         const pct = e.target.value
                         const invAmt = parseFloat(editForm.invoice_amount) || 0
                         const autoAmt = pct !== '' ? String(roundTds(invAmt * (parseFloat(pct) || 0) / 100)) : ''
-                        setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: autoAmt }))
+                        // Same fix as the % dropdown above — don't clobber a
+                        // manually-typed TDS Amount.
+                        setEditForm(f => ({ ...f, tds_pct: pct, tds_amount: f.tds_amount === '' ? autoAmt : f.tds_amount }))
                       }}
                       placeholder="e.g. 3.75" className="w-full mt-1.5 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                   )}
