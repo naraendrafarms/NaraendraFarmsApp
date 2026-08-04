@@ -471,9 +471,18 @@ export const PendingPaymentsPage: React.FC = () => {
       const amtEntered = editForm.tds_amount !== ''
       let tdsPct: number | null = pctEntered ? parseFloat(editForm.tds_pct) || 0 : null
       let tds: number | null = amtEntered ? parseFloat(editForm.tds_amount) || 0 : null
+      // Only ever DERIVE the side that wasn't filled in. A typed TDS Amount is
+      // always saved exactly as typed, even when a % is also selected.
+      //
+      // This used to end with "% wins if both given", which silently recomputed
+      // the amount from the rate on every save — so a manually-entered TDS could
+      // never be saved at all while a rate was set (confirmed on a real bill:
+      // Vinayaka Enterprises, ₹664 entered, saved as ₹714 = 0.1% of the gross).
+      // The two legitimately differ: the % is the section rate, while the amount
+      // is what's actually deducted (rounding, or TDS computed on the base value
+      // excluding GST rather than the gross invoice).
       if (pctEntered && !amtEntered) tds = roundTds(invAmt * (tdsPct ?? 0) / 100)
       else if (amtEntered && !pctEntered && invAmt > 0) tdsPct = Math.round((tds ?? 0) / invAmt * 10000) / 100
-      else if (pctEntered && amtEntered) tds = roundTds(invAmt * (tdsPct ?? 0) / 100) // % wins if both given
       const netPayable = invAmt - (tds ?? 0)
       const payload = {
         vendor_name: editForm.vendor_name.trim(),
