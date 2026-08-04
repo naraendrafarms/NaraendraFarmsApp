@@ -1840,8 +1840,11 @@ const EMPTY_NHE_FORM = {
   is_employee_sale: false, employee_id: '', deduct_salary: false,
 }
 
-type NheLine = { sale_type: string; quantity: string; unit: string; rate: string; amount: string }
-const emptyNheLine = (): NheLine => ({ sale_type: 'je', quantity: '', unit: 'nos', rate: '', amount: '' })
+// free_qty = eggs given away free on this line (complimentary / to outsiders).
+// They count as stock leaving (same as HE Dispatch's free_eggs) but are never
+// billed — only `quantity` × `rate` is charged.
+type NheLine = { sale_type: string; quantity: string; unit: string; rate: string; amount: string; free_qty: string }
+const emptyNheLine = (): NheLine => ({ sale_type: 'je', quantity: '', unit: 'nos', rate: '', amount: '', free_qty: '' })
 
 export const NHESales: React.FC = () => {
   const qc = useQueryClient()
@@ -2161,8 +2164,12 @@ export const NHESales: React.FC = () => {
         if (invErr) throw invErr
         finalInvoiceNo = realInv as string
       }
-      // For egg sales: aggregate qty from lines, rate stored per-line
-      const eggTotalQty = egg ? nheLines.reduce((s, l) => s + (parseFloat(l.quantity)||0), 0) : null
+      // For egg sales: aggregate qty from lines, rate stored per-line.
+      // Free eggs are added in here too — they physically leave stock exactly
+      // like sold eggs, so Egg Stock/production must count them; they're just
+      // never billed (see linePayloads/amount, which use `quantity` only).
+      const eggFreeQty = egg ? nheLines.reduce((s, l) => s + (parseFloat(l.free_qty)||0), 0) : 0
+      const eggTotalQty = egg ? nheLines.reduce((s, l) => s + (parseFloat(l.quantity)||0) + (parseFloat(l.free_qty)||0), 0) : null
       // Header sale_type for multi-line egg sales = the line carrying the
       // largest amount (was hardcoded 'je', mislabelling TE/BE-dominant sales)
       const lineAmtOf = (l: NheLine) => parseFloat(l.amount) || ((parseFloat(l.quantity)||0) * (parseFloat(l.rate)||0))
@@ -2176,6 +2183,7 @@ export const NHESales: React.FC = () => {
         party_id: form.party_id || null, dc_no: form.dc_no || null,
         invoice_no: finalInvoiceNo,
         quantity: egg ? (eggTotalQty || null) : (parseFloat(form.quantity) || null),
+        free_qty: egg ? eggFreeQty : 0,
         unit: bird ? 'nos' : (form.unit || 'nos'),
         rate: (bird || egg) ? null : (parseFloat(form.rate) || null),
         amount: finalAmt,
@@ -2253,13 +2261,17 @@ export const NHESales: React.FC = () => {
       if (egg && savedId) {
         await supabase.from('nhe_sale_lines').delete().eq('sale_id', savedId)
         const linePayloads = nheLines
-          .filter(l => (parseFloat(l.quantity)||0) > 0 || (parseFloat(l.amount)||0) > 0)
+          // A free-only line (qty 0, free 10) is a legitimate give-away with
+          // no billable amount — keep it, or the record would vanish on save.
+          .filter(l => (parseFloat(l.quantity)||0) > 0 || (parseFloat(l.amount)||0) > 0 || (parseFloat(l.free_qty)||0) > 0)
           .map(l => ({
             sale_id: savedId,
             sale_type: l.sale_type,
             quantity: parseFloat(l.quantity) || null,
+            free_qty: parseFloat(l.free_qty) || 0,
             unit: l.unit || 'nos',
             rate: parseFloat(l.rate) || null,
+            // Billed on `quantity` only — free_qty is deliberately excluded.
             amount: parseFloat(l.amount) || ((parseFloat(l.quantity)||0)*(parseFloat(l.rate)||0)) || null,
             gst_pct: gstPct,
           }))
@@ -2476,6 +2488,7 @@ export const NHESales: React.FC = () => {
               unit: l.unit ?? 'nos',
               rate: l.rate?.toString() ?? '',
               amount: l.amount?.toString() ?? '',
+              free_qty: l.free_qty ? l.free_qty.toString() : '',
             })))
           } else {
             // No lines in DB — prefill a single line from header values
@@ -2486,6 +2499,7 @@ export const NHESales: React.FC = () => {
               unit: row.unit ?? 'nos',
               rate: row.rate?.toString() ?? '',
               amount: row.amount != null ? row.amount.toString() : '',
+              free_qty: row.free_qty ? row.free_qty.toString() : '',
             }])
           }
         })
@@ -2514,12 +2528,12 @@ export const NHESales: React.FC = () => {
 
   const handleExport = () => {
     const rows = filtered ?? []
-    const headers = 'Flock,Date,Type,Party,DC No,Qty,Unit,Rate,Amount,Remarks'
+    const headers = 'Flock,Date,Type,Party,DC No,Qty,Free,Unit,Rate,Amount,Remarks'
     const lines = rows.map((r: any) => [
       r.flocks?.flock_no ?? '', r.sale_date,
       r.sale_type,
       r.parties?.name ?? '', r.dc_no ?? '',
-      r.quantity ?? '', r.unit ?? '', r.rate ?? '', r.amount ?? '', r.remarks ?? ''
+      r.quantity ?? '', r.free_qty ?? 0, r.unit ?? '', r.rate ?? '', r.amount ?? '', r.remarks ?? ''
     ].join(','))
     const blob = new Blob([headers + '\n' + lines.join('\n')], { type: 'text/csv' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
@@ -2610,6 +2624,10 @@ export const NHESales: React.FC = () => {
 
   // Bird sales summary: total birds + weight + value (follows all active filters)
   const payTotSale = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  // Eggs given away free across the currently-filtered sales — surfaced as
+  // its own stat card so give-aways are visible instead of hiding inside a
+  // zero-rate line.
+  const totalFreeQty = filtered.reduce((s: number, r: any) => s + Number(r.free_qty ?? 0), 0)
   const payTotRecd = filtered.reduce((s: number, r: any) => s + (r.amount_received ?? 0), 0)
   const payTotDue  = Math.max(0, payTotSale - payTotRecd)
 
@@ -2744,10 +2762,13 @@ export const NHESales: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className={`grid grid-cols-1 gap-3 ${totalFreeQty > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
         <StatCard title="Total Sales" value={inr(payTotSale)} icon={<Package size={18}/>} color="text-blue-600" />
         <StatCard title="Received (Paid)" value={inr(payTotRecd)} icon={<Package size={18}/>} color="text-green-600" />
         <StatCard title="Due" value={inr(payTotDue)} icon={<AlertCircle size={18}/>} color="text-red-600" />
+        {totalFreeQty > 0 && (
+          <StatCard title="Free Eggs Given" value={totalFreeQty.toLocaleString('en-IN')} subtitle="Not billed" icon={<Egg size={18}/>} color="text-orange-600" />
+        )}
       </div>
 
       {/* Bird Sales Summary */}
@@ -3085,6 +3106,7 @@ export const NHESales: React.FC = () => {
                       <tr>
                         <th className="px-2 py-1 text-left text-xs font-medium text-gray-600">Type</th>
                         <th className="px-2 py-1 text-right text-xs font-medium text-gray-600">Qty (nos)</th>
+                        <th className="px-2 py-1 text-right text-xs font-medium text-orange-600" title="Eggs given away free — leave stock but are never billed">Free</th>
                         <th className="px-2 py-1 text-right text-xs font-medium text-gray-600">Rate (₹)</th>
                         <th className="px-2 py-1 text-right text-xs font-medium text-gray-600">Amount (₹)</th>
                         <th className="px-2 py-1"></th>
@@ -3112,6 +3134,11 @@ export const NHESales: React.FC = () => {
                                 onChange={e => setNheLines(ls => ls.map((l,j) => j===i ? {...l, quantity: e.target.value, amount: ''} : l))} />
                             </td>
                             <td className="px-1 py-1">
+                              <input type="number" min="0" className="w-full text-xs border border-orange-200 rounded px-1 py-0.5 text-right bg-orange-50/40"
+                                value={line.free_qty} placeholder="0"
+                                onChange={e => setNheLines(ls => ls.map((l,j) => j===i ? {...l, free_qty: e.target.value} : l))} />
+                            </td>
+                            <td className="px-1 py-1">
                               <input type="number" className="w-full text-xs border border-gray-200 rounded px-1 py-0.5 text-right"
                                 value={line.rate} placeholder="0.00"
                                 onChange={e => setNheLines(ls => ls.map((l,j) => j===i ? {...l, rate: e.target.value, amount: ''} : l))} />
@@ -3134,7 +3161,11 @@ export const NHESales: React.FC = () => {
                     </tbody>
                     <tfoot className="bg-gray-50 border-t border-gray-200">
                       <tr>
-                        <td className="px-2 py-1 text-xs font-semibold text-gray-700" colSpan={3}>Total</td>
+                        <td className="px-2 py-1 text-xs font-semibold text-gray-700" colSpan={2}>Total</td>
+                        <td className="px-2 py-1 text-right text-xs font-semibold text-orange-600">
+                          {(() => { const f = nheLines.reduce((s, l) => s + (parseFloat(l.free_qty)||0), 0); return f > 0 ? f.toLocaleString('en-IN') : '—' })()}
+                        </td>
+                        <td></td>
                         <td className="px-2 py-1 text-right text-xs font-semibold text-gray-900">{inr(linesTotal)}</td>
                         <td></td>
                       </tr>

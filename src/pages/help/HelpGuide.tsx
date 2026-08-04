@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-08-03'
+const LAST_UPDATED = '2026-08-04'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-08-04', tag: 'New', text: 'Flocks → NHE Sales: egg lines now have a "Free" column for eggs given away free (complimentary / to outsiders) — previously the only way to record this was faking a zero-rate sale, which made give-aways indistinguishable from real ₹0 sales in reports. Free eggs still count as stock leaving (so Egg Stock and production figures stay correct) but are never billed, and now roll up into their own "Free Eggs Given" total on the page and a Free column in the CSV export. Works the same way HE Dispatch\'s existing Free Eggs field already does.' },
   { date: '2026-08-03', tag: 'New', text: 'Admin Centre → Masters → Tasks: Task Recurrence rules (the dropdown when assigning/editing a recurring task — "Monthly 7th for TDS", "Quarterly 31st", etc.) are no longer hardcoded — add, edit, or deactivate as many compliance recurrences as needed (GST, TDS, ESI, PF, PT, and anything else with its own due date) the same way every other dropdown list in the app is managed.' },
   { date: '2026-08-03', tag: 'New', text: 'App-wide: added a "Turn on notifications" banner (dismissible, shows once) that enables real OS/desktop notifications for new Discussions messages, new task assignments, and task due-date reminders — firing even when the app tab isn\'t focused (minimized, another tab/app in front). Note: this needs the browser/app to still be open in the background; it does not yet survive the browser being fully closed — that would need a separate server-push setup.' },
   { date: '2026-08-03', tag: 'New', text: 'Purchase → GRN → Edit GRN: "+ Add Another Item" now works while editing an existing GRN, not just when adding a new one — so if you forgot an item on a bill, you no longer have to redo the whole GRN (No/Date/Farm/Supplier/Invoice/Vehicle) from scratch just to add one more line. Item 1 stays the existing item being edited; anything added below it saves as a new item under that same GRN.' },
