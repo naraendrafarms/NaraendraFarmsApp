@@ -7,6 +7,7 @@ import { Button, Modal, Input, Textarea, Select, DateInput, FormRow, SearchableS
 import { ListPlus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { TASK_TYPE_OPTIONS, TASK_PRIORITY_OPTIONS, RECURRENCE_PRESETS, type TaskType } from '@/lib/tasks'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 interface AssignTaskButtonProps {
   // Optional link back to the record this task was raised from — shown from
@@ -41,6 +42,7 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(emptyForm(defaultTitle))
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const recurrenceOptions = useConfigOptions('task_recurrence', RECURRENCE_PRESETS)
 
   const { data: users } = useQuery({
     queryKey: ['tasks_users_list'],
@@ -137,7 +139,7 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
             <Input label="Team label (optional, just a tag — not an assignment)" value={form.team} onChange={e => s('team', e.target.value)} placeholder="e.g. Accounts / Site" />
             <DateInput label="Due Date" value={form.due_date} onChange={e => s('due_date', e.target.value)} />
           </FormRow>
-          <Select label="Recurrence" options={RECURRENCE_PRESETS} value={form.recurrence_rule} onChange={e => s('recurrence_rule', e.target.value)} />
+          <Select label="Recurrence" options={recurrenceOptions} value={form.recurrence_rule} onChange={e => s('recurrence_rule', e.target.value)} />
           <label className="flex items-start gap-2 text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-2 cursor-pointer">
             <input type="checkbox" className="mt-0.5" checked={form.is_private}
               onChange={e => setForm(f => ({ ...f, is_private: e.target.checked }))} />

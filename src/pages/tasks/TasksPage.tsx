@@ -8,6 +8,7 @@ import {
   Modal, Input, Textarea, DateInput, FormRow, SearchableSelect,
 } from '@/components/ui'
 import { AssignTaskButton } from '@/components/tasks/AssignTaskButton'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { CheckCircle2, Circle, Clock, XCircle, Trash2, ListTodo, AlertTriangle, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
@@ -35,6 +36,7 @@ export const TasksPage: React.FC = () => {
   const [filterFarm, setFilterFarm] = useState('')
   const [filterUser, setFilterUser] = useState('')
   const [editTask, setEditTask] = useState<any>(null)
+  const recurrenceOptions = useConfigOptions('task_recurrence', RECURRENCE_PRESETS)
   const [editForm, setEditForm] = useState<any>(null)
 
   const effectiveUserFilter = scope === 'mine' ? (profile?.id ?? '') : filterUser
@@ -299,7 +301,7 @@ export const TasksPage: React.FC = () => {
               <Input label="Team label (optional, just a tag)" value={editForm.team} onChange={e => setEditForm((f: any) => ({ ...f, team: e.target.value }))} />
               <DateInput label="Due Date" value={editForm.due_date} onChange={e => setEditForm((f: any) => ({ ...f, due_date: e.target.value }))} />
             </FormRow>
-            <Select label="Recurrence" options={RECURRENCE_PRESETS} value={editForm.recurrence_rule} onChange={e => setEditForm((f: any) => ({ ...f, recurrence_rule: e.target.value }))} />
+            <Select label="Recurrence" options={recurrenceOptions} value={editForm.recurrence_rule} onChange={e => setEditForm((f: any) => ({ ...f, recurrence_rule: e.target.value }))} />
             <label className="flex items-start gap-2 text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-2 cursor-pointer">
               <input type="checkbox" className="mt-0.5" checked={editForm.is_private}
                 onChange={e => setEditForm((f: any) => ({ ...f, is_private: e.target.checked }))} />
