@@ -1975,7 +1975,7 @@ export const NHESales: React.FC = () => {
   const { data: sales, isLoading } = useQuery({
     queryKey: ['nhe_sales', flockFilter, empFilter, payFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount)')
+      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
         .order('sale_date', { ascending: false })
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       if (empFilter) q = q.eq('employee_id', empFilter)
@@ -2151,7 +2151,13 @@ export const NHESales: React.FC = () => {
         return sum + amt
       }, 0)
       const finalAmt = egg ? freshLinesTotal : (parseFloat(form.amount) || autoAmt)
-      if (!form.flock_id || !form.sale_date || !finalAmt) throw new Error('Flock, date and amount required')
+      // A pure give-away (only Free eggs, nothing billed) is a legitimate ₹0
+      // entry — requiring an amount would make free eggs impossible to record,
+      // which is exactly what the Free column exists for. Still require SOME
+      // quantity so a totally blank form can't be saved.
+      const freshFreeQty = egg ? nheLines.reduce((s, l) => s + (parseFloat(l.free_qty)||0), 0) : 0
+      if (!form.flock_id || !form.sale_date) throw new Error('Flock and date are required')
+      if (!finalAmt && !freshFreeQty) throw new Error('Enter an amount, or a Free quantity for eggs given away free')
       const bird = isBirdSale(form.sale_type)
       const buyer = parties?.find((p: any) => p.id === form.party_id)
       const nheSupply = supplyType(buyer?.state_code)
@@ -2851,6 +2857,7 @@ export const NHESales: React.FC = () => {
                         {s.nhe_sale_lines.map((l: any, i: number) => (
                           <div key={i} className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
                             {l.sale_type.toUpperCase()} — {l.quantity?.toLocaleString('en-IN') ?? '?'} nos @ ₹{l.rate ?? '?'} = {inr(l.amount ?? 0)}
+                            {Number(l.free_qty ?? 0) > 0 && <span className="ml-1 text-orange-600">+{Number(l.free_qty).toLocaleString('en-IN')} free</span>}
                           </div>
                         ))}
                       </div>
@@ -2865,7 +2872,12 @@ export const NHESales: React.FC = () => {
                       ? <span className="text-purple-700 font-medium">{s.employees?.name ?? '—'} <span className="text-gray-400 font-normal">(Emp)</span></span>
                       : (s.parties?.name ?? '—')}
                   </Td>
-                  <Td right className="text-xs">{s.quantity != null ? s.quantity.toLocaleString('en-IN') : '—'}</Td>
+                  <Td right className="text-xs">
+                    {s.quantity != null ? s.quantity.toLocaleString('en-IN') : '—'}
+                    {Number(s.free_qty ?? 0) > 0 && (
+                      <div className="text-[10px] text-orange-600 font-medium">incl. {Number(s.free_qty).toLocaleString('en-IN')} free</div>
+                    )}
+                  </Td>
                   <Td right className="text-xs text-gray-500">{s.total_weight_kg ? s.total_weight_kg.toFixed(1) : '—'}</Td>
                   <Td right className="text-xs">{s.rate_per_kg ? `₹${s.rate_per_kg}` : s.rate ? `₹${s.rate}` : '—'}</Td>
                   <Td right className="font-semibold text-green-700 text-xs">
