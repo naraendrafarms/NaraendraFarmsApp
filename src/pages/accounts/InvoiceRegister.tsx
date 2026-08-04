@@ -36,7 +36,7 @@ const EMPTY = {
   invoice_no: '', invoice_date: today(), supplier_name: '',
   party_id: '', source_type: 'other', flock_id: '', grn_id: '',
   farm_id: '', basic_amount: '', gst_pct: '0', gst_amount: '',
-  total_amount: '', payment_status: 'unpaid', paid_amount: '0',
+  total_amount: '', tds_amount: '0', payment_status: 'unpaid', paid_amount: '0',
   due_date: '', remarks: '',
 }
 
@@ -127,7 +127,11 @@ export const InvoiceRegister: React.FC = () => {
       if (!form.total_amount) throw new Error('Total Amount is required')
       const total = parseFloat(form.total_amount)
       const paidAmt = parseFloat(form.paid_amount) || 0
-      const payStatus = paidAmt >= total ? 'paid' : paidAmt > 0 ? 'partial' : form.payment_status
+      const tdsAmt = parseFloat(form.tds_amount) || 0
+      // TDS clears part of the invoice without cash moving, so it counts toward
+      // settlement — otherwise a 79,000 invoice with 7,900 TDS stayed 'partial'
+      // forever after the 71,100 actually due was paid.
+      const payStatus = paidAmt + tdsAmt >= total - 0.5 ? 'paid' : paidAmt > 0 ? 'partial' : form.payment_status
       const payload = {
         invoice_no:     form.invoice_no.trim(),
         invoice_date:   form.invoice_date,
@@ -140,6 +144,7 @@ export const InvoiceRegister: React.FC = () => {
         gst_pct:        parseFloat(form.gst_pct) || 0,
         gst_amount:     parseFloat(form.gst_amount) || null,
         total_amount:   total,
+        tds_amount:     tdsAmt,
         payment_status: payStatus,
         paid_amount:    paidAmt,
         due_date:       form.due_date || null,
@@ -175,8 +180,12 @@ export const InvoiceRegister: React.FC = () => {
           gst_pct:        parseFloat(form.gst_pct) || 0,
           gst_amount:     parseFloat(form.gst_amount) || null,
           invoice_amount: total,
+          tds_amount:     tdsAmt,
           paid_amount:    paidAmt,
-          net_payable:    total - paidAmt,
+          // Net payable is invoice MINUS TDS — not minus what's been paid.
+          // The old 'total - paidAmt' overwrote any TDS-adjusted net payable
+          // set on the bill in Pending Payments every time an invoice was saved.
+          net_payable:    total - tdsAmt,
           payment_status: ppStatus,
           paid_date:      ppStatus === 'Paid' ? form.due_date || form.invoice_date : null,
           pay_before_date: form.due_date || null,
@@ -300,6 +309,7 @@ export const InvoiceRegister: React.FC = () => {
       gst_pct:        inv.gst_pct?.toString() ?? '0',
       gst_amount:     inv.gst_amount?.toString() ?? '',
       total_amount:   inv.total_amount?.toString() ?? '',
+      tds_amount:     inv.tds_amount?.toString() ?? '0',
       payment_status: inv.payment_status ?? 'unpaid',
       paid_amount:    inv.paid_amount?.toString() ?? '0',
       due_date:       inv.due_date ?? '',
@@ -328,6 +338,7 @@ export const InvoiceRegister: React.FC = () => {
       gst_pct:        inv.gst_pct?.toString() ?? '0',
       gst_amount:     inv.gst_amount?.toString() ?? '',
       total_amount:   inv.total_amount?.toString() ?? '',
+      tds_amount:     '0',
       payment_status: 'unpaid',
       paid_amount:    '0',
       due_date:       '',
@@ -356,7 +367,11 @@ export const InvoiceRegister: React.FC = () => {
 
   const totalAmt    = filtered.reduce((s: number, i: any) => s + (i.total_amount ?? 0), 0)
   const totalPaid   = filtered.reduce((s: number, i: any) => s + (i.paid_amount  ?? 0), 0)
-  const totalUnpaid = totalAmt - totalPaid
+  const totalTds    = filtered.reduce((s: number, i: any) => s + (i.tds_amount   ?? 0), 0)
+  // TDS settles part of an invoice without cash moving, so it must come off
+  // the outstanding figure too — otherwise every TDS-bearing invoice looks
+  // permanently short by exactly the tax deducted.
+  const totalUnpaid = totalAmt - totalPaid - totalTds
   const unpaidCount = filtered.filter((i: any) => i.payment_status !== 'paid').length
   const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
   const visibleRows = filtered.slice(from, to)
@@ -374,7 +389,8 @@ export const InvoiceRegister: React.FC = () => {
       'GST Amt':        i.gst_amount ?? '',
       'Total':          i.total_amount,
       'Paid':           i.paid_amount ?? 0,
-      'Balance':        (i.total_amount ?? 0) - (i.paid_amount ?? 0),
+      'TDS':            i.tds_amount ?? 0,
+      'Balance':        (i.total_amount ?? 0) - (i.paid_amount ?? 0) - (i.tds_amount ?? 0),
       'Status':         i.payment_status,
       'Due Date':       i.due_date ?? '',
       'Remarks':        i.remarks ?? '',
@@ -562,6 +578,9 @@ export const InvoiceRegister: React.FC = () => {
                   value={form.gst_amount} onChange={e => s('gst_amount', e.target.value)} />
                 <Input label="Total Amount" type="number" step="0.01" required
                   value={form.total_amount} onChange={e => s('total_amount', e.target.value)} />
+                <Input label="TDS Deducted" type="number" step="0.01"
+                  value={form.tds_amount} onChange={e => s('tds_amount', e.target.value)}
+                  hint="Tax deducted at source — reduces the balance without a payment" />
               </div>
             </div>
 
@@ -629,6 +648,7 @@ export const InvoiceRegister: React.FC = () => {
                   <Th>Linked To</Th>
                   <Th right>Total</Th>
                   <Th right>Paid</Th>
+                  <Th right>TDS</Th>
                   <Th right>Balance</Th>
                   <Th>Status</Th>
                   <Th>Due</Th>
@@ -637,7 +657,7 @@ export const InvoiceRegister: React.FC = () => {
               </thead>
               <tbody>
                 {visibleRows.map((inv: any) => {
-                  const balance = (inv.total_amount ?? 0) - (inv.paid_amount ?? 0)
+                  const balance = (inv.total_amount ?? 0) - (inv.paid_amount ?? 0) - (inv.tds_amount ?? 0)
                   const isOverdue = inv.payment_status !== 'paid' && inv.due_date && inv.due_date < today()
                   return (
                     <tr key={inv.id} className={`border-b border-gray-50 hover:bg-gray-50 ${sel.has(inv.id) ? 'bg-red-50' : isOverdue ? 'bg-red-50/40' : ''}`}>
@@ -659,6 +679,7 @@ export const InvoiceRegister: React.FC = () => {
                       </Td>
                       <Td right className="font-medium">{inr(inv.total_amount)}</Td>
                       <Td right className="text-green-600">{inr(inv.paid_amount)}</Td>
+                      <Td right className={inv.tds_amount > 0 ? 'text-orange-600' : 'text-gray-300'}>{inv.tds_amount > 0 ? inr(inv.tds_amount) : '—'}</Td>
                       <Td right className={balance > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}>{inr(balance)}</Td>
                       <Td>
                         <Badge color={STATUS_COLOR[inv.payment_status] as any}>
@@ -693,7 +714,8 @@ export const InvoiceRegister: React.FC = () => {
                     <td colSpan={6} className="px-3 py-1.5">This page ({visibleRows.length} of {filtered.length})</td>
                     <td className="px-3 py-1.5 text-right">{inr(visibleRows.reduce((s: number, i: any) => s + (i.total_amount ?? 0), 0))}</td>
                     <td className="px-3 py-1.5 text-right">{inr(visibleRows.reduce((s: number, i: any) => s + (i.paid_amount ?? 0), 0))}</td>
-                    <td className="px-3 py-1.5 text-right">{inr(visibleRows.reduce((s: number, i: any) => s + ((i.total_amount ?? 0) - (i.paid_amount ?? 0)), 0))}</td>
+                    <td className="px-3 py-1.5 text-right">{inr(visibleRows.reduce((s: number, i: any) => s + (i.tds_amount ?? 0), 0))}</td>
+                    <td className="px-3 py-1.5 text-right">{inr(visibleRows.reduce((s: number, i: any) => s + ((i.total_amount ?? 0) - (i.paid_amount ?? 0) - (i.tds_amount ?? 0)), 0))}</td>
                     <td colSpan={3}></td>
                   </tr>
                 )}
@@ -701,6 +723,7 @@ export const InvoiceRegister: React.FC = () => {
                   <td colSpan={6} className="px-3 py-2 text-gray-600">Total ({filtered.length} invoices)</td>
                   <td className="px-3 py-2 text-right">{inr(totalAmt)}</td>
                   <td className="px-3 py-2 text-right text-green-600">{inr(totalPaid)}</td>
+                  <td className="px-3 py-2 text-right text-orange-600">{inr(totalTds)}</td>
                   <td className="px-3 py-2 text-right text-red-600">{inr(totalUnpaid)}</td>
                   <td colSpan={3}></td>
                 </tr>

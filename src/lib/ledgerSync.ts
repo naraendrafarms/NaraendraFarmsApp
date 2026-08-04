@@ -68,6 +68,8 @@ export const syncSupplierInvoicePayment = async (opts: {
   vendorName?: string | null
   partyId?: string | null
   paidAmount: number
+  tdsAmount?: number | null
+  discountAmount?: number | null
 }) => {
   const invNo = (opts.invoiceNo ?? '').trim()
   if (!invNo) return
@@ -82,7 +84,13 @@ export const syncSupplierInvoicePayment = async (opts: {
   if (!match) return
   const total = Number(match.total_amount) || 0
   const paid = Math.max(0, opts.paidAmount)
-  const status = total > 0 && paid >= total - 0.5 ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
+  const tds = Math.max(0, Number(opts.tdsAmount) || 0)
+  const disc = Math.max(0, Number(opts.discountAmount) || 0)
+  // TDS and discount settle the invoice without cash changing hands, so they
+  // count toward "is this invoice cleared" — otherwise a ₹79,000 invoice with
+  // ₹7,900 TDS looked ₹7,900 short forever after paying the ₹71,100 due.
+  const settled = paid + tds + disc
+  const status = total > 0 && settled >= total - 0.5 ? 'paid' : settled > 0 ? 'partial' : 'unpaid'
   await supabase.from('supplier_invoices')
-    .update({ paid_amount: paid, payment_status: status }).eq('id', match.id)
+    .update({ paid_amount: paid, tds_amount: tds, payment_status: status }).eq('id', match.id)
 }

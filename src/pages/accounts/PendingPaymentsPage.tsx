@@ -297,6 +297,7 @@ export const PendingPaymentsPage: React.FC = () => {
       await syncSupplierInvoicePayment({
         invoiceNo: modal.record.invoice_no, vendorName: modal.record.vendor_name,
         partyId: modal.record.party_id, paidAmount: newPaid,
+        tdsAmount: modal.record.tds_amount, discountAmount: newDiscount,
       })
       qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
@@ -391,6 +392,7 @@ export const PendingPaymentsPage: React.FC = () => {
         await syncSupplierInvoicePayment({
           invoiceNo: bill.invoice_no, vendorName: bill.vendor_name,
           partyId: bill.party_id, paidAmount: newPaid,
+          tdsAmount: bill.tds_amount, discountAmount: bill.discount_amount,
         })
       }
       qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
@@ -597,6 +599,7 @@ export const PendingPaymentsPage: React.FC = () => {
       await syncSupplierInvoicePayment({
         invoiceNo: payload.invoice_no, vendorName: payload.vendor_name,
         partyId: payload.party_id, paidAmount: payload.paid_amount,
+        tdsAmount: payload.tds_amount, discountAmount: payload.discount_amount,
       })
       qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })

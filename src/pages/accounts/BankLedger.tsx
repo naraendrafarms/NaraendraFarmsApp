@@ -186,7 +186,7 @@ const LinkToBills: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from('pending_payments')
-        .select('id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount,party_id')
+        .select('id,vendor_name,invoice_no,grn_no,net_payable,invoice_amount,paid_amount,discount_amount,tds_amount,party_id')
         .neq('payment_status', 'Paid')
         .order('vendor_name')
       return (data ?? []) as any[]
@@ -280,6 +280,7 @@ const LinkToBills: React.FC = () => {
         await syncSupplierInvoicePayment({
           invoiceNo: payment.invoice_no, vendorName: payment.vendor_name,
           partyId: payment.party_id, paidAmount: (payment.paid_amount ?? 0) + balance,
+          tdsAmount: payment.tds_amount, discountAmount: payment.discount_amount,
         })
       }
       // Link the bank transaction (linked_payment_id = first bill; tag holds the full set)
