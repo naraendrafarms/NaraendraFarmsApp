@@ -52,3 +52,37 @@ export const clearLedgerEntries = async (paymentId: string) => {
   await supabase.from('cash_book').delete().eq('pending_payment_id', paymentId)
   await supabase.from('bank_transactions').delete().eq('linked_payment_id', paymentId)
 }
+
+// ── Reverse sync: bill payment → Purchase Invoice Register ────────────────
+// Purchase Invoice Register mirrors every invoice INTO pending_payments
+// (keyed on vendor_name + invoice_no), but nothing ever mirrored back — so
+// paying a bill from Pending Payments / Bulk Pay / Bank Ledger left the
+// invoice still showing Unpaid in the register forever. Every place that
+// changes a bill's paid amount calls this so both views agree.
+//
+// Matching mirrors how InvoiceRegister derives the vendor name for its own
+// upsert (party name first, else the free-text supplier_name), so a bill
+// created from an invoice always finds its way back to that same invoice.
+export const syncSupplierInvoicePayment = async (opts: {
+  invoiceNo?: string | null
+  vendorName?: string | null
+  partyId?: string | null
+  paidAmount: number
+}) => {
+  const invNo = (opts.invoiceNo ?? '').trim()
+  if (!invNo) return
+  const { data: rows } = await supabase.from('supplier_invoices')
+    .select('id,total_amount,supplier_name,party_id')
+    .eq('invoice_no', invNo)
+  if (!rows?.length) return
+  // Invoice numbers are only unique per vendor, so never update on the
+  // number alone — require the party or the supplier name to line up too.
+  const match = rows.find((r: any) => opts.partyId && r.party_id === opts.partyId)
+    ?? rows.find((r: any) => opts.vendorName && (r.supplier_name ?? '').trim().toLowerCase() === opts.vendorName.trim().toLowerCase())
+  if (!match) return
+  const total = Number(match.total_amount) || 0
+  const paid = Math.max(0, opts.paidAmount)
+  const status = total > 0 && paid >= total - 0.5 ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
+  await supabase.from('supplier_invoices')
+    .update({ paid_amount: paid, payment_status: status }).eq('id', match.id)
+}

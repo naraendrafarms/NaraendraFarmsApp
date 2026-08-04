@@ -8,7 +8,7 @@ import {
 import { AlertCircle, Search, Link2, X, CheckCircle2, Trash2, Pencil, Plus } from 'lucide-react'
 import { AssignTaskButton } from '@/components/tasks/AssignTaskButton'
 import { TaskBadge } from '@/components/tasks/TaskBadge'
-import { postLedgerEntry, clearLedgerEntries } from '@/lib/ledgerSync'
+import { postLedgerEntry, clearLedgerEntries, syncSupplierInvoicePayment } from '@/lib/ledgerSync'
 import * as XLSX from 'xlsx'
 import { Download } from 'lucide-react'
 
@@ -291,6 +291,14 @@ export const PendingPaymentsPage: React.FC = () => {
           })
         }
       }
+      // Push the new paid figure back to Purchase Invoice Register — an
+      // invoice recorded there mirrors into this table, but paying here never
+      // updated the invoice, so it kept showing Unpaid forever.
+      await syncSupplierInvoicePayment({
+        invoiceNo: modal.record.invoice_no, vendorName: modal.record.vendor_name,
+        partyId: modal.record.party_id, paidAmount: newPaid,
+      })
+      qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
@@ -380,7 +388,12 @@ export const PendingPaymentsPage: React.FC = () => {
           amount: balance, mode: bulkPayForm.mode, date: bulkPayForm.date, ref: bulkPayForm.ref,
           remarks: `Bulk payment batch (${bills.length} bills)`, partyId: bill.party_id,
         })
+        await syncSupplierInvoicePayment({
+          invoiceNo: bill.invoice_no, vendorName: bill.vendor_name,
+          partyId: bill.party_id, paidAmount: newPaid,
+        })
       }
+      qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
@@ -580,6 +593,12 @@ export const PendingPaymentsPage: React.FC = () => {
           }
         }
       }
+      // Keep Purchase Invoice Register in step with a Paid Amount edited here
+      await syncSupplierInvoicePayment({
+        invoiceNo: payload.invoice_no, vendorName: payload.vendor_name,
+        partyId: payload.party_id, paidAmount: payload.paid_amount,
+      })
+      qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })

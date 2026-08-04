@@ -6,7 +6,7 @@ import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, Emp
 import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { ifscError, accountNoError } from '@/lib/validators'
-import { postLedgerEntry, clearLedgerEntries, toCbMode } from '@/lib/ledgerSync'
+import { postLedgerEntry, clearLedgerEntries, toCbMode, syncSupplierInvoicePayment } from '@/lib/ledgerSync'
 
 const EMPTY_FORM = {
   txn_date: today(),
@@ -277,6 +277,10 @@ const LinkToBills: React.FC = () => {
           amount: balance, mode: 'NEFT', date: linkModal.txn_date, ref: linkModal.reference_no,
           remarks: `Bank-reconciled: ${linkModal.description ?? ''}`, partyId: payment.party_id,
         })
+        await syncSupplierInvoicePayment({
+          invoiceNo: payment.invoice_no, vendorName: payment.vendor_name,
+          partyId: payment.party_id, paidAmount: (payment.paid_amount ?? 0) + balance,
+        })
       }
       // Link the bank transaction (linked_payment_id = first bill; tag holds the full set)
       const firstBill = (openPayments ?? []).find((p: any) => p.id === ids[0])
@@ -292,6 +296,7 @@ const LinkToBills: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
       qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
       qc.invalidateQueries({ queryKey: ['bank_txn_matched'] })
+      qc.invalidateQueries({ queryKey: ['supplier_invoices'] })
       qc.invalidateQueries({ queryKey: ['cash_book'] })
       setLinkModal(null)
       setSelectedPaymentIds(new Set())

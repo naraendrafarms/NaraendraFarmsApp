@@ -216,13 +216,20 @@ export const InvoiceRegister: React.FC = () => {
             .update({
               paid_amount: amount,
               payment_status: status === 'paid' ? 'Paid' : 'Pending',
-              paid_date: status === 'paid' ? date : null,
-              account_type: status === 'paid' ? mode : null,
-              bank_account_id: status === 'paid' && mode.toLowerCase() !== 'cash' ? bankAccountId : null,
+              // Recorded for a partial payment too — the money genuinely moved,
+              // so the date/mode/bank belong on the bill either way.
+              paid_date: amount > 0 ? date : null,
+              account_type: amount > 0 ? mode : null,
+              bank_account_id: amount > 0 && mode.toLowerCase() !== 'cash' ? bankAccountId : null,
             })
             .eq('vendor_name', vendorName).eq('invoice_no', inv.invoice_no)
             .select('id,party_id').maybeSingle()
-          if (status === 'paid' && pp?.id) {
+          // Partial payments used to update statuses only and post NOTHING to
+          // Cash Book / Bank Ledger, so real money left the bank with no
+          // ledger entry anywhere. Any non-zero payment now posts, same as a
+          // full one — the delete-then-insert keeps it idempotent when the
+          // amount is corrected later.
+          if (amount > 0 && pp?.id) {
             await supabase.from('cash_book').delete().eq('pending_payment_id', pp.id)
             await supabase.from('bank_transactions').delete().eq('linked_payment_id', pp.id)
             const isCash = mode.toLowerCase() === 'cash'
