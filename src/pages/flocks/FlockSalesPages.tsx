@@ -674,14 +674,19 @@ export const HEDispatch: React.FC = () => {
   const { data: dispatches, isLoading } = useQuery({
     queryKey: ['he_dispatch', flockFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('he_dispatch')
-        .select('*, flocks(flock_no,placement_date), parties(name,address,contact), hatcheries(name)')
-        .order('dispatch_date', { ascending: false })
-      if (flockFilter) q = q.eq('flock_id', flockFilter)
-      if (fromDate) q = q.gte('dispatch_date', fromDate)
-      if (toDate) q = q.lte('dispatch_date', toDate)
-      if (!hasFilter) q = q.limit(200)
-      const { data } = await q; return data ?? []
+      const build = () => {
+        let q = supabase.from('he_dispatch')
+          .select('*, flocks(flock_no,placement_date), parties(name,address,contact), hatcheries(name)')
+          .order('dispatch_date', { ascending: false })
+        if (flockFilter) q = q.eq('flock_id', flockFilter)
+        if (fromDate) q = q.gte('dispatch_date', fromDate)
+        if (toDate) q = q.lte('dispatch_date', toDate)
+        return q
+      }
+      // Same rule as NHE Sales: latest 200 unfiltered (fast default), but a
+      // filtered view must return every match, paging past the 1000 cap.
+      if (!hasFilter) { const { data } = await build().limit(NHE_RECENT_LIMIT); return data ?? [] }
+      return fetchAllPages<any>((from, to) => build().range(from, to), 'HE Dispatch', toast.error)
     }
   })
 
@@ -1284,6 +1289,14 @@ export const HEDispatch: React.FC = () => {
       <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)}
         extraAction={sel.size > 1 ? <Button variant="outline" size="sm" onClick={() => setConsolidateOpen(true)}>Consolidate to Invoice</Button> : undefined} />
 
+
+      {!hasFilter && (dispatches ?? []).length >= NHE_RECENT_LIMIT && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
+          Showing only the latest <strong>{NHE_RECENT_LIMIT}</strong> dispatches — the totals below cover just these.
+          Apply a flock or date filter to load every matching record.
+        </div>
+      )}
+
       {tab === 'dispatch' && (isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
@@ -1790,6 +1803,10 @@ export const HEDispatch: React.FC = () => {
 }
 
 // ── NHE SALES ────────────────────────────────────────────────────
+// Rows loaded in the unfiltered view — surfaced in the UI so the count is
+// never mistaken for the full history.
+const NHE_RECENT_LIMIT = 200
+
 const NHE_TYPES = [
   { value: 'je',         label: 'Jumbo Eggs (JE)' },
   { value: 'te',         label: 'Table Eggs (TE)' },
@@ -1975,17 +1992,26 @@ export const NHESales: React.FC = () => {
   const { data: sales, isLoading } = useQuery({
     queryKey: ['nhe_sales', flockFilter, empFilter, payFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
-        .order('sale_date', { ascending: false })
-      if (flockFilter) q = q.eq('flock_id', flockFilter)
-      if (empFilter) q = q.eq('employee_id', empFilter)
-      if (payFilter) q = q.eq('payment_status', payFilter)
-      if (fromDate) q = q.gte('sale_date', fromDate)
-      if (toDate) q = q.lte('sale_date', toDate)
-      if (!hasFilter) q = q.limit(200)
-      const { data, error } = await q
-      if (error) { toast.error(error.message); return [] }
-      return data ?? []
+      // Unfiltered view deliberately loads only the latest 200 for speed (the
+      // UI says so). Once a filter is applied every match must load — but a
+      // single request is capped at 1000 rows by Supabase, so page through it
+      // rather than silently stopping at 1000.
+      const build = () => {
+        let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
+          .order('sale_date', { ascending: false })
+        if (flockFilter) q = q.eq('flock_id', flockFilter)
+        if (empFilter) q = q.eq('employee_id', empFilter)
+        if (payFilter) q = q.eq('payment_status', payFilter)
+        if (fromDate) q = q.gte('sale_date', fromDate)
+        if (toDate) q = q.lte('sale_date', toDate)
+        return q
+      }
+      if (!hasFilter) {
+        const { data, error } = await build().limit(NHE_RECENT_LIMIT)
+        if (error) { toast.error(error.message); return [] }
+        return data ?? []
+      }
+      return fetchAllPages<any>((from, to) => build().range(from, to), 'NHE Sales', toast.error)
     }
   })
 
@@ -2768,6 +2794,16 @@ export const NHESales: React.FC = () => {
         </div>
       </div>
 
+      {/* The unfiltered view loads only the most recent NHE_RECENT_LIMIT rows.
+          Without saying so, the table AND the totals below silently described
+          a partial set as if it were everything. */}
+      {!hasFilter && (sales ?? []).length >= NHE_RECENT_LIMIT && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
+          Showing only the latest <strong>{NHE_RECENT_LIMIT}</strong> sales — the totals below cover just these.
+          Apply a flock, date or payment filter to load every matching record.
+        </div>
+      )}
+
       <div className={`grid grid-cols-1 gap-3 ${totalFreeQty > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
         <StatCard title="Total Sales" value={inr(payTotSale)} icon={<Package size={18}/>} color="text-blue-600" />
         <StatCard title="Received (Paid)" value={inr(payTotRecd)} icon={<Package size={18}/>} color="text-green-600" />
@@ -3301,14 +3337,17 @@ export const MedicineEntry: React.FC = () => {
   const { data: usage, isLoading } = useQuery({
     queryKey: ['medicine_usage', flockFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('medicine_usage')
-        .select('*, flocks(flock_no), medicines_master(name,unit,item_id)')
-        .order('usage_date', { ascending: false })
-      if (flockFilter) q = q.eq('flock_id', flockFilter)
-      if (fromDate) q = q.gte('usage_date', fromDate)
-      if (toDate) q = q.lte('usage_date', toDate)
-      if (!hasFilter) q = q.limit(200)
-      const { data } = await q; return data ?? []
+      const build = () => {
+        let q = supabase.from('medicine_usage')
+          .select('*, flocks(flock_no), medicines_master(name,unit,item_id)')
+          .order('usage_date', { ascending: false })
+        if (flockFilter) q = q.eq('flock_id', flockFilter)
+        if (fromDate) q = q.gte('usage_date', fromDate)
+        if (toDate) q = q.lte('usage_date', toDate)
+        return q
+      }
+      if (!hasFilter) { const { data } = await build().limit(NHE_RECENT_LIMIT); return data ?? [] }
+      return fetchAllPages<any>((from, to) => build().range(from, to), 'Medicine usage', toast.error)
     }
   })
 
@@ -3324,14 +3363,17 @@ export const MedicineEntry: React.FC = () => {
   const { data: allocations, isLoading: loadingAlloc } = useQuery({
     queryKey: ['medicine_allocations', flockFilter, fromDate, toDate],
     queryFn: async () => {
-      let q = supabase.from('medicine_allocations')
-        .select('*, flocks(flock_no), medicines_master(name,unit)')
-        .order('allocation_date', { ascending: false })
-      if (flockFilter) q = q.eq('flock_id', flockFilter)
-      if (fromDate) q = q.gte('allocation_date', fromDate)
-      if (toDate) q = q.lte('allocation_date', toDate)
-      if (!hasFilter) q = q.limit(200)
-      const { data } = await q; return data ?? []
+      const build = () => {
+        let q = supabase.from('medicine_allocations')
+          .select('*, flocks(flock_no), medicines_master(name,unit)')
+          .order('allocation_date', { ascending: false })
+        if (flockFilter) q = q.eq('flock_id', flockFilter)
+        if (fromDate) q = q.gte('allocation_date', fromDate)
+        if (toDate) q = q.lte('allocation_date', toDate)
+        return q
+      }
+      if (!hasFilter) { const { data } = await build().limit(NHE_RECENT_LIMIT); return data ?? [] }
+      return fetchAllPages<any>((from, to) => build().range(from, to), 'Medicine allocations', toast.error)
     }
   })
 
@@ -3580,6 +3622,14 @@ export const MedicineEntry: React.FC = () => {
           ))}
         </div>
       </div>
+
+
+      {!hasFilter && (usage ?? []).length >= NHE_RECENT_LIMIT && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
+          Showing only the latest <strong>{NHE_RECENT_LIMIT}</strong> medicine entries — the totals below cover just these.
+          Apply a flock or date filter to load every matching record.
+        </div>
+      )}
 
       {isLoading ? <Spinner /> : tab === 'monthly' ? (
         <Card padding={false}>
