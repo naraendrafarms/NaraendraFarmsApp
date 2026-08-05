@@ -6,9 +6,10 @@ import {
   Card, CardHeader, Button, Input, Select, Badge,
   SectionHeader, Spinner, Table, Th, Td, StatCard
 , DateInput, usePagination, PageSizeControl } from '@/components/ui'
-import { Plus, Download, Upload, Edit2, Trash2, CheckCircle, Copy } from 'lucide-react'
+import { Plus, Download, Upload, Edit2, Trash2, CheckCircle, Copy, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
+import { printReport } from '@/lib/invoicePrint'
 
 const SOURCE_TYPES = [
   { value: 'chick',       label: 'Chick Supply' },
@@ -376,6 +377,37 @@ export const InvoiceRegister: React.FC = () => {
   const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
   const visibleRows = filtered.slice(from, to)
 
+  // Printable register on the company letterhead (same printReport used by
+  // the other account reports) — prints exactly the rows the filters are
+  // currently showing, not the whole table.
+  const printRegister = () => {
+    if (!filtered.length) { toast.error('Nothing to print — adjust the filters'); return }
+    const period = filterFrom || filterTo
+      ? `${filterFrom ? fmtDate(filterFrom) : 'start'} to ${filterTo ? fmtDate(filterTo) : 'today'}`
+      : 'All dates'
+    const statusLabel = filterStatus ? ` · ${filterStatus}` : ''
+    const typeLabel = filterType ? ` · ${SOURCE_TYPES.find(t => t.value === filterType)?.label ?? filterType}` : ''
+    printReport({
+      title: 'Purchase Invoice Register',
+      subtitle: `${period}${typeLabel}${statusLabel} · ${filtered.length} invoice(s)`,
+      headers: ['Invoice No', 'Date', 'Type', 'Supplier', 'Total', 'Paid', 'TDS', 'Balance', 'Status'],
+      rightAlignFrom: 4,
+      rows: filtered.map((i: any) => [
+        i.invoice_no ?? '',
+        i.invoice_date ? fmtDate(i.invoice_date) : '',
+        SOURCE_TYPES.find(t => t.value === i.source_type)?.label ?? i.source_type ?? '',
+        i.party?.name ?? i.supplier_name ?? '',
+        inr(i.total_amount ?? 0),
+        inr(i.paid_amount ?? 0),
+        (i.tds_amount ?? 0) > 0 ? inr(i.tds_amount) : '—',
+        inr((i.total_amount ?? 0) - (i.paid_amount ?? 0) - (i.tds_amount ?? 0)),
+        i.payment_status ?? '',
+      ]),
+      footerRow: ['TOTAL', '', '', `${filtered.length} invoice(s)`,
+        inr(totalAmt), inr(totalPaid), inr(totalTds), inr(totalUnpaid), ''],
+    })
+  }
+
   const exportExcel = () => {
     const rows = filtered.map((i: any) => ({
       'Invoice No':     i.invoice_no,
@@ -485,6 +517,7 @@ export const InvoiceRegister: React.FC = () => {
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={downloadTemplate}>Template</Button>
             <Button variant="outline" size="sm" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>
             <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportExcel}>Export</Button>
+            <Button variant="outline" size="sm" icon={<Printer size={14}/>} onClick={printRegister}>Print</Button>
             <Button size="sm" icon={<Plus size={14}/>} onClick={() => { setForm({ ...EMPTY }); setEditId(null); setEditOrigKey(null); setShowForm(true) }}>Add Invoice</Button>
             <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport} />
           </div>
