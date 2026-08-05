@@ -428,7 +428,7 @@ export const EmployeeList: React.FC = () => {
             <Table>
               <thead><tr>
                 <Th><CB checked={farmAllSel} indeterminate={farmSomeSel&&!farmAllSel} onChange={toggleFarm}/></Th>
-                <Th>Emp ID</Th><Th>Name</Th><Th>Designation</Th><Th>Dept</Th><Th>Gender</Th><Th>Mobile</Th>
+                <Th>Emp ID</Th><Th>Name</Th><Th>Designation</Th><Th>Dept</Th><Th>Joined</Th><Th>Gender</Th><Th>Mobile</Th>
                 <Th right>Basic Salary</Th><Th right>Increment</Th>
                 <Th>Bank</Th><Th>ESI/PF</Th><Th>Status</Th><Th></Th>
               </tr></thead>
@@ -439,6 +439,10 @@ export const EmployeeList: React.FC = () => {
                   <Td><span className="font-medium">{e.name}</span></Td>
                   <Td className="text-xs">{e.designation??'—'}</Td>
                   <Td className="text-xs">{e.department??'—'}</Td>
+                  <Td className="text-xs whitespace-nowrap">
+                    {e.joining_date ? fmtDate(e.joining_date) : <span className="text-gray-300">—</span>}
+                    {e.leaving_date && <div className="text-[10px] text-red-500">left {fmtDate(e.leaving_date)}</div>}
+                  </Td>
                   <Td className="text-xs">{e.gender??'—'}</Td>
                   <Td className="text-xs">{e.mobile??'—'}</Td>
                   <Td right>{e.base_salary?inr(e.base_salary):'—'}</Td>
@@ -3618,11 +3622,26 @@ export const BulkSalaryPage: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,account_name,bank_name').order('account_name'); return data ?? [] }
   })
   const { data: employees } = useQuery({
-    queryKey: ['employees_bulk', filterFarm],
+    // Keyed on the month too — the list must change when the month does.
+    queryKey: ['employees_bulk', filterFarm, month],
     queryFn: async () => {
+      const [yr, mn] = month.split('-').map(Number)
+      const start = `${month}-01`
+      const end   = `${month}-${String(new Date(yr, mn, 0).getDate()).padStart(2,'0')}`
+      // Only people actually employed during the SELECTED month. This used to
+      // filter on is_active alone and never looked at the month at all, so
+      // anyone on the payroll today appeared in every month — including staff
+      // who had not joined yet (confirmed: 8 employees who joined 01/08/2026
+      // were listed in, and had salary rows saved for, July 2026). The mirror
+      // image was just as wrong: anyone who has since left vanished from the
+      // months they genuinely worked.
+      // joining_date/leaving_date may be blank on older records, so a NULL is
+      // always treated as "no boundary" rather than excluding the person.
       let q = supabase.from('employees')
-        .select('id,emp_id,name,designation,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,farms(name,code)')
-        .eq('is_active',true).order('emp_id', { ascending: true, nullsFirst: false })
+        .select('id,emp_id,name,designation,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,joining_date,leaving_date,farms(name,code)')
+        .or(`joining_date.is.null,joining_date.lte.${end}`)
+        .or(`leaving_date.is.null,leaving_date.gte.${start}`)
+        .order('emp_id', { ascending: true, nullsFirst: false })
       if (filterFarm.length) q = q.in('farm_id', filterFarm)
       const { data } = await q; return data ?? []
     }
