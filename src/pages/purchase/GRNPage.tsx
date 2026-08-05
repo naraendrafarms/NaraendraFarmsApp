@@ -7,7 +7,7 @@ import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, Edit2, Download, Upload, X, Printer } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
-import { printGRN } from '@/lib/invoicePrint'
+import { printGRNLines, type GRNPrintLine } from '@/lib/invoicePrint'
 import { registerItemAlias } from '@/lib/itemAliases'
 
 // Raw GRN input columns for the import template — only fields the user types.
@@ -380,6 +380,36 @@ export const GRNPage: React.FC = () => {
     onError: (e: any) => toast.error(e.message)
   })
 
+  // Map a grn row to a print line. Used by both the per-row print (all lines
+  // of that GRN) and the multi-select print (whatever is ticked).
+  const toPrintLine = (g: any): GRNPrintLine => ({
+    grn_no: g.grn_no, grn_date: g.grn_date,
+    party_name: g.parties?.name ?? '—', party_gstin: g.parties?.gstin ?? null,
+    invoice_no: g.invoice_no, invoice_date: g.invoice_date,
+    vehicle_no: g.vehicle_no, farm_name: g.farms?.name ?? null,
+    item_name: g.item_name ?? '—', category: g.category ?? null,
+    qty: g.qty, unit: g.unit, price_per_unit: g.price_per_unit,
+    basic_amount: g.basic_amount, gst_pct: g.gst_pct, gst_amount: g.gst_amount,
+    total_amount: g.total_amount, batch_no: g.batch_no, expiry_date: g.expiry_date,
+  })
+
+  // Per-row printer icon: print the WHOLE GRN, not just the clicked line —
+  // a GRN is one bill with many item rows, so printing a single line showed
+  // that item's amount as if it were the entire bill.
+  const printWholeGRN = (row: any) => {
+    const siblings = (grns ?? []).filter((g: any) =>
+      g.grn_no === row.grn_no && g.party_id === row.party_id)
+    const lines = (siblings.length ? siblings : [row]).map(toPrintLine)
+    printGRNLines(lines, { title: 'Goods Received Note' })
+  }
+
+  // Multi-select print: everything ticked, grouped by GRN No + vendor.
+  const printSelected = () => {
+    const rows = (filtered ?? []).filter((g: any) => sel.has(g.id))
+    if (!rows.length) { toast.error('Select at least one GRN line to print'); return }
+    printGRNLines(rows.map(toPrintLine), { title: 'Goods Received Notes' })
+  }
+
   const bulkDeleteMut = useMutation({
     mutationFn: async () => {
       const ids = Array.from(sel)
@@ -547,6 +577,14 @@ export const GRNPage: React.FC = () => {
           <div className="flex gap-2">
             {sel.size > 0 && (
               <button
+                onClick={printSelected}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm border border-brand-300 text-brand-700 rounded hover:bg-brand-50"
+              >
+                <Printer size={14} /> Print ({sel.size})
+              </button>
+            )}
+            {sel.size > 0 && (
+              <button
                 onClick={() => setBulkDelConfirm(true)}
                 className="flex items-center gap-1 px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700"
               >
@@ -695,17 +733,8 @@ export const GRNPage: React.FC = () => {
                     <Td>
                       <div className="flex gap-1">
                         <button onClick={() => openEdit(g)} className="p-1 hover:text-blue-600"><Edit2 size={14} /></button>
-                        <button onClick={() => printGRN({
-                          id: g.id, grn_date: g.grn_date, grn_no: g.grn_no, invoice_no: g.invoice_no,
-                          invoice_date: g.invoice_date, party_name: g.parties?.name ?? '—',
-                          item_name: g.item_name ?? '—',
-                          qty: g.qty, unit: g.unit, price_per_unit: g.price_per_unit,
-                          basic_amount: g.basic_amount, gst_pct: g.gst_pct, gst_amount: g.gst_amount,
-                          total_amount: g.total_amount, cgst_amount: null,
-                          sgst_amount: null, igst_amount: null,
-                          party_gstin: g.parties?.gstin ?? null, vehicle_no: g.vehicle_no,
-                          farm_name: g.farms?.name, is_rcm: false
-                        })} className="p-1 hover:text-blue-600" title="Print GRN"><Printer size={14} /></button>
+                        <button onClick={() => printWholeGRN(g)} className="p-1 hover:text-blue-600"
+                          title="Print this GRN — all its item lines with the bill total"><Printer size={14} /></button>
                         <button onClick={() => setDelId(g.id)} className="p-1 hover:text-red-600"><Trash2 size={14} /></button>
                       </div>
                     </Td>

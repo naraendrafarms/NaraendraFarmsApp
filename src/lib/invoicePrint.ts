@@ -700,6 +700,129 @@ export function printNHESale(d: NHESaleRecord) {
 }
 
 // ── Purchase GRN ──────────────────────────────────────────────────────────────
+// ── Multi-line GRN print ──────────────────────────────────────────────────
+// A GRN is one bill with many item lines (one `grn` row per item, sharing a
+// grn_no), but printGRN below prints a SINGLE row — so a 3-item GRN needed 3
+// printouts, each showing only that item's amount as if it were the whole
+// bill. This prints every line of a GRN together with the real grand total,
+// and handles several GRNs at once (each gets its own block) so ticking rows
+// across different GRNs still produces one document.
+export interface GRNPrintLine {
+  grn_no: string | null
+  grn_date: string
+  party_name: string
+  party_gstin?: string | null
+  invoice_no?: string | null
+  invoice_date?: string | null
+  vehicle_no?: string | null
+  farm_name?: string | null
+  item_name: string
+  category?: string | null
+  qty: number | null
+  unit?: string | null
+  price_per_unit?: number | null
+  basic_amount?: number | null
+  gst_pct?: number | null
+  gst_amount?: number | null
+  total_amount?: number | null
+  batch_no?: string | null
+  expiry_date?: string | null
+}
+export function printGRNLines(lines: GRNPrintLine[], opts?: { title?: string }) {
+  if (!lines.length) return
+  // Group by GRN No + vendor — the same key the payable bill uses, so the
+  // printed total always matches the bill in Pending Payments.
+  const groups = new Map<string, GRNPrintLine[]>()
+  for (const l of lines) {
+    const key = `${l.grn_no ?? '—'}||${l.party_name ?? ''}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(l)
+  }
+  const sum = (arr: GRNPrintLine[], f: (l: GRNPrintLine) => number) => arr.reduce((s, l) => s + (f(l) || 0), 0)
+  const grand = sum(lines, l => l.total_amount ?? l.basic_amount ?? 0)
+
+  const blocks = [...groups.values()].map(g => {
+    const h = g[0]
+    const basic = sum(g, l => l.basic_amount ?? 0)
+    const gst = sum(g, l => l.gst_amount ?? 0)
+    const total = sum(g, l => l.total_amount ?? l.basic_amount ?? 0)
+    const rows = g.map((l, i) => `<tr>
+      <td class="tc">${i + 1}</td>
+      <td>${l.item_name ?? '—'}${l.batch_no ? `<div class="sub">Batch: ${l.batch_no}${l.expiry_date ? ` · Exp ${fmt(l.expiry_date)}` : ''}</div>` : ''}</td>
+      <td class="tc">${l.category ?? '—'}</td>
+      <td class="tr">${(l.qty ?? 0).toLocaleString('en-IN')}${l.unit ? ` ${l.unit}` : ''}</td>
+      <td class="tr">${l.price_per_unit != null ? inr(l.price_per_unit) : '—'}</td>
+      <td class="tr">${inr(l.basic_amount ?? 0)}</td>
+      <td class="tr">${(l.gst_pct ?? 0) > 0 ? `${l.gst_pct}%` : 'Nil'}</td>
+      <td class="tr">${inr(l.gst_amount ?? 0)}</td>
+      <td class="tr bold">${inr(l.total_amount ?? l.basic_amount ?? 0)}</td>
+    </tr>`).join('')
+    return `
+    <div class="section">
+      <div class="two-col">
+        <div>
+          <div class="label">Supplier</div>
+          <div class="box">
+            <div class="bold">${h.party_name ?? '—'}</div>
+            ${h.party_gstin ? `<div class="sub">GSTIN: ${h.party_gstin}</div>` : ''}
+          </div>
+        </div>
+        <div>
+          <div class="label">GRN Details</div>
+          <div class="box">
+            <div>GRN No: <strong>${h.grn_no ?? '—'}</strong> · ${fmt(h.grn_date)}</div>
+            ${h.invoice_no ? `<div class="sub">Invoice: ${h.invoice_no}${h.invoice_date ? ` dt. ${fmt(h.invoice_date)}` : ''}</div>` : ''}
+            ${h.farm_name ? `<div class="sub">Site: ${h.farm_name}</div>` : ''}
+            ${h.vehicle_no ? `<div class="sub">Vehicle: ${h.vehicle_no}</div>` : ''}
+          </div>
+        </div>
+      </div>
+      <table>
+        <thead><tr>
+          <th>#</th><th>Item</th><th>Category</th><th>Qty</th><th>Rate</th>
+          <th>Basic</th><th>GST%</th><th>GST Amt</th><th>Total</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr class="total-row">
+          <td colspan="5" class="tr">Total (${g.length} item${g.length > 1 ? 's' : ''})</td>
+          <td class="tr">${inr(basic)}</td><td></td>
+          <td class="tr">${inr(gst)}</td><td class="tr">${inr(total)}</td>
+        </tr></tfoot>
+      </table>
+    </div>`
+  }).join('')
+
+  const many = groups.size > 1
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>${opts?.title ?? 'Goods Received Note'}</title>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+  <div class="header">
+    <div>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+      <div class="sub">${CO.addr1}</div>
+      <div class="sub">${CO.addr2}, ${CO.state} — ${CO.stateCode}</div>
+      <div class="sub">GSTIN: ${CO.gstin} · Ph: ${CO.phone}</div>
+    </div>
+    <div class="header-right">
+      <h2>${opts?.title ?? 'Goods Received Note'}</h2>
+      ${many ? `<div class="sub">${groups.size} GRNs · ${lines.length} line(s)</div>` : ''}
+      <div class="sub">Printed: ${new Date().toLocaleString('en-IN')}</div>
+    </div>
+  </div>
+  ${blocks}
+  ${many ? `<div class="section"><table><tfoot><tr class="total-row">
+      <td class="tr">GRAND TOTAL (${groups.size} GRNs)</td><td class="tr">${inr(grand)}</td>
+    </tr></tfoot></table></div>` : ''}
+  <div class="sign-row-4">
+    <div>Received By</div>
+    <div>Store In-charge</div>
+    <div>Verified By</div>
+    <div>Accounts</div>
+  </div>
+  </body></html>`
+  openPrint(html)
+}
+
 export interface GRNRecord {
   id: string
   grn_date: string
