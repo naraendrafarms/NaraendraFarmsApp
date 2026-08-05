@@ -634,7 +634,8 @@ export const PaymentPlanningPage: React.FC = () => {
                 <Th></Th>
                 <Th>Vendor</Th>
                 <Th>Type</Th>
-                <Th>Reference</Th>
+                <Th>Invoice No</Th>
+                <Th>PO No</Th>
                 <Th>GRN</Th>
                 <Th right>Invoice Amt</Th>
                 <Th right>TDS</Th>
@@ -662,7 +663,8 @@ export const PaymentPlanningPage: React.FC = () => {
                         {partiesMap?.[p.vendor_name]?.bank_name && <span className="block text-xs text-gray-400">{partiesMap[p.vendor_name].bank_name}</span>}
                       </Td>
                       <Td><Badge color="blue">{p.payment_type ?? 'NEFT'}</Badge></Td>
-                      <Td className="text-xs">{p.po_no ?? p.invoice_no ?? '—'}</Td>
+                      <Td className="text-xs">{p.invoice_no ?? '—'}</Td>
+                      <Td className="text-xs text-gray-500">{p.po_no ?? '—'}</Td>
                       <Td className="text-xs">{p.grn_no ?? '—'}</Td>
                       <Td right>{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
                       <Td right className="text-xs text-orange-600">{(p.tds_amount ?? 0) > 0 ? inr(p.tds_amount) : '—'}</Td>
@@ -678,7 +680,7 @@ export const PaymentPlanningPage: React.FC = () => {
                   )
                 })}
                 {!(payments?.length) && (
-                  <tr><td colSpan={10} className="text-center py-8 text-gray-400 text-sm">No pending payments</td></tr>
+                  <tr><td colSpan={11} className="text-center py-8 text-gray-400 text-sm">No pending payments</td></tr>
                 )}
               </tbody>
             </Table>
