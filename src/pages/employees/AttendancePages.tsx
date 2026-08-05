@@ -399,12 +399,18 @@ export const MonthAttendancePage: React.FC = () => {
       if (!empIds.length) return []
       const start = `${monthStr}-01`
       const end = `${monthStr}-${String(numDays).padStart(2, '0')}`
-      const { data } = await supabase.from('attendance_daily')
-        .select('employee_id, attendance_date, status, ot_hours')
-        .in('employee_id', empIds)
-        .gte('attendance_date', start)
-        .lte('attendance_date', end)
-      return data ?? []
+      // Same 1000-row trap as Bulk Salary: a whole month across every
+      // employee runs to several thousand rows, so a single request
+      // silently dropped most days.
+      return fetchAllPages<any>(
+        (from, to) => supabase.from('attendance_daily')
+          .select('employee_id, attendance_date, status, ot_hours')
+          .in('employee_id', empIds)
+          .gte('attendance_date', start)
+          .lte('attendance_date', end)
+          .range(from, to),
+        'Month attendance'
+      )
     },
     enabled: empIds.length > 0
   })

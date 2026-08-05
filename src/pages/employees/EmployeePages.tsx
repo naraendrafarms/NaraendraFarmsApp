@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, currentFY, today } from '@/lib/utils'
+import { inr, fmtDate, currentFY, today, fetchAllPages } from '@/lib/utils'
 
 // cash_book.payment_mode allows 'cash' | 'upi' | 'cheque' | 'neft' | 'rtgs' | 'imps' | 'bank_transfer'.
 const toCbMode = (mode: string) => {
@@ -3773,8 +3773,19 @@ export const BulkSalaryPage: React.FC = () => {
       const [yr, mn] = month.split('-').map(Number)
       const lastDay = new Date(yr, mn, 0).getDate()
       const start = `${month}-01`, end = `${month}-${String(lastDay).padStart(2,'0')}`
-      const { data } = await supabase.from('attendance_daily')
-        .select('employee_id,status').gte('attendance_date', start).lte('attendance_date', end)
+      // A month of attendance across every employee far exceeds Supabase's
+      // default 1000-row cap (247 employees x 31 days = ~7,600 rows for
+      // Jul 2026), and this used to be a single unpaginated request — so
+      // roughly 6,600 rows never arrived and each employee's absent count
+      // was computed from a fraction of their month. Confirmed on a real
+      // employee: 15 real absences showed here as 2. Page through it all.
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('attendance_daily')
+          .select('employee_id,status')
+          .gte('attendance_date', start).lte('attendance_date', end)
+          .range(from, to),
+        'Daily attendance'
+      )
       // Per employee: count A=1 absent, H=0.5 absent, P/OT/WO = 0 absent
       const agg: Record<string,number> = {}
       for (const r of (data ?? [])) {
