@@ -169,6 +169,7 @@ export const ChatBody: React.FC<{ onClose?: () => void; active: boolean; initial
     qc.invalidateQueries({ queryKey: ['chat_groups', myId] })
   }
 
+  const [newMode, setNewMode] = useState<'dm' | 'group'>('dm')
   const [groupName, setGroupName] = useState('')
   const [groupMembers, setGroupMembers] = useState<Set<string>>(new Set())
   const createGroup = async () => {
@@ -195,7 +196,7 @@ export const ChatBody: React.FC<{ onClose?: () => void; active: boolean; initial
           {anyUnread && <span className="w-2 h-2 rounded-full bg-red-500" />}
         </h2>}
         <div className="flex items-center gap-1">
-          {!activeGroup && <button onClick={() => setShowNew(true)} className="p-1 rounded hover:bg-gray-100"><Plus size={16} /></button>}
+          {!activeGroup && <button onClick={() => { setNewMode('dm'); setGroupName(''); setGroupMembers(new Set()); setShowNew(true) }} className="p-1 rounded hover:bg-gray-100"><Plus size={16} /></button>}
           {onClose && <button onClick={onClose} className="p-1 rounded hover:bg-gray-100"><X size={16} /></button>}
         </div>
       </div>
@@ -221,22 +222,51 @@ export const ChatBody: React.FC<{ onClose?: () => void; active: boolean; initial
 
       {showNew && (
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          <input value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Group name (leave blank for 1:1 chat)"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-          <p className="text-xs text-gray-500">Pick people — tap one for a direct message, or several + a group name for a group.</p>
+          {/* Explicit Direct / Group choice. Previously the mode was inferred
+              from whether a group name happened to be typed, so ticking
+              several people without a name left a disabled "Start Chat"
+              button and no visible way to create a group at all. */}
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+            <button
+              onClick={() => { setNewMode('dm'); setGroupName(''); setGroupMembers(new Set()) }}
+              className={`flex-1 py-2 ${newMode === 'dm' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+              Direct Message
+            </button>
+            <button
+              onClick={() => { setNewMode('group'); setGroupMembers(new Set()) }}
+              className={`flex-1 py-2 ${newMode === 'group' ? 'bg-green-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+              Group Chat
+            </button>
+          </div>
+
+          {newMode === 'group' && (
+            <input value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Group name (e.g. Accounts Team)"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+          )}
+          <p className="text-xs text-gray-500">
+            {newMode === 'group'
+              ? 'Name the group, then tick everyone who should be in it.'
+              : 'Tick one person to start a private 1:1 chat.'}
+          </p>
           <div className="space-y-1">
             {users.filter(u => u.id !== myId).map(u => (
               <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer">
-                <input type="checkbox" checked={groupMembers.has(u.id)}
-                  onChange={e => setGroupMembers(prev => { const n = new Set(prev); e.target.checked ? n.add(u.id) : n.delete(u.id); return n })} />
+                <input type={newMode === 'group' ? 'checkbox' : 'radio'} checked={groupMembers.has(u.id)}
+                  onChange={e => setGroupMembers(prev => {
+                    if (newMode === 'dm') return e.target.checked ? new Set([u.id]) : new Set()
+                    const n = new Set(prev); e.target.checked ? n.add(u.id) : n.delete(u.id); return n
+                  })} />
                 <span className="text-sm">{u.full_name ?? u.email}</span>
               </label>
             ))}
           </div>
           <div className="flex gap-2 pt-2">
             <button className="flex-1 text-xs bg-gray-100 rounded-lg py-2" onClick={() => setShowNew(false)}>Cancel</button>
-            {groupName.trim()
-              ? <button className="flex-1 text-xs bg-green-600 text-white rounded-lg py-2" onClick={createGroup}>Create Group</button>
+            {newMode === 'group'
+              ? <button className="flex-1 text-xs bg-green-600 text-white rounded-lg py-2 disabled:opacity-40"
+                  disabled={!groupName.trim() || groupMembers.size === 0} onClick={createGroup}>
+                  Create Group{groupMembers.size > 0 ? ` (${groupMembers.size})` : ''}
+                </button>
               : <button className="flex-1 text-xs bg-green-600 text-white rounded-lg py-2 disabled:opacity-40"
                   disabled={groupMembers.size !== 1} onClick={() => startDM(Array.from(groupMembers)[0])}>Start Chat</button>}
           </div>
