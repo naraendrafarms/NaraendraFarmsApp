@@ -178,6 +178,91 @@ export function printAdvanceVoucher(d: AdvanceVoucherRecord) {
   openPrint(html)
 }
 
+// ── Purchase Invoice voucher — one invoice on the company letterhead, for
+// filing against the vendor's bill or attaching to a payment. Shows the full
+// money breakdown (basic / GST / TDS / paid / balance) rather than a list.
+export interface PurchaseInvoiceVoucher {
+  invoice_no: string
+  invoice_date: string
+  supplier_name: string
+  source_type?: string | null
+  flock_label?: string | null
+  farm_name?: string | null
+  basic_amount?: number | null
+  gst_pct?: number | null
+  gst_amount?: number | null
+  total_amount: number
+  tds_amount?: number | null
+  paid_amount?: number | null
+  payment_status?: string | null
+  due_date?: string | null
+  remarks?: string | null
+}
+export function printPurchaseInvoiceVoucher(d: PurchaseInvoiceVoucher) {
+  const tds = d.tds_amount ?? 0
+  const paid = d.paid_amount ?? 0
+  const balance = (d.total_amount ?? 0) - paid - tds
+  const row = (label: string, value: string, bold = false) =>
+    `<tr><td>${label}</td><td class="tr${bold ? ' bold' : ''}">${value}</td></tr>`
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>Purchase Invoice — ${d.invoice_no}</title>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+  <div class="header">
+    <div>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+      <div class="sub">${CO.addr1}</div>
+      <div class="sub">${CO.addr2}, ${CO.state} — ${CO.stateCode}</div>
+      <div class="sub">GSTIN: ${CO.gstin} · Ph: ${CO.phone}</div>
+    </div>
+    <div class="header-right">
+      <h2>Purchase Invoice</h2>
+      <div class="sub">Invoice No: <strong>${d.invoice_no}</strong></div>
+      <div class="sub">Date: ${fmt(d.invoice_date)}</div>
+    </div>
+  </div>
+
+  <div class="two-col section">
+    <div>
+      <div class="label">Supplier</div>
+      <div class="box">
+        <div class="bold">${d.supplier_name || '—'}</div>
+        ${d.source_type ? `<div class="sub">${d.source_type}</div>` : ''}
+      </div>
+    </div>
+    <div>
+      <div class="label">Allocation</div>
+      <div class="box">
+        <div>${d.flock_label || d.farm_name || '—'}</div>
+        ${d.due_date ? `<div class="sub">Due: ${fmt(d.due_date)}</div>` : ''}
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <table>
+      <thead><tr><th>Particulars</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>
+        ${d.basic_amount != null ? row('Basic Amount', inr(d.basic_amount)) : ''}
+        ${d.gst_amount != null && d.gst_amount > 0 ? row(`GST${d.gst_pct ? ` @ ${d.gst_pct}%` : ''}`, inr(d.gst_amount)) : ''}
+        ${row('Invoice Total', inr(d.total_amount), true)}
+        ${tds > 0 ? row('Less: TDS Deducted', `- ${inr(tds)}`) : ''}
+        ${paid > 0 ? row('Less: Amount Paid', `- ${inr(paid)}`) : ''}
+      </tbody>
+      <tfoot><tr class="total-row"><td class="tr">Balance Payable</td><td class="tr">${inr(balance)}</td></tr></tfoot>
+    </table>
+    <p class="note">Status: <strong>${(d.payment_status ?? 'unpaid').toUpperCase()}</strong>${d.remarks ? ` · ${d.remarks}` : ''}</p>
+  </div>
+
+  <div class="sign-row-4">
+    <div>Prepared By</div>
+    <div>Checked By</div>
+    <div>Approved By</div>
+    <div>Accounts</div>
+  </div>
+  </body></html>`
+  openPrint(html)
+}
+
 // ── Side-by-side column grid print (Site-wise Designation Count, etc.) ─────────
 export function printColumnGrid(opts: {
   title: string

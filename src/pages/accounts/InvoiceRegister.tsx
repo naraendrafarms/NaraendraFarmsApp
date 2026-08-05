@@ -9,7 +9,7 @@ import {
 import { Plus, Download, Upload, Edit2, Trash2, CheckCircle, Copy, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
-import { printReport } from '@/lib/invoicePrint'
+import { printReport, printPurchaseInvoiceVoucher } from '@/lib/invoicePrint'
 
 const SOURCE_TYPES = [
   { value: 'chick',       label: 'Chick Supply' },
@@ -408,6 +408,28 @@ export const InvoiceRegister: React.FC = () => {
     })
   }
 
+  // Single-invoice voucher — the list Print covers the whole register, this
+  // prints one invoice on the letterhead for filing against the vendor bill.
+  const printOne = (inv: any) => {
+    printPurchaseInvoiceVoucher({
+      invoice_no:   inv.invoice_no ?? '',
+      invoice_date: inv.invoice_date ?? '',
+      supplier_name: inv.party?.name ?? inv.supplier_name ?? '',
+      source_type:  SOURCE_TYPES.find(t => t.value === inv.source_type)?.label ?? inv.source_type ?? null,
+      flock_label:  inv.flock ? `Flock ${inv.flock.flock_no}` : null,
+      farm_name:    inv.farm?.name ?? null,
+      basic_amount: inv.basic_amount,
+      gst_pct:      inv.gst_pct,
+      gst_amount:   inv.gst_amount,
+      total_amount: inv.total_amount ?? 0,
+      tds_amount:   inv.tds_amount,
+      paid_amount:  inv.paid_amount,
+      payment_status: inv.payment_status,
+      due_date:     inv.due_date,
+      remarks:      inv.remarks,
+    })
+  }
+
   const exportExcel = () => {
     const rows = filtered.map((i: any) => ({
       'Invoice No':     i.invoice_no,
@@ -732,6 +754,7 @@ export const InvoiceRegister: React.FC = () => {
                               <CheckCircle size={14} className="inline mr-0.5" />Pay
                             </button>
                           )}
+                          <button onClick={() => printOne(inv)} className="text-xs text-gray-500 hover:underline" title="Print this invoice on the company letterhead"><Printer size={13}/></button>
                           <button onClick={() => openDuplicate(inv)} className="text-xs text-gray-500 hover:underline" title="Duplicate — for a recurring bill (rent, AMC, etc.)"><Copy size={13}/></button>
                           <button onClick={() => openEdit(inv)} className="text-xs text-blue-600 hover:underline"><Edit2 size={13}/></button>
                           <button onClick={() => setDelId(inv.id)} className="text-xs text-red-500 hover:underline"><Trash2 size={13}/></button>
