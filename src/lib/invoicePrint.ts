@@ -700,6 +700,117 @@ export function printNHESale(d: NHESaleRecord) {
 }
 
 // ── Purchase GRN ──────────────────────────────────────────────────────────────
+// ── Bank Ledger statement print ───────────────────────────────────────────
+// One account per print (the page shows one at a time), so Kotak and every
+// other account produce their own statement. Honours whatever period is
+// selected — the From/To range, or the whole FY when no range is set.
+// Rows print oldest→newest so the running balance reads down the page, even
+// though the on-screen table shows newest first.
+export interface BankLedgerPrintRow {
+  txn_date: string
+  txn_type: string
+  category?: string | null
+  description?: string | null
+  reference_no?: string | null
+  party_name?: string | null
+  amount?: number | null
+  balance?: number | null
+}
+export function printBankLedger(opts: {
+  accountName: string
+  bankName?: string | null
+  accountNo?: string | null
+  ifsc?: string | null
+  periodLabel: string
+  openingBalance: number
+  rows: BankLedgerPrintRow[]
+  credits: number
+  debits: number
+  closing: number
+}) {
+  const { accountName, bankName, accountNo, ifsc, periodLabel,
+          openingBalance, rows, credits, debits, closing } = opts
+  const body = rows.map(r => {
+    const isCr = r.txn_type === 'Credit'
+    return `<tr>
+      <td class="tc">${fmt(r.txn_date)}</td>
+      <td>${r.description ?? '—'}${r.party_name ? `<div class="sub">${r.party_name}</div>` : ''}</td>
+      <td class="tc">${r.category ?? '—'}</td>
+      <td class="tc">${r.reference_no ?? '—'}</td>
+      <td class="tr">${isCr ? inr(r.amount ?? 0) : ''}</td>
+      <td class="tr">${!isCr ? inr(r.amount ?? 0) : ''}</td>
+      <td class="tr bold">${inr(r.balance ?? 0)}</td>
+    </tr>`
+  }).join('')
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>Bank Ledger — ${accountName}</title>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+  <div class="header">
+    <div>
+      <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+      <div class="sub">${CO.addr1}</div>
+      <div class="sub">${CO.addr2}, ${CO.state} — ${CO.stateCode}</div>
+      <div class="sub">GSTIN: ${CO.gstin} · Ph: ${CO.phone}</div>
+    </div>
+    <div class="header-right">
+      <h2>Bank Ledger Statement</h2>
+      <div class="sub">${periodLabel}</div>
+      <div class="sub">Printed: ${new Date().toLocaleString('en-IN')}</div>
+    </div>
+  </div>
+
+  <div class="two-col section">
+    <div>
+      <div class="label">Account</div>
+      <div class="box">
+        <div class="bold">${bankName ? `${bankName} — ` : ''}${accountName}</div>
+        ${accountNo ? `<div class="sub">A/c No: ${accountNo}</div>` : ''}
+        ${ifsc ? `<div class="sub">IFSC: ${ifsc}</div>` : ''}
+      </div>
+    </div>
+    <div>
+      <div class="label">Summary</div>
+      <div class="box">
+        <div>Opening: <strong>${inr(openingBalance)}</strong></div>
+        <div class="sub">Credits: ${inr(credits)} · Debits: ${inr(debits)}</div>
+        <div>Closing: <strong>${inr(closing)}</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Particulars</th><th>Category</th><th>Reference</th>
+        <th>Credit</th><th>Debit</th><th>Balance</th>
+      </tr></thead>
+      <tbody>
+        <tr class="total-row">
+          <td class="tc">—</td><td colspan="3">Opening Balance</td>
+          <td></td><td></td><td class="tr">${inr(openingBalance)}</td>
+        </tr>
+        ${body}
+      </tbody>
+      <tfoot><tr class="total-row">
+        <td colspan="4" class="tr">Total (${rows.length} entr${rows.length === 1 ? 'y' : 'ies'})</td>
+        <td class="tr">${inr(credits)}</td>
+        <td class="tr">${inr(debits)}</td>
+        <td class="tr">${inr(closing)}</td>
+      </tr></tfoot>
+    </table>
+  </div>
+
+  <div class="sign-row-4">
+    <div>Prepared By</div>
+    <div>Checked By</div>
+    <div>Approved By</div>
+    <div>Accounts</div>
+  </div>
+  </body></html>`
+  openPrint(html)
+}
+
 // ── Multi-line GRN print ──────────────────────────────────────────────────
 // A GRN is one bill with many item lines (one `grn` row per item, sharing a
 // grn_no), but printGRN below prints a SINGLE row — so a 3-item GRN needed 3

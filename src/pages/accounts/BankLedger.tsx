@@ -1,12 +1,13 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, today, FY_OPTIONS, currentFY, fyRange, fyOfDate, fetchAllPages } from '@/lib/utils'
+import { inr, today, fmtDate, FY_OPTIONS, currentFY, fyRange, fyOfDate, fetchAllPages } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState, SearchableSelect } from '@/components/ui'
-import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil, X } from 'lucide-react'
+import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil, X, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { ifscError, accountNoError } from '@/lib/validators'
 import { postLedgerEntry, clearLedgerEntries, toCbMode, syncSupplierInvoicePayment } from '@/lib/ledgerSync'
+import { printBankLedger } from '@/lib/invoicePrint'
 
 const EMPTY_FORM = {
   txn_date: today(),
@@ -1205,6 +1206,33 @@ export const BankLedgerPage: React.FC = () => {
     }
   }
 
+  // Statement print for the account currently selected — each bank prints its
+  // own ledger. Honours the From/To range (or the whole FY when none is set),
+  // and prints oldest→newest so the running balance reads down the page.
+  const handlePrintLedger = () => {
+    if (!selectedAccountData) { toast.error('Select a bank account first'); return }
+    if (!filteredRows.length) { toast.error('No transactions in this period to print'); return }
+    const periodLabel = fromDate || toDate
+      ? `${fromDate ? fmtDate(fromDate) : 'Start'} to ${toDate ? fmtDate(toDate) : 'Today'}`
+      : `FY ${fy}`
+    printBankLedger({
+      accountName: selectedAccountData.account_name ?? '',
+      bankName: selectedAccountData.bank_name,
+      accountNo: selectedAccountData.account_no,
+      ifsc: (selectedAccountData as any).ifsc ?? null,
+      periodLabel,
+      openingBalance,
+      // filteredRows is newest-first for the screen; a printed ledger reads
+      // oldest-first so each running balance follows the line above it.
+      rows: filteredRows.slice().reverse().map((t: any) => ({
+        txn_date: t.txn_date, txn_type: t.txn_type, category: t.category,
+        description: t.description, reference_no: t.reference_no,
+        party_name: t.parties?.name ?? null, amount: t.amount, balance: t.balance,
+      })),
+      credits: summary.credits, debits: summary.debits, closing: summary.closing,
+    })
+  }
+
   const handleExportCSV = () => {
     if (!filteredRows.length) return
     const headers = ['Date', 'Type', 'Category', 'Description', 'Reference', 'Debit', 'Credit', 'Balance']
@@ -1387,6 +1415,9 @@ export const BankLedgerPage: React.FC = () => {
               <>
                 <Button icon={<Plus size={16} />} onClick={openAdd} disabled={!selectedAccount}>
                   Add Transaction
+                </Button>
+                <Button icon={<Printer size={16} />} variant="outline" onClick={handlePrintLedger} disabled={!filteredRows.length}>
+                  Print
                 </Button>
                 <Button icon={<Download size={16} />} variant="outline" onClick={handleExportCSV} disabled={!filteredRows.length}>
                   Export CSV

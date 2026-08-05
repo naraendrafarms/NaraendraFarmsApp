@@ -43,6 +43,7 @@ export const VendorAdvancesPage: React.FC = () => {
   const [editId, setEditId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [filterParty, setFilterParty] = useState('')
+  const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const tdsSectionOptions = useConfigOptions('tds_section', [])
 
@@ -250,8 +251,11 @@ export const VendorAdvancesPage: React.FC = () => {
   }
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === advances.length) setSelectedIds(new Set())
-    else setSelectedIds(new Set((advances as any[]).map((a: any) => a.id)))
+    // Deliberately scoped to the rows currently visible — with a search
+    // active, "select all" must not silently tick rows that are filtered out
+    // (bulk delete would then remove records the user never saw).
+    if (visibleAdvances.length > 0 && selectedIds.size === visibleAdvances.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set(visibleAdvances.map((a: any) => a.id)))
   }
 
   const openAdd = () => {
@@ -284,8 +288,22 @@ export const VendorAdvancesPage: React.FC = () => {
   }
   const [challanModal, setChallanModal] = useState<any>(null)
 
-  const totalPaid = advances.reduce((s, a: any) => s + (a.amount ?? 0), 0)
-  const totalUsed = advances.reduce((s, a: any) => s + (a.amount_used ?? 0), 0)
+  // Free-text search across the fields actually visible in the table, so a
+  // vendor name, UTR/reference, remark or amount all find the row.
+  const visibleAdvances = (advances as any[]).filter((a: any) => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return (a.parties?.name ?? '').toLowerCase().includes(q)
+      || (a.reference_no ?? '').toLowerCase().includes(q)
+      || (a.remarks ?? '').toLowerCase().includes(q)
+      || (a.payment_mode ?? '').toLowerCase().includes(q)
+      || (a.tds_section ?? '').toLowerCase().includes(q)
+      || String(a.amount ?? '').includes(q)
+      || (a.advance_date ?? '').includes(q)
+  })
+
+  const totalPaid = visibleAdvances.reduce((s: number, a: any) => s + (a.amount ?? 0), 0)
+  const totalUsed = visibleAdvances.reduce((s: number, a: any) => s + (a.amount_used ?? 0), 0)
   const totalBalance = totalPaid - totalUsed
 
   return (
@@ -322,13 +340,34 @@ export const VendorAdvancesPage: React.FC = () => {
         </Card>
       </div>
 
-      <Card className="p-3 max-w-xs">
-        <SearchableSelect
-          placeholder="— All Vendors —"
-          value={filterParty}
-          onChange={setFilterParty}
-          options={partyOptions}
-        />
+      <Card className="p-3">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="w-full sm:max-w-xs">
+            <SearchableSelect
+              placeholder="— All Vendors —"
+              value={filterParty}
+              onChange={setFilterParty}
+              options={partyOptions}
+            />
+          </div>
+          <div className="flex-1 flex items-center gap-2">
+            <Input
+              label=""
+              placeholder="Search vendor, reference, remarks, amount…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="text-xs text-brand-600 hover:underline whitespace-nowrap">Clear</button>
+            )}
+          </div>
+        </div>
+        {search && (
+          <p className="text-xs text-gray-400 mt-2">
+            Showing {visibleAdvances.length} of {advances.length} advance(s)
+          </p>
+        )}
       </Card>
 
       {selectedIds.size > 0 && (
@@ -358,7 +397,7 @@ export const VendorAdvancesPage: React.FC = () => {
                 <Th>
                   <input
                     type="checkbox"
-                    checked={advances.length > 0 && selectedIds.size === advances.length}
+                    checked={visibleAdvances.length > 0 && selectedIds.size === visibleAdvances.length}
                     onChange={toggleSelectAll}
                   />
                 </Th>
@@ -375,7 +414,7 @@ export const VendorAdvancesPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {advances.map((a: any) => {
+              {visibleAdvances.map((a: any) => {
                 const bal = (a.amount ?? 0) - (a.amount_used ?? 0)
                 return (
                   <tr key={a.id} className="hover:bg-gray-50">
@@ -436,7 +475,7 @@ export const VendorAdvancesPage: React.FC = () => {
             </tbody>
             <tfoot>
               <tr className="bg-gray-50 font-bold">
-                <Td colSpan={6}>TOTAL ({advances.length})</Td>
+                <Td colSpan={6}>TOTAL ({visibleAdvances.length})</Td>
                 <Td className="text-right text-red-700">{inr(advances.reduce((s: number, a: any) => s + (a.amount ?? 0), 0))}</Td>
                 <Td className="text-right text-gray-600">{inr(advances.reduce((s: number, a: any) => s + (a.amount_used ?? 0), 0))}</Td>
                 <Td className="text-right text-blue-700">{inr(advances.reduce((s: number, a: any) => s + ((a.amount ?? 0) - (a.amount_used ?? 0)), 0))}</Td>
