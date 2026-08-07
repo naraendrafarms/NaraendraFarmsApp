@@ -44,6 +44,7 @@ const CompanySettingsCard: React.FC = () => {
         site_contact_1: form.site_contact_1 || null,
         site_contact_2: form.site_contact_2 || null,
         po_terms: form.po_terms || null,
+        pan_no: form.pan_no || null,
         tan_no: form.tan_no || null,
         updated_at: new Date().toISOString(),
       }
@@ -73,9 +74,10 @@ const CompanySettingsCard: React.FC = () => {
         <Input label="Site / Delivery Location" value={form.site_location ?? ''} onChange={e => s('site_location', e.target.value)} />
       </FormRow>
       <FormRow cols={2}>
+        <Input label="PAN No." value={form.pan_no ?? ''} onChange={e => s('pan_no', e.target.value)} placeholder="e.g. ABJFM1393C" />
         <Input label="TAN No." value={form.tan_no ?? ''} onChange={e => s('tan_no', e.target.value)} placeholder="e.g. BLRN12345A" />
-        <p className="text-xs text-gray-400 self-end pb-2">Required for TDS challan &amp; quarterly return filing.</p>
       </FormRow>
+      <p className="text-xs text-gray-400 -mt-2">PAN and TAN print on the TDS statement and are required for challan &amp; quarterly return filing.</p>
       <FormRow cols={2}>
         <Input label="Site Contact 1" value={form.site_contact_1 ?? ''} onChange={e => s('site_contact_1', e.target.value)} placeholder="Name / phone for delivery at site" />
         <Input label="Site Contact 2" value={form.site_contact_2 ?? ''} onChange={e => s('site_contact_2', e.target.value)} placeholder="Name / phone for delivery at site" />

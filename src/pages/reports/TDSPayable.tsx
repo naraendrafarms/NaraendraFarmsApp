@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
-import { printReport, printMultiReport, CO_PAN, CO_TAN, type PrintSection } from '@/lib/invoicePrint'
+import { printReport, printMultiReport, type PrintSection } from '@/lib/invoicePrint'
 import { Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput, Modal, FormRow } from '@/components/ui'
 import { Download, Printer, Trash2, Link2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -511,6 +511,20 @@ export const TDSPayable: React.FC = () => {
   // challan covers both), then a summary grouped by deductee type and section
   // — which is exactly how the challan is filed.
 
+  // Deductor PAN and TAN come from Admin Centre → Company Profile, never from
+  // application code. PAN falls back to the GSTIN's embedded PAN (characters
+  // 3-12) if the field has not been filled in yet.
+  const deductorIds = () => {
+    const cs: any = companySettings ?? {}
+    const gstin = (cs.gstin ?? '').trim()
+    const panNo = (cs.pan_no ?? '').trim() || (gstin.length >= 12 ? gstin.slice(2, 12) : '')
+    const tanNo = (cs.tan_no ?? '').trim()
+    const parts: string[] = []
+    if (panNo) parts.push(`PAN: ${panNo}`)
+    if (tanNo) parts.push(`TAN: ${tanNo}`)
+    return parts.join(' · ')
+  }
+
   // "Jul-26"
   const monthLabel = (d: string | null | undefined) => {
     if (!d) return ''
@@ -576,21 +590,47 @@ export const TDSPayable: React.FC = () => {
     })),
   ]
 
-  const detailsSection = (lines: StmtLine[]): PrintSection => ({
-    heading: 'TDS Deducted Details',
-    headers: ['S.No', 'Name of Deductee', 'Nature of Payment', 'Month', 'Total Amount',
-              'TDS Deducted', 'TDS Rate', 'Interest', 'Section', 'Deductee Type', 'PAN No'],
-    rightAlignFrom: 4,
-    rows: lines.map((l, i) => [
-      i + 1, l.name, l.nature, l.month, inr(l.amount), inr(l.tds),
-      l.rate || '—', inr(l.interest), l.section || '—', l.deductee, l.pan || '—',
-    ]),
-    footerRow: ['', 'Total', '', '',
-      inr(lines.reduce((a, l) => a + l.amount, 0)),
-      inr(lines.reduce((a, l) => a + l.tds, 0)), '',
-      inr(lines.reduce((a, l) => a + l.interest, 0)), '', '', ''],
-    emptyNote: 'No TDS deducted in this period.',
-  })
+  // The statement is deductee-wise, NOT bill-wise: a supplier billed twenty
+  // times in a month is one line carrying the month's total purchase value and
+  // the total TDS deducted, because that is the figure that gets filed. Bills
+  // are grouped by deductee + section + month, so a supplier deducted under two
+  // different sections still gets a line each, as it must.
+  const groupedLines = (lines: StmtLine[]): StmtLine[] => {
+    const map: Record<string, StmtLine> = {}
+    lines.forEach(l => {
+      const key = `${l.name}||${l.section}||${l.month}||${l.deductee}`
+      if (!map[key]) { map[key] = { ...l }; return }
+      map[key].amount += l.amount
+      map[key].tds += l.tds
+      map[key].interest += l.interest
+      if (!map[key].pan && l.pan) map[key].pan = l.pan
+    })
+    return Object.values(map).map(l => ({
+      ...l,
+      // Recomputed from the totals so a merged line shows the effective rate
+      // rather than whichever bill happened to be first.
+      rate: l.amount > 0 ? `${+(l.tds / l.amount * 100).toFixed(2)}%` : l.rate,
+    })).sort((a, b) => a.section.localeCompare(b.section) || a.name.localeCompare(b.name))
+  }
+
+  const detailsSection = (rawLines: StmtLine[]): PrintSection => {
+    const lines = groupedLines(rawLines)
+    return {
+      heading: `TDS Deducted Details — ${lines.length} deductee line(s)`,
+      headers: ['S.No', 'Name of Deductee', 'Nature of Payment', 'Month', 'Total Amount',
+                'TDS Deducted', 'TDS Rate', 'Interest', 'Section', 'Deductee Type', 'PAN No'],
+      rightAlignFrom: 4,
+      rows: lines.map((l, i) => [
+        i + 1, l.name, l.nature, l.month, inr(l.amount), inr(l.tds),
+        l.rate || '—', inr(l.interest), l.section || '—', l.deductee, l.pan || '—',
+      ]),
+      footerRow: ['', 'Total', '', '',
+        inr(lines.reduce((a, l) => a + l.amount, 0)),
+        inr(lines.reduce((a, l) => a + l.tds, 0)), '',
+        inr(lines.reduce((a, l) => a + l.interest, 0)), '', '', ''],
+      emptyNote: 'No TDS deducted in this period.',
+    }
+  }
 
   // Grouped exactly the way the challan is filed: one line per deductee type
   // AND section, because those two together decide which challan it goes on.
@@ -632,7 +672,7 @@ export const TDSPayable: React.FC = () => {
       printMultiReport({
         title: 'TDS Deducted — Statement',
         subtitle: `${periodLabel()}${selNote}`,
-        headerNote: `PAN: ${CO_PAN} · TAN: ${CO_TAN}`,
+        headerNote: deductorIds(),
         sections: [detailsSection(lines), summarySection(lines)],
         grandTotalLabel: 'TOTAL TDS PAYABLE',
         grandTotalValue: inr(lines.reduce((a, l) => a + l.tds + l.interest, 0)),
