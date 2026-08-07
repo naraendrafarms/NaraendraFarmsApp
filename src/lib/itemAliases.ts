@@ -117,3 +117,41 @@ export function useInvalidateItemAliases() {
     qc.invalidateQueries({ queryKey: ['items_for_alias_search'] })
   }
 }
+
+// ── Name canonicalisation for the price lookups ─────────────────────────────
+// Feed Mill and useFeedRates price an ingredient by matching its NAME against
+// GRN item names. That breaks the moment the same item is written two ways —
+// "Toxfin 360 Dry" in a formula vs "Toxfin360 Dry" on every GRN — and the
+// ingredient silently costs zero while the rest of the formula prices fine.
+//
+// Merging the duplicate items in Items Master does NOT fix this: the merge
+// remaps ids (item_id, ingredient_id) and carries the aliases over, but
+// feed_formula_ingredients.ingredient_name is plain text and is never
+// rewritten. The alias table already knows both spellings are the same item,
+// so the fix is to collapse every name through it before matching.
+//
+// Returns a map of lower(alias) -> lower(canonical items.name). Callers should
+// pass BOTH sides of a comparison through it, so a GRN written under an alias
+// and a formula written under another both land on the same key.
+export async function fetchItemNameCanonMap(): Promise<Record<string, string>> {
+  const { data, error } = await supabase
+    .from('item_aliases')
+    .select('alias, items!item_id(name)')
+  if (error) return {}
+  const m: Record<string, string> = {}
+  for (const r of data ?? []) {
+    const rel = (r as any).items
+    const canonical = Array.isArray(rel) ? rel[0]?.name : rel?.name
+    if (!canonical) continue
+    const alias = String((r as any).alias ?? '').trim().toLowerCase()
+    if (alias) m[alias] = String(canonical).trim().toLowerCase()
+  }
+  return m
+}
+
+// Applies the map above; falls back to the name itself when no alias exists,
+// so behaviour is unchanged for every item that was already matching.
+export const canonName = (canon: Record<string, string>, name: any): string => {
+  const k = String(name ?? '').trim().toLowerCase()
+  return canon[k] ?? k
+}

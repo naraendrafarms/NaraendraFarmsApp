@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { fetchItemNameCanonMap, canonName } from '@/lib/itemAliases'
 
 /**
  * Recipe-cost per kg for each finished feed type.
@@ -22,6 +23,10 @@ export function useFeedRates(): FeedRates {
     queryKey: ['feed_recipe_rates'],
     staleTime: 5 * 60 * 1000,
     queryFn: async (): Promise<FeedRates> => {
+      // Both the GRN name and the formula name are collapsed through the alias
+      // table before matching, so an ingredient written two ways still prices.
+      const canon = await fetchItemNameCanonMap()
+
       // 1. Latest GRN price per ingredient (feed category)
       const { data: grn } = await supabase
         .from('grn')
@@ -32,7 +37,7 @@ export function useFeedRates(): FeedRates {
       for (const g of (grn ?? [])) {
         const name = (g as any).item_name || (g as any).feed_ingredients?.name
         if (name && g.price_per_unit) {
-          const k = String(name).trim().toLowerCase()
+          const k = canonName(canon, name)
           // landed rate = material rate + transport per unit (latest GRN wins)
           const qty = Number((g as any).qty) || 0
           const landed = Number(g.price_per_unit) + (qty > 0 ? (Number((g as any).other_charges) || 0) / qty : 0)
@@ -46,7 +51,7 @@ export function useFeedRates(): FeedRates {
         .in('txn_type', ['opening', 'adjustment_in'])
         .order('txn_date', { ascending: false })
       for (const r of (slRates ?? [])) {
-        const k = String((r as any).item_name ?? '').trim().toLowerCase()
+        const k = canonName(canon, (r as any).item_name)
         if (k && r.unit_price && !(k in rateByIng)) rateByIng[k] = Number(r.unit_price)
       }
 
@@ -74,7 +79,7 @@ export function useFeedRates(): FeedRates {
         let cost = 0
         for (const ing of ings) {
           const pct = Number(ing.percentage) || 0
-          const rate = rateByIng[String(ing.ingredient_name ?? '').trim().toLowerCase()] || 0
+          const rate = rateByIng[canonName(canon, ing.ingredient_name)] || 0
           cost += (pct / 100) * rate
         }
         costByFormula[f.id] = cost

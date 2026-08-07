@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today } from '@/lib/utils'
 import { parseFile } from '@/lib/parseFile'
+import { fetchItemNameCanonMap, canonName } from '@/lib/itemAliases'
 import {
   Card, Button, Input, Modal, Select,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
@@ -902,15 +903,19 @@ const ProductionTab: React.FC = () => {
 
   // GRN prices per feed ingredient WITH dates — so we can take the rate prevailing on
   // the production date (point-in-time), not just the latest.
-  const { data: grnRates = {} } = useQuery({
+  const { data: rateData } = useQuery({
     queryKey: ['feed_grn_rates_prod'],
     queryFn: async () => {
+      // Names on both sides are collapsed through the alias table first: a
+      // formula saying "Toxfin 360 Dry" and every GRN saying "Toxfin360 Dry"
+      // are the same item, and without this the ingredient silently costs 0.
+      const canon = await fetchItemNameCanonMap()
       const { data } = await supabase.from('grn')
         .select('item_name,price_per_unit,qty,other_charges,grn_date').eq('category','Feed Ingredient')
         .order('grn_date', { ascending: false })
       const m: Record<string, { date: string; price: number }[]> = {}
       for (const g of (data ?? [])) {
-        const k = String(g.item_name ?? '').trim().toLowerCase()
+        const k = canonName(canon, g.item_name)
         if (!k || !g.price_per_unit) continue
         // landed rate = material rate + transport per unit
         const qty = Number(g.qty) || 0
@@ -923,19 +928,21 @@ const ProductionTab: React.FC = () => {
         .in('txn_type', ['opening', 'adjustment_in'])
         .order('txn_date', { ascending: false })
       for (const r of (sl ?? [])) {
-        const k = String(r.item_name ?? '').trim().toLowerCase()
+        const k = canonName(canon, r.item_name)
         if (!k || !r.unit_price) continue
         ;(m[k] ??= []).push({ date: r.txn_date ?? '', price: Number(r.unit_price) })
       }
       // keep each list newest-first
       for (const k of Object.keys(m)) m[k].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-      return m
+      return { rates: m, canon }
     }
   })
+  const grnRates = rateData?.rates ?? {}
+  const nameCanon = rateData?.canon ?? {}
   // Rate of an ingredient as of a date: latest GRN price with grn_date <= asOf.
   // Falls back to the oldest known price if the production predates all purchases.
   const ingRate = (name: string, asOf?: string) => {
-    const list = grnRates[String(name ?? '').trim().toLowerCase()]
+    const list = grnRates[canonName(nameCanon, name)]
     if (!list || !list.length) return 0
     if (!asOf) return list[0].price
     const onOrBefore = list.find(x => x.date && x.date <= asOf)
