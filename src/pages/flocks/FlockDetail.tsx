@@ -591,6 +591,62 @@ export const FlockDetail: React.FC = () => {
     return arr
   }, [heDispatch, heFromDate, heToDate])
 
+  // MUST stay above the early returns below: a hook placed after them runs
+  // only once data has loaded, so the first (loading) render and the next
+  // render have different hook counts — React error #310. Cached flocks hid
+  // this because they skip the loading render entirely.
+
+  // vs Standard tab's actual-vs-Venco-curve rows, duplicated here (same pure
+  // computation as the tab's own render) purely so Export/Print can build
+  // rows without needing the tab's JSX to have already rendered.
+  const stdExportRows = useMemo(() => {
+    if (!flock?.laying_season || !stdCurve || stdCurve.length === 0) return []
+    const HH = flock.total_placed_f ?? 0
+    type WeekAgg = { openFSum: number; totalEggs: number; heEggs: number; depletion: number }
+    const weekly: Record<number, WeekAgg> = {}
+    for (const d of (daily ?? [])) {
+      if (!d.record_date) continue
+      const wk = flockAgeWeeks(flock.placement_date, d.record_date)
+      if (wk < 0) continue
+      const row = weekly[wk] ??= { openFSum: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
+      row.openFSum += d.opening_female ?? 0
+      row.totalEggs += d.total_eggs ?? 0
+      row.heEggs += d.he_eggs ?? 0
+      row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
+    }
+    const hatchWeekly: Record<number, { sum: number; n: number }> = {}
+    for (const h of (heDispatch ?? [])) {
+      if (!h.dispatch_date || h.hatch_pct == null) continue
+      const wk = flockAgeWeeks(flock.placement_date, h.dispatch_date)
+      if (wk < 0) continue
+      const row = hatchWeekly[wk] ??= { sum: 0, n: 0 }
+      row.sum += h.hatch_pct; row.n++
+    }
+    const variance = (actual: number | null, std: number | null) =>
+      actual == null || std == null ? null : actual - std
+    let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0
+    return stdCurve.map((s: any) => {
+      const w = weekly[s.week_of_age]
+      const actualHd = w && w.openFSum > 0 ? (w.totalEggs / w.openFSum) * 100 : null
+      const actualHe = w && w.totalEggs > 0 ? (w.heEggs / w.totalEggs) * 100 : null
+      const hw = hatchWeekly[s.week_of_age]
+      const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
+      const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
+      const weeklyHeHh = w && HH > 0 ? w.heEggs / HH : null
+      const weeklyDepletionPct = w && HH > 0 ? (w.depletion / HH) * 100 : null
+      if (w) { cumDepletion += weeklyDepletionPct ?? 0; cumTeHh += weeklyTeHh ?? 0; cumHeHh += weeklyHeHh ?? 0 }
+      return {
+        s, actualHd, actualHe, actualHatch, weeklyTeHh, weeklyHeHh,
+        cumDepletion: w ? cumDepletion : null, cumTeHh: w ? cumTeHh : null, cumHeHh: w ? cumHeHh : null,
+        vDepletion: variance(w ? cumDepletion : null, s.cum_depletion_pct),
+        vHd: variance(actualHd, s.hen_week_pct), vHe: variance(actualHe, s.he_pct),
+        vTeHh: variance(weeklyTeHh, s.weekly_te_hh), vCumTeHh: variance(w ? cumTeHh : null, s.cum_te_hh),
+        vHeHh: variance(weeklyHeHh, s.weekly_he_hh), vCumHeHh: variance(w ? cumHeHh : null, s.cum_he_hh),
+        vHatch: variance(actualHatch, s.hatch_pct),
+      }
+    })
+  }, [flock?.laying_season, flock?.total_placed_f, flock?.placement_date, stdCurve, daily, heDispatch])
+
   if (isLoading) return <Spinner />
   if (!flock) return <div className="p-8 text-center text-gray-500">Flock not found</div>
 
@@ -652,57 +708,6 @@ export const FlockDetail: React.FC = () => {
     const mortF = monthDaily.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
     return { ...m, days: monthDaily.length, avgF, feedF, feedM, mortF }
   })
-
-  // vs Standard tab's actual-vs-Venco-curve rows, duplicated here (same pure
-  // computation as the tab's own render) purely so Export/Print can build
-  // rows without needing the tab's JSX to have already rendered.
-  const stdExportRows = useMemo(() => {
-    if (!flock?.laying_season || !stdCurve || stdCurve.length === 0) return []
-    const HH = flock.total_placed_f ?? 0
-    type WeekAgg = { openFSum: number; totalEggs: number; heEggs: number; depletion: number }
-    const weekly: Record<number, WeekAgg> = {}
-    for (const d of (daily ?? [])) {
-      if (!d.record_date) continue
-      const wk = flockAgeWeeks(flock.placement_date, d.record_date)
-      if (wk < 0) continue
-      const row = weekly[wk] ??= { openFSum: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
-      row.openFSum += d.opening_female ?? 0
-      row.totalEggs += d.total_eggs ?? 0
-      row.heEggs += d.he_eggs ?? 0
-      row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
-    }
-    const hatchWeekly: Record<number, { sum: number; n: number }> = {}
-    for (const h of (heDispatch ?? [])) {
-      if (!h.dispatch_date || h.hatch_pct == null) continue
-      const wk = flockAgeWeeks(flock.placement_date, h.dispatch_date)
-      if (wk < 0) continue
-      const row = hatchWeekly[wk] ??= { sum: 0, n: 0 }
-      row.sum += h.hatch_pct; row.n++
-    }
-    const variance = (actual: number | null, std: number | null) =>
-      actual == null || std == null ? null : actual - std
-    let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0
-    return stdCurve.map((s: any) => {
-      const w = weekly[s.week_of_age]
-      const actualHd = w && w.openFSum > 0 ? (w.totalEggs / w.openFSum) * 100 : null
-      const actualHe = w && w.totalEggs > 0 ? (w.heEggs / w.totalEggs) * 100 : null
-      const hw = hatchWeekly[s.week_of_age]
-      const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
-      const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
-      const weeklyHeHh = w && HH > 0 ? w.heEggs / HH : null
-      const weeklyDepletionPct = w && HH > 0 ? (w.depletion / HH) * 100 : null
-      if (w) { cumDepletion += weeklyDepletionPct ?? 0; cumTeHh += weeklyTeHh ?? 0; cumHeHh += weeklyHeHh ?? 0 }
-      return {
-        s, actualHd, actualHe, actualHatch, weeklyTeHh, weeklyHeHh,
-        cumDepletion: w ? cumDepletion : null, cumTeHh: w ? cumTeHh : null, cumHeHh: w ? cumHeHh : null,
-        vDepletion: variance(w ? cumDepletion : null, s.cum_depletion_pct),
-        vHd: variance(actualHd, s.hen_week_pct), vHe: variance(actualHe, s.he_pct),
-        vTeHh: variance(weeklyTeHh, s.weekly_te_hh), vCumTeHh: variance(w ? cumTeHh : null, s.cum_te_hh),
-        vHeHh: variance(weeklyHeHh, s.weekly_he_hh), vCumHeHh: variance(w ? cumHeHh : null, s.cum_he_hh),
-        vHatch: variance(actualHatch, s.hatch_pct),
-      }
-    })
-  }, [flock?.laying_season, flock?.total_placed_f, flock?.placement_date, stdCurve, daily, heDispatch])
 
   // Aggregate the most recent date's records across all sheds
   const lastDate = daily?.length ? daily[daily.length - 1].record_date : null

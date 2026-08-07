@@ -100,7 +100,6 @@ export const SalesInvoiceRegister: React.FC = () => {
     }
   })
 
-  if (heLoading || nheLoading) return <Spinner />
 
   const all = [...(heRows ?? []), ...(nheRows ?? [])].sort((a, b) =>
     b.date.localeCompare(a.date)
@@ -116,6 +115,12 @@ export const SalesInvoiceRegister: React.FC = () => {
   const totalValue = filtered.reduce((s, r) => s + r.amount, 0)
   const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, filtered.length)
   const visibleRows = filtered.slice(from, to)
+  // Guard sits BELOW usePagination on purpose: a hook after an early return
+  // runs only once loading finishes, so the loading render and the next have
+  // different hook counts — React error #310. The rows above are pure and
+  // already tolerate undefined data.
+  if (heLoading || nheLoading) return <Spinner />
+
 
   const exportExcel = () => {
     const rows = filtered.map(r => ({

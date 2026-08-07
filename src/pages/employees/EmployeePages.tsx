@@ -2940,25 +2940,27 @@ export const PayslipGeneratorPage: React.FC = () => {
       localStorage.setItem(LS_KEY, JSON.stringify({ ...cur, [key]: val }))
     } catch {}
   }
-  const mkToggle = (key: string, def = true): [boolean, (v: boolean) => void] => {
+  // Named use* because it calls useState — it is a custom hook, and the name
+  // is what lets the rules-of-hooks check verify its call order.
+  const useToggleOpt = (key: string, def = true): [boolean, (v: boolean) => void] => {
     const opts = loadOpts()
     const [val, setVal] = useState<boolean>(key in opts ? opts[key] : def)
     const set = (v: boolean) => { setVal(v); saveOpt(key, v) }
     return [val, set]
   }
-  const [sigEmp,    setSigEmp]    = mkToggle('sigEmp')
-  const [sigHR,     setSigHR]     = mkToggle('sigHR')
-  const [sigAuth,   setSigAuth]   = mkToggle('sigAuth')
-  const [showFooter,setShowFooter]= mkToggle('showFooter')
-  const [showUAN,   setShowUAN]   = mkToggle('showUAN')
-  const [showESI,   setShowESI]   = mkToggle('showESI')
-  const [showEmpPF, setShowEmpPF] = mkToggle('showEmpPF')
-  const [showEmpESI,setShowEmpESI]= mkToggle('showEmpESI')
-  const [showPT,    setShowPT]    = mkToggle('showPT')
-  const [showEmprPF,setShowEmprPF]= mkToggle('showEmprPF')
-  const [showEmprESI,setShowEmprESI]=mkToggle('showEmprESI')
-  const [showPFRegNo,setShowPFRegNo]=mkToggle('showPFRegNo')
-  const [showESIRegNo,setShowESIRegNo]=mkToggle('showESIRegNo')
+  const [sigEmp,    setSigEmp]    = useToggleOpt('sigEmp')
+  const [sigHR,     setSigHR]     = useToggleOpt('sigHR')
+  const [sigAuth,   setSigAuth]   = useToggleOpt('sigAuth')
+  const [showFooter,setShowFooter]= useToggleOpt('showFooter')
+  const [showUAN,   setShowUAN]   = useToggleOpt('showUAN')
+  const [showESI,   setShowESI]   = useToggleOpt('showESI')
+  const [showEmpPF, setShowEmpPF] = useToggleOpt('showEmpPF')
+  const [showEmpESI,setShowEmpESI]= useToggleOpt('showEmpESI')
+  const [showPT,    setShowPT]    = useToggleOpt('showPT')
+  const [showEmprPF,setShowEmprPF]= useToggleOpt('showEmprPF')
+  const [showEmprESI,setShowEmprESI]=useToggleOpt('showEmprESI')
+  const [showPFRegNo,setShowPFRegNo]=useToggleOpt('showPFRegNo')
+  const [showESIRegNo,setShowESIRegNo]=useToggleOpt('showESIRegNo')
   const { map: skillWages } = useSkillWages()
   // Saved payslips
   const [selIds, setSelIds] = useState<Set<string>>(new Set())
