@@ -27,6 +27,35 @@ happening?" or a bug report). If in doubt, explain first and ask.
 
 ---
 
+## NEVER ASSUME — CHECK FIRST, SAY WHAT IT IS, THEN DO IT (NEVER CHANGE THIS)
+Do not guess a column name, a table name, a status/enum value, an existing
+value, or whether something already exists. **Verify it against the real
+schema or the real data first**, state plainly what you found, and only then
+write the code or the migration.
+
+Guessing has produced silently wrong output more than once:
+- `attendance_daily.att_date` — the column is `attendance_date`, so the whole
+  panel errored.
+- Attendance statuses guessed as `present`/`half`/`ot` — the real values are
+  `P` / `A` / `H` / `WO` / `OT`, so no day would have counted even with the
+  right column.
+- "The standard curve was never populated" — it already held 86 rows for both
+  Summer and Winter Vencobb430.
+
+How to check:
+- **Column / table exists?** grep `supabase/migrations/`, or run a read-only
+  diagnostic migration against `information_schema.columns`.
+- **What values does a column actually hold?** Diagnostic migration with
+  `GROUP BY` — the CHECK constraint is not proof of what is really stored.
+- **Does data already exist?** COUNT it before writing anything that seeds,
+  backfills or overwrites.
+- **A number looks wrong?** Measure it with a diagnostic before explaining it.
+  Never explain a figure you have not verified.
+
+If it cannot be verified, say so explicitly rather than proceeding on a guess.
+
+---
+
 ## Rules to Follow Every Session
 
 ### 1. Migration Checklist (MANDATORY every time)
