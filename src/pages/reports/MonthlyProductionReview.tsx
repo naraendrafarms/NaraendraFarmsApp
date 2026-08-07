@@ -25,6 +25,7 @@ import {
 import { Printer } from 'lucide-react'
 import { printMultiReport, type PrintSection } from '@/lib/invoicePrint'
 import { chartToDataUri } from '@/lib/chartImage'
+import { useFeedRates } from '@/hooks/useFeedRates'
 import toast from 'react-hot-toast'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -89,6 +90,8 @@ export const MonthlyProductionReview: React.FC = () => {
   const start = monthStart(month)
   const end = monthEnd(month)
   const months3 = lastMonths(month, 3)
+
+  const feedRates = useFeedRates()
 
   const hdChartRef = useRef<HTMLDivElement>(null)
   const mortChartRef = useRef<HTMLDivElement>(null)
@@ -304,6 +307,21 @@ export const MonthlyProductionReview: React.FC = () => {
         .order('dispatch_date')
         .range(from, to),
       'HE dispatch (Monthly Review)', toast.error),
+    staleTime: 60_000,
+  })
+
+  // Cost inputs for the HE cost panel. Feed is costed from daily_records with
+  // recipe rates (the same basis Flock P&L uses); medicine and electricity are
+  // whole-flock allocations with no date on medicine_usage.amount granularity
+  // finer than the usage date, so both are taken within the month.
+  const { data: medUsage = [] } = useQuery({
+    queryKey: ['mpr_med', scopeIds.join(','), start, end],
+    enabled: scopeIds.length > 0,
+    queryFn: () => fetchAllPages<any>((from, to) =>
+      supabase.from('medicine_usage').select('flock_id,usage_date,amount')
+        .in('flock_id', scopeIds).gte('usage_date', start).lte('usage_date', end)
+        .range(from, to),
+      'Medicine usage (Monthly Review)', toast.error),
     staleTime: 60_000,
   })
 
@@ -678,6 +696,61 @@ export const MonthlyProductionReview: React.FC = () => {
     emptyNote: 'No hatching-egg dispatches in this month.',
   }
 
+  // ── HE production cost ────────────────────────────────────────────────────
+  // Split by EGG COUNT, as chosen: every egg the flock laid carries the same
+  // share of the month's cost, so the HE share is cost x (HE eggs / all eggs).
+  // Note this makes cost-per-HE-egg identical to cost-per-egg by definition —
+  // that is what an egg-count split means. A revenue-share split would give a
+  // different figure; this one deliberately does not assume eggs differ in
+  // what they cost to produce, only in what they sell for.
+  //
+  // Feed is costed from daily_records with recipe rates, the same basis Flock
+  // P&L uses. Chick cost is NOT included: it is a one-off placement cost for
+  // the whole flock, not a cost of this month's eggs, and spreading it over a
+  // single month would overstate that month badly.
+  const heCost = useMemo(() => {
+    const rows = dailyByFlockDate.filter(d =>
+      d.record_date >= start && d.record_date <= end &&
+      (scope !== 'flock' || d.flock_id === flockId))
+    const raw = (dailyAll as any[]).filter(d =>
+      d.record_date >= start && d.record_date <= end &&
+      (scope !== 'flock' || d.flock_id === flockId))
+
+    // Feed rates are per feed TYPE, which lives on the raw shed rows.
+    const feedCost = raw.reduce((a, d) =>
+      a + num(d.feed_female_kg) * feedRates.rate(d.feed_type_f)
+        + num(d.feed_male_kg) * feedRates.rate(d.feed_type_m), 0)
+    const medCost = (medUsage as any[]).reduce((a, m) => a + num(m.amount), 0)
+    const totalCost = feedCost + medCost
+
+    const totalEggs = rows.reduce((a, d) => a + d.total_eggs, 0)
+    const heEggs = rows.reduce((a, d) => a + d.he_eggs, 0)
+    const perEgg = totalEggs > 0 ? totalCost / totalEggs : 0
+    const heShare = perEgg * heEggs
+    const heRevenue = heTotals.amt
+    return { feedCost, medCost, totalCost, totalEggs, heEggs, perEgg, heShare,
+      heRevenue, margin: heShare > 0 ? ((heRevenue - heShare) / heShare) * 100 : null }
+  }, [dailyByFlockDate, dailyAll, medUsage, feedRates, start, end, scope, flockId, heTotals])
+
+  const heCostSection: PrintSection = {
+    heading: `Hatching Egg Production Cost — ${monthLabel(month)}`,
+    headers: ['Particulars', 'Value'],
+    rightAlignFrom: 1,
+    rows: [
+      ['Feed cost (recipe rates)', inr(heCost.feedCost)],
+      ['Medicine cost', inr(heCost.medCost)],
+      ['Total production cost', inr(heCost.totalCost)],
+      ['Total eggs laid', heCost.totalEggs.toLocaleString('en-IN')],
+      ['Cost per egg', inr(heCost.perEgg)],
+      ['HE eggs', heCost.heEggs.toLocaleString('en-IN')],
+      ['HE share of cost (by egg count)', inr(heCost.heShare)],
+      ['HE sales income (invoiced)', inr(heCost.heRevenue)],
+      ['HE margin over production cost', heCost.margin == null ? '—' : `${heCost.margin.toFixed(1)}%`],
+    ],
+    note: 'Cost is split by egg count, so every egg carries the same share — cost per HE egg equals cost per egg by definition. Feed is costed at recipe rates; chick cost is excluded because it is a one-off placement cost for the whole flock, not a cost of this month\'s eggs. Electricity and salary are not allocated per flock per month, so they are not included.',
+    emptyNote: 'No production or cost recorded in this month.',
+  }
+
   // Shared by the page and the print so the two can never drift.
   const staffScopeNote = scope === 'flock'
     ? (siteSharedWith.length
@@ -829,7 +902,7 @@ export const MonthlyProductionReview: React.FC = () => {
 
     }
 
-    sections.push(heGradeSection, heInvoiceSection, staffSection)
+    sections.push(heGradeSection, heInvoiceSection, heCostSection, staffSection)
 
     // Charts — pictures of exactly what is on screen.
     if (scope !== 'company') {
@@ -1361,6 +1434,7 @@ export const MonthlyProductionReview: React.FC = () => {
 
           {renderSection(heGradeSection)}
           {renderSection(heInvoiceSection)}
+          {renderSection(heCostSection)}
 
           {staffPanel}
 
