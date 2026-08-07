@@ -83,13 +83,13 @@ export const BulkDailyEntry: React.FC = () => {
   const feedRates = useFeedRates()
   const [date, setDate] = useState(today())
   const [saving, setSaving] = useState(false)
-  // The row grids are rebuilt from the server data. Their effects depend on
-  // React Query results, and any refetch — including the automatic one when
-  // the browser window regains focus — hands back a NEW array, re-runs the
-  // effect and overwrites whatever has been typed but not yet saved. That is
-  // silent: the figure simply reverts to the pre-filled one and Save then
-  // stores that. These two guards rebuild only when the flock/date/shed set
-  // actually changes, or when a save asks for a reload.
+  // The row grids are rebuilt from server data by an effect. Every time that
+  // effect re-runs it calls setShedRows over whatever has been typed but not
+  // yet saved, silently reverting it — and Save then stores the reverted value.
+  // (Window-focus refetching is NOT the cause: it is disabled globally in
+  // App.tsx. The trigger is two independent queries answering at different
+  // moments — see prevReady.) These guards rebuild only when the flock, date
+  // or shed set actually changes, or when a save asks for a reload.
   const builtShedKeyRef = useRef<string>('')
   const builtFlockKeyRef = useRef<string>('')
   const [rowsEpoch, setRowsEpoch] = useState(0)
@@ -227,9 +227,12 @@ export const BulkDailyEntry: React.FC = () => {
     } catch { return '' }
   }, [date])
 
+  // Yesterday's closing, used to pre-fill today's opening. This is a SEPARATE
+  // query from existingDR and resolves independently — see prevReady below.
+  const prevEnabled = !!selectedFlock && !!prevDate
   const { data: prevDR } = useQuery({
     queryKey: ['bulk_prev_dr', prevDate, selectedFlock],
-    enabled: !!selectedFlock && !!prevDate,
+    enabled: prevEnabled,
     queryFn: async () => {
       const { data } = await supabase.from('daily_records')
         .select('shed_id,closing_female,closing_male')
@@ -237,6 +240,14 @@ export const BulkDailyEntry: React.FC = () => {
       return data ?? []
     }
   })
+  // The row grid must not be built until BOTH queries have answered. On a day
+  // with no saved record yet — a brand-new flock — existingDR comes back empty
+  // first, the grid is built with a blank opening, and prevDR lands a moment
+  // later and rebuilds it with yesterday's closing. Anything typed in that gap
+  // is overwritten. On an established flock the late rebuild produces the value
+  // already on screen, so it is invisible; that is why only the new flock
+  // appeared to lose its entry.
+  const prevReady = !prevEnabled || prevDR !== undefined
 
   // existingFeed removed — feed is now read from daily_records.feed_female_kg for consistency
 
@@ -297,6 +308,7 @@ export const BulkDailyEntry: React.FC = () => {
   useEffect(() => {
     if (!selectedFlock || !flockSheds.length) return
     if (existingFetching) return   // keep rows intact while date is loading
+    if (!prevReady) return         // and until yesterday's closing has arrived
     const key = `${selectedFlock}|${date}|${flockSheds.map((s: any) => s.id).join(',')}|${rowsEpoch}`
     if (builtShedKeyRef.current === key) return   // already built — don't clobber edits
     builtShedKeyRef.current = key
@@ -346,7 +358,7 @@ export const BulkDailyEntry: React.FC = () => {
       }
     }
     setShedRows(newRows)
-  }, [flockSheds, existingDR, existingMed, prevDR, selectedFlock, date, existingFetching, rowsEpoch])
+  }, [flockSheds, existingDR, existingMed, prevDR, selectedFlock, date, existingFetching, prevReady, rowsEpoch])
 
   const updateShedRow = (id: string, field: keyof ShedRow, val: string) => {
     setShedRows(prev => {
