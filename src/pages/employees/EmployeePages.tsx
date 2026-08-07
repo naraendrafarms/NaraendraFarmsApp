@@ -23,7 +23,7 @@ import { TaskBadge } from '@/components/tasks/TaskBadge'
 import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { LogoChip } from '@/components/Logo'
-import { ifscError, accountNoError } from '@/lib/validators'
+import { ifscError, accountNoError, aadhaarError } from '@/lib/validators'
 import { printReport, printColumnGrid } from '@/lib/invoicePrint'
 import { Printer } from 'lucide-react'
 
@@ -48,6 +48,15 @@ function fyMonths(fy: string): string[] {
   for (let m = 4; m <= 12; m++) months.push(`${startY}-${String(m).padStart(2,'0')}-01`)
   for (let m = 1; m <= 3; m++) months.push(`${startY+1}-${String(m).padStart(2,'0')}-01`)
   return months
+}
+
+// Aadhaar is stored as 12 bare digits but is always read and checked in the
+// 4-4-4 grouping printed on the card, so it is displayed that way. Anything
+// that is not 12 digits is shown as typed rather than forced into groups.
+const fmtAadhaar = (v?: string | null) => {
+  const d = (v ?? '').replace(/\D/g, '')
+  if (!d) return '—'
+  return d.length === 12 ? `${d.slice(0, 4)} ${d.slice(4, 8)} ${d.slice(8)}` : d
 }
 
 // ── Checkbox ──────────────────────────────────────────────────────
@@ -114,7 +123,7 @@ export const EmployeeList: React.FC = () => {
     emp_id:'', name:'', designation:'', farm_id:'', department:'',
     base_salary:'', basic_rate:'', hra_rate:'', allowance_rate:'', skill_category:'', increment:'0', bank_name:'', bank_branch:'', account_no:'', ifsc:'',
     joining_date:'', leaving_date:'', dob:'', gender:'', mobile:'', esi_no:'', pf_no:'',
-    uan_no:'', pan_no:'', is_active:'true',
+    uan_no:'', pan_no:'', aadhaar_no:'', is_active:'true',
     esi_applicable:'false', pf_applicable:'false', pt_applicable:'false',
     restrict_pf:'false', zone_area:'', emp_category:'', location_branch:'',
     payment_mode:'own_account', shared_with_emp_id:'',
@@ -136,7 +145,7 @@ export const EmployeeList: React.FC = () => {
         joining_date: emp.joining_date??'', leaving_date: emp.leaving_date??'',
         dob: emp.dob??'', gender: emp.gender??'',
         mobile: emp.mobile??'', esi_no: emp.esi_no??'', pf_no: emp.pf_no??'',
-        uan_no: emp.uan_no??'', pan_no: emp.pan_no??'',
+        uan_no: emp.uan_no??'', pan_no: emp.pan_no??'', aadhaar_no: emp.aadhaar_no??'',
         is_active: emp.is_active?'true':'false',
         esi_applicable: emp.esi_applicable?'true':'false',
         pf_applicable: emp.pf_applicable?'true':'false',
@@ -153,7 +162,7 @@ export const EmployeeList: React.FC = () => {
       setForm({emp_id:'',name:'',designation:'',farm_id:'',department:'',
         base_salary:'',basic_rate:'',hra_rate:'',allowance_rate:'',skill_category:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
         joining_date:'',leaving_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',
-        uan_no:'',pan_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
+        uan_no:'',pan_no:'',aadhaar_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
         restrict_pf:'false',zone_area:'',emp_category:'',location_branch:'',
         payment_mode:'own_account',shared_with_emp_id:''})
     }
@@ -164,6 +173,7 @@ export const EmployeeList: React.FC = () => {
     mutationFn: async () => {
       if (!form.name || !form.farm_id) throw new Error('Name and site required')
       const ifscErr = ifscError(form.ifsc); if (ifscErr) throw new Error(ifscErr)
+      const aadErr = aadhaarError(form.aadhaar_no); if (aadErr) throw new Error(aadErr)
       const acctErr = accountNoError(form.account_no); if (acctErr) throw new Error(acctErr)
       const payload = {
         emp_id: form.emp_id || null, name: form.name, designation: form.designation || null,
@@ -182,6 +192,7 @@ export const EmployeeList: React.FC = () => {
         // UAN and PF No are merged into one — keep pf_no in sync for older reports
         uan_no: form.uan_no || null, pf_no: form.uan_no || null,
         pan_no: form.pan_no ? form.pan_no.toUpperCase() : null,
+        aadhaar_no: form.aadhaar_no ? form.aadhaar_no.replace(/\D/g, '') : null,
         is_active: form.is_active === 'true',
         esi_applicable: form.esi_applicable === 'true',
         pf_applicable: form.pf_applicable === 'true',
@@ -267,6 +278,9 @@ export const EmployeeList: React.FC = () => {
       gender: r.gender || null,
       dob: r.dob || null,
       esi_no: r.esi_no || null,
+      // Spreadsheets often hold Aadhaar grouped "1234 5678 9012"; store bare digits.
+      aadhaar_no: r.aadhaar_no ? String(r.aadhaar_no).replace(/\D/g, '') : null,
+      pan_no: r.pan_no ? String(r.pan_no).toUpperCase() : null,
       uan_no: r.uan_no || null,
       pf_no: r.uan_no || null,
       bank_name: r.bank_name || null,
@@ -310,8 +324,8 @@ export const EmployeeList: React.FC = () => {
 
   const downloadTemplate = () => {
     exportCSV('employees_template.csv',
-      ['emp_id','name','designation','department','farm_name','base_salary','increment','mobile','gender','dob','esi_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
-      [['BPS4001','John Doe','Helper','Poultry','Farm Name Here','8000','0','9876543210','Male','1990-01-15','','','SBI','Main Branch','123456789','SBIN0001234','2024-01-01','','Yes','Yes','No','Active']]
+      ['emp_id','name','designation','department','farm_name','base_salary','increment','mobile','gender','dob','aadhaar_no','pan_no','esi_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
+      [['BPS4001','John Doe','Helper','Poultry','Farm Name Here','8000','0','9876543210','Male','1990-01-15','234567890123','ABCDE1234F','','','SBI','Main Branch','123456789','SBIN0001234','2024-01-01','','Yes','Yes','No','Active']]
     )
   }
 
@@ -322,7 +336,10 @@ export const EmployeeList: React.FC = () => {
   // Client-side filtering: search + gender + designation + status + statutory
   const q = search.trim().toLowerCase()
   const filteredEmps = (employees??[]).filter((e:any)=>{
-    if (q && !(`${e.name??''} ${e.emp_id??''} ${e.mobile??''} ${e.designation??''} ${e.department??''}`.toLowerCase().includes(q))) return false
+    // Aadhaar/PAN included so a card or a payroll query can be looked up
+    // directly; the Aadhaar digits are searched bare AND grouped, so typing it
+    // either way finds the person.
+    if (q && !(`${e.name??''} ${e.emp_id??''} ${e.mobile??''} ${e.designation??''} ${e.department??''} ${e.pan_no??''} ${e.aadhaar_no??''} ${fmtAadhaar(e.aadhaar_no)}`.toLowerCase().includes(q))) return false
     if (genderFilter && (e.gender??'')!==genderFilter) return false
     if (desigFilter && (e.designation??'')!==desigFilter) return false
     if (statusFilter==='active' && !e.is_active) return false
@@ -340,10 +357,10 @@ export const EmployeeList: React.FC = () => {
 
   const exportEmployees = () => {
     exportCSV(`employees_${new Date().toISOString().slice(0,10)}.csv`,
-      ['emp_id','name','designation','department','site','gender','dob','mobile','base_salary','increment','esi_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
+      ['emp_id','name','designation','department','site','gender','dob','mobile','aadhaar_no','pan_no','base_salary','increment','esi_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
       filteredEmps.map((e:any)=>[
         e.emp_id, e.name, e.designation, e.department, e.farms?.name,
-        e.gender, e.dob, e.mobile, e.base_salary, e.increment,
+        e.gender, e.dob, e.mobile, fmtAadhaar(e.aadhaar_no), e.pan_no, e.base_salary, e.increment,
         e.esi_no, e.uan_no, e.bank_name, e.bank_branch, e.account_no, e.ifsc,
         e.joining_date, e.leaving_date,
         e.esi_applicable?'Yes':'No', e.pf_applicable?'Yes':'No', e.pt_applicable?'Yes':'No',
@@ -356,9 +373,9 @@ export const EmployeeList: React.FC = () => {
     printReport({
       title: 'Employee List',
       subtitle: `${filteredEmps.length} employee(s)`,
-      headers: ['Emp ID','Name','Designation','Site','Gender','Mobile','Base Salary','Status'],
-      rows: filteredEmps.map((e:any)=>[e.emp_id, e.name, e.designation, e.farms?.name, e.gender, e.mobile, e.base_salary, e.is_active?'Active':'Left']),
-      rightAlignFrom: 6,
+      headers: ['Emp ID','Name','Designation','Site','Gender','Mobile','Aadhaar','Base Salary','Status'],
+      rows: filteredEmps.map((e:any)=>[e.emp_id, e.name, e.designation, e.farms?.name, e.gender, e.mobile, fmtAadhaar(e.aadhaar_no), e.base_salary, e.is_active?'Active':'Left']),
+      rightAlignFrom: 7,
     })
   }
 
@@ -429,6 +446,7 @@ export const EmployeeList: React.FC = () => {
               <thead><tr>
                 <Th><CB checked={farmAllSel} indeterminate={farmSomeSel&&!farmAllSel} onChange={toggleFarm}/></Th>
                 <Th>Emp ID</Th><Th>Name</Th><Th>Designation</Th><Th>Dept</Th><Th>Joined</Th><Th>Gender</Th><Th>Mobile</Th>
+                <Th>Aadhaar</Th>
                 <Th right>Basic Salary</Th><Th right>Increment</Th>
                 <Th>Bank</Th><Th>ESI/PF</Th><Th>Status</Th><Th></Th>
               </tr></thead>
@@ -445,6 +463,7 @@ export const EmployeeList: React.FC = () => {
                   </Td>
                   <Td className="text-xs">{e.gender??'—'}</Td>
                   <Td className="text-xs">{e.mobile??'—'}</Td>
+                  <Td className="text-xs whitespace-nowrap">{fmtAadhaar(e.aadhaar_no)}</Td>
                   <Td right>{e.base_salary?inr(e.base_salary):'—'}</Td>
                   <Td right className="text-xs">{e.increment?inr(e.increment):'—'}</Td>
                   <Td className="text-xs">{e.bank_name??'—'}</Td>
@@ -595,6 +614,9 @@ export const EmployeeList: React.FC = () => {
           </FormRow>
           <FormRow>
             <Input label="PAN No." value={form.pan_no} onChange={e=>s('pan_no',e.target.value.toUpperCase())} hint="Required for TDS Payable report" />
+            <Input label="Aadhaar No." value={form.aadhaar_no}
+              onChange={e=>s('aadhaar_no', e.target.value.replace(/[^0-9 ]/g, '').slice(0, 14))}
+              hint="12 digits" error={aadhaarError(form.aadhaar_no) ?? undefined} />
           </FormRow>
           <FormRow>
             <Select label="Salary Payment Mode"
