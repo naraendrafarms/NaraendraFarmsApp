@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
-import { printReport } from '@/lib/invoicePrint'
+import { printReport, printMultiReport, type PrintSection } from '@/lib/invoicePrint'
 import { Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput, Modal, FormRow } from '@/components/ui'
 import { Download, Printer, Trash2, Link2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -167,6 +167,7 @@ export const ChallanPickerModal: React.FC<{
 }
 
 export const TDSPayable: React.FC = () => {
+  const [printScope, setPrintScope] = useState<'both'|'vendor'|'salary'>('both')
   const [search, setSearch] = useState('')
   const [depositFilter, setDepositFilter] = useState('')
   const [sortKey, setSortKey] = useState<string>('date')
@@ -454,56 +455,96 @@ export const TDSPayable: React.FC = () => {
   // Printable TDS Payable on the company letterhead. Prints exactly what the
   // FY / date / rate / status filters are showing — vendor TDS and salary TDS
   // are separate sources, so each prints as its own statement.
+  // Section builders — shared by the individual and combined prints so the
+  // two can never drift apart.
+  const vendorSection = (rows: any[]): PrintSection => ({
+    heading: `Vendor TDS — ${rows.length} bill(s)`,
+    headers: ['Date', 'Vendor', 'PAN', 'GRN #', 'Invoice #', 'Section', 'Invoice Amt', 'TDS %', 'TDS Amt', 'Deposit Status'],
+    rightAlignFrom: 6,
+    rows: rows.map((r: any) => [
+      refDate(r) ? fmtDate(refDate(r)) : '',
+      r.vendor_name ?? '',
+      pan(r) || '—',
+      r.grn_no ?? '—',
+      r.invoice_no ?? '—',
+      r.tds_section ?? '—',
+      inr(r.invoice_amount ?? 0),
+      effPct(r) ? `${effPct(r)}%` : '—',
+      inr(r.tds_amount ?? 0),
+      r.tds_deposited ? `Deposited${r.tds_deposit_date ? ' ' + fmtDate(r.tds_deposit_date) : ''}` : 'Not deposited',
+    ]),
+    footerRow: ['TOTAL', '', '', '', '', `${rows.length} bill(s)`,
+      inr(rows.reduce((a: number, r: any) => a + (r.invoice_amount ?? 0), 0)), '',
+      inr(rows.reduce((a: number, r: any) => a + (r.tds_amount ?? 0), 0)), ''],
+    emptyNote: 'No vendor TDS for this period.',
+  })
+
+  const salarySection = (rows: any[]): PrintSection => ({
+    heading: `Salary TDS — ${rows.length} record(s)`,
+    headers: ['Month', 'Employee', 'Emp ID', 'Site', 'PAN', 'Section', 'TDS Amt', 'Interest', 'Deposit Status'],
+    rightAlignFrom: 6,
+    rows: rows.map((r: any) => [
+      r.month ? fmtDate(r.month) : '',
+      r.employees?.name ?? '',
+      r.employees?.emp_id ?? '—',
+      r.employees?.farms?.name ?? '—',
+      r.employees?.pan_no ?? '—',
+      r.tds_section ?? '—',
+      inr(r.tds ?? 0),
+      inr(r.tds_interest ?? 0),
+      r.tds_deposited ? `Deposited${r.tds_deposit_date ? ' ' + fmtDate(r.tds_deposit_date) : ''}` : 'Not deposited',
+    ]),
+    footerRow: ['TOTAL', '', '', '', '', `${rows.length} record(s)`,
+      inr(rows.reduce((a: number, r: any) => a + (r.tds ?? 0), 0)), '', ''],
+    emptyNote: 'No salary TDS for this period.',
+  })
+
   const periodLabel = () => {
     if (fy) return `FY ${fy}`
     if (dateFrom || dateTo) return `${dateFrom ? fmtDate(dateFrom) : 'Start'} to ${dateTo ? fmtDate(dateTo) : 'Today'}`
     return 'All dates'
   }
 
-  const printVendorTds = () => {
-    if (!filtered.length) { toast.error('Nothing to print for this period'); return }
-    printReport({
-      title: 'TDS Payable — Vendor',
-      subtitle: `${periodLabel()} · ${filtered.length} bill(s)`,
-      headers: ['Date', 'Vendor', 'PAN', 'GRN #', 'Invoice #', 'Section', 'Invoice Amt', 'TDS %', 'TDS Amt', 'Deposit Status'],
-      rightAlignFrom: 6,
-      rows: filtered.map((r: any) => [
-        refDate(r) ? fmtDate(refDate(r)) : '',
-        r.vendor_name ?? '',
-        r.pan_no ?? r.parties?.pan_no ?? '—',
-        r.grn_no ?? '—',
-        r.invoice_no ?? '—',
-        r.tds_section ?? '—',
-        inr(r.invoice_amount ?? 0),
-        (r.tds_pct ?? 0) > 0 ? `${r.tds_pct}%` : '—',
-        inr(r.tds_amount ?? 0),
-        r.tds_deposited ? `Deposited${r.tds_deposit_date ? ' ' + fmtDate(r.tds_deposit_date) : ''}` : 'Not deposited',
-      ]),
-      footerRow: ['TOTAL', '', '', '', '', `${filtered.length} bill(s)`,
-        inr(totalInvoice), '', inr(totalTDS), ''],
-    })
-  }
+  const handlePrint = () => {
+    // Ticking rows narrows the vendor sheet to just those — handy when filing
+    // one challan's worth of deductees.
+    const vRows = selectedRows.length ? selectedRows : filtered
+    const sRows = filteredSalary
+    const selNote = selectedRows.length ? ` · ${selectedRows.length} selected row(s)` : ''
 
-  const printSalaryTds = () => {
-    if (!filteredSalary.length) { toast.error('No salary TDS for this period'); return }
-    printReport({
-      title: 'TDS Payable — Salary',
-      subtitle: `${periodLabel()} · ${filteredSalary.length} record(s)`,
-      headers: ['Month', 'Employee', 'Emp ID', 'Site', 'PAN', 'Section', 'TDS Amt', 'Interest', 'Deposit Status'],
-      rightAlignFrom: 6,
-      rows: filteredSalary.map((r: any) => [
-        r.month ? fmtDate(r.month) : '',
-        r.employees?.name ?? '',
-        r.employees?.emp_id ?? '—',
-        r.employees?.farms?.name ?? '—',
-        r.employees?.pan_no ?? '—',
-        r.tds_section ?? '—',
-        inr(r.tds ?? 0),
-        inr(r.tds_interest ?? 0),
-        r.tds_deposited ? `Deposited${r.tds_deposit_date ? ' ' + fmtDate(r.tds_deposit_date) : ''}` : 'Not deposited',
-      ]),
-      footerRow: ['TOTAL', '', '', '', '', `${filteredSalary.length} record(s)`,
-        inr(totalSalaryTDS), '', ''],
+    if (printScope === 'vendor') {
+      if (!vRows.length) { toast.error('No vendor TDS to print for this period'); return }
+      printMultiReport({
+        title: 'TDS Payable — Vendor',
+        subtitle: `${periodLabel()}${selNote}`,
+        sections: [vendorSection(vRows)],
+        grandTotalLabel: 'TOTAL VENDOR TDS',
+        grandTotalValue: inr(vRows.reduce((a: number, r: any) => a + (r.tds_amount ?? 0), 0)),
+      })
+      return
+    }
+    if (printScope === 'salary') {
+      if (!sRows.length) { toast.error('No salary TDS to print for this period'); return }
+      printMultiReport({
+        title: 'TDS Payable — Salary',
+        subtitle: periodLabel(),
+        sections: [salarySection(sRows)],
+        grandTotalLabel: 'TOTAL SALARY TDS',
+        grandTotalValue: inr(sRows.reduce((a: number, r: any) => a + (r.tds ?? 0), 0)),
+      })
+      return
+    }
+    // Combined — both sheets on one document with a single grand total, which
+    // is what actually gets deposited for the period.
+    if (!vRows.length && !sRows.length) { toast.error('Nothing to print for this period'); return }
+    const grand = vRows.reduce((a: number, r: any) => a + (r.tds_amount ?? 0), 0)
+      + sRows.reduce((a: number, r: any) => a + (r.tds ?? 0), 0)
+    printMultiReport({
+      title: 'TDS Payable — Vendor & Salary',
+      subtitle: `${periodLabel()}${selNote}`,
+      sections: [vendorSection(vRows), salarySection(sRows)],
+      grandTotalLabel: 'GRAND TOTAL TDS PAYABLE (Vendor + Salary)',
+      grandTotalValue: inr(grand),
     })
   }
 
@@ -652,8 +693,13 @@ export const TDSPayable: React.FC = () => {
               onClick={() => { setSearch(''); setDepositFilter(''); setRateFilter(''); setStatusFilter('') }}>Clear</Button>
           )}
           <Button size="sm" variant="outline" onClick={exportXlsx}><Download size={14} className="mr-1" />Export</Button>
-          <Button size="sm" variant="outline" onClick={printVendorTds}><Printer size={14} className="mr-1" />Print Vendor</Button>
-          <Button size="sm" variant="outline" onClick={printSalaryTds}><Printer size={14} className="mr-1" />Print Salary</Button>
+          <Select label="Print" value={printScope} onChange={e => setPrintScope(e.target.value as any)}
+            options={[
+              { value: 'both',   label: 'Vendor + Salary' },
+              { value: 'vendor', label: 'Vendor only' },
+              { value: 'salary', label: 'Salary only' },
+            ]} />
+          <Button size="sm" variant="outline" onClick={handlePrint}><Printer size={14} className="mr-1" />Print</Button>
         </div>
       </Card>
 

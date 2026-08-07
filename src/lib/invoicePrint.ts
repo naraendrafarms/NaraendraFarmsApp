@@ -700,6 +700,75 @@ export function printNHESale(d: NHESaleRecord) {
 }
 
 // ── Purchase GRN ──────────────────────────────────────────────────────────────
+// ── Multi-section report print ────────────────────────────────────────────
+// One letterhead document holding several tables, each with its own heading
+// and totals, plus an optional grand total across all of them. Used where two
+// related sets belong on one sheet (e.g. TDS Payable: vendor TDS and salary
+// TDS are different sources but are filed and paid together).
+export interface PrintSection {
+  heading: string
+  headers: string[]
+  rows: (string | number | null | undefined)[][]
+  rightAlignFrom?: number
+  footerRow?: (string | number | null | undefined)[]
+  emptyNote?: string
+}
+export function printMultiReport(opts: {
+  title: string
+  subtitle?: string
+  sections: PrintSection[]
+  grandTotalLabel?: string
+  grandTotalValue?: string
+}) {
+  const { title, subtitle, sections, grandTotalLabel, grandTotalValue } = opts
+  const body = sections.map(sec => {
+    if (!sec.rows.length) {
+      return `<div class="section"><div class="label">${sec.heading}</div>
+        <div class="box"><span class="sub">${sec.emptyNote ?? 'No entries for this period.'}</span></div></div>`
+    }
+    const thead = sec.headers.map(h => `<th>${h}</th>`).join('')
+    const tbody = sec.rows.map(r => `<tr>${r.map((c, i) =>
+      `<td${sec.rightAlignFrom != null && i >= sec.rightAlignFrom ? ' style="text-align:right"' : ''}>${c ?? ''}</td>`
+    ).join('')}</tr>`).join('')
+    const tfoot = sec.footerRow ? `<tfoot><tr class="total-row">${sec.footerRow.map((c, i) =>
+      `<td${sec.rightAlignFrom != null && i >= sec.rightAlignFrom ? ' style="text-align:right"' : ''}>${c ?? ''}</td>`
+    ).join('')}</tr></tfoot>` : ''
+    return `<div class="section">
+      <div class="label">${sec.heading}</div>
+      <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody>${tfoot}</table>
+    </div>`
+  }).join('')
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+    <div class="header">
+      <div>
+        <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>
+        <div class="sub">${CO.addr1}</div>
+        <div class="sub">${CO.addr2}, ${CO.state} — ${CO.stateCode}</div>
+        <div class="sub">GSTIN: ${CO.gstin} · Ph: ${CO.phone}</div>
+      </div>
+      <div class="header-right">
+        <h2>${title}</h2>
+        ${subtitle ? `<div class="sub">${subtitle}</div>` : ''}
+        <div class="sub">Printed: ${new Date().toLocaleString('en-IN')}</div>
+      </div>
+    </div>
+    ${body}
+    ${grandTotalValue ? `<div class="section"><table><tfoot><tr class="total-row">
+        <td class="tr">${grandTotalLabel ?? 'GRAND TOTAL'}</td>
+        <td class="tr" style="width:160px">${grandTotalValue}</td>
+      </tr></tfoot></table></div>` : ''}
+    <div class="sign-row-4">
+      <div>Prepared By</div>
+      <div>Checked By</div>
+      <div>Approved By</div>
+      <div>Accounts</div>
+    </div>
+  </body></html>`
+  openPrint(html)
+}
+
 // ── Bank Ledger statement print ───────────────────────────────────────────
 // One account per print (the page shows one at a time), so Kotak and every
 // other account produce their own statement. Honours whatever period is
