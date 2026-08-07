@@ -12,12 +12,21 @@ const CO = {
   state: 'Telangana',
   stateCode: '36',
   gstin: '36ABJFM1393C1ZC',
+  // PAN is the middle 10 characters of the GSTIN; TAN is separate and is
+  // required on TDS statements.
+  pan: 'ABJFM1393C',
+  tan: 'HYDN08964E',
   phone: '+91 73370 83931',
   bank: 'Kotak Mahindra Bank Ltd',
   acNo: '0045360473 (CC A/c)',
   ifsc: 'KKBK0007463',
   branch: 'Himayat Nagar',
 }
+
+// Exposed so pages can put the deductor's identifiers on a statement without
+// duplicating them.
+export const CO_PAN = CO.pan
+export const CO_TAN = CO.tan
 
 function openPrint(html: string) {
   const win = window.open('', '_blank', 'width=900,height=700')
@@ -719,8 +728,11 @@ export function printMultiReport(opts: {
   sections: PrintSection[]
   grandTotalLabel?: string
   grandTotalValue?: string
+  // Extra identification line under the address — statutory statements need
+  // the deductor's PAN and TAN on the face of the document.
+  headerNote?: string
 }) {
-  const { title, subtitle, sections, grandTotalLabel, grandTotalValue } = opts
+  const { title, subtitle, sections, grandTotalLabel, grandTotalValue, headerNote } = opts
   const body = sections.map(sec => {
     if (!sec.rows.length) {
       return `<div class="section"><div class="label">${sec.heading}</div>
@@ -747,6 +759,7 @@ export function printMultiReport(opts: {
         <div class="sub">${CO.addr1}</div>
         <div class="sub">${CO.addr2}, ${CO.state} — ${CO.stateCode}</div>
         <div class="sub">GSTIN: ${CO.gstin} · Ph: ${CO.phone}</div>
+        ${headerNote ? `<div class="sub">${headerNote}</div>` : ''}
       </div>
       <div class="header-right">
         <h2>${title}</h2>

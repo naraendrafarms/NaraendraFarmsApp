@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
-import { printReport, printMultiReport, type PrintSection } from '@/lib/invoicePrint'
+import { printReport, printMultiReport, CO_PAN, CO_TAN, type PrintSection } from '@/lib/invoicePrint'
 import { Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput, Modal, FormRow } from '@/components/ui'
 import { Download, Printer, Trash2, Link2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -167,7 +167,7 @@ export const ChallanPickerModal: React.FC<{
 }
 
 export const TDSPayable: React.FC = () => {
-  const [printScope, setPrintScope] = useState<'both'|'vendor'|'salary'>('both')
+  const [printScope, setPrintScope] = useState<'statement'|'both'|'vendor'|'salary'>('statement')
   const [search, setSearch] = useState('')
   const [depositFilter, setDepositFilter] = useState('')
   const [sortKey, setSortKey] = useState<string>('date')
@@ -505,6 +505,120 @@ export const TDSPayable: React.FC = () => {
     return 'All dates'
   }
 
+  // ── Statutory statement format ────────────────────────────────────────────
+  // The layout used for the monthly TDS working: one "TDS Deducted Details"
+  // table listing every deductee (vendor bills and salary together, since the
+  // challan covers both), then a summary grouped by deductee type and section
+  // — which is exactly how the challan is filed.
+
+  // "Jul-26"
+  const monthLabel = (d: string | null | undefined) => {
+    if (!d) return ''
+    const [y, m] = d.split('T')[0].split('-')
+    const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    return `${names[Number(m) - 1]}-${y.slice(2)}`
+  }
+
+  // The "Type" column is not stored separately — it is what the TDS section
+  // already means (1002 = Salary, 1031 = Purchase, and so on), so it is read
+  // from the section master rather than asking for it twice.
+  const natureOfPayment = (code: string | null | undefined) => {
+    switch (code) {
+      case '1002': return 'Salary'
+      case '1023': return 'Transport'
+      case '1027': return 'Service'
+      case '1031': case '194Q': return 'Purchase'
+      case '1067': return 'Partner Remuneration'
+      default: return code ? sectionLabel(code).replace(/\s*\(Section.*\)$/, '') : '—'
+    }
+  }
+
+  // Challan deductee codes. Employees are individuals, so salary rows are
+  // always non-company.
+  const deducteeCode = (r: any, isSalary: boolean) => {
+    const t = isSalary ? 'Non-Company' : deducteeType(r)
+    return String(t).toLowerCase().startsWith('company')
+      ? '(0020) Company Deduction'
+      : '(0021) NON Company Deduction'
+  }
+
+  type StmtLine = {
+    name: string; nature: string; month: string; amount: number
+    tds: number; rate: string; interest: number; section: string
+    deductee: string; pan: string
+  }
+
+  const statementLines = (vRows: any[], sRows: any[]): StmtLine[] => [
+    ...vRows.map((r: any) => ({
+      name: r.vendor_name ?? '',
+      nature: natureOfPayment(r.tds_section),
+      month: monthLabel(refDate(r)),
+      // The gross amount the deduction was computed on.
+      amount: r.invoice_amount ?? 0,
+      tds: r.tds_amount ?? 0,
+      rate: effPct(r) ? `${effPct(r)}%` : '',
+      interest: r.tds_interest ?? 0,
+      section: r.tds_section ?? '',
+      deductee: deducteeCode(r, false),
+      pan: pan(r) || '',
+    })),
+    ...sRows.map((r: any) => ({
+      name: r.employees?.name ?? '',
+      nature: natureOfPayment(r.tds_section) || 'Salary',
+      month: monthLabel(r.month),
+      amount: r.earned_salary ?? 0,
+      tds: r.tds ?? 0,
+      rate: '',
+      interest: r.tds_interest ?? 0,
+      section: r.tds_section ?? '',
+      deductee: deducteeCode(r, true),
+      pan: r.employees?.pan_no ?? '',
+    })),
+  ]
+
+  const detailsSection = (lines: StmtLine[]): PrintSection => ({
+    heading: 'TDS Deducted Details',
+    headers: ['S.No', 'Name of Deductee', 'Nature of Payment', 'Month', 'Total Amount',
+              'TDS Deducted', 'TDS Rate', 'Interest', 'Section', 'Deductee Type', 'PAN No'],
+    rightAlignFrom: 4,
+    rows: lines.map((l, i) => [
+      i + 1, l.name, l.nature, l.month, inr(l.amount), inr(l.tds),
+      l.rate || '—', inr(l.interest), l.section || '—', l.deductee, l.pan || '—',
+    ]),
+    footerRow: ['', 'Total', '', '',
+      inr(lines.reduce((a, l) => a + l.amount, 0)),
+      inr(lines.reduce((a, l) => a + l.tds, 0)), '',
+      inr(lines.reduce((a, l) => a + l.interest, 0)), '', '', ''],
+    emptyNote: 'No TDS deducted in this period.',
+  })
+
+  // Grouped exactly the way the challan is filed: one line per deductee type
+  // AND section, because those two together decide which challan it goes on.
+  const summarySection = (lines: StmtLine[]): PrintSection => {
+    const map: Record<string, { deductee: string; section: string; tax: number; interest: number }> = {}
+    lines.forEach(l => {
+      const key = `${l.deductee}||${l.section}`
+      if (!map[key]) map[key] = { deductee: l.deductee, section: l.section || '—', tax: 0, interest: 0 }
+      map[key].tax += l.tds
+      map[key].interest += l.interest
+    })
+    const groups = Object.values(map).sort((a, b) =>
+      a.deductee.localeCompare(b.deductee) || a.section.localeCompare(b.section))
+    return {
+      heading: `Summary of TDS — ${periodLabel()}`,
+      headers: ['S.No', 'Type of Deduction', 'TDS Section', 'Total Tax', 'Interest', 'Total TDS Payable'],
+      rightAlignFrom: 3,
+      rows: groups.map((g, i) => [
+        i + 1, g.deductee, g.section, inr(g.tax), inr(g.interest), inr(g.tax + g.interest),
+      ]),
+      footerRow: ['', 'TOTAL', '',
+        inr(groups.reduce((a, g) => a + g.tax, 0)),
+        inr(groups.reduce((a, g) => a + g.interest, 0)),
+        inr(groups.reduce((a, g) => a + g.tax + g.interest, 0))],
+      emptyNote: 'Nothing to summarise for this period.',
+    }
+  }
+
   const handlePrint = () => {
     // Ticking rows narrows the vendor sheet to just those — handy when filing
     // one challan's worth of deductees.
@@ -512,6 +626,19 @@ export const TDSPayable: React.FC = () => {
     const sRows = filteredSalary
     const selNote = selectedRows.length ? ` · ${selectedRows.length} selected row(s)` : ''
 
+    if (printScope === 'statement') {
+      const lines = statementLines(vRows, sRows)
+      if (!lines.length) { toast.error('Nothing to print for this period'); return }
+      printMultiReport({
+        title: 'TDS Deducted — Statement',
+        subtitle: `${periodLabel()}${selNote}`,
+        headerNote: `PAN: ${CO_PAN} · TAN: ${CO_TAN}`,
+        sections: [detailsSection(lines), summarySection(lines)],
+        grandTotalLabel: 'TOTAL TDS PAYABLE',
+        grandTotalValue: inr(lines.reduce((a, l) => a + l.tds + l.interest, 0)),
+      })
+      return
+    }
     if (printScope === 'vendor') {
       if (!vRows.length) { toast.error('No vendor TDS to print for this period'); return }
       printMultiReport({
@@ -695,7 +822,8 @@ export const TDSPayable: React.FC = () => {
           <Button size="sm" variant="outline" onClick={exportXlsx}><Download size={14} className="mr-1" />Export</Button>
           <Select label="Print" value={printScope} onChange={e => setPrintScope(e.target.value as any)}
             options={[
-              { value: 'both',   label: 'Vendor + Salary' },
+              { value: 'statement', label: 'TDS Statement (Deducted + Summary)' },
+    { value: 'both',   label: 'Vendor + Salary' },
               { value: 'vendor', label: 'Vendor only' },
               { value: 'salary', label: 'Salary only' },
             ]} />
