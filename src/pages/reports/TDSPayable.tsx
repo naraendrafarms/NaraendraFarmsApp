@@ -2,8 +2,9 @@ import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
+import { printReport } from '@/lib/invoicePrint'
 import { Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput, Modal, FormRow } from '@/components/ui'
-import { Download } from 'lucide-react'
+import { Download, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import toast from 'react-hot-toast'
@@ -368,6 +369,62 @@ export const TDSPayable: React.FC = () => {
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
   }, [filtered, filteredSalary])
 
+  // Printable TDS Payable on the company letterhead. Prints exactly what the
+  // FY / date / rate / status filters are showing — vendor TDS and salary TDS
+  // are separate sources, so each prints as its own statement.
+  const periodLabel = () => {
+    if (fy) return `FY ${fy}`
+    if (dateFrom || dateTo) return `${dateFrom ? fmtDate(dateFrom) : 'Start'} to ${dateTo ? fmtDate(dateTo) : 'Today'}`
+    return 'All dates'
+  }
+
+  const printVendorTds = () => {
+    if (!filtered.length) { toast.error('Nothing to print for this period'); return }
+    printReport({
+      title: 'TDS Payable — Vendor',
+      subtitle: `${periodLabel()} · ${filtered.length} bill(s)`,
+      headers: ['Date', 'Vendor', 'PAN', 'GRN #', 'Invoice #', 'Section', 'Invoice Amt', 'TDS %', 'TDS Amt', 'Deposit Status'],
+      rightAlignFrom: 6,
+      rows: filtered.map((r: any) => [
+        r.grn_date ? fmtDate(r.grn_date) : '',
+        r.vendor_name ?? '',
+        r.pan_no ?? r.parties?.pan_no ?? '—',
+        r.grn_no ?? '—',
+        r.invoice_no ?? '—',
+        r.tds_section ?? '—',
+        inr(r.invoice_amount ?? 0),
+        (r.tds_pct ?? 0) > 0 ? `${r.tds_pct}%` : '—',
+        inr(r.tds_amount ?? 0),
+        r.tds_deposited ? `Deposited${r.tds_deposit_date ? ' ' + fmtDate(r.tds_deposit_date) : ''}` : 'Not deposited',
+      ]),
+      footerRow: ['TOTAL', '', '', '', '', `${filtered.length} bill(s)`,
+        inr(totalInvoice), '', inr(totalTDS), ''],
+    })
+  }
+
+  const printSalaryTds = () => {
+    if (!filteredSalary.length) { toast.error('No salary TDS for this period'); return }
+    printReport({
+      title: 'TDS Payable — Salary',
+      subtitle: `${periodLabel()} · ${filteredSalary.length} record(s)`,
+      headers: ['Month', 'Employee', 'Emp ID', 'Site', 'PAN', 'Section', 'TDS Amt', 'Interest', 'Deposit Status'],
+      rightAlignFrom: 6,
+      rows: filteredSalary.map((r: any) => [
+        r.month ? fmtDate(r.month) : '',
+        r.employees?.name ?? '',
+        r.employees?.emp_id ?? '—',
+        r.employees?.farms?.name ?? '—',
+        r.employees?.pan_no ?? '—',
+        r.tds_section ?? '—',
+        inr(r.tds ?? 0),
+        inr(r.tds_interest ?? 0),
+        r.tds_deposited ? `Deposited${r.tds_deposit_date ? ' ' + fmtDate(r.tds_deposit_date) : ''}` : 'Not deposited',
+      ]),
+      footerRow: ['TOTAL', '', '', '', '', `${filteredSalary.length} record(s)`,
+        inr(totalSalaryTDS), '', ''],
+    })
+  }
+
   const exportXlsx = () => {
     const data = filtered.map((r: any) => ({
       Date: fmtDate(r.grn_date),
@@ -499,6 +556,8 @@ export const TDSPayable: React.FC = () => {
               { value: 'Paid', label: 'Paid' },
             ]} />
           <Button size="sm" variant="outline" onClick={exportXlsx}><Download size={14} className="mr-1" />Export</Button>
+          <Button size="sm" variant="outline" onClick={printVendorTds}><Printer size={14} className="mr-1" />Print Vendor</Button>
+          <Button size="sm" variant="outline" onClick={printSalaryTds}><Printer size={14} className="mr-1" />Print Salary</Button>
         </div>
       </Card>
 

@@ -3,8 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
 import { Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput } from '@/components/ui'
-import { Download } from 'lucide-react'
+import { Download, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { printReport } from '@/lib/invoicePrint'
 import toast from 'react-hot-toast'
 
 const TDS_RATE_OPTIONS = [
@@ -81,6 +82,39 @@ export const TDSReceivable: React.FC = () => {
   const totalTDS = filtered.reduce((s: number, r: any) => s + (r.tds_amount ?? 0), 0)
   const receivedTDS = filtered.filter((r: any) => r.payment_status === 'Received').reduce((s: number, r: any) => s + (r.tds_amount ?? 0), 0)
 
+  // Printable TDS Receivable on the company letterhead — prints exactly the
+  // rows the FY / date / rate / status filters are showing.
+  const printTds = () => {
+    if (!filtered.length) { toast.error('Nothing to print for this period'); return }
+    const period = fy ? `FY ${fy}`
+      : (dateFrom || dateTo) ? `${dateFrom ? fmtDate(dateFrom) : 'Start'} to ${dateTo ? fmtDate(dateTo) : 'Today'}`
+      : 'All dates'
+    printReport({
+      title: 'TDS Receivable',
+      subtitle: `${period} · ${filtered.length} entr${filtered.length === 1 ? 'y' : 'ies'}`,
+      headers: ['Date', 'Party', 'Flock', 'Invoice No', 'Invoice Amt', 'TDS %', 'TDS Amt', 'Status'],
+      rightAlignFrom: 4,
+      rows: filtered.map((r: any) => {
+        const pct = r.tds_pct != null && r.tds_pct > 0
+          ? r.tds_pct
+          : r.amount ? Math.round(r.tds_amount / r.amount * 1000) / 10 : null
+        return [
+          r.dispatch_date ? fmtDate(r.dispatch_date) : '',
+          (r.parties as any)?.name ?? '—',
+          (r.flocks as any)?.flock_no ? `F-${(r.flocks as any).flock_no}` : '—',
+          r.invoice_no ?? '—',
+          r.amount ? inr(r.amount) : '—',
+          pct != null ? `${pct}%` : '—',
+          inr(r.tds_amount ?? 0),
+          r.payment_status ?? '—',
+        ]
+      }),
+      footerRow: ['TOTAL', '', '', `${filtered.length} entr${filtered.length === 1 ? 'y' : 'ies'}`,
+        inr(filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)), '',
+        inr(totalTDS), ''],
+    })
+  }
+
   const exportXlsx = () => {
     const data = filtered.map((r: any) => ({
       Date: fmtDate(r.dispatch_date),
@@ -118,6 +152,7 @@ export const TDSReceivable: React.FC = () => {
               { value: 'pending', label: 'Payment Pending' },
             ]} />
           <Button size="sm" variant="outline" onClick={exportXlsx}><Download size={14} className="mr-1" />Export</Button>
+          <Button size="sm" variant="outline" onClick={printTds}><Printer size={14} className="mr-1" />Print</Button>
         </div>
       </Card>
 
