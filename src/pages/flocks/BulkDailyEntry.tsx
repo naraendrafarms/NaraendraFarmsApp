@@ -83,6 +83,16 @@ export const BulkDailyEntry: React.FC = () => {
   const feedRates = useFeedRates()
   const [date, setDate] = useState(today())
   const [saving, setSaving] = useState(false)
+  // The row grids are rebuilt from the server data. Their effects depend on
+  // React Query results, and any refetch — including the automatic one when
+  // the browser window regains focus — hands back a NEW array, re-runs the
+  // effect and overwrites whatever has been typed but not yet saved. That is
+  // silent: the figure simply reverts to the pre-filled one and Save then
+  // stores that. These two guards rebuild only when the flock/date/shed set
+  // actually changes, or when a save asks for a reload.
+  const builtShedKeyRef = useRef<string>('')
+  const builtFlockKeyRef = useRef<string>('')
+  const [rowsEpoch, setRowsEpoch] = useState(0)
 
   // ── Change Date ───────────────────────────────────────────────────────────
   // A day entered against the wrong date could previously neither be moved nor
@@ -281,12 +291,15 @@ export const BulkDailyEntry: React.FC = () => {
       }
     }
     setFlockRows(newRows)
-  }, [visibleFlocks.length, existingDR, existingMed, selectedFlock])
+  }, [visibleFlocks.length, existingDR, existingMed, selectedFlock, date, rowsEpoch])
 
   // ── Init shed rows ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedFlock || !flockSheds.length) return
     if (existingFetching) return   // keep rows intact while date is loading
+    const key = `${selectedFlock}|${date}|${flockSheds.map((s: any) => s.id).join(',')}|${rowsEpoch}`
+    if (builtShedKeyRef.current === key) return   // already built — don't clobber edits
+    builtShedKeyRef.current = key
     const newRows: Record<string, ShedRow> = {}
     for (const shed of flockSheds) {
       const dr = (existingDR ?? []).find((r: any) => r.shed_id === shed.id)
@@ -333,7 +346,7 @@ export const BulkDailyEntry: React.FC = () => {
       }
     }
     setShedRows(newRows)
-  }, [flockSheds, existingDR, existingMed, prevDR, selectedFlock])
+  }, [flockSheds, existingDR, existingMed, prevDR, selectedFlock, date, existingFetching, rowsEpoch])
 
   const updateShedRow = (id: string, field: keyof ShedRow, val: string) => {
     setShedRows(prev => {
@@ -528,6 +541,9 @@ export const BulkDailyEntry: React.FC = () => {
     qc.invalidateQueries({ queryKey: ['bulk_existing_dr', date, selectedFlock] })
     qc.invalidateQueries({ queryKey: ['bulk_existing_med', date, selectedFlock] })
     qc.invalidateQueries({ queryKey: ['flock_daily_feed', selectedFlock] })
+    // Allow one rebuild now the save is done, so newly created rows pick up
+    // their database id — without it a second Save would try to insert again.
+    setRowsEpoch(e => e + 1)
     if (errors === 0) toast.success(`Saved ${saved} shed(s) for ${date}`)
     else toast.error(`Saved ${saved} with ${errors} error(s)`)
   }
@@ -612,6 +628,7 @@ export const BulkDailyEntry: React.FC = () => {
     }
     setSaving(false)
     qc.invalidateQueries({ queryKey: ['bulk_existing_dr', date, ''] })
+    setRowsEpoch(e => e + 1)
     if (errors === 0) toast.success(`Saved ${saved} flock(s) for ${date}`)
     else toast.error(`Saved ${saved} with ${errors} error(s)`)
   }
