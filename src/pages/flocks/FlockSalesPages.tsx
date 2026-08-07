@@ -179,6 +179,11 @@ export const ReceivePaymentModal: React.FC<{
         amount_received: amt || null,
         bank_account_id: (mode !== 'Cash' && bankId) ? bankId : null,
         utr_ref: utr || null,
+        // "Cash Received At (Location)" was written to the Cash Book entry but
+        // never back to the sale, so reopening this modal always fell back to
+        // Head Office and the sale itself never recorded where cash came in.
+        // he_dispatch has no such column, so only set it for nhe_sales.
+        ...(table === 'nhe_sales' ? { cash_farm_id: mode === 'Cash' ? (cashFarmId === 'ho' ? null : cashFarmId) : null } : {}),
         // Clear any prior advance link now that this receipt is cash/bank,
         // not an advance adjustment (the reversal above already restored
         // the advance's balance).

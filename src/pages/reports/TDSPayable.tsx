@@ -195,13 +195,21 @@ export const TDSPayable: React.FC = () => {
     queryFn: () => fetchAllPages<any>((from, to) => {
       // Only require tds_amount > 0 — some bills have TDS entered as a flat
       // amount (Pending Payments edit) without a tds_pct, so don't filter on rate.
+      // Bills mirrored from Purchase Invoice Register carry invoice_date but
+      // NO grn_date (they aren't goods receipts), so filtering/sorting on
+      // grn_date alone silently dropped them from every filtered view --
+      // confirmed: 6 bills holding Rs 32,600 of TDS were invisible.
+      // tds_ref_date is a generated fallback: grn_date, else invoice_date.
+      // partners.pan is joined too: partner PAN lives in `partners.pan`,
+      // NOT `parties.pan_no`, so a partner's PAN could never be shown.
       let q = supabase.from('pending_payments')
-        .select('*, parties!party_id(pan_no,deductee_type), partners!partner_id(deductee_type)')
+        .select('*, parties!party_id(pan_no,deductee_type), partners!partner_id(pan,deductee_type)')
         .gt('tds_amount', 0)
-        .order('grn_date', { ascending: false })
+        .order('grn_date', { ascending: false, nullsFirst: false })
+        .order('invoice_date', { ascending: false })
         .range(from, to)
-      if (dateFrom) q = q.gte('grn_date', dateFrom)
-      if (dateTo) q = q.lte('grn_date', dateTo)
+      if (dateFrom) q = q.or(`grn_date.gte.${dateFrom},and(grn_date.is.null,invoice_date.gte.${dateFrom})`)
+      if (dateTo) q = q.or(`grn_date.lte.${dateTo},and(grn_date.is.null,invoice_date.lte.${dateTo})`)
       return q
     }, 'Pending Payments (TDS)', toast.error),
     staleTime: 60_000,
@@ -224,7 +232,15 @@ export const TDSPayable: React.FC = () => {
     staleTime: 60_000,
   })
 
-  const pan = (r: any) => r.parties?.pan_no ?? r.employees?.pan_no ?? ''
+  // The date TDS is reckoned from: goods-receipt date for GRN bills, invoice
+  // date for bills that came from Purchase Invoice Register (no GRN). Used
+  // for display, the TDS due date, exports and the print — otherwise those
+  // bills showed a blank date and no due date at all.
+  const refDate = (r: any) => r.grn_date ?? r.invoice_date ?? null
+
+  // partners.pan is a different column name from parties.pan_no — both are
+  // checked so supplier, partner and employee PANs all resolve.
+  const pan = (r: any) => r.parties?.pan_no ?? r.partners?.pan ?? r.employees?.pan_no ?? ''
   const deducteeType = (r: any) => r.parties?.deductee_type ?? r.partners?.deductee_type ?? 'Non-Company'
 
   // TDS deducted in month M is due to the government by the 7th of month
@@ -386,7 +402,7 @@ export const TDSPayable: React.FC = () => {
       headers: ['Date', 'Vendor', 'PAN', 'GRN #', 'Invoice #', 'Section', 'Invoice Amt', 'TDS %', 'TDS Amt', 'Deposit Status'],
       rightAlignFrom: 6,
       rows: filtered.map((r: any) => [
-        r.grn_date ? fmtDate(r.grn_date) : '',
+        refDate(r) ? fmtDate(refDate(r)) : '',
         r.vendor_name ?? '',
         r.pan_no ?? r.parties?.pan_no ?? '—',
         r.grn_no ?? '—',
@@ -427,7 +443,7 @@ export const TDSPayable: React.FC = () => {
 
   const exportXlsx = () => {
     const data = filtered.map((r: any) => ({
-      Date: fmtDate(r.grn_date),
+      Date: refDate(r) ? fmtDate(refDate(r)) : '',
       Vendor: r.vendor_name ?? '',
       'GRN #': r.grn_no ?? '',
       'Invoice #': r.invoice_no ?? '',
@@ -440,7 +456,7 @@ export const TDSPayable: React.FC = () => {
       'Deductee Type': deducteeType(r),
       'TDS Section': r.tds_section ?? '',
       'TDS Interest': r.tds_interest ?? 0,
-      'TDS Due Date': tdsDueDate(r.grn_date) ? fmtDate(tdsDueDate(r.grn_date)) : '',
+      'TDS Due Date': tdsDueDate(refDate(r)) ? fmtDate(tdsDueDate(refDate(r))!) : '',
       'TDS Deposit Status': r.tds_deposited ? 'Deposited' : (isOverdue(r, 'grn_date') ? 'Overdue' : 'Pending'),
       'TDS Deposit Date': r.tds_deposit_date ? fmtDate(r.tds_deposit_date) : '',
     }))
@@ -505,7 +521,7 @@ export const TDSPayable: React.FC = () => {
       Name: r.vendor_name ?? '',
       'Deductee Type': deducteeType(r),
       Section: r.tds_section ?? '',
-      'Date of Payment/Credit': r.grn_date ? fmtDate(r.grn_date) : '',
+      'Date of Payment/Credit': refDate(r) ? fmtDate(refDate(r)) : '',
       'Amount Paid/Credited': r.invoice_amount ?? 0,
       'TDS Amount': r.tds_amount ?? 0,
       'Rate (%)': effPct(r),
@@ -644,11 +660,11 @@ export const TDSPayable: React.FC = () => {
                   ? <tr><td colSpan={15} className="text-center py-8 text-gray-400 text-sm">No TDS entries found</td></tr>
                   : filtered.map((r: any) => {
                       const netPay = r.net_payable ?? (r.invoice_amount ?? 0) - (r.tds_amount ?? 0)
-                      const due = tdsDueDate(r.grn_date)
+                      const due = tdsDueDate(refDate(r))
                       const overdue = isOverdue(r, 'grn_date')
                       return (
                         <tr key={r.id} className="hover:bg-gray-50">
-                          <Td className="text-xs">{r.grn_date ? fmtDate(r.grn_date) : '—'}</Td>
+                          <Td className="text-xs">{refDate(r) ? fmtDate(refDate(r)) : '—'}</Td>
                           <Td className="text-xs font-medium">{r.vendor_name ?? '—'}</Td>
                           <Td className="text-xs font-mono">{r.grn_no ?? '—'}</Td>
                           <Td className="text-xs font-medium text-blue-700">{r.invoice_no ?? '—'}</Td>
