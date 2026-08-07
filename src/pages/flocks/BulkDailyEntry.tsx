@@ -104,7 +104,12 @@ export const BulkDailyEntry: React.FC = () => {
 
   // ── Master data ──────────────────────────────────────────────────────────────
   const { data: feedTypesRaw = [] } = useQuery({
-    queryKey: ['feed_types'],
+    // Key includes the SHAPE: this returns codes (strings), while Feed Mill
+    // and Feed Pages cache full rows under the same table. They shared one key,
+    // so whichever loaded last won and this page then tried to render objects
+    // as text - React error #31. Prefix stays 'feed_types' so the Masters page
+    // invalidation still matches.
+    queryKey: ['feed_types', 'codes'],
     queryFn: async () => { const { data } = await supabase.from('feed_types').select('code').eq('is_active', true).order('sort_order'); return (data ?? []).map((r: any) => r.code as string) },
     staleTime: 10 * 60 * 1000,
   })

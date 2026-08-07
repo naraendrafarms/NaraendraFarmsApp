@@ -56,7 +56,7 @@ type Tab = 'Raw Materials Stock' | 'Production' | 'Finished Feed Stock' | 'Stock
 const FinishedFeedStockTab: React.FC = () => {
   const qc = useQueryClient()
   const { data: feedTypes = [] } = useQuery({
-    queryKey: ['feed_types'],
+    queryKey: ['feed_types', 'full'],
     queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] }
   })
   const { byTypeId } = useFeedRates()
@@ -419,7 +419,7 @@ const FormulasTab: React.FC = () => {
   const importRef = useRef<HTMLInputElement>(null)
 
   const { data: feedTypes = [] } = useQuery({
-    queryKey: ['feed_types'],
+    queryKey: ['feed_types', 'full_with_category'],
     queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name,category').eq('is_active', true).order('sort_order'); return data ?? [] }
   })
 
@@ -2172,7 +2172,7 @@ const ReconciliationTab: React.FC = () => {
 
   const { data: farms = [] } = useQuery({ queryKey:['farms'], queryFn: async () => { const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data??[] } })
   const { data: feedTypes = [] } = useQuery({
-    queryKey: ['feed_types'],
+    queryKey: ['feed_types', 'full_all'],
     queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').order('sort_order'); return data ?? [] }
   })
   const { data: transfers = [] } = useQuery({

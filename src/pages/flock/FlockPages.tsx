@@ -1382,7 +1382,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const [allocForm, setAllocForm] = useState({ feed_type_id: '', allocation_date: today(), quantity_kg: '', rate_per_kg: '', remarks: '' })
 
   const { data: feedTypes = [] } = useQuery({
-    queryKey: ['feed_types'],
+    queryKey: ['feed_types', 'full'],
     queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active', true).order('sort_order'); return data ?? [] }
   })
 

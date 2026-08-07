@@ -76,7 +76,8 @@ export const DailyEntry: React.FC = () => {
   })
 
   const { data: feedTypesData = [] } = useQuery({
-    queryKey: ['feed_types'],
+    // Codes only — see the note in BulkDailyEntry about the shared-key clash.
+    queryKey: ['feed_types', 'codes'],
     queryFn: async () => { const { data } = await supabase.from('feed_types').select('code').eq('is_active', true).order('sort_order'); return (data ?? []).map((r: any) => r.code as string) },
     staleTime: 10 * 60 * 1000,
   })

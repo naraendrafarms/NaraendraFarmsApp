@@ -697,7 +697,7 @@ export const FeedProduction: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
 
-  const { data: feedTypes } = useQuery({ queryKey: ['feed_types'], queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] } })
+  const { data: feedTypes } = useQuery({ queryKey: ['feed_types', 'full'], queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] } })
 
   const { data: productions, isLoading } = useQuery({
     queryKey: ['feed_production'],
@@ -827,7 +827,7 @@ export const FeedTransfer: React.FC = () => {
   const [editing, setEditing] = useState<any>(null)
 
   const { data: farms } = useQuery({ queryKey: ['farms'], queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name'); return data ?? [] } })
-  const { data: feedTypes } = useQuery({ queryKey: ['feed_types'], queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] } })
+  const { data: feedTypes } = useQuery({ queryKey: ['feed_types', 'full'], queryFn: async () => { const { data } = await supabase.from('feed_types').select('id,code,name').eq('is_active',true).order('sort_order'); return data ?? [] } })
   const { data: flocks } = useQuery({ queryKey: ['flocks_all'], queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').neq('status','closed').order('flock_no'); return data ?? [] } })
 
   const { data: transfers, isLoading } = useQuery({
