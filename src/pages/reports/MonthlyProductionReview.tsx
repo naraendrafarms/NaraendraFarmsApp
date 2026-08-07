@@ -272,6 +272,15 @@ export const MonthlyProductionReview: React.FC = () => {
     staleTime: 60_000,
   })
 
+  const { data: farms = [] } = useQuery({
+    queryKey: ['mpr_farms'],
+    queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name,code').order('name')
+      return data ?? []
+    },
+    staleTime: 5 * 60_000,
+  })
+
   const { data: diesel = [] } = useQuery({
     queryKey: ['mpr_diesel'],
     queryFn: () => fetchAllPages<any>((from, to) =>
@@ -285,7 +294,9 @@ export const MonthlyProductionReview: React.FC = () => {
     queryKey: ['mpr_staff', start, end],
     queryFn: () => fetchAllPages<any>((from, to) =>
       supabase.from('attendance_daily')
-        .select('attendance_date,status,employees!employee_id(designation)')
+        // farm_id is the site the day was worked at; the employee's own farm_id
+        // is the fallback. Both were verified 100% populated for Jul-2026.
+        .select('attendance_date,status,farm_id,employee_id,employees!employee_id(designation,farm_id)')
         .gte('attendance_date', start).lte('attendance_date', end).range(from, to),
       'Attendance (Monthly Review)', toast.error),
     staleTime: 60_000,
@@ -454,23 +465,70 @@ export const MonthlyProductionReview: React.FC = () => {
   }, [diesel])
 
   // Panel: staff working days by designation.
-  const staffByDesig = useMemo(() => {
-    const acc: Record<string, number> = {}
-    const daysInMonth = new Date(Number(month.split('-')[0]), Number(month.split('-')[1]), 0).getDate()
-    // attendance_daily.status is one of P (present), A (absent), H (half day),
-    // WO (weekly off) or OT. Only days actually worked count: A and WO are not
-    // working days, and H is half a day.
-    const WORKED: Record<string, number> = { P: 1, OT: 1, H: 0.5 }
-    for (const a of staffDays) {
-      const weight = WORKED[String(a.status ?? '').toUpperCase()]
-      if (!weight) continue
-      const emp = (a as any).employees
-      const d = (Array.isArray(emp) ? emp[0]?.designation : emp?.designation) ?? 'Unspecified'
-      acc[d] = (acc[d] ?? 0) + weight
+  // Which site each flock sits on, and which flocks share a site. Attendance
+  // records a SITE, never a flock, so a flock-wise staff figure is only honest
+  // where that site has exactly one flock. Kethireddypally currently carries
+  // flocks 22 and 23 together — splitting its staff between them would be an
+  // invention, so the site total is shown once and labelled as shared.
+  const flocksBySite = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const f of activeFlocks as any[]) {
+      const site = f.laying_farm_id ?? f.rearing_farm_id
+      if (!site) continue
+      m.set(site, [...(m.get(site) ?? []), f.flock_no])
     }
-    return Object.entries(acc).sort(([a], [b]) => a.localeCompare(b))
-      .map(([desig, days]) => ({ desig, days, avg: days / daysInMonth }))
-  }, [staffDays, month])
+    return m
+  }, [activeFlocks])
+
+  const selectedSiteId = selectedFlock?.laying_farm_id ?? selectedFlock?.rearing_farm_id ?? null
+  const siteSharedWith = useMemo(() => {
+    if (!selectedSiteId || !selectedFlock) return []
+    return (flocksBySite.get(selectedSiteId) ?? []).filter(n => n !== selectedFlock.flock_no)
+  }, [flocksBySite, selectedSiteId, selectedFlock])
+
+  // Working days per site per designation. P and OT count as a full day, H as
+  // half, A and WO not at all — the same weighting the salary calculation uses
+  // (EmployeePages.tsx), so this panel and payroll can never disagree.
+  const staffBySite = useMemo(() => {
+    const WORKED: Record<string, number> = { P: 1, OT: 1, H: 0.5 }
+    const daysInMonth = new Date(Number(month.split('-')[0]), Number(month.split('-')[1]), 0).getDate()
+    const farmName2 = (id: string | null) =>
+      (farms as any[]).find(f => f.id === id)?.name ?? '(no site)'
+
+    const acc = new Map<string, { site: string; desig: string; days: number; emps: Set<string> }>()
+    for (const a of staffDays as any[]) {
+      const weight = WORKED[String(a.status ?? '').toUpperCase()]
+      const emp = Array.isArray(a.employees) ? a.employees[0] : a.employees
+      const siteId = a.farm_id ?? emp?.farm_id ?? null
+      // In flock scope, only the site this flock is on.
+      if (scope === 'flock' && selectedSiteId && siteId !== selectedSiteId) continue
+      const site = farmName2(siteId)
+      const desig = emp?.designation ?? 'Unspecified'
+      const key = `${site}||${desig}`
+      const row = acc.get(key) ?? { site, desig, days: 0, emps: new Set<string>() }
+      row.emps.add(a.employee_id)
+      if (weight) row.days += weight
+      acc.set(key, row)
+    }
+    return [...acc.values()]
+      .sort((x, y) => x.site.localeCompare(y.site) || y.days - x.days)
+      .map(r => ({ site: r.site, desig: r.desig, employees: r.emps.size, days: r.days,
+        avg: r.days / daysInMonth }))
+  }, [staffDays, month, farms, scope, selectedSiteId])
+
+  // Per-site subtotals, so a site reads as one figure as well as by designation.
+  const staffSiteTotals = useMemo(() => {
+    const daysInMonth = new Date(Number(month.split('-')[0]), Number(month.split('-')[1]), 0).getDate()
+    const acc = new Map<string, { site: string; employees: number; days: number }>()
+    for (const r of staffBySite) {
+      const ex = acc.get(r.site) ?? { site: r.site, employees: 0, days: 0 }
+      ex.employees += r.employees
+      ex.days += r.days
+      acc.set(r.site, ex)
+    }
+    return [...acc.values()].sort((a, b) => a.site.localeCompare(b.site))
+      .map(r => ({ ...r, avg: r.days / daysInMonth }))
+  }, [staffBySite, month])
 
   // Panel: all-flocks summary for the month.
   const allFlocksSummary = useMemo(() => {
@@ -518,6 +576,26 @@ export const MonthlyProductionReview: React.FC = () => {
     })), [hatchRows])
 
   // ── Print ─────────────────────────────────────────────────────────────────
+
+  // Shared by the page and the print so the two can never drift.
+  const staffScopeNote = scope === 'flock'
+    ? (siteSharedWith.length
+        ? `Attendance records a site, not a flock. This site also carries flock(s) ${siteSharedWith.join(', ')}, so these are the site's staff for BOTH — they cannot be split between flocks.`
+        : `Attendance records a site, not a flock. This site carries only flock ${selectedFlock?.flock_no}, so its staff are this flock's staff.`)
+    : 'Attendance records a site, not a flock — figures are per site. A day counts as 1 for Present and OT, 0.5 for Half Day; Absent and Weekly Off do not count, matching the salary calculation.'
+
+  const staffSection: PrintSection = {
+    heading: `Staff Working Days — ${monthLabel(month)}`,
+    headers: ['Site', 'Designation', 'Employees', 'Total Working Days', 'Avg Working Day'],
+    rightAlignFrom: 2,
+    rows: staffBySite.map(r => [r.site, r.desig, r.employees, r.days, r.avg.toFixed(1)]),
+    footerRow: ['TOTAL', '',
+      staffSiteTotals.reduce((a, r) => a + r.employees, 0),
+      staffSiteTotals.reduce((a, r) => a + r.days, 0),
+      staffSiteTotals.reduce((a, r) => a + r.avg, 0).toFixed(1)],
+    note: staffScopeNote,
+    emptyNote: 'No attendance recorded for this month.',
+  }
 
   const scopeLabel = scope === 'flock'
     ? `Flock ${selectedFlock?.flock_no ?? '—'}`
@@ -642,17 +720,9 @@ export const MonthlyProductionReview: React.FC = () => {
         emptyNote: 'No diesel purchases recorded.',
       })
 
-      sections.push({
-        heading: `Average Staff Working Day Per Day — ${monthLabel(month)}`,
-        headers: ['Designation', 'Total Working Days', 'Avg Working Day'],
-        rightAlignFrom: 1,
-        rows: staffByDesig.map(s => [s.desig, s.days, s.avg.toFixed(1)]),
-        footerRow: ['TOTAL',
-          staffByDesig.reduce((a, s) => a + s.days, 0),
-          staffByDesig.reduce((a, s) => a + s.avg, 0).toFixed(1)],
-        emptyNote: 'No attendance recorded for this month.',
-      })
     }
+
+    sections.push(staffSection)
 
     // Charts — pictures of exactly what is on screen.
     if (scope !== 'company') {
@@ -733,6 +803,57 @@ export const MonthlyProductionReview: React.FC = () => {
       r('Deviation', x => dev(x.c.cumHHHEggs, x.stdCumHeHh == null ? null : Number(x.stdCumHeHh), 2)),
     ]
   }, [monthWise])
+
+  // Rendered in every scope: in flock scope it narrows to that flock's site.
+  const staffPanel = (
+    <Card>
+      <p className="text-sm font-semibold text-gray-800 mb-2">
+        Staff Working Days — {monthLabel(month)}
+      </p>
+      <div className="overflow-x-auto">
+        <Table>
+          <thead><tr>
+            <Th>Site</Th><Th>Designation</Th><Th right>Employees</Th>
+            <Th right>Total Working Days</Th><Th right>Avg Working Day</Th>
+          </tr></thead>
+          <tbody>
+            {staffBySite.length === 0 ? (
+              <tr><Td colSpan={5} className="text-sm text-gray-500">No attendance recorded for this month.</Td></tr>
+            ) : staffBySite.map((r, i) => (
+              <tr key={i} className="hover:bg-gray-50">
+                <Td className="text-sm">{r.site}</Td>
+                <Td className="text-sm">{r.desig}</Td>
+                <Td right className="text-sm">{r.employees}</Td>
+                <Td right className="text-sm">{r.days}</Td>
+                <Td right className="text-sm font-medium">{r.avg.toFixed(1)}</Td>
+              </tr>
+            ))}
+            {staffSiteTotals.length > 1 && staffSiteTotals.map(t => (
+              <tr key={`t-${t.site}`} className="bg-blue-50/60">
+                <Td className="text-sm font-medium">{t.site}</Td>
+                <Td className="text-sm text-gray-500">— site total —</Td>
+                <Td right className="text-sm font-medium">{t.employees}</Td>
+                <Td right className="text-sm font-medium">{t.days}</Td>
+                <Td right className="text-sm font-medium">{t.avg.toFixed(1)}</Td>
+              </tr>
+            ))}
+            {staffBySite.length > 0 && (
+              <tr className="bg-gray-50 font-semibold">
+                <Td className="text-sm">TOTAL</Td><Td />
+                <Td right className="text-sm">{staffSiteTotals.reduce((a, r) => a + r.employees, 0)}</Td>
+                <Td right className="text-sm">{staffSiteTotals.reduce((a, r) => a + r.days, 0)}</Td>
+                <Td right className="text-sm">{staffSiteTotals.reduce((a, r) => a + r.avg, 0).toFixed(1)}</Td>
+              </tr>
+            )}
+          </tbody>
+        </Table>
+      </div>
+      <p className={`text-xs mt-2 ${siteSharedWith.length && scope === 'flock'
+        ? 'text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2' : 'text-gray-500'}`}>
+        {staffScopeNote}
+      </p>
+    </Card>
+  )
 
   const loading = flocksLoading || dailyLoading
 
@@ -1077,34 +1198,10 @@ export const MonthlyProductionReview: React.FC = () => {
                 </Table>
               </Card>
 
-              <Card>
-                <p className="text-sm font-semibold text-gray-800 mb-2">
-                  Average Staff Working Day Per Day — {monthLabel(month)}
-                </p>
-                <Table>
-                  <thead><tr><Th>Designation</Th><Th right>Total Working Days</Th><Th right>Avg Working Day</Th></tr></thead>
-                  <tbody>
-                    {staffByDesig.length === 0 ? (
-                      <tr><Td colSpan={3} className="text-sm text-gray-500">No attendance recorded for this month.</Td></tr>
-                    ) : staffByDesig.map(s => (
-                      <tr key={s.desig} className="hover:bg-gray-50">
-                        <Td className="text-sm">{s.desig}</Td>
-                        <Td right className="text-sm">{s.days}</Td>
-                        <Td right className="text-sm">{s.avg.toFixed(1)}</Td>
-                      </tr>
-                    ))}
-                    {staffByDesig.length > 0 && (
-                      <tr className="bg-gray-50 font-semibold">
-                        <Td className="text-sm">TOTAL</Td>
-                        <Td right className="text-sm">{staffByDesig.reduce((a, s) => a + s.days, 0)}</Td>
-                        <Td right className="text-sm">{staffByDesig.reduce((a, s) => a + s.avg, 0).toFixed(1)}</Td>
-                      </tr>
-                    )}
-                  </tbody>
-                </Table>
-              </Card>
             </>
           )}
+
+          {staffPanel}
 
           <Card className="bg-amber-50 border-amber-200">
             <p className="text-sm font-semibold text-amber-900 mb-2">Not included in this report</p>
