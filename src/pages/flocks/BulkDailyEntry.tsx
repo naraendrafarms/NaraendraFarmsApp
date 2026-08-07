@@ -47,9 +47,15 @@ type ShedRow = {
   lighting_hrs: string; remarks: string
   med_id: string; med_qty: string
   existingId: string | null; existingMedId: string | null
+  // What opening/closing were PRE-FILLED with (today's saved record, else
+  // yesterday's closing). Kept so the save can tell a figure the user actually
+  // typed from one the page filled in — see hasProductionData below.
+  prefillOpenF: string; prefillOpenM: string
+  prefillCloseF: string; prefillCloseM: string
 }
 const emptyShedRow = (): ShedRow => ({
   opening_female: '', opening_male: '',
+  prefillOpenF: '', prefillOpenM: '', prefillCloseF: '', prefillCloseM: '',
   he_eggs: '', je_eggs: '', te_eggs: '', be_eggs: '', le_eggs: '',
   he_grade_a: '', he_grade_b: '', he_grade_c: '',
   wastage_he: '', wastage_je: '', wastage_te: '', wastage_be: '',
@@ -298,6 +304,8 @@ export const BulkDailyEntry: React.FC = () => {
       )
       newRows[shed.id] = {
         opening_female: openF, opening_male: openM,
+        prefillOpenF: openF, prefillOpenM: openM,
+        prefillCloseF: closeF, prefillCloseM: closeM,
         he_eggs: dr?.he_eggs?.toString() ?? '', je_eggs: dr?.je_eggs?.toString() ?? '',
         te_eggs: dr?.te_eggs?.toString() ?? '', be_eggs: dr?.be_eggs?.toString() ?? '',
         le_eggs: dr?.le_eggs?.toString() ?? '',
@@ -399,7 +407,16 @@ export const BulkDailyEntry: React.FC = () => {
       const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
       const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
-      const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || r.lighting_hrs || r.remarks
+      // A day-old flock has NO eggs, feed or mortality — the only thing entered
+      // on placement day is the bird count. Those columns were missing from
+      // this test, so the row was skipped and the chicks silently never saved.
+      // Prefilled values must not count, or every shed would get a blank record
+      // each day just because yesterday's closing was carried forward; so only
+      // a figure that DIFFERS from what the page filled in counts as entered.
+      const birdCountEntered =
+        r.opening_female !== r.prefillOpenF || r.opening_male !== r.prefillOpenM ||
+        r.closing_female !== r.prefillCloseF || r.closing_male !== r.prefillCloseM
+      const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || r.lighting_hrs || r.remarks || birdCountEntered
       if (!hasProductionData) continue
       const of_ = parseInt(r.opening_female) || null
       const om = parseInt(r.opening_male) || null
