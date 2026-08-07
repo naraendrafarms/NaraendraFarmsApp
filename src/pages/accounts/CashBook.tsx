@@ -56,6 +56,11 @@ const LINK_COLUMNS = [
 ]
 const isLinkedRow = (t: any) => LINK_COLUMNS.some(c => !!t[c])
 
+// Show the master's current name when the row is linked to one, so renaming a
+// supplier or partner is reflected here immediately. Rows with no link (older
+// entries, or a name simply typed in) fall back to the stored text.
+const partyLabel = (t: any) => t.parties?.name ?? t.partners?.name ?? t.party_name ?? ''
+
 const TYPE_COLORS: Record<string, 'green' | 'red' | 'blue' | 'gray'> = {
   receipt: 'green',
   payment: 'red',
@@ -99,6 +104,8 @@ function emptyForm() {
     category:     'sales_collection',
     description:  '',
     party_name:   '',
+    // "party:<id>" or "partner:<id>" — empty means the free-text box is used
+    party_ref:    '',
     farm_id:      '',
     flock_id:     '',
     reference_no: '',
@@ -191,6 +198,35 @@ export const CashBookPage: React.FC = () => {
     }
   })
 
+  // Suppliers/customers and partners, offered as one picker so a cash entry
+  // can be tied to the master record instead of only carrying typed text.
+  const { data: parties } = useQuery({
+    queryKey: ['parties_for_cash_book'],
+    queryFn: async () => {
+      const { data } = await supabase.from('parties').select('id,name').order('name')
+      return data ?? []
+    }
+  })
+
+  const { data: partners } = useQuery({
+    queryKey: ['partners_for_cash_book'],
+    queryFn: async () => {
+      const { data } = await supabase.from('partners').select('id,name').order('name')
+      return data ?? []
+    }
+  })
+
+  const partyRefOptions = useMemo(() => [
+    ...(parties ?? []).map((p: any) => ({ value: `party:${p.id}`, label: p.name })),
+    ...(partners ?? []).map((p: any) => ({ value: `partner:${p.id}`, label: `${p.name} (Partner)` })),
+  ], [parties, partners])
+
+  const nameForRef = (ref: string) => {
+    const [kind, id] = ref.split(':')
+    const list = kind === 'partner' ? (partners ?? []) : (parties ?? [])
+    return (list as any[]).find(x => x.id === id)?.name ?? ''
+  }
+
   const { data: flocks } = useQuery({
     queryKey: ['flocks_active'],
     queryFn: async () => {
@@ -204,7 +240,9 @@ export const CashBookPage: React.FC = () => {
     queryFn: () => fetchAllPages((from, to) => {
       let q = supabase
         .from('cash_book')
-        .select('*, farms(name,code), flocks(flock_no)')
+        // parties/partners are joined so the Party column can show the
+        // master's CURRENT name rather than the copy stored on the row.
+        .select('*, farms(name,code), flocks(flock_no), parties!party_id(name), partners!partner_id(name)')
         .order('txn_date', { ascending: true })
         .order('created_at', { ascending: true })
         .range(from, to)
@@ -262,7 +300,7 @@ export const CashBookPage: React.FC = () => {
     if (!filterParty.trim()) return reversed
     const q = filterParty.trim().toLowerCase()
     return reversed.filter((t: any) =>
-      (t.party_name ?? '').toLowerCase().includes(q) ||
+      partyLabel(t).toLowerCase().includes(q) ||
       (t.description ?? '').toLowerCase().includes(q)
     )
   }, [rowsWithBalance, filterParty, filterMode])
@@ -315,7 +353,11 @@ export const CashBookPage: React.FC = () => {
         txn_type:     form.txn_type,
         category:     form.category || null,
         description:  form.description,
-        party_name:   form.party_name  || null,
+        // When a master is picked the name is derived from it, so the stored
+        // copy can never drift; a rename then flows through on its own.
+        party_name:   (form.party_ref ? nameForRef(form.party_ref) : form.party_name) || null,
+        party_id:     form.party_ref.startsWith('party:')   ? form.party_ref.slice(6) : null,
+        partner_id:   form.party_ref.startsWith('partner:') ? form.party_ref.slice(8) : null,
         farm_id:      form.farm_id     || null,
         flock_id:     form.flock_id    || null,
         reference_no: form.reference_no || null,
@@ -368,6 +410,7 @@ export const CashBookPage: React.FC = () => {
         category:     row.category      ?? 'other',
         description:  row.description   ?? '',
         party_name:   row.party_name    ?? '',
+        party_ref:    row.party_id ? `party:${row.party_id}` : row.partner_id ? `partner:${row.partner_id}` : '',
         farm_id:      row.farm_id       ?? '',
         flock_id:     row.flock_id      ?? '',
         reference_no: row.reference_no  ?? '',
@@ -451,7 +494,7 @@ export const CashBookPage: React.FC = () => {
       Type:           t.txn_type,
       Category:       t.category ?? '',
       Description:    t.description,
-      Party:          t.party_name ?? '',
+      Party:          partyLabel(t),
       Farm:           t.farms?.code ?? '',
       Flock:          t.flocks?.flock_no ?? '',
       Reference:      t.reference_no ?? '',
@@ -665,7 +708,7 @@ export const CashBookPage: React.FC = () => {
                     {CATEGORIES.find(c => c.value === t.category)?.label ?? t.category ?? '—'}
                   </Td>
                   <Td className="text-xs max-w-xs truncate">{t.description}</Td>
-                  <Td className="text-xs text-gray-500">{t.party_name ?? '—'}</Td>
+                  <Td className="text-xs text-gray-500">{partyLabel(t) || '—'}</Td>
                   <Td className="text-xs text-gray-500">{t.farms?.name ?? <span className="text-purple-600 font-medium">HO</span>}</Td>
                   <Td className="text-right text-sm font-semibold text-green-700">
                     {(t.amount_in ?? 0) > 0 ? inr(t.amount_in) : <span className="text-gray-300">—</span>}
@@ -769,7 +812,16 @@ export const CashBookPage: React.FC = () => {
             />
           </FormRow>
           <FormRow>
-            <Input label="Party Name" placeholder="Vendor / Customer name" value={form.party_name} onChange={e => sf('party_name', e.target.value)} />
+            <div>
+              <label className="text-xs font-medium text-gray-600 block mb-1">Party</label>
+              <SearchableSelect placeholder="Select supplier / customer / partner"
+                options={partyRefOptions} value={form.party_ref}
+                onChange={v => setForm(f => ({ ...f, party_ref: v, party_name: v ? nameForRef(v) : f.party_name }))} />
+              {!form.party_ref && (
+                <Input placeholder="Or type a name if not in the list"
+                  value={form.party_name} onChange={e => sf('party_name', e.target.value)} />
+              )}
+            </div>
             <Input label="Reference / Cheque No" value={form.reference_no} onChange={e => sf('reference_no', e.target.value)} />
           </FormRow>
           <FormRow>
