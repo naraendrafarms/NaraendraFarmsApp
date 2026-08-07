@@ -111,6 +111,7 @@ const NAV: NavItem[] = [
       { label: 'Flock P&L (Full)',      to: '/reports/pl' },
       { label: 'Flock P&L Summary',    to: '/reports/flock-pl-summary' },
       { label: 'Company P&L',           to: '/reports/company-pl' },
+      { label: 'Monthly Production Review', to: '/reports/monthly-review' },
       { label: 'Party Outstanding',     to: '/reports/party-outstanding' },
       { label: 'GST Reports',           to: '/reports/gst' },
       { label: 'Production Report',     to: '/reports/production' },

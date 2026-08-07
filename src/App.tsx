@@ -61,6 +61,7 @@ import { EggOpeningStockPage } from '@/pages/flocks/EggOpeningStock'
 import { VaccinationRecordsPage } from '@/pages/flocks/VaccinationRecords'
 import { PartyOutstanding as PartyOutstandingPage } from '@/pages/reports/PartyOutstanding'
 import { CompanyPL as CompanyPLPage } from '@/pages/reports/CompanyPL'
+import { MonthlyProductionReview } from '@/pages/reports/MonthlyProductionReview'
 import { GSTReportPage } from '@/pages/reports/GSTReport'
 import { EggStockPage } from '@/pages/reports/EggStock'
 import { TDSReceivable } from '@/pages/reports/TDSReceivable'
@@ -248,6 +249,7 @@ export const App: React.FC = () => {
             <Route path="reports/salary-analysis" element={<SalaryCostPage />} />
             <Route path="reports/party-outstanding" element={<PartyOutstandingPage />} />
             <Route path="reports/company-pl" element={<CompanyPLPage />} />
+            <Route path="reports/monthly-review" element={<MonthlyProductionReview />} />
             <Route path="reports/gst" element={<GSTReportPage />} />
             <Route path="reports/egg-stock" element={<EggStockPage />} />
             <Route path="reports/tds-receivable" element={<TDSReceivable />} />

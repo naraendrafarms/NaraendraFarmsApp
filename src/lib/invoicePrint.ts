@@ -712,6 +712,15 @@ export interface PrintSection {
   rightAlignFrom?: number
   footerRow?: (string | number | null | undefined)[]
   emptyNote?: string
+  // A chart section: an image data URI (the on-screen chart's SVG, serialised)
+  // printed in place of a table. The same chart the reviewer saw on screen is
+  // the one that prints — it is never re-drawn from the data a second time,
+  // so the two cannot disagree.
+  image?: string
+  // Optional note printed under a table or chart (units, caveats, exclusions).
+  note?: string
+  // Forces a page break before this section, for a print made of many panels.
+  pageBreakBefore?: boolean
 }
 export function printMultiReport(opts: {
   title: string
@@ -725,9 +734,15 @@ export function printMultiReport(opts: {
 }) {
   const { title, subtitle, sections, grandTotalLabel, grandTotalValue, headerNote } = opts
   const body = sections.map(sec => {
+    const brk = sec.pageBreakBefore ? ' style="page-break-before:always"' : ''
+    const note = sec.note ? `<div class="sub" style="margin-top:4px">${sec.note}</div>` : ''
+    if (sec.image) {
+      return `<div class="section"${brk}><div class="label">${sec.heading}</div>
+        <img src="${sec.image}" style="width:100%;max-width:100%;height:auto"/>${note}</div>`
+    }
     if (!sec.rows.length) {
-      return `<div class="section"><div class="label">${sec.heading}</div>
-        <div class="box"><span class="sub">${sec.emptyNote ?? 'No entries for this period.'}</span></div></div>`
+      return `<div class="section"${brk}><div class="label">${sec.heading}</div>
+        <div class="box"><span class="sub">${sec.emptyNote ?? 'No entries for this period.'}</span></div>${note}</div>`
     }
     const thead = sec.headers.map(h => `<th>${h}</th>`).join('')
     const tbody = sec.rows.map(r => `<tr>${r.map((c, i) =>
@@ -736,9 +751,10 @@ export function printMultiReport(opts: {
     const tfoot = sec.footerRow ? `<tfoot><tr class="total-row">${sec.footerRow.map((c, i) =>
       `<td${sec.rightAlignFrom != null && i >= sec.rightAlignFrom ? ' style="text-align:right"' : ''}>${c ?? ''}</td>`
     ).join('')}</tr></tfoot>` : ''
-    return `<div class="section">
+    return `<div class="section"${brk}>
       <div class="label">${sec.heading}</div>
       <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody>${tfoot}</table>
+      ${note}
     </div>`
   }).join('')
 
