@@ -277,8 +277,8 @@ export const MonthlyProductionReview: React.FC = () => {
     queryKey: ['mpr_staff', start, end],
     queryFn: () => fetchAllPages<any>((from, to) =>
       supabase.from('attendance_daily')
-        .select('att_date,status,employees!employee_id(designation)')
-        .gte('att_date', start).lte('att_date', end).range(from, to),
+        .select('attendance_date,status,employees!employee_id(designation)')
+        .gte('attendance_date', start).lte('attendance_date', end).range(from, to),
       'Attendance (Monthly Review)', toast.error),
     staleTime: 60_000,
   })
@@ -449,12 +449,16 @@ export const MonthlyProductionReview: React.FC = () => {
   const staffByDesig = useMemo(() => {
     const acc: Record<string, number> = {}
     const daysInMonth = new Date(Number(month.split('-')[0]), Number(month.split('-')[1]), 0).getDate()
+    // attendance_daily.status is one of P (present), A (absent), H (half day),
+    // WO (weekly off) or OT. Only days actually worked count: A and WO are not
+    // working days, and H is half a day.
+    const WORKED: Record<string, number> = { P: 1, OT: 1, H: 0.5 }
     for (const a of staffDays) {
-      const st = String(a.status ?? '').toLowerCase()
-      // Only days actually worked; absent/leave must not inflate the count.
-      if (st && !['present', 'p', 'half', 'halfday', 'half_day', 'ot'].includes(st)) continue
-      const d = (a as any).employees?.designation ?? 'Unspecified'
-      acc[d] = (acc[d] ?? 0) + (st.startsWith('half') ? 0.5 : 1)
+      const weight = WORKED[String(a.status ?? '').toUpperCase()]
+      if (!weight) continue
+      const emp = (a as any).employees
+      const d = (Array.isArray(emp) ? emp[0]?.designation : emp?.designation) ?? 'Unspecified'
+      acc[d] = (acc[d] ?? 0) + weight
     }
     return Object.entries(acc).sort(([a], [b]) => a.localeCompare(b))
       .map(([desig, days]) => ({ desig, days, avg: days / daysInMonth }))
