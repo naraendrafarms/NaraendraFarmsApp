@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today } from '@/lib/utils'
-import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput, SearchableSelect } from '@/components/ui'
+import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput, SearchableSelect, Modal } from '@/components/ui'
 import { QuickAddMedicine } from '@/components/ui/QuickAdd'
-import { Save, Download, Upload, FileSpreadsheet } from 'lucide-react'
+import { Save, Download, Upload, FileSpreadsheet, CalendarClock } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import { useFeedRates } from '@/hooks/useFeedRates'
 import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
@@ -77,6 +77,15 @@ export const BulkDailyEntry: React.FC = () => {
   const feedRates = useFeedRates()
   const [date, setDate] = useState(today())
   const [saving, setSaving] = useState(false)
+
+  // ── Change Date ───────────────────────────────────────────────────────────
+  // A day entered against the wrong date could previously neither be moved nor
+  // deleted — the date box only ever selected which day to show. This moves an
+  // entire day's entry (every shed's daily record, the flock-level grade row,
+  // feed and medicine usage) to another date in one step.
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [moveTo, setMoveTo] = useState('')
+  const [moving, setMoving] = useState(false)
   const [selectedFarm, setSelectedFarm] = useState('')
   const [selectedFlock, setSelectedFlock] = useState('')
   const [flockRows, setFlockRows] = useState<Record<string, FlockRow>>({})
@@ -1020,6 +1029,65 @@ export const BulkDailyEntry: React.FC = () => {
   const isSheedMode = !!selectedFlock
   const isLoading = flocksLoading || (isSheedMode && shedsLoading)
 
+  // Moves everything Bulk Daily Entry writes for one flock on one date.
+  // Refuses if the target date already holds anything for that flock, so a
+  // move can never silently overwrite a day that was entered correctly.
+  const handleChangeDate = async () => {
+    if (!selectedFlock) { toast.error('Select a flock first'); return }
+    if (!moveTo || moveTo.length !== 10) { toast.error('Pick the new date'); return }
+    if (moveTo === date) { toast.error('New date is the same as the current date'); return }
+    setMoving(true)
+    try {
+      const countAt = async (table: string, col: string, d: string) => {
+        const { count, error } = await supabase.from(table)
+          .select('id', { count: 'exact', head: true })
+          .eq('flock_id', selectedFlock).eq(col, d)
+        if (error) throw error
+        return count ?? 0
+      }
+
+      const srcDR = await countAt('daily_records', 'record_date', date)
+      const srcFeed = await countAt('daily_feed', 'feed_date', date)
+      const srcMed = await countAt('medicine_usage', 'usage_date', date)
+      if (srcDR + srcFeed + srcMed === 0) {
+        toast.error('Nothing recorded for this flock on this date'); setMoving(false); return
+      }
+
+      const dstDR = await countAt('daily_records', 'record_date', moveTo)
+      const dstFeed = await countAt('daily_feed', 'feed_date', moveTo)
+      const dstMed = await countAt('medicine_usage', 'usage_date', moveTo)
+      if (dstDR + dstFeed + dstMed > 0) {
+        toast.error('The new date already has an entry for this flock — clear it first')
+        setMoving(false); return
+      }
+
+      // daily_records first: if it fails, nothing else has moved yet.
+      const { error: e1 } = await supabase.from('daily_records')
+        .update({ record_date: moveTo }).eq('flock_id', selectedFlock).eq('record_date', date)
+      if (e1) throw new Error(`Daily records: ${e1.message}`)
+      const { error: e2 } = await supabase.from('daily_feed')
+        .update({ feed_date: moveTo }).eq('flock_id', selectedFlock).eq('feed_date', date)
+      if (e2) throw new Error(`Feed: ${e2.message}`)
+      const { error: e3 } = await supabase.from('medicine_usage')
+        .update({ usage_date: moveTo }).eq('flock_id', selectedFlock).eq('usage_date', date)
+      if (e3) throw new Error(`Medicine: ${e3.message}`)
+
+      toast.success(`Moved ${srcDR} daily record(s), ${srcFeed} feed row(s) and ${srcMed} medicine row(s)`)
+      setMoveOpen(false)
+      // Follow the data so the moved day is what's on screen.
+      setDate(moveTo)
+      qc.invalidateQueries({ queryKey: ['bulk_existing_dr'] })
+      qc.invalidateQueries({ queryKey: ['bulk_prev_dr'] })
+      qc.invalidateQueries({ queryKey: ['bulk_existing_med'] })
+      qc.invalidateQueries({ queryKey: ['daily_records'] })
+      qc.invalidateQueries({ queryKey: ['flock_daily'] })
+    } catch (err: any) {
+      toast.error(err.message ?? 'Could not change the date')
+    } finally {
+      setMoving(false)
+    }
+  }
+
   const grouped: Record<string, any[]> = {}
   for (const f of visibleFlocks) {
     const farm = (f as any).laying_farm?.name ?? 'Unknown'
@@ -1074,6 +1142,12 @@ export const BulkDailyEntry: React.FC = () => {
                 className="w-44" />
             )}
             <DateInput value={date} onChange={e => setDate(e.target.value)} />
+            {isSheedMode && (
+              <Button size="sm" variant="outline" icon={<CalendarClock size={14} />}
+                onClick={() => { setMoveTo(''); setMoveOpen(true) }}>
+                Change Date
+              </Button>
+            )}
             <Button icon={<Save size={16} />} loading={saving}
               onClick={isSheedMode ? handleSaveShedMode : handleSaveFlockMode}>
               Save All
@@ -1475,6 +1549,30 @@ export const BulkDailyEntry: React.FC = () => {
           </Button>
         </div>
       )}
+
+      <Modal open={moveOpen} onClose={() => setMoveOpen(false)} title="Change Date" size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setMoveOpen(false)}>Cancel</Button>
+            <Button loading={moving} onClick={handleChangeDate}>Move Entry</Button>
+          </div>
+        }>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            Moves this flock's entire entry for <strong>{date}</strong> to a new date — every shed's
+            daily record, the flock-level grade row, feed and medicine usage together.
+          </p>
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">New date</label>
+            <DateInput value={moveTo} onChange={e => setMoveTo(e.target.value)} />
+          </div>
+          <p className="text-xs text-gray-500">
+            If the new date already has an entry for this flock, the move is refused so nothing is
+            overwritten. Check the day after the old date afterwards — its opening bird count reads
+            from the previous day.
+          </p>
+        </div>
+      </Modal>
     </div>
   )
 }
