@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, exportCSV } from '@/lib/utils'
+import { inr, exportCSV, FY_OPTIONS, currentFY, fyOfDate } from '@/lib/utils'
 import {
   Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Button
 } from '@/components/ui'
@@ -38,11 +38,10 @@ export const ElectricityCostPage: React.FC = () => {
     const map: Record<string, any> = {}
     for (const b of bills) {
       const month = b.bill_month.slice(0, 7)
-      const fy = month >= '2022-04' && month <= '2023-03' ? '2022-23'
-               : month >= '2023-04' && month <= '2024-03' ? '2023-24'
-               : month >= '2024-04' && month <= '2025-03' ? '2024-25'
-               : month >= '2025-04' && month <= '2026-03' ? '2025-26'
-               : '2026-27'
+      // Shared helper, not a hardcoded ladder: the old one ended at 2025-26 and
+      // labelled every later month '2026-27', so FY 2027-28 bills would have
+      // been filed under the wrong year.
+      const fy = fyOfDate(b.bill_month)
       if (fyFilter !== 'all' && fy !== fyFilter) continue
       const site = (b.electricity_meters as any)?.farms?.code ?? 'OTHER'
       const key = month
@@ -69,12 +68,12 @@ export const ElectricityCostPage: React.FC = () => {
 
   const grandTotal = Object.values(siteTotals).reduce((s, v) => s + v.amount, 0)
 
+  // Built from the shared FY list so a new financial year appears everywhere at
+  // once; the old hardcoded list stopped at 2025-26, so FY 2026-27 could not be
+  // selected even though its data was there.
   const fyOptions = [
     { value: 'all', label: 'All Years' },
-    { value: '2022-23', label: 'FY 2022-23' },
-    { value: '2023-24', label: 'FY 2023-24' },
-    { value: '2024-25', label: 'FY 2024-25' },
-    { value: '2025-26', label: 'FY 2025-26' },
+    ...FY_OPTIONS.map(fy => ({ value: fy, label: `FY ${fy}` })),
   ]
 
   if (isLoading) return <Spinner />
@@ -163,7 +162,7 @@ export const ElectricityCostPage: React.FC = () => {
 
 // ── SALARY ANALYSIS ──────────────────────────────────────────────
 export const SalaryCostPage: React.FC = () => {
-  const [fyFilter, setFyFilter] = useState('2024-25')
+  const [fyFilter, setFyFilter] = useState(currentFY())
 
   const { data: salaries, isLoading } = useQuery({
     queryKey: ['salary_analysis', fyFilter],
@@ -225,10 +224,7 @@ export const SalaryCostPage: React.FC = () => {
 
   const grandTotal = Object.values(siteTotals).reduce((s, v) => s + v, 0)
 
-  const fyOptions = [
-    { value: '2024-25', label: 'FY 2024-25' },
-    { value: '2025-26', label: 'FY 2025-26' },
-  ]
+  const fyOptions = FY_OPTIONS.map(fy => ({ value: fy, label: `FY ${fy}` }))
 
   if (isLoading) return <Spinner />
 
