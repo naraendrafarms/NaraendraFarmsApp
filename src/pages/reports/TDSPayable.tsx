@@ -168,6 +168,7 @@ export const ChallanPickerModal: React.FC<{
 
 export const TDSPayable: React.FC = () => {
   const [printScope, setPrintScope] = useState<'statement'|'both'|'vendor'|'salary'>('statement')
+  const [showStatement, setShowStatement] = useState(true)
   const [search, setSearch] = useState('')
   const [depositFilter, setDepositFilter] = useState('')
   const [sortKey, setSortKey] = useState<string>('date')
@@ -659,14 +660,26 @@ export const TDSPayable: React.FC = () => {
     }
   }
 
-  const handlePrint = () => {
+  // The two statement tables, shared by the page and the print. Ticking rows
+  // narrows the deductee list the same way the print does.
+  const statementSections = useMemo(() => {
+    const lines = statementLines(selectedRows.length ? selectedRows : filtered, filteredSalary)
+    if (!lines.length) return [] as PrintSection[]
+    return [detailsSection(lines), summarySection(lines)]
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, filteredSalary, selectedRows, tdsSectionOptions, fy, dateFrom, dateTo])
+
+  // scope is passed explicitly where a button forces one (setState is async,
+  // so reading printScope right after setting it would use the old value).
+  const handlePrint = (scopeArg?: 'statement'|'both'|'vendor'|'salary') => {
+    const scope = scopeArg ?? printScope
     // Ticking rows narrows the vendor sheet to just those — handy when filing
     // one challan's worth of deductees.
     const vRows = selectedRows.length ? selectedRows : filtered
     const sRows = filteredSalary
     const selNote = selectedRows.length ? ` · ${selectedRows.length} selected row(s)` : ''
 
-    if (printScope === 'statement') {
+    if (scope === 'statement') {
       const lines = statementLines(vRows, sRows)
       if (!lines.length) { toast.error('Nothing to print for this period'); return }
       printMultiReport({
@@ -679,7 +692,7 @@ export const TDSPayable: React.FC = () => {
       })
       return
     }
-    if (printScope === 'vendor') {
+    if (scope === 'vendor') {
       if (!vRows.length) { toast.error('No vendor TDS to print for this period'); return }
       printMultiReport({
         title: 'TDS Payable — Vendor',
@@ -690,7 +703,7 @@ export const TDSPayable: React.FC = () => {
       })
       return
     }
-    if (printScope === 'salary') {
+    if (scope === 'salary') {
       if (!sRows.length) { toast.error('No salary TDS to print for this period'); return }
       printMultiReport({
         title: 'TDS Payable — Salary',
@@ -867,7 +880,7 @@ export const TDSPayable: React.FC = () => {
               { value: 'vendor', label: 'Vendor only' },
               { value: 'salary', label: 'Salary only' },
             ]} />
-          <Button size="sm" variant="outline" onClick={handlePrint}><Printer size={14} className="mr-1" />Print</Button>
+          <Button size="sm" variant="outline" onClick={() => handlePrint()}><Printer size={14} className="mr-1" />Print</Button>
         </div>
       </Card>
 
@@ -938,6 +951,71 @@ export const TDSPayable: React.FC = () => {
               </Table>
             </Card>
           )}
+
+          {/* On-screen TDS statement — built from the SAME section builders the
+              Print button uses, so what the team verifies here and what gets
+              filed can never differ. Every amount is the figure entered on the
+              bill or salary row, only added up; nothing is re-derived except
+              the rate on a merged line, which is shown as TDS ÷ Amount. */}
+          <Card>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold text-gray-800">TDS Statement — {periodLabel()}</p>
+                <p className="text-xs text-gray-500">
+                  Deductee-wise, exactly as printed. {deductorIds()}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowStatement(v => !v)}
+                  className="text-xs text-brand-700 hover:underline">
+                  {showStatement ? 'Hide' : 'Show'}
+                </button>
+                <Button size="sm" variant="outline" onClick={() => handlePrint('statement')}>
+                  <Printer size={14} className="mr-1" />Print this
+                </Button>
+              </div>
+            </div>
+            {showStatement && (
+              statementSections.length === 0 ? (
+                <p className="text-xs text-gray-500 mt-3">No TDS deducted in this period.</p>
+              ) : (
+                <div className="space-y-5 mt-4">
+                  {statementSections.map((sec, si) => (
+                    <div key={si}>
+                      <p className="text-xs font-semibold text-gray-600 mb-2">{sec.heading}</p>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <thead><tr>
+                            {sec.headers.map((h, i) => (
+                              <Th key={i} right={sec.rightAlignFrom != null && i >= sec.rightAlignFrom}>{h}</Th>
+                            ))}
+                          </tr></thead>
+                          <tbody>
+                            {sec.rows.map((r, ri) => (
+                              <tr key={ri} className="hover:bg-gray-50">
+                                {r.map((c, ci) => (
+                                  <Td key={ci} right={sec.rightAlignFrom != null && ci >= sec.rightAlignFrom}
+                                    className="text-sm whitespace-nowrap">{c ?? ''}</Td>
+                                ))}
+                              </tr>
+                            ))}
+                            {sec.footerRow && (
+                              <tr className="bg-gray-50 font-semibold">
+                                {sec.footerRow.map((c, ci) => (
+                                  <Td key={ci} right={sec.rightAlignFrom != null && ci >= sec.rightAlignFrom}
+                                    className="text-sm whitespace-nowrap">{c ?? ''}</Td>
+                                ))}
+                              </tr>
+                            )}
+                          </tbody>
+                        </Table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+          </Card>
 
           {/* Bulk actions — one challan normally covers many deductees, so
               tagging them one row at a time was the slow part of filing. */}
