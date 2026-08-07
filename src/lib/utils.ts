@@ -193,3 +193,30 @@ export function exportCSV(filename: string, headers: string[], rows: (string | n
   a.download = filename
   a.click()
 }
+
+// Flock age label for one record date, e.g. "W0 D1" on the placement date.
+//
+// Age is 0-BASED: a day-old chick is 0 weeks 1 day, and the flock turns 1 week
+// old on day 8. This matches the standard curve, which is keyed on completed
+// weeks, and the Age (weeks) figure the daily entry auto-fills.
+//
+// Days BEFORE placement are real — chicks can arrive over two or three days
+// while day 1 is reckoned from the last consignment — so they are labelled
+// rather than mislabelled. Note JavaScript's % keeps the sign of the operand
+// (-2 % 7 === -2), so a negative day would otherwise print as "D-1".
+export const flockAgeLabel = (placementDate: string | null | undefined, recordDate: string): string => {
+  if (!placementDate || !recordDate) return '—'
+  const days = Math.floor(
+    (new Date(recordDate).getTime() - new Date(placementDate).getTime()) / 86400000)
+  if (days < 0) return `Pre ${days}d`
+  return `W${Math.floor(days / 7)} D${(days % 7) + 1}`
+}
+
+// The week bucket a record falls in — 0 for the first week, and -1 for
+// anything before placement so those days group together and sort first.
+export const flockAgeWeekBucket = (placementDate: string | null | undefined, recordDate: string): number | null => {
+  if (!placementDate || !recordDate) return null
+  const days = Math.floor(
+    (new Date(recordDate).getTime() - new Date(placementDate).getTime()) / 86400000)
+  return days < 0 ? -1 : Math.floor(days / 7)
+}

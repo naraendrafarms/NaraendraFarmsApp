@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, pct, fmtDate, flockAgeWeeks, exportCSV, fetchAllPages } from '@/lib/utils'
+import { inr, pct, fmtDate, flockAgeWeeks, flockAgeLabel, flockAgeWeekBucket, exportCSV, fetchAllPages } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Badge, Table, Th, Td,
   SectionHeader, Spinner, StatCard, Divider, Input, Select
@@ -537,8 +537,9 @@ export const FlockDetail: React.FC = () => {
     if (!flock?.placement_date) return []
     const map = new Map<number, any>()
     for (const d of dailyAggregated) {
-      const dayAge = Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
-      const weekNum = Math.floor(dayAge / 7) + 1
+      // 0-based: the placement week is Week 0, matching the standard curve and
+      // the auto-filled Age (weeks). Days before placement bucket at -1.
+      const weekNum = flockAgeWeekBucket(flock.placement_date, d.record_date) ?? 0
       const eggs = d.total_eggs ?? 0
       const he = d.he_eggs ?? 0
       const openF = d.opening_female ?? 0
@@ -761,13 +762,9 @@ export const FlockDetail: React.FC = () => {
           headers: ['Date','Week/Day','Open ♀','Open ♂','Feed ♀','Feed ♂','Eggs','HD%','HE','HE%','Tr ♀','Cull ♀','Mort ♀','Mort ♂','Close ♀','Close ♂'],
           rightAlignFrom: 2,
           rows: displayDaily.map((d: any) => {
-            const dayAge = flock.placement_date
-              ? Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
-              : (dailyIndexMap.get(d.record_date) ?? 0)
-            const weekNum = Math.floor(dayAge / 7) + 1
-            const dayInWeek = (dayAge % 7) + 1
+            const ageLabel = flockAgeLabel(flock.placement_date, d.record_date)
             return [
-              fmtDate(d.record_date), `W${weekNum} D${dayInWeek}`,
+              fmtDate(d.record_date), ageLabel,
               d.opening_female ?? 0, d.opening_male ?? 0, d.feed_female_kg ?? 0, d.feed_male_kg ?? 0,
               d.total_eggs ?? 0, d.hd_pct != null ? pct(d.hd_pct,1) : '—',
               d.he_eggs ?? 0, d.he_pct != null ? pct(d.he_pct,1) : '—',
@@ -782,7 +779,7 @@ export const FlockDetail: React.FC = () => {
           headers: ['Week','Date Range','Days Logged','Open ♀','Close ♀','Close ♂','Total Eggs','HD%','HE','HE%','Mort ♀','Mort ♂','Feed ♀','Feed ♂'],
           rightAlignFrom: 2,
           rows: weeklyAgg.map((w: any) => [
-            `Week ${w.weekNum}`, `${fmtDate(w.firstDate)} – ${fmtDate(w.lastDate)}`, `${w.days}/7`,
+            w.weekNum < 0 ? 'Pre-placement' : `Week ${w.weekNum}`, `${fmtDate(w.firstDate)} – ${fmtDate(w.lastDate)}`, `${w.days}/7`,
             w.openF, w.closeF, w.closeM, w.totalEggs, w.hdPct != null ? pct(w.hdPct,1) : '—',
             w.totalHE, w.hePct != null ? pct(w.hePct,1) : '—', w.mortF || '—', w.mortM || '—', w.feedF, w.feedM,
           ]),
@@ -1099,13 +1096,9 @@ export const FlockDetail: React.FC = () => {
                 `flock_${flock?.flock_no ?? id}_daily_records.csv`,
                 ['Date','Week/Day','Opening F','Opening M','Feed F (kg)','Feed M (kg)','Total Eggs','HD%','HE Eggs','HE%','Transfer F','Cull F','Mortality F','Mortality M','Closing F','Closing M'],
                 rows.map((d: any) => {
-                  const dayAge = flock?.placement_date
-                    ? Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
-                    : (dailyIndexMap.get(d.record_date) ?? 0)
-                  const weekNum = Math.floor(dayAge / 7) + 1
-                  const dayInWeek = (dayAge % 7) + 1
+                  const ageLabel = flockAgeLabel(flock?.placement_date, d.record_date)
                   return [
-                    d.record_date, `W${weekNum} D${dayInWeek}`,
+                    d.record_date, ageLabel,
                     d.opening_female ?? 0, d.opening_male ?? 0,
                     d.feed_female_kg ?? 0, d.feed_male_kg ?? 0,
                     d.total_eggs ?? 0, d.hd_pct != null ? (d.hd_pct * 100).toFixed(1) : '',
@@ -1192,11 +1185,7 @@ export const FlockDetail: React.FC = () => {
                 <tbody>
                   {displayDaily.map((d) => {
                     const isLayingPeriod = flock.laying_start_date && d.record_date >= flock.laying_start_date
-                    const dayAge = flock.placement_date
-                      ? Math.floor((new Date(d.record_date).getTime() - new Date(flock.placement_date).getTime()) / 86400000)
-                      : (dailyIndexMap.get(d.record_date) ?? 0)
-                    const weekNum = Math.floor(dayAge / 7) + 1
-                    const dayInWeek = (dayAge % 7) + 1
+                    const ageLabel = flockAgeLabel(flock.placement_date, d.record_date)
                     return (
                       <tr key={d.record_date} className={`border-b border-gray-50 hover:bg-gray-50
                         ${sel.has(d.record_date) ? 'bg-red-50' : isLayingPeriod ? 'bg-green-50/30' : 'bg-yellow-50/30'}`}>
@@ -1205,7 +1194,7 @@ export const FlockDetail: React.FC = () => {
                           style={{ backgroundColor: sel.has(d.record_date) ? '#fef2f2' : isLayingPeriod ? '#f0fdf4' : '#fefce8' }}>
                           {fmtDate(d.record_date)}{d._sheds > 1 ? <span className="ml-1 text-blue-400 text-[10px]">{d._sheds} sheds</span> : ''}
                         </td>
-                        <td className="px-2 py-1.5 text-gray-400 text-xs whitespace-nowrap">W{weekNum} D{dayInWeek}</td>
+                        <td className="px-2 py-1.5 text-gray-400 text-xs whitespace-nowrap">{ageLabel}</td>
                         <td className="px-2 py-1.5 text-right">{d.opening_female?.toLocaleString('en-IN')}</td>
                         <td className="px-2 py-1.5 text-right">{d.opening_male?.toLocaleString('en-IN')}</td>
                         <td className="px-2 py-1.5 text-right">{d.feed_female_kg?.toLocaleString('en-IN')}</td>
@@ -1287,7 +1276,7 @@ export const FlockDetail: React.FC = () => {
               <tbody>
                 {weeklyAgg.map((w: any) => (
                   <tr key={w.weekNum} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="px-2 py-1.5 font-medium">Week {w.weekNum}</td>
+                    <td className="px-2 py-1.5 font-medium">{w.weekNum < 0 ? 'Pre-placement' : `Week ${w.weekNum}`}</td>
                     <td className="px-2 py-1.5 text-gray-400 whitespace-nowrap">{fmtDate(w.firstDate)} – {fmtDate(w.lastDate)}</td>
                     <td className="px-2 py-1.5 text-right text-gray-400">{w.days}/7</td>
                     <td className="px-2 py-1.5 text-right">{w.openF?.toLocaleString('en-IN')}</td>
