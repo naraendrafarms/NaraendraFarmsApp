@@ -196,7 +196,10 @@ export const PLReport: React.FC = () => {
   // Salary: abstracts for flock's farm
   const { data: salaryAbstracts } = useQuery({
     queryKey: ['pl_salary', farmId], enabled: !!farmId,
-    queryFn: async () => { const { data } = await supabase.from('salary_abstract').select('net_salary').eq('farm_id', farmId); return data ?? [] }
+    // v_salary_abstract derives this from salary_monthly, the table the salary
+    // run actually writes; salary_abstract itself is only filled by the importer
+    // and was empty, so this cost silently read as zero.
+    queryFn: async () => { const { data } = await supabase.from('v_salary_abstract').select('net_salary').eq('farm_id', farmId); return data ?? [] }
   })
   // Farm expenses: linked to this flock or its farm
   const { data: farmExpenses } = useQuery({
@@ -325,7 +328,7 @@ export const SalaryReport: React.FC = () => {
     queryKey: ['salary_report', filterYear],
     queryFn: async () => {
       const { start, end } = fyRange(filterYear)
-      const { data } = await supabase.from('salary_abstract')
+      const { data } = await supabase.from('v_salary_abstract')
         .select('*, farms(name,code)')
         .gte('month', start)
         .lte('month', end)

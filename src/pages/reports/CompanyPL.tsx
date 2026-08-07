@@ -197,7 +197,7 @@ export const CompanyPL: React.FC = () => {
   const { data: salaryData } = useQuery({
     queryKey: ['cpl_salary', fy],
     queryFn: async () => {
-      const { data } = await supabase.from('salary_abstract')
+      const { data } = await supabase.from('v_salary_abstract')
         .select('month,net_salary')
         .gte('month', start).lte('month', end)
       return data ?? []
