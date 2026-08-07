@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
 import { printReport } from '@/lib/invoicePrint'
 import { Card, Button, Select, Input, SectionHeader, Spinner, Table, Th, Td, Badge, DateInput, Modal, FormRow } from '@/components/ui'
-import { Download, Printer } from 'lucide-react'
+import { Download, Printer, Trash2, Link2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import toast from 'react-hot-toast'
@@ -167,6 +167,13 @@ export const ChallanPickerModal: React.FC<{
 }
 
 export const TDSPayable: React.FC = () => {
+  const [search, setSearch] = useState('')
+  const [depositFilter, setDepositFilter] = useState('')
+  const [sortKey, setSortKey] = useState<string>('date')
+  const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc')
+  const [tdsSel, setTdsSel] = useState<Set<string>>(new Set())
+  const [bulkChallanOpen, setBulkChallanOpen] = useState(false)
+  const [removeTdsId, setRemoveTdsId] = useState<string|null>(null)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [fy, setFy] = useState('')
@@ -335,7 +342,8 @@ export const TDSPayable: React.FC = () => {
   }
 
   const filtered = useMemo(() => {
-    return rows.filter((r: any) => {
+    const q = search.trim().toLowerCase()
+    const out = rows.filter((r: any) => {
       if (rateFilter) {
         if (Math.abs(effPct(r) - parseFloat(rateFilter)) > 0.05) return false
       }
@@ -343,9 +351,67 @@ export const TDSPayable: React.FC = () => {
         if (statusFilter === 'Pending' && r.payment_status !== 'Pending') return false
         if (statusFilter === 'Paid' && r.payment_status !== 'Paid') return false
       }
+      if (depositFilter === 'deposited' && !r.tds_deposited) return false
+      if (depositFilter === 'pending' && r.tds_deposited) return false
+      if (q) {
+        const hay = [r.vendor_name, r.invoice_no, r.grn_no, pan(r), r.tds_section,
+          deducteeType(r), r.tds_amount, r.invoice_amount, refDate(r)]
+          .map(v => String(v ?? '').toLowerCase()).join(' ')
+        if (!hay.includes(q)) return false
+      }
       return true
     })
-  }, [rows, rateFilter, statusFilter])
+    // Click any column header to sort — the Excel-style bit people actually
+    // reach for when reconciling a quarter.
+    const val = (r: any) => {
+      switch (sortKey) {
+        case 'vendor':   return (r.vendor_name ?? '').toLowerCase()
+        case 'invoice':  return (r.invoice_no ?? '').toLowerCase()
+        case 'amount':   return r.invoice_amount ?? 0
+        case 'tds':      return r.tds_amount ?? 0
+        case 'pct':      return effPct(r)
+        case 'section':  return (r.tds_section ?? '').toLowerCase()
+        case 'pan':      return (pan(r) ?? '').toLowerCase()
+        case 'deposit':  return r.tds_deposited ? 1 : 0
+        default:         return refDate(r) ?? ''
+      }
+    }
+    return out.sort((a: any, b: any) => {
+      const av = val(a), bv = val(b)
+      const c = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv : String(av).localeCompare(String(bv))
+      return sortDir === 'asc' ? c : -c
+    })
+  }, [rows, rateFilter, statusFilter, search, depositFilter, sortKey, sortDir])
+
+  const toggleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+  }
+  const sortMark = (key: string) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+
+  const selectedRows = filtered.filter((r: any) => tdsSel.has(r.id))
+  const toggleTdsSel = (id: string) => setTdsSel(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const toggleTdsSelAll = () => {
+    if (tdsSel.size === filtered.length) setTdsSel(new Set())
+    else setTdsSel(new Set(filtered.map((r: any) => r.id)))
+  }
+
+  // "Delete" here clears the TDS recorded on the bill — it deliberately does
+  // NOT delete the bill itself, which would destroy a real payable record.
+  const removeTds = async (id: string) => {
+    const { error } = await supabase.from('pending_payments').update({
+      tds_amount: 0, tds_pct: null, tds_section: null, tds_interest: 0,
+      tds_deposited: false, tds_deposit_date: null, tds_challan_id: null,
+    }).eq('id', id)
+    if (error) { toast.error(error.message); return }
+    toast.success('TDS cleared from this bill')
+    setRemoveTdsId(null)
+    qc.invalidateQueries({ queryKey: ['pending_payments_tds'] })
+    qc.invalidateQueries({ queryKey: ['pending_payments'] })
+  }
 
   // Summary by TDS rate
   const summary = useMemo(() => {
@@ -571,6 +637,20 @@ export const TDSPayable: React.FC = () => {
               { value: 'Pending', label: 'Pending' },
               { value: 'Paid', label: 'Paid' },
             ]} />
+          <Select label="TDS Deposit" value={depositFilter} onChange={e => setDepositFilter(e.target.value)}
+            options={[
+              { value: '', label: 'All' },
+              { value: 'pending', label: 'Not deposited' },
+              { value: 'deposited', label: 'Deposited' },
+            ]} />
+          <div className="min-w-[220px] flex-1">
+            <Input label="Search" placeholder="Vendor, invoice, PAN, section…"
+              value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          {(search || depositFilter || rateFilter || statusFilter) && (
+            <Button size="sm" variant="outline"
+              onClick={() => { setSearch(''); setDepositFilter(''); setRateFilter(''); setStatusFilter('') }}>Clear</Button>
+          )}
           <Button size="sm" variant="outline" onClick={exportXlsx}><Download size={14} className="mr-1" />Export</Button>
           <Button size="sm" variant="outline" onClick={printVendorTds}><Printer size={14} className="mr-1" />Print Vendor</Button>
           <Button size="sm" variant="outline" onClick={printSalaryTds}><Printer size={14} className="mr-1" />Print Salary</Button>
@@ -645,25 +725,57 @@ export const TDSPayable: React.FC = () => {
             </Card>
           )}
 
+          {/* Bulk actions — one challan normally covers many deductees, so
+              tagging them one row at a time was the slow part of filing. */}
+          {tdsSel.size > 0 && (
+            <div className="flex items-center gap-3 bg-brand-50 border border-brand-200 rounded-xl px-4 py-2 text-sm">
+              <span className="font-medium text-brand-800">{tdsSel.size} selected</span>
+              <span className="text-xs text-gray-500">
+                TDS {inr(selectedRows.reduce((a: number, r: any) => a + (r.tds_amount ?? 0), 0))}
+              </span>
+              <button onClick={() => setTdsSel(new Set())} className="text-xs text-gray-500 hover:text-gray-700 underline">Clear</button>
+              <div className="ml-auto">
+                <Button size="sm" onClick={() => setBulkChallanOpen(true)}>
+                  <Link2 size={14} className="mr-1" />Link to Challan ({tdsSel.size})
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Detail table */}
           <Card>
             <Table>
               <thead><tr>
-                <Th>Date</Th><Th>Vendor</Th><Th>GRN #</Th><Th>Invoice #</Th>
-                <Th right>Invoice Amt</Th><Th right>TDS %</Th><Th right>TDS Amt</Th>
+                <Th><input type="checkbox" className="rounded border-gray-300"
+                  checked={filtered.length > 0 && tdsSel.size === filtered.length}
+                  onChange={toggleTdsSelAll} /></Th>
+                <Th><button onClick={() => toggleSort('date')} className="hover:underline">Date{sortMark('date')}</button></Th>
+                <Th><button onClick={() => toggleSort('vendor')} className="hover:underline">Vendor{sortMark('vendor')}</button></Th>
+                <Th>GRN #</Th>
+                <Th><button onClick={() => toggleSort('invoice')} className="hover:underline">Invoice #{sortMark('invoice')}</button></Th>
+                <Th right><button onClick={() => toggleSort('amount')} className="hover:underline">Invoice Amt{sortMark('amount')}</button></Th>
+                <Th right><button onClick={() => toggleSort('pct')} className="hover:underline">TDS %{sortMark('pct')}</button></Th>
+                <Th right><button onClick={() => toggleSort('tds')} className="hover:underline">TDS Amt{sortMark('tds')}</button></Th>
                 <Th right>Net Payable</Th><Th>Bill Status</Th>
-                <Th>PAN</Th><Th>Deductee Type</Th><Th>TDS Section</Th><Th right>TDS Interest</Th>
-                <Th>TDS Due Date</Th><Th>TDS Deposit Status</Th>
+                <Th><button onClick={() => toggleSort('pan')} className="hover:underline">PAN{sortMark('pan')}</button></Th>
+                <Th>Deductee Type</Th>
+                <Th><button onClick={() => toggleSort('section')} className="hover:underline">TDS Section{sortMark('section')}</button></Th>
+                <Th right>TDS Interest</Th>
+                <Th>TDS Due Date</Th>
+                <Th><button onClick={() => toggleSort('deposit')} className="hover:underline">TDS Deposit Status{sortMark('deposit')}</button></Th>
+                <Th></Th>
               </tr></thead>
               <tbody>
                 {filtered.length === 0
-                  ? <tr><td colSpan={15} className="text-center py-8 text-gray-400 text-sm">No TDS entries found</td></tr>
+                  ? <tr><td colSpan={17} className="text-center py-8 text-gray-400 text-sm">No TDS entries found</td></tr>
                   : filtered.map((r: any) => {
                       const netPay = r.net_payable ?? (r.invoice_amount ?? 0) - (r.tds_amount ?? 0)
                       const due = tdsDueDate(refDate(r))
                       const overdue = isOverdue(r, 'grn_date')
                       return (
-                        <tr key={r.id} className="hover:bg-gray-50">
+                        <tr key={r.id} className={`hover:bg-gray-50 ${tdsSel.has(r.id) ? 'bg-brand-50' : ''}`}>
+                          <Td><input type="checkbox" className="rounded border-gray-300"
+                            checked={tdsSel.has(r.id)} onChange={() => toggleTdsSel(r.id)} /></Td>
                           <Td className="text-xs">{refDate(r) ? fmtDate(refDate(r)) : '—'}</Td>
                           <Td className="text-xs font-medium">{r.vendor_name ?? '—'}</Td>
                           <Td className="text-xs font-mono">{r.grn_no ?? '—'}</Td>
@@ -708,18 +820,25 @@ export const TDSPayable: React.FC = () => {
                                 : overdue ? <Badge color="red">Overdue</Badge> : <Badge color="orange">Pending</Badge>}
                             </button>
                           </Td>
+                          <Td>
+                            <button onClick={() => setRemoveTdsId(r.id)}
+                              title="Clear the TDS recorded on this bill (the bill itself is kept)"
+                              className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-600">
+                              <Trash2 size={13} />
+                            </button>
+                          </Td>
                         </tr>
                       )
                     })}
               </tbody>
               {filtered.length > 0 && (
                 <tfoot><tr className="bg-gray-50 font-semibold">
-                  <Td colSpan={4}>TOTAL ({filtered.length})</Td>
+                  <Td colSpan={5}>TOTAL ({filtered.length})</Td>
                   <Td right>{inr(totalInvoice)}</Td>
                   <Td></Td>
                   <Td right className="text-red-600">{inr(totalTDS)}</Td>
                   <Td right className="text-green-700">{inr(totalNetPayable)}</Td>
-                  <Td colSpan={7}></Td>
+                  <Td colSpan={8}></Td>
                 </tr></tfoot>
               )}
             </Table>
@@ -880,6 +999,45 @@ export const TDSPayable: React.FC = () => {
           onSave={challanModal.source === 'vendor' ? updateVendorTds : updateSalaryTds}
           onClose={() => setChallanModal(null)}
         />
+      )}
+
+      {/* Bulk tag — reuses the same modal, but applies the chosen challan to
+          every selected bill. The stand-in row carries the first selection's
+          section (so the challan list filters sensibly) and the combined TDS
+          total (pre-filling the amount when creating a new challan). */}
+      {bulkChallanOpen && selectedRows.length > 0 && (
+        <ChallanPickerModal
+          row={{
+            id: '__bulk__',
+            tds_section: selectedRows[0].tds_section,
+            tds_amount: selectedRows.reduce((a: number, r: any) => a + (r.tds_amount ?? 0), 0),
+            tds_interest: selectedRows.reduce((a: number, r: any) => a + (r.tds_interest ?? 0), 0),
+          }}
+          source="vendor"
+          sectionOptions={tdsSectionOptions}
+          onSave={async (_id: string, patch: any) => {
+            for (const r of selectedRows) await updateVendorTds(r.id, patch)
+            setTdsSel(new Set())
+            setBulkChallanOpen(false)
+          }}
+          onClose={() => setBulkChallanOpen(false)}
+        />
+      )}
+
+      {removeTdsId && (
+        <Modal open onClose={() => setRemoveTdsId(null)} title="Clear TDS from this bill" size="sm"
+          footer={<>
+            <Button variant="outline" onClick={() => setRemoveTdsId(null)}>Cancel</Button>
+            <Button variant="danger" onClick={() => removeTds(removeTdsId)}>Clear TDS</Button>
+          </>}>
+          <p className="text-sm text-gray-600">
+            This clears the TDS amount, rate, section, interest and any challan tag from the bill,
+            so it drops out of this report.
+          </p>
+          <p className="text-xs text-amber-700 mt-2">
+            The bill itself is <strong>not</strong> deleted — it stays in Pending Payments with its full amount payable.
+          </p>
+        </Modal>
       )}
     </div>
   )

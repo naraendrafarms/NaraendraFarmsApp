@@ -58,6 +58,7 @@ export const InvoiceRegister: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY })
   const [filterType, setFilterType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [search, setSearch] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
@@ -363,6 +364,17 @@ export const InvoiceRegister: React.FC = () => {
     if (filterStatus && inv.payment_status !== filterStatus) return false
     if (filterFrom   && inv.invoice_date   <  filterFrom)    return false
     if (filterTo     && inv.invoice_date   >  filterTo)      return false
+    // Free-text search across everything visible in a row, so an invoice
+    // number, supplier, amount or remark all find it.
+    const q = search.trim().toLowerCase()
+    if (q) {
+      const hay = [
+        inv.invoice_no, inv.supplier_name, inv.party?.name, inv.remarks,
+        inv.source_type, inv.flock?.flock_no, inv.farm?.name,
+        inv.total_amount, inv.paid_amount, inv.tds_amount, inv.invoice_date,
+      ].map(v => String(v ?? '').toLowerCase()).join(' ')
+      if (!hay.includes(q)) return false
+    }
     return true
   })
 
@@ -574,12 +586,19 @@ export const InvoiceRegister: React.FC = () => {
           </div>
           <DateInput label="From" value={filterFrom} onChange={e => { setFilterFrom(e.target.value); setFilterFy('') }} />
           <DateInput label="To" value={filterTo} onChange={e => { setFilterTo(e.target.value); setFilterFy('') }} />
-          {(filterType || filterStatus || filterFrom || filterTo || filterFy) && (
-            <Button variant="outline" size="sm" onClick={() => { setFilterType(''); setFilterStatus(''); setFilterFrom(''); setFilterTo(''); setFilterFy('') }}>
+          <div className="flex-1 min-w-[220px]">
+            <Input label="Search" placeholder="Invoice no, supplier, amount, remarks…"
+              value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          {(filterType || filterStatus || filterFrom || filterTo || filterFy || search) && (
+            <Button variant="outline" size="sm" onClick={() => { setFilterType(''); setFilterStatus(''); setFilterFrom(''); setFilterTo(''); setFilterFy(''); setSearch('') }}>
               Clear
             </Button>
           )}
         </div>
+        {search && (
+          <p className="text-xs text-gray-400 mt-2">Showing {filtered.length} of {(invoices ?? []).length} invoice(s)</p>
+        )}
       </Card>
 
       {/* Add / Edit Form */}
