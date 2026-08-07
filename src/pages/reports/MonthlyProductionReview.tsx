@@ -15,7 +15,7 @@
 import React, { useState, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fetchAllPages } from '@/lib/utils'
+import { inr, fetchAllPages, fmtDate } from '@/lib/utils'
 import {
   Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, SearchableSelect,
 } from '@/components/ui'
@@ -290,13 +290,30 @@ export const MonthlyProductionReview: React.FC = () => {
     staleTime: 5 * 60_000,
   })
 
+  // Hatching-egg sales. he_dispatch carries the invoice, party, rate and
+  // amount; grade C lives only on he_dispatch_lines (he_dispatch has grade_a
+  // and grade_b only), so the lines are read too.
+  const { data: heSales = [] } = useQuery({
+    queryKey: ['mpr_he_sales', scopeIds.join(','), start, end],
+    enabled: scopeIds.length > 0,
+    queryFn: () => fetchAllPages<any>((from, to) =>
+      supabase.from('he_dispatch')
+        .select('flock_id,dispatch_date,invoice_no,dc_no,total_dispatched,free_eggs,grade_a,grade_b,rate,amount,taxable_value,parties:party_id(name),he_dispatch_lines(grade_a,grade_b,grade_c,rate)')
+        .in('flock_id', scopeIds)
+        .gte('dispatch_date', start).lte('dispatch_date', end)
+        .order('dispatch_date')
+        .range(from, to),
+      'HE dispatch (Monthly Review)', toast.error),
+    staleTime: 60_000,
+  })
+
   const { data: staffDays = [] } = useQuery({
     queryKey: ['mpr_staff', start, end],
     queryFn: () => fetchAllPages<any>((from, to) =>
       supabase.from('attendance_daily')
         // farm_id is the site the day was worked at; the employee's own farm_id
         // is the fallback. Both were verified 100% populated for Jul-2026.
-        .select('attendance_date,status,farm_id,employee_id,employees!employee_id(designation,farm_id)')
+        .select('attendance_date,status,farm_id,employee_id,employees!employee_id(designation,farm_id,gender)')
         .gte('attendance_date', start).lte('attendance_date', end).range(from, to),
       'Attendance (Monthly Review)', toast.error),
     staleTime: 60_000,
@@ -495,7 +512,9 @@ export const MonthlyProductionReview: React.FC = () => {
     const farmName2 = (id: string | null) =>
       (farms as any[]).find(f => f.id === id)?.name ?? '(no site)'
 
-    const acc = new Map<string, { site: string; desig: string; days: number; emps: Set<string> }>()
+    const acc = new Map<string, { site: string; desig: string; days: number
+      femaleDays: number; maleDays: number; emps: Set<string>
+      femaleEmps: Set<string>; maleEmps: Set<string> }>()
     for (const a of staffDays as any[]) {
       const weight = WORKED[String(a.status ?? '').toUpperCase()]
       const emp = Array.isArray(a.employees) ? a.employees[0] : a.employees
@@ -505,14 +524,26 @@ export const MonthlyProductionReview: React.FC = () => {
       const site = farmName2(siteId)
       const desig = emp?.designation ?? 'Unspecified'
       const key = `${site}||${desig}`
-      const row = acc.get(key) ?? { site, desig, days: 0, emps: new Set<string>() }
+      const row = acc.get(key) ?? { site, desig, days: 0, femaleDays: 0, maleDays: 0,
+        emps: new Set<string>(), femaleEmps: new Set<string>(), maleEmps: new Set<string>() }
+      // employees.gender is free text; treat anything starting with F as female
+      // and M as male, and leave the rest out of the split rather than guessing.
+      const g = String(emp?.gender ?? '').trim().toUpperCase().charAt(0)
       row.emps.add(a.employee_id)
-      if (weight) row.days += weight
+      if (g === 'F') row.femaleEmps.add(a.employee_id)
+      else if (g === 'M') row.maleEmps.add(a.employee_id)
+      if (weight) {
+        row.days += weight
+        if (g === 'F') row.femaleDays += weight
+        else if (g === 'M') row.maleDays += weight
+      }
       acc.set(key, row)
     }
     return [...acc.values()]
       .sort((x, y) => x.site.localeCompare(y.site) || y.days - x.days)
       .map(r => ({ site: r.site, desig: r.desig, employees: r.emps.size, days: r.days,
+        femaleEmps: r.femaleEmps.size, maleEmps: r.maleEmps.size,
+        femaleDays: r.femaleDays, maleDays: r.maleDays,
         avg: r.days / daysInMonth }))
   }, [staffDays, month, farms, scope, selectedSiteId])
 
@@ -577,6 +608,76 @@ export const MonthlyProductionReview: React.FC = () => {
 
   // ── Print ─────────────────────────────────────────────────────────────────
 
+  // ── Hatching-egg sales ────────────────────────────────────────────────────
+  // Grade A and B are on he_dispatch; grade C exists only on he_dispatch_lines,
+  // so the lines are preferred when present and the header used as the fallback.
+  //
+  // IMPORTANT: rate and amount are recorded per DISPATCH, not per grade — there
+  // is no per-grade rate anywhere. So grade-wise QUANTITY is real, but income
+  // cannot be split by grade without inventing a rate. Income is therefore
+  // reported per invoice, which is how it is actually billed.
+  const heGrades = useMemo(() => {
+    let a = 0, b = 0, c = 0, free = 0
+    for (const d of heSales as any[]) {
+      const lines = d.he_dispatch_lines ?? []
+      if (lines.length) {
+        for (const l of lines) { a += num(l.grade_a); b += num(l.grade_b); c += num(l.grade_c) }
+      } else {
+        a += num(d.grade_a); b += num(d.grade_b)
+      }
+      free += num(d.free_eggs)
+    }
+    return { a, b, c, free, total: a + b + c }
+  }, [heSales])
+
+  const heInvoices = useMemo(() => (heSales as any[]).map(d => {
+    const party = Array.isArray(d.parties) ? d.parties[0]?.name : d.parties?.name
+    const qty = num(d.total_dispatched)
+    const amt = num(d.amount)
+    return {
+      date: d.dispatch_date,
+      invoice: d.invoice_no || d.dc_no || '—',
+      party: party ?? '—',
+      qty, free: num(d.free_eggs), amt,
+      rate: num(d.rate) || (qty > 0 ? amt / qty : 0),
+    }
+  }), [heSales])
+
+  const heTotals = useMemo(() => {
+    const qty = heInvoices.reduce((x, r) => x + r.qty, 0)
+    const amt = heInvoices.reduce((x, r) => x + r.amt, 0)
+    return { qty, amt, free: heInvoices.reduce((x, r) => x + r.free, 0),
+      avgRate: qty > 0 ? amt / qty : 0 }
+  }, [heInvoices])
+
+  const heGradeSection: PrintSection = {
+    heading: `Hatching Egg Dispatch — Grade Wise, ${monthLabel(month)}`,
+    headers: ['Grade', 'Eggs'],
+    rightAlignFrom: 1,
+    rows: [
+      ['Grade A', heGrades.a.toLocaleString('en-IN')],
+      ['Grade B', heGrades.b.toLocaleString('en-IN')],
+      ['Grade C', heGrades.c.toLocaleString('en-IN')],
+      ['Free eggs', heGrades.free.toLocaleString('en-IN')],
+    ],
+    footerRow: ['TOTAL (A+B+C)', heGrades.total.toLocaleString('en-IN')],
+    note: 'Rate and amount are recorded per dispatch, not per grade, so income cannot be split by grade — see the invoice table for income.',
+    emptyNote: 'No hatching-egg dispatches in this month.',
+  }
+
+  const heInvoiceSection: PrintSection = {
+    heading: `Hatching Egg Sales — Invoice Wise, ${monthLabel(month)}`,
+    headers: ['Date', 'Invoice / DC', 'Party', 'Eggs', 'Free', 'Rate', 'Amount'],
+    rightAlignFrom: 3,
+    rows: heInvoices.map(r => [fmtDate(r.date), r.invoice, r.party,
+      r.qty.toLocaleString('en-IN'), r.free ? r.free.toLocaleString('en-IN') : '—',
+      inr(r.rate), inr(r.amt)]),
+    footerRow: ['TOTAL', '', `${heInvoices.length} invoice(s)`,
+      heTotals.qty.toLocaleString('en-IN'), heTotals.free.toLocaleString('en-IN'),
+      `Avg ${inr(heTotals.avgRate)}`, inr(heTotals.amt)],
+    emptyNote: 'No hatching-egg dispatches in this month.',
+  }
+
   // Shared by the page and the print so the two can never drift.
   const staffScopeNote = scope === 'flock'
     ? (siteSharedWith.length
@@ -586,11 +687,17 @@ export const MonthlyProductionReview: React.FC = () => {
 
   const staffSection: PrintSection = {
     heading: `Staff Working Days — ${monthLabel(month)}`,
-    headers: ['Site', 'Designation', 'Employees', 'Total Working Days', 'Avg Working Day'],
+    headers: ['Site', 'Designation', 'Employees', 'Female', 'Male',
+              'Female Days', 'Male Days', 'Total Working Days', 'Avg Working Day'],
     rightAlignFrom: 2,
-    rows: staffBySite.map(r => [r.site, r.desig, r.employees, r.days, r.avg.toFixed(1)]),
+    rows: staffBySite.map(r => [r.site, r.desig, r.employees, r.femaleEmps, r.maleEmps,
+      r.femaleDays, r.maleDays, r.days, r.avg.toFixed(1)]),
     footerRow: ['TOTAL', '',
-      staffSiteTotals.reduce((a, r) => a + r.employees, 0),
+      staffBySite.reduce((a, r) => a + r.employees, 0),
+      staffBySite.reduce((a, r) => a + r.femaleEmps, 0),
+      staffBySite.reduce((a, r) => a + r.maleEmps, 0),
+      staffBySite.reduce((a, r) => a + r.femaleDays, 0),
+      staffBySite.reduce((a, r) => a + r.maleDays, 0),
       staffSiteTotals.reduce((a, r) => a + r.days, 0),
       staffSiteTotals.reduce((a, r) => a + r.avg, 0).toFixed(1)],
     note: staffScopeNote,
@@ -722,7 +829,7 @@ export const MonthlyProductionReview: React.FC = () => {
 
     }
 
-    sections.push(staffSection)
+    sections.push(heGradeSection, heInvoiceSection, staffSection)
 
     // Charts — pictures of exactly what is on screen.
     if (scope !== 'company') {
@@ -804,6 +911,46 @@ export const MonthlyProductionReview: React.FC = () => {
     ]
   }, [monthWise])
 
+  // Renders a PrintSection as an on-screen table. Using the very same object
+  // the print consumes means a column can never exist in one and not the other.
+  const renderSection = (sec: PrintSection) => (
+    <Card>
+      <p className="text-sm font-semibold text-gray-800 mb-2">{sec.heading}</p>
+      <div className="overflow-x-auto">
+        <Table>
+          <thead><tr>
+            {sec.headers.map((h, i) => (
+              <Th key={i} right={sec.rightAlignFrom != null && i >= sec.rightAlignFrom}>{h}</Th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {sec.rows.length === 0 ? (
+              <tr><Td colSpan={sec.headers.length} className="text-sm text-gray-500">
+                {sec.emptyNote ?? 'No entries for this period.'}
+              </Td></tr>
+            ) : sec.rows.map((r, ri) => (
+              <tr key={ri} className="hover:bg-gray-50">
+                {r.map((c, ci) => (
+                  <Td key={ci} right={sec.rightAlignFrom != null && ci >= sec.rightAlignFrom}
+                    className="text-sm whitespace-nowrap">{c ?? ''}</Td>
+                ))}
+              </tr>
+            ))}
+            {sec.rows.length > 0 && sec.footerRow && (
+              <tr className="bg-gray-50 font-semibold">
+                {sec.footerRow.map((c, ci) => (
+                  <Td key={ci} right={sec.rightAlignFrom != null && ci >= sec.rightAlignFrom}
+                    className="text-sm whitespace-nowrap">{c ?? ''}</Td>
+                ))}
+              </tr>
+            )}
+          </tbody>
+        </Table>
+      </div>
+      {sec.note && <p className="text-xs text-gray-500 mt-2">{sec.note}</p>}
+    </Card>
+  )
+
   // Rendered in every scope: in flock scope it narrows to that flock's site.
   const staffPanel = (
     <Card>
@@ -814,16 +961,22 @@ export const MonthlyProductionReview: React.FC = () => {
         <Table>
           <thead><tr>
             <Th>Site</Th><Th>Designation</Th><Th right>Employees</Th>
+            <Th right>Female</Th><Th right>Male</Th>
+            <Th right>Female Days</Th><Th right>Male Days</Th>
             <Th right>Total Working Days</Th><Th right>Avg Working Day</Th>
           </tr></thead>
           <tbody>
             {staffBySite.length === 0 ? (
-              <tr><Td colSpan={5} className="text-sm text-gray-500">No attendance recorded for this month.</Td></tr>
+              <tr><Td colSpan={9} className="text-sm text-gray-500">No attendance recorded for this month.</Td></tr>
             ) : staffBySite.map((r, i) => (
               <tr key={i} className="hover:bg-gray-50">
                 <Td className="text-sm">{r.site}</Td>
                 <Td className="text-sm">{r.desig}</Td>
                 <Td right className="text-sm">{r.employees}</Td>
+                <Td right className="text-sm text-pink-700">{r.femaleEmps || '—'}</Td>
+                <Td right className="text-sm text-blue-700">{r.maleEmps || '—'}</Td>
+                <Td right className="text-sm text-pink-700">{r.femaleDays || '—'}</Td>
+                <Td right className="text-sm text-blue-700">{r.maleDays || '—'}</Td>
                 <Td right className="text-sm">{r.days}</Td>
                 <Td right className="text-sm font-medium">{r.avg.toFixed(1)}</Td>
               </tr>
@@ -833,6 +986,7 @@ export const MonthlyProductionReview: React.FC = () => {
                 <Td className="text-sm font-medium">{t.site}</Td>
                 <Td className="text-sm text-gray-500">— site total —</Td>
                 <Td right className="text-sm font-medium">{t.employees}</Td>
+                <Td /><Td /><Td /><Td />
                 <Td right className="text-sm font-medium">{t.days}</Td>
                 <Td right className="text-sm font-medium">{t.avg.toFixed(1)}</Td>
               </tr>
@@ -840,7 +994,11 @@ export const MonthlyProductionReview: React.FC = () => {
             {staffBySite.length > 0 && (
               <tr className="bg-gray-50 font-semibold">
                 <Td className="text-sm">TOTAL</Td><Td />
-                <Td right className="text-sm">{staffSiteTotals.reduce((a, r) => a + r.employees, 0)}</Td>
+                <Td right className="text-sm">{staffBySite.reduce((a, r) => a + r.employees, 0)}</Td>
+                <Td right className="text-sm">{staffBySite.reduce((a, r) => a + r.femaleEmps, 0)}</Td>
+                <Td right className="text-sm">{staffBySite.reduce((a, r) => a + r.maleEmps, 0)}</Td>
+                <Td right className="text-sm">{staffBySite.reduce((a, r) => a + r.femaleDays, 0)}</Td>
+                <Td right className="text-sm">{staffBySite.reduce((a, r) => a + r.maleDays, 0)}</Td>
                 <Td right className="text-sm">{staffSiteTotals.reduce((a, r) => a + r.days, 0)}</Td>
                 <Td right className="text-sm">{staffSiteTotals.reduce((a, r) => a + r.avg, 0).toFixed(1)}</Td>
               </tr>
@@ -1200,6 +1358,9 @@ export const MonthlyProductionReview: React.FC = () => {
 
             </>
           )}
+
+          {renderSection(heGradeSection)}
+          {renderSection(heInvoiceSection)}
 
           {staffPanel}
 
