@@ -193,11 +193,19 @@ export const MonthlyProductionReview: React.FC = () => {
     staleTime: 5 * 60_000,
   })
 
+  // The breed standard is held per season (Summer and Winter are both loaded
+  // for Vencobb430). A flock with no Laying Season set has no way to choose
+  // between them: taking whichever row came last would silently compare a
+  // summer flock against the winter standard, with nothing on screen to say
+  // so. Better to show no standard at all and tell the user why.
+  const seasonMissing = !!selectedFlock && !selectedFlock.laying_season
+
   const stdByWeek = useMemo(() => {
     const season = selectedFlock?.laying_season
     const m = new Map<number, any>()
+    if (!season) return m
     for (const s of stdCurve) {
-      if (season && s.season && s.season !== season) continue
+      if (s.season !== season) continue
       m.set(s.week_of_age, s)
     }
     return m
@@ -540,7 +548,9 @@ export const MonthlyProductionReview: React.FC = () => {
         headers: ['Particulars', ...months3.map(monthLabel)],
         rightAlignFrom: 1,
         rows: monthWiseRows,
-        note: 'Standard is the breed curve at the age the flock reached in that month.',
+        note: seasonMissing
+          ? `Flock ${selectedFlock.flock_no} has no Laying Season set, so no standard could be chosen — every Std and Deviation figure is blank for that reason, not because the flock is off target.`
+          : `Standard is the ${selectedFlock.laying_season} breed curve at the age the flock reached in that month.`,
         emptyNote: 'No daily records for these months.',
       })
 
@@ -803,10 +813,19 @@ export const MonthlyProductionReview: React.FC = () => {
                     </tbody>
                   </Table>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Standard is the breed curve at the age the flock reached in that month.
-                  A dash means no standard is loaded for that age.
-                </p>
+                {seasonMissing ? (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                    <strong>Flock {selectedFlock.flock_no} has no Laying Season set</strong>, so no standard can
+                    be chosen — Summer and Winter curves are both loaded and picking one blindly would compare
+                    this flock against the wrong season. Set Laying Season on the flock record and every Std and
+                    Deviation figure here will fill in.
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-2">
+                    Standard is the {selectedFlock.laying_season} breed curve at the age the flock reached in
+                    that month. A dash means no standard row exists for that age.
+                  </p>
+                )}
               </Card>
 
               <Card>
