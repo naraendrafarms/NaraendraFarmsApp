@@ -264,8 +264,19 @@ export const VendorAdvancesPage: React.FC = () => {
     setShowModal(true)
   }
 
-  const openEdit = (a: any) => {
+  const openEdit = async (a: any) => {
     setEditId(a.id)
+    // The bank account is NOT stored on the advance — only on the bank entry it
+    // created. Saving an edit deletes that entry and re-inserts it only when a
+    // bank account is selected, so opening an edit with this blank and saving
+    // would have silently DELETED the bank debit and never put it back. Read it
+    // back from the existing entry so it survives an edit untouched.
+    let bankId = ''
+    if ((a.payment_mode ?? '') !== 'cash') {
+      const { data: bt } = await supabase.from('bank_transactions')
+        .select('bank_account_id').eq('vendor_advance_id', a.id).limit(1).maybeSingle()
+      bankId = bt?.bank_account_id ?? ''
+    }
     setForm({
       advance_date: a.advance_date ?? today(),
       party_id: a.party_id ?? '',
@@ -273,7 +284,7 @@ export const VendorAdvancesPage: React.FC = () => {
       payment_mode: a.payment_mode ?? 'cash',
       reference_no: a.reference_no ?? '',
       remarks: a.remarks ?? '',
-      bank_account_id: '',
+      bank_account_id: bankId,
       tds_pct: a.tds_pct ? String(a.tds_pct) : '',
       tds_amount: a.tds_amount ? String(a.tds_amount) : '',
       tds_section: a.tds_section ?? '',
