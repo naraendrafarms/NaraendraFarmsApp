@@ -10,7 +10,7 @@ const LAST_UPDATED = '2026-08-07'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
-  { date: '2026-08-08', tag: 'New', text: 'Employees → Statutory Filing: added Advance Tax and Late Fee / Interest to the remittance tracker — neither had anywhere to be recorded before. Both are typed in when you mark them remitted, because unlike TDS, GST, PF, ESI and PT there is no source data to total them from. Also, when marking any liability remitted you can now say WHO paid it: leave it as "Paid from our bank", or pick a partner (e.g. Hitech) if the challan was remitted from their account after you transferred them the funds. A partner-paid challan deliberately posts NO bank or cash entry on that date — the money left your account when you transferred it, and posting it again would double-count. The saved row shows "via Hitech" under the payment date so it is obvious at a glance.' },
+  { date: '2026-08-08', tag: 'New', text: 'Employees → Statutory Filing: added Advance Tax and Late Fee / Interest to the remittance tracker — neither had anywhere to be recorded before. Both are typed in when you mark them remitted, because unlike TDS, GST, PF, ESI and PT there is no source data to total them from. Also, when marking any liability remitted you can now say WHO paid it: leave it as "Paid from our bank", or pick the company or partner who deposited the challan after you transferred them the funds. The list is built from your Suppliers and Partners — no name is fixed in the app, so if the payer is not there yet, add them under Purchase → Suppliers and they appear straight away. A challan paid by someone else deliberately posts NO bank or cash entry on that date: the money left your account when you transferred it, and posting it again would double-count the expense. The saved row shows "via <name>" under the payment date. Step-by-step instructions are in the HR & Payroll section of this guide.' },
   { date: '2026-08-08', tag: 'Fix', text: 'Reports → TDS Payable was missing TDS deducted on vendor advances. It read only supplier bills and salaries, so any TDS you deducted while paying an advance never appeared in the report or in the printed statement used for filing — the statement was understated by exactly that amount. Vendor advances now appear as their own table (with the same section picker and Link to Challan action), are included in the section-wise summary and the totals, and the combined print becomes "Vendor + Salary + Advance". Checked before changing anything: you currently have 17 advances and none carry TDS, so no figure moved — this closes the gap before it opens.' },
   { date: '2026-08-07', tag: 'Fix', text: 'Flock age now counts from 0 weeks. The placement date reads W0 D1 instead of W1 D1 — a day-old chick is 0 weeks 1 day, and the flock turns 1 week old on day 8. This is how the Venco standard curve is measured and what the Age (weeks) box in daily entry already filled in, so the three now agree instead of the Week/Day column being one week ahead of everything else. IMPORTANT: on the Weekly tab every week number therefore shifts down by one — what read "Week 58" now reads "Week 57". The weeks themselves, their dates and all totals are unchanged; only the number against them is corrected. Days recorded BEFORE the placement date — normal when chicks arrive over two or three days and day 1 is counted from the last consignment — now read "Pre -2d" and group as "Pre-placement" on the Weekly tab, instead of showing a meaningless week number.' },
   { date: '2026-08-07', tag: 'Fix', text: 'Flock Management → Bulk Daily Entry: a figure typed into the opening bird count could be silently replaced a moment later by the pre-filled value, so Save stored the old number and it looked like nothing saved. This only showed on a brand-new flock: the page fills the opening box from yesterday\'s closing, which arrives from the database a fraction after the rest of the row, and anything typed in that gap was overwritten. On an established flock the same refresh puts back the value already on screen, so it was invisible. The page now waits for all of a day\'s data before filling the grid, and never re-fills it while you are working — only when you change flock, date or shed, or after a save.' },
@@ -875,6 +875,19 @@ const SECTIONS: Section[] = [
         ]
       },
       {
+        title: 'Challan paid from another company / partner account',
+        path: 'HR & Payroll → Statutory Filing → Remittance Tracker',
+        steps: [
+          { text: 'Use this when you transfer money to another company or a partner and THEY deposit the challan — TDS, ESI, PF, PT, Advance Tax, GST (including reverse charge on rent) or a late fee.' },
+          { text: 'FIRST, make sure the payer exists in the app. If it is a company, add it under Purchase → Suppliers (any supplier or customer can be chosen as a payer). If it is one of your partners, they are already listed. Nothing is fixed in the app — whoever you add appears in the dropdown automatically.' },
+          { text: 'STEP 1 — record the transfer. Accounts → Bank Ledger → add a payment from your account to that payer. This is NOT an expense; it is money moved to someone holding it for you. Put "Funds for statutory challans" in the description.' },
+          { text: 'STEP 2 — record the challan. Employees → Statutory Filing, pick the month, find the liability row and click Mark Remitted. Enter the challan / acknowledgement number and the deposit date.' },
+          { text: 'STEP 3 — set the payer. In the same form, change "Paid from our bank" to "Paid via <name>". Save. The row then shows "via <name>" under the payment date.' },
+          { text: 'IMPORTANT: do NOT add a second bank or cash entry for the challan itself. No money left your account on that date — it left in Step 1. The app deliberately posts nothing to the ledger for a challan paid by someone else, so entering it again would double-count the expense.' },
+          { text: 'Advance Tax and Late Fee / Interest are typed in by hand, because unlike TDS, GST, PF, ESI and PT there is no source data in the app to total them from. Enter the amount in the same form when marking them remitted.' },
+        ]
+      },
+      {
         title: 'Salary CMS Export',
         path: 'HR & Payroll → Salary CMS Export',
         steps: [
@@ -889,6 +902,7 @@ const SECTIONS: Section[] = [
       'ESI is not deducted if gross salary exceeds ₹21,000.',
       'Use "Quick Generate All" to create salary for all employees of a farm in one step.',
       'Prefer Bulk Salary Payment over marking employees Paid one at a time — it keeps Bank Ledger showing one real transaction per batch instead of one row per employee.',
+      'If another company pays your challans, add them once under Purchase → Suppliers — then they appear in the "Paid via" list on Statutory Filing forever after.',
     ]
   },
 
