@@ -447,10 +447,19 @@ export const PendingPaymentsPage: React.FC = () => {
     setEditErr('')
   }
 
+  // Which payment modes actually move money out of a bank account. Cash
+  // obviously doesn't; neither does settling a bill against a vendor advance or
+  // an opening balance — in both cases the money left earlier (when the advance
+  // was paid), which is why handlePay has always allowed them without a bank
+  // account. The edit form did not know that, so reopening an advance-settled
+  // bill demanded a bank account that never existed and refused to save.
+  const needsBankAccount = (mode: string) =>
+    !['cash', 'advance', 'opening adjustment'].includes((mode || '').trim().toLowerCase())
+
   const handleEditSave = async () => {
     if (!editModal) return
     if (!editForm.vendor_name.trim()) { setEditErr('Vendor name is required'); return }
-    if (editForm.payment_status === 'Paid' && editForm.account_type.toLowerCase() !== 'cash' && !editForm.bank_account_id) {
+    if (editForm.payment_status === 'Paid' && needsBankAccount(editForm.account_type) && !editForm.bank_account_id) {
       setEditErr('Select which bank account this is paid from'); return
     }
     // Permanent guard against the exact mistake found twice this session
@@ -521,7 +530,7 @@ export const PendingPaymentsPage: React.FC = () => {
         cheque_no: editForm.cheque_no || null,
         category: editForm.category || null,
         remarks: editForm.remarks || null,
-        bank_account_id: (editForm.account_type || '').toLowerCase() !== 'cash' ? (editForm.bank_account_id || null) : null,
+        bank_account_id: needsBankAccount(editForm.account_type) ? (editForm.bank_account_id || null) : null,
         // Paid Amount is now a direct field the user types — saved exactly
         // as entered, never derived from Net Payable minus Discount. That
         // auto-derivation used to silently recompute paid_amount from
@@ -1192,7 +1201,8 @@ export const PendingPaymentsPage: React.FC = () => {
                       <label className="text-xs font-medium text-gray-600 block mb-1">Payment Mode</label>
                       <select value={editForm.account_type} onChange={e => setEditForm(f => ({ ...f, account_type: e.target.value }))}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                        {['NEFT', 'RTGS', 'IMPS', 'Cheque', 'Cash', 'UPI'].map(v => <option key={v}>{v}</option>)}
+                        {['NEFT', 'RTGS', 'IMPS', 'Cheque', 'Cash', 'UPI', 'Advance', 'Opening Adjustment']
+                          .map(v => <option key={v}>{v}</option>)}
                       </select>
                     </div>
                     <div>
@@ -1200,7 +1210,7 @@ export const PendingPaymentsPage: React.FC = () => {
                       <input value={editForm.utr_no || editForm.cheque_no} onChange={e => setEditForm(f => ({ ...f, utr_no: e.target.value, cheque_no: '' }))}
                         placeholder="Optional" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
-                    {editForm.account_type.toLowerCase() !== 'cash' && (
+                    {needsBankAccount(editForm.account_type) && (
                       <div className="col-span-2">
                         <label className="text-xs font-medium text-gray-600 block mb-1">Paid From Bank Account</label>
                         <select value={editForm.bank_account_id} onChange={e => setEditForm(f => ({ ...f, bank_account_id: e.target.value }))}
