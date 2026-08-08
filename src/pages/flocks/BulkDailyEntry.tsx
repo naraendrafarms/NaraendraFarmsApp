@@ -487,8 +487,17 @@ export const BulkDailyEntry: React.FC = () => {
       // because medicine was entered would otherwise sit there as an
       // all-zero/blank daily record that was never actually reported.
       if (hasProductionData || r.existingId) {
-        const { error } = r.existingId
-          ? await supabase.from('daily_records').update(payload).eq('id', r.existingId)
+        // Resolve the row id from the FETCHED data as well, not only from the
+        // grid's state. The grid renders an ad-hoc blank row for any shed whose
+        // state has not been built yet (`shedRows[shed.id] ?? emptyShedRow()`),
+        // and typing into that creates a state row with NO existingId. The save
+        // then INSERTed over a row that already exists for this shed and date
+        // and hit daily_records_unique_with_shed, so the entry silently failed.
+        const existingId = r.existingId
+          ?? (drRows ?? []).find((x: any) => x.shed_id === shed.id)?.id
+          ?? null
+        const { error } = existingId
+          ? await supabase.from('daily_records').update(payload).eq('id', existingId)
           : await supabase.from('daily_records').insert(payload)
         if (error) {
           // Surface WHY. A bare count ("Saved 0 with 2 errors") gives no way to
