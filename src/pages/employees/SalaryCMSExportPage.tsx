@@ -28,6 +28,26 @@ function depositHolder(row: any, employeesById: Record<string, any>) {
   return emp
 }
 
+// Which KIND of account the salary lands in — the same three cases
+// depositHolder resolves, named so they can be filtered on.
+export type AccountKind = 'own' | 'shared' | 'override'
+export function accountKind(row: any, employeesById: Record<string, any>): AccountKind {
+  if (row.override_account_emp_id) return 'override'
+  const emp = employeesById[row.employee_id]
+  return (emp?.payment_mode ?? 'own_account') === 'shared_account' ? 'shared' : 'own'
+}
+
+export const ACCOUNT_KIND_OPTIONS = [
+  { value: '', label: 'All accounts' },
+  { value: 'own', label: 'Own account only' },
+  { value: 'shared', label: 'Shared account only' },
+  { value: 'override', label: 'Override account only' },
+  { value: 'not_own', label: 'Shared + Override (not own)' },
+]
+
+export const matchesAccountKind = (kind: AccountKind, filter: string) =>
+  !filter || (filter === 'not_own' ? kind !== 'own' : kind === filter)
+
 export const SalaryCMSExportPage: React.FC = () => {
   const [month, setMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })
   const [includePaid, setIncludePaid] = useState(false)
@@ -35,6 +55,7 @@ export const SalaryCMSExportPage: React.FC = () => {
   const [unitBranch, setUnitBranch] = useState('Hyderabad')
   const [reference, setReference] = useState('')
   const [farmFilter, setFarmFilter] = useState<string[]>([])
+  const [acctFilter, setAcctFilter] = useState('')
 
   const { data: farms } = useQuery({
     queryKey: ['farms_for_cms'],
@@ -73,14 +94,16 @@ export const SalaryCMSExportPage: React.FC = () => {
 
   const rows = React.useMemo(() => {
     return (salaries as any[] ?? [])
-      .map(s => ({ salary: s, holder: depositHolder(s, employeesById), emp: employeesById[s.employee_id] }))
+      .map(s => ({ salary: s, holder: depositHolder(s, employeesById), emp: employeesById[s.employee_id],
+        kind: accountKind(s, employeesById) }))
       .filter(r => r.emp)
       .filter(r => (r.salary.net_salary ?? 0) > 0)
       .filter(r => !farmFilter.length || farmFilter.includes(r.emp.farm_id))
+      .filter(r => matchesAccountKind(r.kind, acctFilter))
       .sort((a, b) =>
         (a.emp?.farms?.name ?? '').localeCompare(b.emp?.farms?.name ?? '') ||
         (a.emp?.name ?? '').localeCompare(b.emp?.name ?? ''))
-  }, [salaries, employeesById, farmFilter])
+  }, [salaries, employeesById, farmFilter, acctFilter])
 
   const missingBankRows = rows.filter(r => !r.holder?.account_no || !r.holder?.ifsc || !r.holder?.bank_name)
   const total = rows.reduce((s, r) => s + (r.salary.net_salary ?? 0), 0)
@@ -110,7 +133,8 @@ export const SalaryCMSExportPage: React.FC = () => {
     }
     printReport({
       title: 'Salary CMS Export',
-      subtitle: `${monthLabel(month)}${farmFilter.length ? ' — ' + siteGroups.map(g=>g.site).join(', ') : ' — All Sites'}`,
+      subtitle: `${monthLabel(month)}${farmFilter.length ? ' — ' + siteGroups.map(g=>g.site).join(', ') : ' — All Sites'}`
+        + (acctFilter ? ` — ${ACCOUNT_KIND_OPTIONS.find(o => o.value === acctFilter)?.label}` : ''),
       headers: ['Site', 'Name', 'Bank', 'Account No', 'IFSC', 'Amount'],
       rows: printRows,
       rightAlignFrom: 5,
@@ -182,6 +206,17 @@ export const SalaryCMSExportPage: React.FC = () => {
                 </label>
               ))}
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Account</label>
+            <select value={acctFilter} onChange={e => setAcctFilter(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500">
+              {ACCOUNT_KIND_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <p className="text-[10px] text-gray-400 mt-1 max-w-[13rem]">
+              Own = the employee's own account · Shared = paid into another employee's account ·
+              Override = a different account chosen for this month only.
+            </p>
           </div>
           <Input label="Unit / Branch" value={unitBranch} onChange={e => setUnitBranch(e.target.value)} />
           <Input label="Payment Reference" placeholder={`${monthLabel(month)} Salaries`}

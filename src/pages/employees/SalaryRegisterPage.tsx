@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { printReport } from '@/lib/invoicePrint'
+import { ACCOUNT_KIND_OPTIONS, matchesAccountKind } from '@/pages/employees/SalaryCMSExportPage'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -36,6 +37,7 @@ export const SalaryRegisterPage: React.FC = () => {
   const [filterFarm, setFilterFarm] = useState<string[]>([])
   const [filterGender, setFilterGender] = useState('')
   const [filterDesignation, setFilterDesignation] = useState('')
+  const [acctFilter, setAcctFilter] = useState('')
   const navigate = useNavigate()
   const [voucherEmp, setVoucherEmp] = useState<{ id: string; name: string } | null>(null)
   const [dedEmp, setDedEmp] = useState<{ id: string; name: string } | null>(null)
@@ -127,7 +129,13 @@ export const SalaryRegisterPage: React.FC = () => {
 
   // Print/Export skip zero-salary rows (e.g. someone with no paid days that
   // month) — they'd just be blank/zero lines on the sheet otherwise.
-  const payableRows = (rows as any[] ?? []).filter(r => (r.net_salary ?? 0) > 0)
+  const payableRows = (rows as any[] ?? [])
+    .filter(r => (r.net_salary ?? 0) > 0)
+    // depositHolder already resolves Own / Shared / Override; lower-cased it is
+    // the same vocabulary the CMS page filters on, so the two agree by
+    // construction rather than by two similar-looking rules.
+    .filter(r => matchesAccountKind(
+      (depositHolder(r)?.kind ?? 'Own').toLowerCase() as any, acctFilter))
 
   const exportXLSX = () => {
     if (!payableRows.length) { toast.error('No data to export'); return }
@@ -173,7 +181,9 @@ export const SalaryRegisterPage: React.FC = () => {
       return dep?.holder ? `${dep.kind} — ${dep.holder.name}` : '—'
     }
     printReport({
-      title: 'Salary Register', subtitle: monthLabel(month),
+      title: 'Salary Register',
+      subtitle: monthLabel(month)
+        + (acctFilter ? ` — ${ACCOUNT_KIND_OPTIONS.find(o => o.value === acctFilter)?.label}` : ''),
       headers: ['Emp Code','Name','Designation','Farm','Days','Absent','Paid','Extra','Total Earning',
         'Employee Deductions (PF,ESI,PT)','Advance','Other Deductions','Net Salary','Employer Amount (ESI,PF)','CTC','Deposited Into'],
       rows: payableRows.map(r => {
@@ -251,6 +261,14 @@ export const SalaryRegisterPage: React.FC = () => {
           <label className="block text-xs text-gray-500 mb-1">Designation</label>
           <Select value={filterDesignation} onChange={e => setFilterDesignation(e.target.value)}
             options={[{ value: '', label: 'All Designations' }, ...designations.map((d: string) => ({ value: d, label: d }))]} />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Account</label>
+          <Select value={acctFilter} onChange={e => setAcctFilter(e.target.value)}
+            options={ACCOUNT_KIND_OPTIONS} />
+          <p className="text-[10px] text-gray-400 mt-1">
+            Matches the "Deposited Into" column — Own, Shared or Override.
+          </p>
         </div>
       </Card>
 
