@@ -62,14 +62,28 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
   const [manualAmount, setManualAmount] = useState('')
   const period = month + '-01'
 
-  const { data: partners = [] } = useQuery({
-    queryKey: ['partners_for_statutory'],
+  // The payer can be a PARTY (Hitech Hatch Fresh Private Limited is one) or an
+  // individual partner, so both lists are offered. The value encodes which
+  // table it came from, since the two id spaces are separate.
+  const { data: payers = [] } = useQuery({
+    queryKey: ['statutory_payers'],
     queryFn: async () => {
-      const { data } = await supabase.from('partners').select('id,name').order('name')
-      return data ?? []
+      const [{ data: pt }, { data: pa }] = await Promise.all([
+        supabase.from('partners').select('id,name').order('name'),
+        supabase.from('parties').select('id,name').order('name'),
+      ])
+      return [
+        ...(pa ?? []).map((p: any) => ({ key: `party:${p.id}`, name: p.name })),
+        ...(pt ?? []).map((p: any) => ({ key: `partner:${p.id}`, name: `${p.name} (partner)` })),
+      ]
     },
     staleTime: 5 * 60_000,
   })
+  const payerName = (rec: any) => {
+    const k = rec?.paid_via_party_id ? `party:${rec.paid_via_party_id}`
+      : rec?.paid_via_partner_id ? `partner:${rec.paid_via_partner_id}` : ''
+    return (payers as any[]).find(p => p.key === k)?.name ?? null
+  }
 
   const { data: liabilities = [] } = useQuery({
     queryKey: ['statutory_liabilities', month],
@@ -87,7 +101,8 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
     setEditing(t)
     setChallanNo(existing?.challan_no ?? '')
     setPaidDate(existing?.paid_date ?? new Date().toISOString().slice(0, 10))
-    setPaidViaPartner(existing?.paid_via_partner_id ?? '')
+    setPaidViaPartner(existing?.paid_via_party_id ? `party:${existing.paid_via_party_id}`
+      : existing?.paid_via_partner_id ? `partner:${existing.paid_via_partner_id}` : '')
     setManualAmount(existing?.amount_due != null ? String(existing.amount_due) : '')
   }
 
@@ -105,7 +120,10 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
       // Who actually remitted it. A partner-paid challan means our bank was
       // NOT touched on the payment date — the money left when it was
       // transferred to that partner — so nothing is posted to the ledger here.
-      paid_via_partner_id: status === 'Paid' ? (paidViaPartner || null) : null,
+      paid_via_party_id: status === 'Paid' && paidViaPartner.startsWith('party:')
+        ? paidViaPartner.slice(6) : null,
+      paid_via_partner_id: status === 'Paid' && paidViaPartner.startsWith('partner:')
+        ? paidViaPartner.slice(8) : null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'liability_type,period' })
     if (error) { toast.error(error.message); return }
@@ -183,8 +201,8 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
                         className="w-36 mt-1 border border-gray-300 rounded px-1 py-1 text-xs"
                         title="Who actually remitted this challan">
                         <option value="">Paid from our bank</option>
-                        {(partners as any[]).map(p => (
-                          <option key={p.id} value={p.id}>Paid via {p.name}</option>
+                        {(payers as any[]).map(p => (
+                          <option key={p.key} value={p.key}>Paid via {p.name}</option>
                         ))}
                       </select>
                     </Td>
@@ -200,9 +218,9 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
                     <Td className="text-xs font-mono">{rec?.challan_no ?? '—'}</Td>
                     <Td className="text-xs">
                       {rec?.paid_date ?? '—'}
-                      {rec?.paid_via_partner_id && (
+                      {(rec?.paid_via_party_id || rec?.paid_via_partner_id) && (
                         <div className="text-[10px] text-purple-600 mt-0.5">
-                          via {(partners as any[]).find(p => p.id === rec.paid_via_partner_id)?.name ?? 'partner'}
+                          via {payerName(rec) ?? 'another account'}
                         </div>
                       )}
                     </Td>
