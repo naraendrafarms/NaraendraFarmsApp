@@ -212,9 +212,19 @@ export const BulkDailyEntry: React.FC = () => {
         .eq('record_date', date)
       if (selectedFlock) q = q.eq('flock_id', selectedFlock)
       const { data } = await q
-      return data ?? []
+      // Stamped with what it was fetched FOR. placeholderData: keepPreviousData
+      // means this variable can briefly hold the PREVIOUS date's rows while the
+      // new date loads, and isFetching is not reliably true in that first
+      // render — so without a stamp the grid could be built from yesterday's
+      // rows (carrying yesterday's row ids) and then locked in by the
+      // build-once guard. Saving would then try to move those rows onto the new
+      // date and collide with the rows already there, which simply looked like
+      // "it didn't save".
+      return { forDate: date, forFlock: selectedFlock, rows: data ?? [] }
     }
   })
+  const drRows = (existingDR && existingDR.forDate === date && existingDR.forFlock === selectedFlock)
+    ? existingDR.rows : null
 
   // Previous day closing for opening balance
   const prevDate = useMemo(() => {
@@ -237,9 +247,11 @@ export const BulkDailyEntry: React.FC = () => {
       const { data } = await supabase.from('daily_records')
         .select('shed_id,closing_female,closing_male')
         .eq('flock_id', selectedFlock).eq('record_date', prevDate)
-      return data ?? []
+      return { forDate: prevDate, forFlock: selectedFlock, rows: data ?? [] }
     }
   })
+  const prevRows = (prevDR && prevDR.forDate === prevDate && prevDR.forFlock === selectedFlock)
+    ? prevDR.rows : null
   // The row grid must not be built until BOTH queries have answered. On a day
   // with no saved record yet — a brand-new flock — existingDR comes back empty
   // first, the grid is built with a blank opening, and prevDR lands a moment
@@ -247,7 +259,7 @@ export const BulkDailyEntry: React.FC = () => {
   // is overwritten. On an established flock the late rebuild produces the value
   // already on screen, so it is invisible; that is why only the new flock
   // appeared to lose its entry.
-  const prevReady = !prevEnabled || prevDR !== undefined
+  const prevReady = !prevEnabled || prevRows !== null
 
   // existingFeed removed — feed is now read from daily_records.feed_female_kg for consistency
 
@@ -278,7 +290,7 @@ export const BulkDailyEntry: React.FC = () => {
     if (existingFetching) return   // keep rows intact while date is loading
     const newRows: Record<string, FlockRow> = {}
     for (const f of visibleFlocks) {
-      const dr = (existingDR ?? []).find((r: any) => r.flock_id === f.id && !r.shed_id)
+      const dr = (drRows ?? []).find((r: any) => r.flock_id === f.id && !r.shed_id)
       const mu = (existingMed ?? []).find((r: any) => r.flock_id === f.id && !r.shed_id)
       newRows[f.id] = {
         he_eggs: dr?.he_eggs?.toString() ?? '',
@@ -302,20 +314,21 @@ export const BulkDailyEntry: React.FC = () => {
       }
     }
     setFlockRows(newRows)
-  }, [visibleFlocks.length, existingDR, existingMed, selectedFlock, date, rowsEpoch])
+  }, [visibleFlocks.length, drRows, existingMed, selectedFlock, date, rowsEpoch])
 
   // ── Init shed rows ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedFlock || !flockSheds.length) return
     if (existingFetching) return   // keep rows intact while date is loading
+    if (drRows === null) return    // and until the data is FOR this date/flock
     if (!prevReady) return         // and until yesterday's closing has arrived
     const key = `${selectedFlock}|${date}|${flockSheds.map((s: any) => s.id).join(',')}|${rowsEpoch}`
     if (builtShedKeyRef.current === key) return   // already built — don't clobber edits
     builtShedKeyRef.current = key
     const newRows: Record<string, ShedRow> = {}
     for (const shed of flockSheds) {
-      const dr = (existingDR ?? []).find((r: any) => r.shed_id === shed.id)
-      const prev = (prevDR ?? []).find((r: any) => r.shed_id === shed.id)
+      const dr = (drRows ?? []).find((r: any) => r.shed_id === shed.id)
+      const prev = (prevRows ?? []).find((r: any) => r.shed_id === shed.id)
       // opening = today's record opening, or prev day closing, or capacity
       const openF = dr?.opening_female?.toString() ?? prev?.closing_female?.toString() ?? ''
       const openM = dr?.opening_male?.toString() ?? prev?.closing_male?.toString() ?? ''
@@ -358,7 +371,7 @@ export const BulkDailyEntry: React.FC = () => {
       }
     }
     setShedRows(newRows)
-  }, [flockSheds, existingDR, existingMed, prevDR, selectedFlock, date, existingFetching, prevReady, rowsEpoch])
+  }, [flockSheds, drRows, existingMed, prevRows, selectedFlock, date, existingFetching, prevReady, rowsEpoch])
 
   const updateShedRow = (id: string, field: keyof ShedRow, val: string) => {
     setShedRows(prev => {
@@ -379,14 +392,14 @@ export const BulkDailyEntry: React.FC = () => {
   // Init grade row from flock-level record (shed_id IS NULL) when in shed mode
   useEffect(() => {
     if (!selectedFlock) return
-    const flockLevel = (existingDR ?? []).find((r: any) => r.flock_id === selectedFlock && !r.shed_id)
+    const flockLevel = (drRows ?? []).find((r: any) => r.flock_id === selectedFlock && !r.shed_id)
     setGradeRow({
       he_grade_a: flockLevel?.he_grade_a?.toString() ?? '',
       he_grade_b: flockLevel?.he_grade_b?.toString() ?? '',
       he_grade_c: flockLevel?.he_grade_c?.toString() ?? '',
       existingId: flockLevel?.id ?? null,
     })
-  }, [existingDR, selectedFlock])
+  }, [drRows, selectedFlock])
 
   // Init flock-level medicine rows — medicine_usage has no shed_id, so every
   // row on record for this flock+day is its own entry in the list.
@@ -477,7 +490,14 @@ export const BulkDailyEntry: React.FC = () => {
         const { error } = r.existingId
           ? await supabase.from('daily_records').update(payload).eq('id', r.existingId)
           : await supabase.from('daily_records').insert(payload)
-        if (error) { console.error(error); errors++ } else saved++
+        if (error) {
+          // Surface WHY. A bare count ("Saved 0 with 2 errors") gives no way to
+          // tell a constraint violation from a permissions problem, which is
+          // how a failing save stayed unexplained.
+          console.error(error)
+          errors++
+          toast.error(`Shed ${shed.shed_no}: ${error.message}`)
+        } else saved++
       }
 
       // Accumulate feed per type across all sheds — written once after the
