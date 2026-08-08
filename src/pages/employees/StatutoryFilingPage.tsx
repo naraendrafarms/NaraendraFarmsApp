@@ -35,7 +35,7 @@ const monthRange = (month: string) => {
 // the piece that was missing everywhere: no report tracked whether a liability
 // was actually DEPOSITED (challan/ack no + date), only whether the underlying
 // bill/salary was settled.
-type LiabilityType = 'tds_payable' | 'tds_receivable' | 'gst_payable' | 'pf_payable' | 'esi_payable' | 'pt_payable'
+type LiabilityType = 'tds_payable' | 'tds_receivable' | 'gst_payable' | 'pf_payable' | 'esi_payable' | 'pt_payable' | 'advance_tax' | 'late_fee'
 const LIABILITY_LABELS: Record<LiabilityType, { label: string; hint: string; dueDay: string }> = {
   tds_payable:    { label: 'TDS Payable',     hint: 'TDS deducted from vendor bills — must be deposited to the govt',              dueDay: '7th of next month' },
   tds_receivable: { label: 'TDS Receivable',  hint: 'TDS customers deducted from your sales — claim as credit / collect Form 16A',  dueDay: 'Track for return filing' },
@@ -43,14 +43,33 @@ const LIABILITY_LABELS: Record<LiabilityType, { label: string; hint: string; due
   pf_payable:     { label: 'PF Payable',      hint: 'Employee + Employer PF (EPS/EPF/Admin/EDLI) for the month',                    dueDay: '15th of next month (ECR)' },
   esi_payable:    { label: 'ESI Payable',     hint: 'Employee + Employer ESI for the month',                                        dueDay: '15th of next month' },
   pt_payable:     { label: 'PT Payable',      hint: 'Professional Tax deducted from salaries',                                      dueDay: 'Per state schedule' },
+  advance_tax:    { label: 'Advance Tax',     hint: 'Advance income tax instalment for the company',                                dueDay: '15 Jun / Sep / Dec / Mar' },
+  late_fee:       { label: 'Late Fee / Interest', hint: 'Late filing fee or interest on any statutory payment',                     dueDay: 'With the related challan' },
 }
+
+// These two have no source data to compute from — they are entered by hand,
+// unlike TDS/GST/PF/ESI/PT which are totalled from bills, sales and salaries.
+const MANUAL_LIABILITIES: LiabilityType[] = ['advance_tax', 'late_fee']
 
 const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType, number> }> = ({ month, amounts }) => {
   const qc = useQueryClient()
   const [editing, setEditing] = useState<LiabilityType | null>(null)
   const [challanNo, setChallanNo] = useState('')
   const [paidDate, setPaidDate] = useState('')
+  // Blank = remitted from our own bank account (how it always worked).
+  const [paidViaPartner, setPaidViaPartner] = useState('')
+  // Manual-entry liabilities (advance tax, late fee) have no computed source.
+  const [manualAmount, setManualAmount] = useState('')
   const period = month + '-01'
+
+  const { data: partners = [] } = useQuery({
+    queryKey: ['partners_for_statutory'],
+    queryFn: async () => {
+      const { data } = await supabase.from('partners').select('id,name').order('name')
+      return data ?? []
+    },
+    staleTime: 5 * 60_000,
+  })
 
   const { data: liabilities = [] } = useQuery({
     queryKey: ['statutory_liabilities', month],
@@ -68,15 +87,25 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
     setEditing(t)
     setChallanNo(existing?.challan_no ?? '')
     setPaidDate(existing?.paid_date ?? new Date().toISOString().slice(0, 10))
+    setPaidViaPartner(existing?.paid_via_partner_id ?? '')
+    setManualAmount(existing?.amount_due != null ? String(existing.amount_due) : '')
   }
 
   const saveRemittance = async (t: LiabilityType, status: 'Paid' | 'Pending') => {
     const { error } = await supabase.from('statutory_liabilities').upsert({
       liability_type: t, period,
-      amount_due: amounts[t] ?? 0,
+      // Advance tax and late fee are typed in; everything else is computed
+      // from the source data, so a hand-typed figure must not override it.
+      amount_due: MANUAL_LIABILITIES.includes(t)
+        ? (parseFloat(manualAmount) || 0)
+        : (amounts[t] ?? 0),
       status,
       challan_no: status === 'Paid' ? (challanNo || null) : null,
       paid_date: status === 'Paid' ? (paidDate || null) : null,
+      // Who actually remitted it. A partner-paid challan means our bank was
+      // NOT touched on the payment date — the money left when it was
+      // transferred to that partner — so nothing is posted to the ledger here.
+      paid_via_partner_id: status === 'Paid' ? (paidViaPartner || null) : null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'liability_type,period' })
     if (error) { toast.error(error.message); return }
@@ -120,7 +149,10 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
           {(Object.keys(LIABILITY_LABELS) as LiabilityType[]).map(t => {
             const meta = LIABILITY_LABELS[t]
             const rec = byType(t)
-            const amt = amounts[t] ?? 0
+            const isManual = MANUAL_LIABILITIES.includes(t)
+            // Manual liabilities have no computed source, so the saved figure
+            // is the only one there is.
+            const amt = isManual ? (rec?.amount_due ?? 0) : (amounts[t] ?? 0)
             const isEditing = editing === t
             return (
               <tr key={t} className="hover:bg-gray-50 align-top">
@@ -137,8 +169,25 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
                 </Td>
                 {isEditing ? (
                   <>
-                    <Td><Input label="" value={challanNo} onChange={e => setChallanNo(e.target.value)} className="w-32 text-xs" placeholder="Challan/Ack No." /></Td>
-                    <Td><Input label="" type="date" value={paidDate} onChange={e => setPaidDate(e.target.value)} className="w-36 text-xs" /></Td>
+                    <Td>
+                      {isManual && (
+                        <Input label="" type="number" value={manualAmount}
+                          onChange={e => setManualAmount(e.target.value)}
+                          className="w-28 text-xs mb-1" placeholder="Amount" />
+                      )}
+                      <Input label="" value={challanNo} onChange={e => setChallanNo(e.target.value)} className="w-32 text-xs" placeholder="Challan/Ack No." />
+                    </Td>
+                    <Td>
+                      <Input label="" type="date" value={paidDate} onChange={e => setPaidDate(e.target.value)} className="w-36 text-xs" />
+                      <select value={paidViaPartner} onChange={e => setPaidViaPartner(e.target.value)}
+                        className="w-36 mt-1 border border-gray-300 rounded px-1 py-1 text-xs"
+                        title="Who actually remitted this challan">
+                        <option value="">Paid from our bank</option>
+                        {(partners as any[]).map(p => (
+                          <option key={p.id} value={p.id}>Paid via {p.name}</option>
+                        ))}
+                      </select>
+                    </Td>
                     <Td>
                       <div className="flex gap-1">
                         <Button size="sm" onClick={() => saveRemittance(t, 'Paid')}>Save</Button>
@@ -149,9 +198,18 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
                 ) : (
                   <>
                     <Td className="text-xs font-mono">{rec?.challan_no ?? '—'}</Td>
-                    <Td className="text-xs">{rec?.paid_date ?? '—'}</Td>
+                    <Td className="text-xs">
+                      {rec?.paid_date ?? '—'}
+                      {rec?.paid_via_partner_id && (
+                        <div className="text-[10px] text-purple-600 mt-0.5">
+                          via {(partners as any[]).find(p => p.id === rec.paid_via_partner_id)?.name ?? 'partner'}
+                        </div>
+                      )}
+                    </Td>
                     <Td>
-                      {amt > 0 && (
+                      {/* Manual liabilities have no computed amount, so the
+                          Mark Remitted button must not be hidden by amt = 0. */}
+                      {(amt > 0 || isManual) && (
                         rec?.status === 'Paid'
                           ? <button onClick={() => openMark(t)} className="p-1 text-gray-400 hover:text-blue-600" title="Edit"><Pencil size={13} /></button>
                           : <Button size="sm" icon={<CheckCircle2 size={13} />} onClick={() => openMark(t)}>Mark Remitted</Button>
@@ -245,6 +303,9 @@ export const StatutoryFilingPage: React.FC = () => {
   const liabilityAmounts: Record<LiabilityType, number> = {
     tds_payable: tdsPayableAmt, tds_receivable: tdsReceivableAmt, gst_payable: gstPayableAmt,
     pf_payable: pfPayableAmt, esi_payable: esiPayableAmt, pt_payable: ptPayableAmt,
+    // Nothing to compute these from — they are typed in when marking them
+    // remitted, so 0 here just means "not entered yet".
+    advance_tax: 0, late_fee: 0,
   }
 
   // EPFO ECR text file: UAN#~#Name#~#Gross#~#EPFWage#~#EPSWage#~#EDLIWage#~#EE#~#EPS#~#ERdiff#~#NCP#~#Refund
