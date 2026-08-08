@@ -16,6 +16,15 @@ export const postLedgerEntry = async (opts: {
   bankAccountId?: string | null; partyId?: string | null
 }) => {
   if (opts.amount <= 0) return
+  // Settling a bill against a vendor advance, or against an opening balance, is
+  // NOT a cash movement: the money left when the advance was paid (or predates
+  // the books entirely). The Pay modal has always known this and skipped
+  // posting for those modes, but the Edit form called this unconditionally — so
+  // re-saving an advance-settled bill invented a Cash Book payment for money
+  // that never moved. Enforced here so every caller gets it right.
+  const settledEarlier = ['advance', 'opening adjustment']
+    .includes((opts.mode || '').trim().toLowerCase())
+  if (settledEarlier) return
   await supabase.from('cash_book').insert({
     txn_date: opts.date,
     txn_type: 'payment',
