@@ -241,6 +241,56 @@ export const TDSPayable: React.FC = () => {
     staleTime: 60_000,
   })
 
+  // Third source: TDS deducted when paying a vendor ADVANCE. Recorded on
+  // vendor_advances (migration 462) and linkable to a challan from the Vendor
+  // Advances page, but it never reached this report — so the statement printed
+  // for filing omitted it entirely. TDS is due on payment or credit, whichever
+  // is earlier, so an advance's TDS belongs in the same month's return as a
+  // bill's.
+  const { data: advanceRows = [] } = useQuery({
+    queryKey: ['advance_tds', dateFrom, dateTo],
+    queryFn: () => fetchAllPages<any>((from, to) => {
+      let q = supabase.from('vendor_advances')
+        .select('id,advance_date,amount,reference_no,tds_pct,tds_amount,tds_section,tds_interest,tds_deposited,tds_deposit_date,tds_challan_id,parties:party_id(name,pan_no,deductee_type)')
+        .gt('tds_amount', 0)
+        .order('advance_date', { ascending: false })
+        .range(from, to)
+      if (dateFrom) q = q.gte('advance_date', dateFrom)
+      if (dateTo) q = q.lte('advance_date', dateTo)
+      return q
+    }, 'Vendor advance TDS', toast.error),
+    staleTime: 60_000,
+  })
+
+  const updateAdvanceTds = async (id: string, patch: TdsPatch) => {
+    const { error } = await supabase.from('vendor_advances').update(patch).eq('id', id)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['advance_tds'] })
+    qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+  }
+
+  // Advances are money already paid, so the Paid/Pending bill filter does not
+  // apply to them; only the deposit filter and search do.
+  const filteredAdvance = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return (advanceRows as any[]).filter(r => {
+      if (depositFilter === 'deposited' && !r.tds_deposited) return false
+      if (depositFilter === 'pending' && r.tds_deposited) return false
+      if (q) {
+        const party = Array.isArray(r.parties) ? r.parties[0] : r.parties
+        const hay = [party?.name, r.reference_no, r.tds_section, party?.pan_no,
+          String(r.tds_amount ?? ''), String(r.amount ?? '')]
+          .filter(Boolean).join(' ').toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [advanceRows, depositFilter, search])
+
+  const totalAdvanceTDS = filteredAdvance.reduce((s: number, r: any) => s + (r.tds_amount ?? 0), 0)
+
+  const advParty = (r: any) => (Array.isArray(r.parties) ? r.parties[0] : r.parties) ?? {}
+
   // The date TDS is reckoned from: goods-receipt date for GRN bills, invoice
   // date for bills that came from Purchase Invoice Register (no GRN). Used
   // for display, the TDS due date, exports and the print — otherwise those
@@ -279,7 +329,7 @@ export const TDSPayable: React.FC = () => {
     if (error) { toast.error(error.message); return }
     qc.invalidateQueries({ queryKey: ['salary_tds'] })
   }
-  const toggleDeposited = (updater: (id: string, patch: any) => void, r: any, source: 'vendor' | 'salary') => {
+  const toggleDeposited = (updater: (id: string, patch: any) => void, r: any, source: 'vendor' | 'salary' | 'advance') => {
     if (r.tds_deposited) {
       // Un-mark — clear the challan link too so it can't stay tagged to a
       // challan whose deposit is no longer confirmed for this row.
@@ -290,7 +340,7 @@ export const TDSPayable: React.FC = () => {
   }
 
   // ── Challan master (RPU-style challan-level tracking) ──────────────────
-  const [challanModal, setChallanModal] = useState<{ row: any; source: 'vendor' | 'salary' } | null>(null)
+  const [challanModal, setChallanModal] = useState<{ row: any; source: 'vendor' | 'salary' | 'advance' } | null>(null)
   const { data: challans = [] } = useQuery({
     queryKey: ['tds_challans'],
     queryFn: async () => {
@@ -317,8 +367,9 @@ export const TDSPayable: React.FC = () => {
     const map: Record<string, number> = {}
     ;(rows as any[]).forEach(r => { if (r.tds_challan_id) map[r.tds_challan_id] = (map[r.tds_challan_id] ?? 0) + (r.tds_amount ?? 0) })
     ;(salaryRows as any[]).forEach(r => { if (r.tds_challan_id) map[r.tds_challan_id] = (map[r.tds_challan_id] ?? 0) + (r.tds ?? 0) })
+    ;(advanceRows as any[]).forEach(r => { if (r.tds_challan_id) map[r.tds_challan_id] = (map[r.tds_challan_id] ?? 0) + (r.tds_amount ?? 0) })
     return map
-  }, [rows, salaryRows])
+  }, [rows, salaryRows, advanceRows])
 
   const filteredSalary = useMemo(() => {
     return (salaryRows as any[]).filter(r => {
@@ -450,8 +501,14 @@ export const TDSPayable: React.FC = () => {
       map[key].tax += r.tds ?? 0
       map[key].interest += r.tds_interest ?? 0
     })
+    filteredAdvance.forEach((r: any) => {
+      const key = r.tds_section || 'Unspecified'
+      if (!map[key]) map[key] = { tax: 0, interest: 0 }
+      map[key].tax += r.tds_amount ?? 0
+      map[key].interest += r.tds_interest ?? 0
+    })
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
-  }, [filtered, filteredSalary])
+  }, [filtered, filteredSalary, filteredAdvance])
 
   // Printable TDS Payable on the company letterhead. Prints exactly what the
   // FY / date / rate / status filters are showing — vendor TDS and salary TDS
@@ -478,6 +535,25 @@ export const TDSPayable: React.FC = () => {
       inr(rows.reduce((a: number, r: any) => a + (r.invoice_amount ?? 0), 0)), '',
       inr(rows.reduce((a: number, r: any) => a + (r.tds_amount ?? 0), 0)), ''],
     emptyNote: 'No vendor TDS for this period.',
+  })
+
+  const advanceSection = (rows: any[]): PrintSection => ({
+    heading: `Vendor Advance TDS — ${rows.length} advance(s)`,
+    headers: ['Date', 'Vendor', 'PAN', 'Reference', 'Section', 'Advance Amt', 'TDS %', 'TDS Amt', 'Deposit Status'],
+    rightAlignFrom: 5,
+    rows: rows.map((r: any) => {
+      const p = advParty(r)
+      return [
+        r.advance_date ? fmtDate(r.advance_date) : '',
+        p.name ?? '', p.pan_no || '—', r.reference_no ?? '—', r.tds_section ?? '—',
+        inr(r.amount ?? 0), r.tds_pct ? `${r.tds_pct}%` : '—', inr(r.tds_amount ?? 0),
+        r.tds_deposited ? `Deposited${r.tds_deposit_date ? ' ' + fmtDate(r.tds_deposit_date) : ''}` : 'Not deposited',
+      ]
+    }),
+    footerRow: ['TOTAL', '', '', '', `${rows.length} advance(s)`,
+      inr(rows.reduce((a: number, r: any) => a + (r.amount ?? 0), 0)), '',
+      inr(rows.reduce((a: number, r: any) => a + (r.tds_amount ?? 0), 0)), ''],
+    emptyNote: 'No TDS deducted on vendor advances in this period.',
   })
 
   const salarySection = (rows: any[]): PrintSection => ({
@@ -563,7 +639,7 @@ export const TDSPayable: React.FC = () => {
     deductee: string; pan: string
   }
 
-  const statementLines = (vRows: any[], sRows: any[]): StmtLine[] => [
+  const statementLines = (vRows: any[], sRows: any[], aRows: any[] = []): StmtLine[] => [
     ...vRows.map((r: any) => ({
       name: r.vendor_name ?? '',
       nature: natureOfPayment(r.tds_section),
@@ -589,6 +665,24 @@ export const TDSPayable: React.FC = () => {
       deductee: deducteeCode(r, true),
       pan: r.employees?.pan_no ?? '',
     })),
+    // Advances: TDS is due on payment or credit, whichever is earlier, so an
+    // advance belongs in the same month's statement as a bill.
+    ...aRows.map((r: any) => {
+      const p = advParty(r)
+      return {
+        name: p.name ?? '',
+        nature: natureOfPayment(r.tds_section),
+        month: monthLabel(r.advance_date),
+        amount: r.amount ?? 0,
+        tds: r.tds_amount ?? 0,
+        rate: r.tds_pct ? `${r.tds_pct}%` : '',
+        interest: r.tds_interest ?? 0,
+        section: r.tds_section ?? '',
+        deductee: String(p.deductee_type ?? 'Non-Company').toLowerCase().startsWith('company')
+          ? '(0020) Company Deduction' : '(0021) NON Company Deduction',
+        pan: p.pan_no ?? '',
+      }
+    }),
   ]
 
   // The statement is deductee-wise, NOT bill-wise: a supplier billed twenty
@@ -663,7 +757,7 @@ export const TDSPayable: React.FC = () => {
   // The two statement tables, shared by the page and the print. Ticking rows
   // narrows the deductee list the same way the print does.
   const statementSections = useMemo(() => {
-    const lines = statementLines(selectedRows.length ? selectedRows : filtered, filteredSalary)
+    const lines = statementLines(selectedRows.length ? selectedRows : filtered, filteredSalary, filteredAdvance)
     if (!lines.length) return [] as PrintSection[]
     return [detailsSection(lines), summarySection(lines)]
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -716,14 +810,15 @@ export const TDSPayable: React.FC = () => {
     }
     // Combined — both sheets on one document with a single grand total, which
     // is what actually gets deposited for the period.
-    if (!vRows.length && !sRows.length) { toast.error('Nothing to print for this period'); return }
+    if (!vRows.length && !sRows.length && !filteredAdvance.length) { toast.error('Nothing to print for this period'); return }
     const grand = vRows.reduce((a: number, r: any) => a + (r.tds_amount ?? 0), 0)
       + sRows.reduce((a: number, r: any) => a + (r.tds ?? 0), 0)
+      + totalAdvanceTDS
     printMultiReport({
-      title: 'TDS Payable — Vendor & Salary',
+      title: 'TDS Payable — Vendor, Salary & Advances',
       subtitle: `${periodLabel()}${selNote}`,
-      sections: [vendorSection(vRows), salarySection(sRows)],
-      grandTotalLabel: 'GRAND TOTAL TDS PAYABLE (Vendor + Salary)',
+      sections: [vendorSection(vRows), salarySection(sRows), advanceSection(filteredAdvance)],
+      grandTotalLabel: 'GRAND TOTAL TDS PAYABLE (Vendor + Salary + Advance)',
       grandTotalValue: inr(grand),
     })
   }
@@ -918,8 +1013,12 @@ export const TDSPayable: React.FC = () => {
                 <p className="text-lg font-bold text-red-600">{inr(totalSalaryTDS)}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500 mb-1">Total TDS (Vendor + Salary)</p>
-                <p className="text-xl font-bold text-gray-900">{inr(totalTDS + totalSalaryTDS)}</p>
+                <p className="text-xs text-gray-500 mb-1">Advance TDS</p>
+                <p className="text-lg font-bold text-red-600">{inr(totalAdvanceTDS)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Total TDS (Vendor + Salary + Advance)</p>
+                <p className="text-xl font-bold text-gray-900">{inr(totalTDS + totalSalaryTDS + totalAdvanceTDS)}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Total Pending</p>
@@ -1136,6 +1235,60 @@ export const TDSPayable: React.FC = () => {
             </Table>
           </Card>
 
+          {/* Vendor advance TDS detail table */}
+          <Card>
+            <SectionHeader title="Vendor Advance TDS"
+              subtitle="TDS deducted when paying an advance — due in the same month as a bill's" />
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr>
+                  <Th>Date</Th><Th>Vendor</Th><Th>PAN</Th><Th>Reference</Th>
+                  <Th right>Advance Amt</Th><Th right>TDS %</Th><Th right>TDS Amt</Th>
+                  <Th>Section</Th><Th right>Interest</Th><Th>TDS Deposit Status</Th>
+                </tr></thead>
+                <tbody>
+                  {filteredAdvance.length === 0 ? (
+                    <tr><Td colSpan={10} className="text-sm text-gray-500">
+                      No TDS deducted on vendor advances in this period.
+                    </Td></tr>
+                  ) : filteredAdvance.map((r: any) => {
+                    const p = advParty(r)
+                    return (
+                      <tr key={r.id} className="hover:bg-gray-50">
+                        <Td className="text-sm whitespace-nowrap">{r.advance_date ? fmtDate(r.advance_date) : '—'}</Td>
+                        <Td className="text-sm">{p.name ?? '—'}</Td>
+                        <Td className="text-sm">{p.pan_no || '—'}</Td>
+                        <Td className="text-sm">{r.reference_no ?? '—'}</Td>
+                        <Td right className="text-sm">{inr(r.amount ?? 0)}</Td>
+                        <Td right className="text-sm">{r.tds_pct ? `${r.tds_pct}%` : '—'}</Td>
+                        <Td right className="text-sm font-semibold text-red-600">{inr(r.tds_amount ?? 0)}</Td>
+                        <Td>
+                          <select className="border border-gray-200 rounded px-1 py-0.5 text-xs"
+                            defaultValue={r.tds_section ?? ''}
+                            title={r.tds_section ? sectionLabel(r.tds_section) : ''}
+                            onChange={e => updateAdvanceTds(r.id, { tds_section: e.target.value || undefined })}>
+                            <option value="">—</option>
+                            {tdsSectionOptions.map(o => <option key={o.value} value={o.value}>{o.value}</option>)}
+                          </select>
+                        </Td>
+                        <Td right className="text-sm">{inr(r.tds_interest ?? 0)}</Td>
+                        <Td>
+                          <button onClick={() => toggleDeposited(updateAdvanceTds, r, 'advance')}
+                            className={`text-xs px-2 py-0.5 rounded ${r.tds_deposited
+                              ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                            {r.tds_deposited
+                              ? `Deposited${r.tds_deposit_date ? ' ' + fmtDate(r.tds_deposit_date) : ''}`
+                              : 'Not deposited'}
+                          </button>
+                        </Td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </Table>
+            </div>
+          </Card>
+
           {/* Salary TDS detail table */}
           <Card>
             <SectionHeader title="Salary TDS" subtitle="TDS deducted from employee salaries" />
@@ -1288,7 +1441,8 @@ export const TDSPayable: React.FC = () => {
           row={challanModal.row}
           source={challanModal.source}
           sectionOptions={tdsSectionOptions}
-          onSave={challanModal.source === 'vendor' ? updateVendorTds : updateSalaryTds}
+          onSave={challanModal.source === 'vendor' ? updateVendorTds
+            : challanModal.source === 'advance' ? updateAdvanceTds : updateSalaryTds}
           onClose={() => setChallanModal(null)}
         />
       )}
