@@ -129,13 +129,18 @@ export const SalaryRegisterPage: React.FC = () => {
 
   // Print/Export skip zero-salary rows (e.g. someone with no paid days that
   // month) — they'd just be blank/zero lines on the sheet otherwise.
-  const payableRows = (rows as any[] ?? [])
-    .filter(r => (r.net_salary ?? 0) > 0)
-    // depositHolder already resolves Own / Shared / Override; lower-cased it is
-    // the same vocabulary the CMS page filters on, so the two agree by
-    // construction rather than by two similar-looking rules.
-    .filter(r => matchesAccountKind(
-      (depositHolder(r)?.kind ?? 'Own').toLowerCase() as any, acctFilter))
+  // The account filter must be applied ONCE, above everything that reads the
+  // rows — the table, the totals, the export and the print. Applying it only to
+  // payableRows left the on-screen table showing every account regardless of
+  // the filter, while the printout was correctly filtered: the two disagreed.
+  //
+  // depositHolder already resolves Own / Shared / Override; lower-cased that is
+  // the same vocabulary the CMS page filters on, so both pages classify
+  // identically rather than through two similar-looking rules.
+  const visibleRows = (rows as any[] ?? []).filter(r =>
+    matchesAccountKind((depositHolder(r)?.kind ?? 'Own').toLowerCase() as any, acctFilter))
+
+  const payableRows = visibleRows.filter(r => (r.net_salary ?? 0) > 0)
 
   const exportXLSX = () => {
     if (!payableRows.length) { toast.error('No data to export'); return }
@@ -204,7 +209,7 @@ export const SalaryRegisterPage: React.FC = () => {
   }
 
   const farmNames = Array.from(new Set((farms as any[])?.map((f: any) => f.name) ?? []))
-  const totals = (rows as any[] ?? []).reduce((acc: any, r: any) => {
+  const totals = visibleRows.reduce((acc: any, r: any) => {
     acc.gross_rate     = (acc.gross_rate??0) + (r.gross_rate??0)
     acc.basic_salary   = (acc.basic_salary??0) + (r.basic_salary??0)
     acc.hra            = (acc.hra??0) + (r.hra??0)
@@ -273,10 +278,10 @@ export const SalaryRegisterPage: React.FC = () => {
       </Card>
 
       {isLoading && <Spinner />}
-      {!isLoading && !rows?.length && (
+      {!isLoading && !visibleRows.length && (
         <EmptyState icon={<IndianRupee size={32}/>} title="No salary data for this month" subtitle="Run Bulk Salary to generate records" />
       )}
-      {!isLoading && !!rows?.length && (
+      {!isLoading && !!visibleRows.length && (
         <div className="overflow-x-auto rounded-lg border border-gray-200">
           <table className="min-w-full text-xs">
             <thead className="bg-gray-50 sticky top-0 z-10">
@@ -312,7 +317,7 @@ export const SalaryRegisterPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {(rows as any[]).map((r: any) => {
+              {visibleRows.map((r: any) => {
                 const emp = r.employees ?? {}
                 const dep = depositHolder(r)
                 return (
@@ -369,7 +374,7 @@ export const SalaryRegisterPage: React.FC = () => {
             </tbody>
             <tfoot className="bg-gray-100 font-semibold text-xs border-t-2 border-gray-300">
               <tr>
-                <td colSpan={8} className="px-2 py-2 text-right text-gray-700">TOTAL ({rows.length} employees)</td>
+                <td colSpan={8} className="px-2 py-2 text-right text-gray-700">TOTAL ({visibleRows.length} employees)</td>
                 <td className="px-2 py-2 text-right text-green-700">{inr(totals.gross_rate??0)}</td>
                 <td className="px-2 py-2 text-right text-gray-600">{inr(totals.basic_salary??0)}</td>
                 <td className="px-2 py-2 text-right text-gray-600">{inr(totals.hra??0)}</td>
