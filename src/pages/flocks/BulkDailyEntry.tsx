@@ -35,6 +35,12 @@ const emptyFlockRow = (): FlockRow => ({
 
 type ShedRow = {
   opening_female: string; opening_male: string
+  // Birds ARRIVING on this day. Opening cannot be used for them:
+  // trg_chain_daily_opening overwrites opening with the previous day's closing
+  // on every write, so a mid-flock receipt typed there is silently discarded.
+  // The same trigger computes closing = opening + transfer_in - mortality -
+  // cull - transfer_out, so this is the field built for it.
+  transfer_in_female: string; transfer_in_male: string
   he_eggs: string; je_eggs: string; te_eggs: string; be_eggs: string; le_eggs: string
   he_grade_a: string; he_grade_b: string; he_grade_c: string
   wastage_he: string; wastage_je: string; wastage_te: string; wastage_be: string
@@ -55,6 +61,7 @@ type ShedRow = {
 }
 const emptyShedRow = (): ShedRow => ({
   opening_female: '', opening_male: '',
+  transfer_in_female: '', transfer_in_male: '',
   prefillOpenF: '', prefillOpenM: '', prefillCloseF: '', prefillCloseM: '',
   he_eggs: '', je_eggs: '', te_eggs: '', be_eggs: '', le_eggs: '',
   he_grade_a: '', he_grade_b: '', he_grade_c: '',
@@ -208,7 +215,7 @@ export const BulkDailyEntry: React.FC = () => {
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase.from('daily_records')
-        .select('id,flock_id,shed_id,opening_female,opening_male,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_he,wastage_je,wastage_te,wastage_be,mortality_female,mortality_male,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,transfer_female,transfer_male,cull_female,cull_male,closing_female,closing_male,lighting_hrs,remarks')
+        .select('id,flock_id,shed_id,opening_female,opening_male,transfer_in_female,transfer_in_male,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_he,wastage_je,wastage_te,wastage_be,mortality_female,mortality_male,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,transfer_female,transfer_male,cull_female,cull_male,closing_female,closing_male,lighting_hrs,remarks')
         .eq('record_date', date)
       if (selectedFlock) q = q.eq('flock_id', selectedFlock)
       const { data } = await q
@@ -342,6 +349,8 @@ export const BulkDailyEntry: React.FC = () => {
       )
       newRows[shed.id] = {
         opening_female: openF, opening_male: openM,
+        transfer_in_female: dr?.transfer_in_female?.toString() ?? '',
+        transfer_in_male: dr?.transfer_in_male?.toString() ?? '',
         prefillOpenF: openF, prefillOpenM: openM,
         prefillCloseF: closeF, prefillCloseM: closeM,
         he_eggs: dr?.he_eggs?.toString() ?? '', je_eggs: dr?.je_eggs?.toString() ?? '',
@@ -383,8 +392,12 @@ export const BulkDailyEntry: React.FC = () => {
       const mm = parseInt(r.mortality_male) || 0
       const tf = (parseInt(r.transfer_female) || 0) + (parseInt(r.cull_female) || 0)
       const tm = (parseInt(r.transfer_male) || 0) + (parseInt(r.cull_male) || 0)
-      if (of_ > 0 && !['closing_female','closing_male'].includes(field)) r.closing_female = String(Math.max(0, of_ - mf - tf))
-      if (om > 0 && !['closing_female','closing_male'].includes(field)) r.closing_male = String(Math.max(0, om - mm - tm))
+      // Mirrors trg_chain_daily_opening exactly: closing = opening + received
+      // - mortality - cull - transfer out.
+      const inF = parseInt(r.transfer_in_female) || 0
+      const inM = parseInt(r.transfer_in_male) || 0
+      if (of_ > 0 && !['closing_female','closing_male'].includes(field)) r.closing_female = String(Math.max(0, of_ + inF - mf - tf))
+      if (om > 0 && !['closing_female','closing_male'].includes(field)) r.closing_male = String(Math.max(0, om + inM - mm - tm))
       return { ...prev, [id]: r }
     })
   }
@@ -444,6 +457,7 @@ export const BulkDailyEntry: React.FC = () => {
       const mf = parseInt(r.mortality_female) || 0, mm = parseInt(r.mortality_male) || 0
       const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
+      const inF = parseInt(r.transfer_in_female) || 0, inM = parseInt(r.transfer_in_male) || 0
       const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
       // A day-old flock has NO eggs, feed or mortality — the only thing entered
       // on placement day is the bird count. Those columns were missing from
@@ -454,7 +468,7 @@ export const BulkDailyEntry: React.FC = () => {
       const birdCountEntered =
         r.opening_female !== r.prefillOpenF || r.opening_male !== r.prefillOpenM ||
         r.closing_female !== r.prefillCloseF || r.closing_male !== r.prefillCloseM
-      const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || r.lighting_hrs || r.remarks || birdCountEntered
+      const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || inF || inM || whe || wje || wte || wbe || r.lighting_hrs || r.remarks || birdCountEntered
       if (!hasProductionData) continue
       const of_ = parseInt(r.opening_female) || null
       const om = parseInt(r.opening_male) || null
@@ -475,6 +489,7 @@ export const BulkDailyEntry: React.FC = () => {
         feed_female_kg: ff, feed_type_f: r.feed_type_f || 'BCM',
         feed_male_kg: fm, feed_type_m: r.feed_type_m || 'BCM',
         transfer_female: tf, transfer_male: tm,
+        transfer_in_female: inF, transfer_in_male: inM,
         cull_female: cf, cull_male: cm,
         trcull_female: tf + cf, trcull_male: tm + cm,
         closing_female: clf, closing_male: clm,
@@ -1292,6 +1307,8 @@ export const BulkDailyEntry: React.FC = () => {
                       <th className="px-2 py-2 text-left sticky left-0 bg-gray-50 z-10">Shed</th>
                       <th className="px-1 py-2 text-center">Open ♀</th>
                       <th className="px-1 py-2 text-center">Open ♂</th>
+                      <th className="px-1 py-2 text-center bg-green-50" title="Birds RECEIVED into this shed on this day — a new consignment, or a transfer in. Opening is carried forward automatically and cannot be used for arrivals.">Recd ♀</th>
+                      <th className="px-1 py-2 text-center bg-green-50" title="Birds RECEIVED into this shed on this day.">Recd ♂</th>
                       <th className="px-1 py-2 text-center">Feed ♀ kg</th>
                       <th className="px-1 py-2 text-center">Type ♀</th>
                       <th className="px-1 py-2 text-center">Feed ♂ kg</th>
@@ -1320,9 +1337,9 @@ export const BulkDailyEntry: React.FC = () => {
                       const r = shedRows[shed.id] ?? emptyShedRow()
                       const u = (f: keyof ShedRow) => (v: string) => updateShedRow(shed.id, f, v)
                       // Two-phase tab order:
-                      // Phase 1 (bird mgmt, 12 cols): Open♀ Open♂ Feed♀ FeedType♀ Feed♂ FeedType♂ Trf♀ Trf♂ Cull♀ Cull♂ Death♀ Death♂
+                      // Phase 1 (bird mgmt, 14 cols): Open♀ Open♂ Recd♀ Recd♂ Feed♀ FeedType♀ Feed♂ FeedType♂ Trf♀ Trf♂ Cull♀ Cull♂ Death♀ Death♂
                       // Phase 2 (eggs, 11 cols):      HE JE TE BE LE Close♀ Close♂ Light Med MedQty Remarks
-                      const P1 = 12, P2 = 11, N = flockSheds.length
+                      const P1 = 14, P2 = 11, N = flockSheds.length
                       const t1 = (col: number) => idx * P1 + col
                       const t2 = (col: number) => N * P1 + idx * P2 + col
                       return (
@@ -1333,26 +1350,28 @@ export const BulkDailyEntry: React.FC = () => {
                               {/* Phase 1 — bird management */}
                               <td className="px-1 py-1">{numInput(r.opening_female, u('opening_female'), 'w-14', t1(1))}</td>
                               <td className="px-1 py-1">{numInput(r.opening_male, u('opening_male'), 'w-14', t1(2))}</td>
-                              <td className="px-1 py-1">{numInput(r.feed_female_kg, u('feed_female_kg'), 'w-14', t1(3))}</td>
+                              <td className="px-1 py-1 bg-green-50/60">{numInput(r.transfer_in_female, u('transfer_in_female'), 'w-14', t1(3))}</td>
+                              <td className="px-1 py-1 bg-green-50/60">{numInput(r.transfer_in_male, u('transfer_in_male'), 'w-14', t1(4))}</td>
+                              <td className="px-1 py-1">{numInput(r.feed_female_kg, u('feed_female_kg'), 'w-14', t1(5))}</td>
                               <td className="px-1 py-1">
-                                <select tabIndex={t1(4)} value={r.feed_type_f} onChange={e => updateShedRow(shed.id, 'feed_type_f', e.target.value)}
+                                <select tabIndex={t1(6)} value={r.feed_type_f} onChange={e => updateShedRow(shed.id, 'feed_type_f', e.target.value)}
                                   className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
                                   {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
                               </td>
-                              <td className="px-1 py-1">{numInput(r.feed_male_kg, u('feed_male_kg'), 'w-14', t1(5))}</td>
+                              <td className="px-1 py-1">{numInput(r.feed_male_kg, u('feed_male_kg'), 'w-14', t1(7))}</td>
                               <td className="px-1 py-1">
-                                <select tabIndex={t1(6)} value={r.feed_type_m} onChange={e => updateShedRow(shed.id, 'feed_type_m', e.target.value)}
+                                <select tabIndex={t1(8)} value={r.feed_type_m} onChange={e => updateShedRow(shed.id, 'feed_type_m', e.target.value)}
                                   className="w-full border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white">
                                   {FEED_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
                               </td>
-                              <td className="px-1 py-1">{numInput(r.transfer_female, u('transfer_female'), 'w-14', t1(7))}</td>
-                              <td className="px-1 py-1">{numInput(r.transfer_male, u('transfer_male'), 'w-14', t1(8))}</td>
-                              <td className="px-1 py-1">{numInput(r.cull_female, u('cull_female'), 'w-14', t1(9))}</td>
-                              <td className="px-1 py-1">{numInput(r.cull_male, u('cull_male'), 'w-14', t1(10))}</td>
-                              <td className="px-1 py-1">{numInput(r.mortality_female, u('mortality_female'), 'w-14', t1(11))}</td>
-                              <td className="px-1 py-1">{numInput(r.mortality_male, u('mortality_male'), 'w-14', t1(12))}</td>
+                              <td className="px-1 py-1">{numInput(r.transfer_female, u('transfer_female'), 'w-14', t1(9))}</td>
+                              <td className="px-1 py-1">{numInput(r.transfer_male, u('transfer_male'), 'w-14', t1(10))}</td>
+                              <td className="px-1 py-1">{numInput(r.cull_female, u('cull_female'), 'w-14', t1(11))}</td>
+                              <td className="px-1 py-1">{numInput(r.cull_male, u('cull_male'), 'w-14', t1(12))}</td>
+                              <td className="px-1 py-1">{numInput(r.mortality_female, u('mortality_female'), 'w-14', t1(13))}</td>
+                              <td className="px-1 py-1">{numInput(r.mortality_male, u('mortality_male'), 'w-14', t1(14))}</td>
                               {/* Phase 2 — egg production */}
                               <td className="px-1 py-1">{numInput(r.he_eggs, u('he_eggs'), 'w-14', t2(1))}</td>
                               <td className="px-1 py-1">{numInput(r.je_eggs, u('je_eggs'), 'w-14', t2(2))}</td>
