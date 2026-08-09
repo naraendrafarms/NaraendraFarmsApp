@@ -1198,6 +1198,7 @@ export const BulkDailyEntry: React.FC = () => {
     const n = (f: keyof ShedRow) => vals.reduce((s, r) => s + (parseFloat(r[f] as string) || 0), 0)
     return {
       open_f: n('opening_female'), open_m: n('opening_male'),
+      in_f: n('transfer_in_female'), in_m: n('transfer_in_male'),
       feed_f: n('feed_female_kg'), feed_m: n('feed_male_kg'),
       trf_f: n('transfer_female'), trf_m: n('transfer_male'),
       cull_f: n('cull_female'), cull_m: n('cull_male'),
@@ -1403,6 +1404,8 @@ export const BulkDailyEntry: React.FC = () => {
                         {/* Phase 1 cols */}
                         <td className="px-1 py-1.5 text-center">{shedTotals.open_f || '—'}</td>
                         <td className="px-1 py-1.5 text-center">{shedTotals.open_m || '—'}</td>
+                        <td className="px-1 py-1.5 text-center bg-green-50">{shedTotals.in_f || '—'}</td>
+                        <td className="px-1 py-1.5 text-center bg-green-50">{shedTotals.in_m || '—'}</td>
                         <td className="px-1 py-1.5 text-center">{shedTotals.feed_f ? shedTotals.feed_f.toFixed(1) : '—'}</td>
                         <td className="px-1 py-1.5 text-center text-gray-400">—</td>
                         <td className="px-1 py-1.5 text-center">{shedTotals.feed_m ? shedTotals.feed_m.toFixed(1) : '—'}</td>
