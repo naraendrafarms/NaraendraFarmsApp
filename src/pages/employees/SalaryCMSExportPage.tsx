@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, today } from '@/lib/utils'
 import { Card, CardHeader, Button, Input, DateInput, Spinner, EmptyState } from '@/components/ui'
-import { Download, AlertTriangle, Printer } from 'lucide-react'
+import { Download, AlertTriangle, Printer, Search, X } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 import { printReport } from '@/lib/invoicePrint'
@@ -56,6 +56,7 @@ export const SalaryCMSExportPage: React.FC = () => {
   const [reference, setReference] = useState('')
   const [farmFilter, setFarmFilter] = useState<string[]>([])
   const [acctFilter, setAcctFilter] = useState('')
+  const [search, setSearch] = useState('')
 
   const { data: farms } = useQuery({
     queryKey: ['farms_for_cms'],
@@ -92,7 +93,15 @@ export const SalaryCMSExportPage: React.FC = () => {
     }
   })
 
+  // Search is folded into the SAME memo as the site and account filters, so the
+  // table, the site subtotals, the missing-bank warning, the print and the
+  // exported bank sheet are all built from one identical set of rows.
+  const q = search.trim().toLowerCase()
   const rows = React.useMemo(() => {
+    const hit = (r: any) => !q || [
+      r.emp?.name, r.emp?.emp_id, r.emp?.farms?.name,
+      r.holder?.name, r.holder?.bank_name, r.holder?.bank_branch, r.holder?.ifsc, r.holder?.account_no,
+    ].some(v => String(v ?? '').toLowerCase().includes(q))
     return (salaries as any[] ?? [])
       .map(s => ({ salary: s, holder: depositHolder(s, employeesById), emp: employeesById[s.employee_id],
         kind: accountKind(s, employeesById) }))
@@ -100,10 +109,11 @@ export const SalaryCMSExportPage: React.FC = () => {
       .filter(r => (r.salary.net_salary ?? 0) > 0)
       .filter(r => !farmFilter.length || farmFilter.includes(r.emp.farm_id))
       .filter(r => matchesAccountKind(r.kind, acctFilter))
+      .filter(hit)
       .sort((a, b) =>
         (a.emp?.farms?.name ?? '').localeCompare(b.emp?.farms?.name ?? '') ||
         (a.emp?.name ?? '').localeCompare(b.emp?.name ?? ''))
-  }, [salaries, employeesById, farmFilter, acctFilter])
+  }, [salaries, employeesById, farmFilter, acctFilter, q])
 
   const missingBankRows = rows.filter(r => !r.holder?.account_no || !r.holder?.ifsc || !r.holder?.bank_name)
   const total = rows.reduce((s, r) => s + (r.salary.net_salary ?? 0), 0)
@@ -134,7 +144,8 @@ export const SalaryCMSExportPage: React.FC = () => {
     printReport({
       title: 'Salary CMS Export',
       subtitle: `${monthLabel(month)}${farmFilter.length ? ' — ' + siteGroups.map(g=>g.site).join(', ') : ' — All Sites'}`
-        + (acctFilter ? ` — ${ACCOUNT_KIND_OPTIONS.find(o => o.value === acctFilter)?.label}` : ''),
+        + (acctFilter ? ` — ${ACCOUNT_KIND_OPTIONS.find(o => o.value === acctFilter)?.label}` : '')
+        + (q ? ` — search "${search.trim()}"` : ''),
       headers: ['Site', 'Name', 'Bank', 'Account No', 'IFSC', 'Amount'],
       rows: printRows,
       rightAlignFrom: 5,
@@ -174,8 +185,11 @@ export const SalaryCMSExportPage: React.FC = () => {
     const siteTag = farmFilter.length
       ? `_${farmFilter.map(id => (farms as any[] ?? []).find(f => f.id === id)?.code ?? 'site').join('-')}`
       : ''
-    XLSX.writeFile(wb, `NF_CMS_Salary_${month}${siteTag}.xlsx`)
-    toast.success(`Exported ${rows.length} beneficiaries`)
+    // A searched sheet is a PART payment file. Tagging the filename is the only
+    // thing that survives the download and reaches whoever uploads it to the bank.
+    XLSX.writeFile(wb, `NF_CMS_Salary_${month}${siteTag}${q ? '_SEARCH-FILTERED' : ''}.xlsx`)
+    toast.success(q ? `Exported ${rows.length} beneficiaries — SEARCH FILTERED, not the full month`
+                    : `Exported ${rows.length} beneficiaries`)
   }
 
   return (
@@ -184,6 +198,25 @@ export const SalaryCMSExportPage: React.FC = () => {
 
       <Card>
         <div className="flex flex-wrap gap-3 items-end p-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
+            <div className="relative">
+              <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Name, emp code, bank, A/c no…"
+                className="w-56 border border-gray-300 rounded-lg pl-7 pr-7 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500" />
+              {search && (
+                <button type="button" onClick={() => setSearch('')} aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X size={13} />
+                </button>)}
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1 max-w-[13rem]">
+              Also matches site, IFSC, branch and the account holder's name.
+            </p>
+          </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
             <input type="month" value={month} onChange={e => setMonth(e.target.value)}
@@ -230,6 +263,21 @@ export const SalaryCMSExportPage: React.FC = () => {
         </div>
       </Card>
 
+      {!!q && (
+        <Card>
+          <div className="p-4 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+            <Search size={16} className="mt-0.5 shrink-0"/>
+            <div>
+              <strong>Search is on — this is not the whole month.</strong> Showing {rows.length} of{' '}
+              {(salaries as any[] ?? []).filter(s => (s.net_salary ?? 0) > 0).length} payable rows for {monthLabel(month)}.
+              An export made now is a <strong>part payment sheet</strong> and its filename is tagged
+              SEARCH-FILTERED. Clear the search before making the full bank upload.{' '}
+              <button className="underline font-medium" onClick={() => setSearch('')}>Clear search</button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {missingBankRows.length > 0 && (
         <Card>
           <div className="p-4 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
@@ -244,7 +292,11 @@ export const SalaryCMSExportPage: React.FC = () => {
 
       <Card>
         {isLoading ? <div className="flex justify-center p-8"><Spinner size={28}/></div> :
-         !rows.length ? <EmptyState title="No salary rows" subtitle="No unpaid salary_monthly rows found for this month"/> :
+         !rows.length ? (q
+           ? <EmptyState title="Nothing matches this search"
+               subtitle={`No beneficiary matches "${search.trim()}" for ${monthLabel(month)}.`}
+               action={<Button variant="outline" onClick={() => setSearch('')}>Clear search</Button>} />
+           : <EmptyState title="No salary rows" subtitle="No unpaid salary_monthly rows found for this month"/>) :
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
