@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, MultiSelect, Table, Th, Td, Spinner, EmptyState, Modal, Badge } from '@/components/ui'
-import { IndianRupee, Download, ExternalLink, Printer } from 'lucide-react'
+import { IndianRupee, Download, ExternalLink, Printer, Search, X } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -38,6 +38,7 @@ export const SalaryRegisterPage: React.FC = () => {
   const [filterGender, setFilterGender] = useState('')
   const [filterDesignation, setFilterDesignation] = useState('')
   const [acctFilter, setAcctFilter] = useState('')
+  const [search, setSearch] = useState('')
   const navigate = useNavigate()
   const [voucherEmp, setVoucherEmp] = useState<{ id: string; name: string } | null>(null)
   const [dedEmp, setDedEmp] = useState<{ id: string; name: string } | null>(null)
@@ -137,8 +138,22 @@ export const SalaryRegisterPage: React.FC = () => {
   // depositHolder already resolves Own / Shared / Override; lower-cased that is
   // the same vocabulary the CMS page filters on, so both pages classify
   // identically rather than through two similar-looking rules.
+  //
+  // Search sits in the same single filter step, for the same reason: a search
+  // that narrowed only the table would leave the totals, the export and the
+  // print showing everybody.
+  const q = search.trim().toLowerCase()
+  const matchesSearch = (r: any) => {
+    if (!q) return true
+    const emp = r.employees ?? {}
+    const dep = depositHolder(r)
+    return [emp.emp_id, emp.name, emp.designation, emp.emp_category, emp.zone_area,
+            emp.farms?.name, dep?.holder?.name, dep?.holder?.account_no]
+      .some(v => String(v ?? '').toLowerCase().includes(q))
+  }
+
   const visibleRows = (rows as any[] ?? []).filter(r =>
-    matchesAccountKind((depositHolder(r)?.kind ?? 'Own').toLowerCase() as any, acctFilter))
+    matchesAccountKind((depositHolder(r)?.kind ?? 'Own').toLowerCase() as any, acctFilter) && matchesSearch(r))
 
   const payableRows = visibleRows.filter(r => (r.net_salary ?? 0) > 0)
 
@@ -188,7 +203,8 @@ export const SalaryRegisterPage: React.FC = () => {
     printReport({
       title: 'Salary Register',
       subtitle: monthLabel(month)
-        + (acctFilter ? ` — ${ACCOUNT_KIND_OPTIONS.find(o => o.value === acctFilter)?.label}` : ''),
+        + (acctFilter ? ` — ${ACCOUNT_KIND_OPTIONS.find(o => o.value === acctFilter)?.label}` : '')
+        + (q ? ` — search "${search.trim()}"` : ''),
       headers: ['Emp Code','Name','Designation','Farm','Days','Absent','Paid','Extra','Total Earning',
         'Employee Deductions (PF,ESI,PT)','Advance','Other Deductions','Net Salary','Employer Amount (ESI,PF)','CTC','Deposited Into'],
       rows: payableRows.map(r => {
@@ -248,6 +264,25 @@ export const SalaryRegisterPage: React.FC = () => {
 
       <Card className="p-3 flex flex-wrap gap-3 items-end">
         <div>
+          <label className="block text-xs text-gray-500 mb-1">Search</label>
+          <div className="relative">
+            <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Emp code, name, designation…"
+              className="w-56 border border-gray-300 rounded-lg pl-7 pr-7 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400" />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X size={13} />
+              </button>)}
+          </div>
+          <p className="text-[10px] text-gray-400 mt-1">
+            Also matches farm, category, zone and the account it was deposited into.
+          </p>
+        </div>
+        <div>
           <label className="block text-xs text-gray-500 mb-1">Month</label>
           <Select value={month} onChange={e => setMonth(e.target.value)}
             options={monthOptions().map(m => ({ value: m, label: monthLabel(m) }))} />
@@ -279,7 +314,11 @@ export const SalaryRegisterPage: React.FC = () => {
 
       {isLoading && <Spinner />}
       {!isLoading && !visibleRows.length && (
-        <EmptyState icon={<IndianRupee size={32}/>} title="No salary data for this month" subtitle="Run Bulk Salary to generate records" />
+        (rows as any[] ?? []).length
+          ? <EmptyState icon={<Search size={32}/>} title="Nothing matches these filters"
+              subtitle={`${(rows as any[]).length} salary rows exist for ${monthLabel(month)} — clear the search or the filters to see them.`}
+              action={<Button size="sm" variant="outline" onClick={() => { setSearch(''); setAcctFilter('') }}>Clear search &amp; account filter</Button>} />
+          : <EmptyState icon={<IndianRupee size={32}/>} title="No salary data for this month" subtitle="Run Bulk Salary to generate records" />
       )}
       {!isLoading && !!visibleRows.length && (
         <div className="overflow-x-auto rounded-lg border border-gray-200">
