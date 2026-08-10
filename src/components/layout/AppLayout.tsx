@@ -74,6 +74,7 @@ const NAV: NavItem[] = [
     children: [
       { label: 'Employee List',   to: '/employees' },
       { label: 'Bulk Salary',      to: '/employees/bulk-salary' },
+      { label: 'Workforce Review', to: '/employees/workforce-review' },
       { label: 'Salary Register',  to: '/employees/salary-register' },
       { label: 'Salary CMS Export', to: '/employees/cms-export' },
       { label: 'Statutory Compliance (TDS/GST/PF/ESI/PT)', to: '/employees/statutory' },

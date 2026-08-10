@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-08-09'
+const LAST_UPDATED = '2026-08-10'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-08-10', tag: 'New', text: 'Employees → Workforce Review: a new page answering "who is not there this month compared to last month", and what the workforce actually looked like day by day. It has: a headcount strip (worked last month → joined → not there now → worked this month → net change); a named list of everyone who worked last month and has no attendance at all this month, with their last present date — this catches people who left without the leaving date ever being filled in; a Daily Presence grid, one row per date and one column per site, with P and OT counting a full day and H counting half; Day-wise Absentees showing full-day absent, half day, weekly off and Not Marked per date, clickable to see the names in each group; Workers by Designation and Site with a male / female split; a Site Summary with attendance %, absence and OT days and hours (Available Days excludes weekly offs, so a rostered day off never reads as a shortfall); and Absence by Employee, worst first. "Not Marked" is a new figure nothing else reported — an employee with no attendance entry on a day when entries were made for others, which until now silently reduced their paid days with nothing to show for it. Month and Site filters apply to every panel, and Print and Export Excel carry all of it (Excel puts each panel on its own sheet). One deliberate limit: attendance is recorded against a site and there is no flock on an attendance record, so the page is site-wise only — a flock-wise split would be invented wherever two flocks share a site.' },
   { date: '2026-08-09', tag: 'Fix', text: 'Flock Management → Bulk Daily Entry: the TOTAL line at the bottom of the shed grid was showing the wrong figures under the wrong headings. When the new "Recd ♀ / Recd ♂" columns (chicks received mid-flock) were added, the TOTAL row did not get its two matching cells, so every total from Open ♂ onwards was displaced two columns to the left — the feed total appeared under Recd ♀, and there was no Recd total at all. Display only: the saved data was always correct. The TOTAL row now carries Recd ♀ and Recd ♂ totals and every column lines up again.' },
   { date: '2026-08-08', tag: 'New', text: 'Employees → Statutory Filing: added Advance Tax and Late Fee / Interest to the remittance tracker — neither had anywhere to be recorded before. Both are typed in when you mark them remitted, because unlike TDS, GST, PF, ESI and PT there is no source data to total them from. Also, when marking any liability remitted you can now say WHO paid it: leave it as "Paid from our bank", or pick the company or partner who deposited the challan after you transferred them the funds. The list is built from your Suppliers and Partners — no name is fixed in the app, so if the payer is not there yet, add them under Purchase → Suppliers and they appear straight away. A challan paid by someone else deliberately posts NO bank or cash entry on that date: the money left your account when you transferred it, and posting it again would double-count the expense. The saved row shows "via <name>" under the payment date. Step-by-step instructions are in the HR & Payroll section of this guide.' },
   { date: '2026-08-08', tag: 'Fix', text: 'Reports → TDS Payable was missing TDS deducted on vendor advances. It read only supplier bills and salaries, so any TDS you deducted while paying an advance never appeared in the report or in the printed statement used for filing — the statement was understated by exactly that amount. Vendor advances now appear as their own table (with the same section picker and Link to Challan action), are included in the section-wise summary and the totals, and the combined print becomes "Vendor + Salary + Advance". Checked before changing anything: you currently have 17 advances and none carry TDS, so no figure moved — this closes the gap before it opens.' },
@@ -841,6 +842,23 @@ const SECTIONS: Section[] = [
           { text: 'For each employee: set status — P (Present), A (Absent), H (Half Day), WO (Week Off), OT (Full OT Day).' },
           { text: 'OT Hours column — enter hours of overtime worked on a normal Present day.' },
           { text: 'Save All button saves the entire day at once.' },
+        ]
+      },
+      {
+        title: 'Review the workforce for a month',
+        path: 'HR & Payroll → Workforce Review',
+        steps: [
+          { text: 'Pick the Month, and a Site if you want just one. Everything on the page follows both.' },
+          { text: 'Headcount strip — worked last month, joined, not there now, worked this month, net change. "Worked" means at least one day marked P, OT or H.' },
+          { text: 'Not there this month — anyone who worked last month and has no attendance at all this month, with their last present date. This is the list to check first: it catches people who left without the leaving date being filled in.' },
+          { text: 'Daily Presence, Site-wise — one row per date, one column per site, showing how many were present. P and OT count as 1 day, H counts as ½.' },
+          { text: 'Day-wise Absentees — full-day absent, half day, weekly off and Not Marked per date. Click any row to see the names in each group.' },
+          { text: 'Not Marked is NOT absence — it means no entry was made for that person on a day when entries were made for others. Go back to Attendance and fill those in, otherwise their paid days come out short.' },
+          { text: 'Workers by Designation and Site — headcount per designation per site, split male / female, counted from who actually worked this month.' },
+          { text: 'Site Summary — attendance %, absent, half, weekly off, OT days and OT hours per site. Available Days excludes weekly offs, so a rostered day off never reads as a shortfall.' },
+          { text: 'Absence by Employee — worst first, so the repeat absentees are at the top.' },
+          { text: 'Print or Export Excel gives you every panel — the Excel puts each panel on its own sheet.' },
+          { text: 'Attendance is recorded against a site, not a flock, so this page is site-wise only. A flock-wise split would be invented wherever two flocks share a site.' },
         ]
       },
       {
