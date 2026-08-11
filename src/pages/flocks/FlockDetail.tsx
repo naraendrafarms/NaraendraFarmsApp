@@ -60,7 +60,7 @@ const NHE_LABEL: Record<string, string> = {
 export const FlockDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'overview'|'daily'|'weekly'|'monthly'|'financial'|'transfers'|'placements'|'std'>('overview')
+  const [tab, setTab] = useState<'overview'|'daily'|'weekly'|'monthly'|'financial'|'costincome'|'transfers'|'placements'|'std'>('overview')
   const [placementForm, setPlacementForm] = useState({ allocated_date: '', shed_id: '', female_count: '', male_count: '', notes: '' })
   const [editPlacementId, setEditPlacementId] = useState<string|null>(null)
   const [showPlacementForm, setShowPlacementForm] = useState(false)
@@ -495,6 +495,24 @@ export const FlockDetail: React.FC = () => {
       return data ?? []
     },
   })
+  const { data: heRates } = useQuery({
+    queryKey: ['he_rate_register_all'],
+    queryFn: async () => {
+      const { data } = await supabase.from('he_rate_register')
+        .select('week_start,week_end,rate').order('week_start')
+      return data ?? []
+    },
+  })
+  const { data: nheRateRows } = useQuery({
+    queryKey: ['nhe_recent_rates'],
+    queryFn: async () => {
+      const { data } = await supabase.from('nhe_sales')
+        .select('sale_date,sale_type,rate,qty').order('sale_date', { ascending: false }).limit(500)
+      return data ?? []
+    },
+  })
+  const [ciFrom, setCiFrom] = useState('')
+  const [ciTo, setCiTo] = useState('')
   const { data: otherExpenses } = useQuery({
     queryKey: ['flock_other_expenses', id],
     queryFn: async () => {
@@ -774,6 +792,118 @@ export const FlockDetail: React.FC = () => {
   const otherExpByCat = (otherExpenses ?? []).reduce((acc: any, e: any) => {
     const k = e.category || 'other'; acc[k] = (acc[k] ?? 0) + (e.amount ?? 0); return acc
   }, {} as Record<string, number>)
+
+  // ── Cost & Income tab ────────────────────────────────────────────────────
+  // Eggs produced are VALUED each day, so a day with production but no dispatch
+  // still shows what it earned: HE at that week's rate from the HE Rate
+  // Register, other eggs at the most recent rate actually achieved for that
+  // sale type. Actual sales are shown separately, on the date they happened.
+
+  const heRateOn = (d: string): number => {
+    const w = (heRates ?? []).find((r: any) => d >= r.week_start && d <= r.week_end)
+    return w?.rate ?? 0
+  }
+  // Latest rate achieved for each NHE type, taken from real sales.
+  const nheRateByType = (() => {
+    const m: Record<string, number> = {}
+    for (const r of (nheRateRows ?? []) as any[]) {
+      if (r.sale_type && r.rate && m[r.sale_type] == null) m[r.sale_type] = r.rate
+    }
+    return m
+  })()
+
+
+  const salesByDate = (() => {
+    const m: Record<string, number> = {}
+    for (const d of (heDispatch ?? []) as any[]) {
+      const k = String(d.dispatch_date); m[k] = (m[k] ?? 0) + (d.amount ?? 0)
+    }
+    for (const s2 of (nheSales ?? []) as any[]) {
+      const k = String(s2.sale_date); m[k] = (m[k] ?? 0) + (s2.amount ?? 0)
+    }
+    return m
+  })()
+
+  const medByDate = (() => {
+    const m: Record<string, number> = {}
+    for (const r of (medUsage ?? []) as any[]) {
+      const k = String(r.usage_date); m[k] = (m[k] ?? 0) + (r.amount ?? 0)
+    }
+    return m
+  })()
+
+  const expByDate = (() => {
+    const m: Record<string, number> = {}
+    for (const e of (otherExpenses ?? []) as any[]) {
+      const k = String(e.expense_date); m[k] = (m[k] ?? 0) + (e.amount ?? 0)
+    }
+    return m
+  })()
+
+  const farmName = (() => {
+    const m: Record<string, string> = {}
+    for (const f of ((farms ?? []) as any[])) m[f.id] = f.name ?? f.code
+    return m
+  })()
+
+  // One row per date. Chick cost sits on the placement day only, exactly as you
+  // asked — so it appears once and never distorts cost per egg on other days.
+  const ciDaily = (() => {
+    const byDate: Record<string, any> = {}
+    for (const d of (dailyAggregated ?? []) as any[]) {
+      const k = String(d.record_date)
+      byDate[k] ??= { date: k, eggs: 0, he: 0, feedKg: 0, feedCost: 0 }
+      byDate[k].eggs += d.total_eggs ?? 0
+      byDate[k].he += d.he_eggs ?? 0
+      byDate[k].feedKg += (d.feed_female_kg ?? 0) + (d.feed_male_kg ?? 0)
+      byDate[k].feedCost += (d.feed_female_kg ?? 0) * feedRate(d.feed_type_f)
+                          + (d.feed_male_kg ?? 0) * feedRate(d.feed_type_m)
+    }
+    const placement = flock.placement_date ? String(flock.placement_date) : null
+    return Object.values(byDate).map((r: any) => {
+      const nonHe = Math.max(0, r.eggs - r.he)
+      // Non-HE eggs are valued at the table-egg rate, the commonest NHE type;
+      // a per-grade split would need grade-wise production, which the daily
+      // record does not carry.
+      const nheRate = nheRateByType['te'] ?? nheRateByType['je'] ?? 0
+      const value = r.he * heRateOn(r.date) + nonHe * nheRate
+      const chick = placement && r.date === placement ? chickCost : 0
+      const med = medByDate[r.date] ?? 0
+      const exp = expByDate[r.date] ?? 0
+      const cost = r.feedCost + med + exp
+      return {
+        ...r, site: farmName[siteOnDate(r.date) ?? ''] ?? '—',
+        value, sales: salesByDate[r.date] ?? 0,
+        med, exp, chick, cost,
+        perEgg: r.eggs > 0 ? cost / r.eggs : 0,
+      }
+    }).filter((r: any) => (!ciFrom || r.date >= ciFrom) && (!ciTo || r.date <= ciTo))
+      .sort((a: any, b: any) => b.date.localeCompare(a.date))
+  })()
+
+  // Monthly rolls the daily figures up and ADDS the site costs, which only
+  // exist per month — so the month view is complete where the day view cannot be.
+  const ciMonthly = (() => {
+    const m: Record<string, any> = {}
+    for (const r of ciDaily) {
+      const k = r.date.slice(0, 7)
+      m[k] ??= { month: k, eggs: 0, he: 0, feedCost: 0, med: 0, exp: 0, value: 0, sales: 0, chick: 0, site: r.site }
+      m[k].eggs += r.eggs; m[k].he += r.he; m[k].feedCost += r.feedCost
+      m[k].med += r.med; m[k].exp += r.exp; m[k].value += r.value; m[k].sales += r.sales; m[k].chick += r.chick
+    }
+    return Object.values(m).map((r: any) => {
+      const sal = (siteSalary ?? []).reduce((s2: number, x: any) =>
+        String(x.month ?? '').slice(0, 7) === r.month
+        && (x.employees?.farm_id ?? '') === (siteOnDate(r.month + '-15') ?? '')
+          ? s2 + (x.earned_salary ?? x.net_salary ?? 0) : s2, 0)
+      const elec = (siteElectricity ?? []).reduce((s2: number, b: any) =>
+        String(b.bill_month ?? '').slice(0, 7) === r.month
+        && (b.electricity_meters?.farm_id ?? '') === (siteOnDate(r.month + '-15') ?? '')
+          ? s2 + (b.amount ?? 0) : s2, 0)
+      const total = r.feedCost + r.med + r.exp + r.chick + sal + elec
+      return { ...r, sal, elec, total, perEgg: r.eggs > 0 ? total / r.eggs : 0 }
+    }).sort((a: any, b: any) => b.month.localeCompare(a.month))
+  })()
 
   const directCost = chickCost + medCost + feedCost + otherExpCost
   const totalCost  = directCost + salaryCost + electricityCost
@@ -1080,11 +1210,11 @@ export const FlockDetail: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {(['overview','placements','daily','weekly','monthly','financial','transfers','std'] as const).map(t => (
+        {(['overview','placements','daily','weekly','monthly','financial','costincome','transfers','std'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors -mb-px
               ${tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {t === 'std' ? 'vs Standard' : t}
+            {t === 'std' ? 'vs Standard' : t === 'costincome' ? 'Cost & Income' : t}
           </button>
         ))}
       </div>
@@ -1838,6 +1968,133 @@ export const FlockDetail: React.FC = () => {
       )}
 
       {/* FINANCIAL TAB */}
+      {tab === 'costincome' && (
+        <div className="space-y-5">
+          <Card>
+            <div className="flex flex-wrap gap-3 items-end">
+              <label className="flex items-center gap-1.5 text-sm text-gray-600">From
+                <DateInput value={ciFrom} onChange={e => setCiFrom(e.target.value)} /></label>
+              <label className="flex items-center gap-1.5 text-sm text-gray-600">To
+                <DateInput value={ciTo} onChange={e => setCiTo(e.target.value)} /></label>
+              {(ciFrom || ciTo) && <Button variant="ghost" size="sm" onClick={() => { setCiFrom(''); setCiTo('') }}>Clear</Button>}
+              <p className="text-[11px] text-gray-500 ml-auto max-w-lg">
+                Eggs are <strong>valued the day they are produced</strong> — HE at that week's rate from the HE Rate
+                Register, other eggs at the latest rate actually achieved in NHE sales. <strong>Actual Sales</strong> is
+                money that really came in on that date, so the two rarely match day to day.
+              </p>
+            </div>
+          </Card>
+
+          {/* Monthly first — it is the only complete picture, because salary and
+              electricity exist per month, not per day. */}
+          <Card padding={false}>
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800">Month-wise — complete cost</h3>
+              <span className="text-[11px] text-gray-500">includes site salary &amp; electricity</span>
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr>
+                  <Th>Month</Th><Th>Site</Th><Th right>Total Eggs</Th><Th right>HE Eggs</Th>
+                  <Th right className="text-green-700">Egg Value</Th><Th right className="text-green-700">Actual Sales</Th>
+                  <Th right>Feed</Th><Th right>Medicine</Th><Th right>Expenses</Th>
+                  <Th right>Chick</Th><Th right>Salary*</Th><Th right>Electricity*</Th>
+                  <Th right className="text-orange-700">Total Cost</Th><Th right>Cost/Egg</Th>
+                </tr></thead>
+                <tbody>
+                  {ciMonthly.map((r: any) => (
+                    <tr key={r.month} className="hover:bg-gray-50 text-xs">
+                      <Td className="font-medium">{r.month}</Td>
+                      <Td className="text-gray-500">{r.site}</Td>
+                      <Td right>{r.eggs.toLocaleString('en-IN')}</Td>
+                      <Td right>{r.he.toLocaleString('en-IN')}</Td>
+                      <Td right className="text-green-700">{inr(r.value)}</Td>
+                      <Td right className="text-green-700">{inr(r.sales)}</Td>
+                      <Td right>{inr(r.feedCost)}</Td>
+                      <Td right>{inr(r.med)}</Td>
+                      <Td right>{inr(r.exp)}</Td>
+                      <Td right>{r.chick ? inr(r.chick) : '—'}</Td>
+                      <Td right className="text-gray-500">{inr(r.sal)}</Td>
+                      <Td right className="text-gray-500">{inr(r.elec)}</Td>
+                      <Td right className="font-semibold text-orange-700">{inr(r.total)}</Td>
+                      <Td right className="font-semibold">{r.eggs > 0 ? `Rs ${r.perEgg.toFixed(3)}` : '—'}</Td>
+                    </tr>
+                  ))}
+                  {ciMonthly.length === 0 && (
+                    <tr><Td colSpan={14} className="text-center text-gray-400 py-8">No daily records in this range.</Td></tr>
+                  )}
+                </tbody>
+              </Table>
+            </div>
+            <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-amber-800 bg-amber-50">
+              * Salary and Electricity are the <strong>whole site's</strong> figures for that month, not this flock's
+              share. Attendance and power are recorded per site and nothing says which flock they belong to, so where
+              two flocks share a site both show the same number. They are <strong>not</strong> divided — a split would
+              be invented. Electricity adds every meter/transformer on the site.
+            </div>
+          </Card>
+
+          {/* Day-wise: only the costs that genuinely exist per day. */}
+          <Card padding={false}>
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800">Day-wise — direct cost only</h3>
+              <span className="text-[11px] text-gray-500">{ciDaily.length} days</span>
+            </div>
+            <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
+              <Table>
+                <thead><tr>
+                  <Th>Date</Th><Th>Site</Th><Th right>Total Eggs</Th><Th right>HE Eggs</Th>
+                  <Th right className="text-green-700">Egg Value</Th><Th right className="text-green-700">Actual Sales</Th>
+                  <Th right>Feed kg</Th><Th right>Feed</Th><Th right>Medicine</Th><Th right>Expenses</Th>
+                  <Th right className="text-orange-700">Direct Cost</Th><Th right>Cost/Egg</Th>
+                </tr></thead>
+                <tbody>
+                  {ciDaily.map((r: any) => (
+                    <tr key={r.date} className="hover:bg-gray-50 text-xs">
+                      <Td>{fmtDate(r.date)}</Td>
+                      <Td className="text-gray-500">{r.site}</Td>
+                      <Td right>{r.eggs.toLocaleString('en-IN')}</Td>
+                      <Td right>{r.he.toLocaleString('en-IN')}</Td>
+                      <Td right className="text-green-700">{inr(r.value)}</Td>
+                      <Td right className="text-green-700">{r.sales ? inr(r.sales) : '—'}</Td>
+                      <Td right className="text-gray-500">{r.feedKg.toLocaleString('en-IN')}</Td>
+                      <Td right>{inr(r.feedCost)}</Td>
+                      <Td right>{r.med ? inr(r.med) : '—'}</Td>
+                      <Td right>{r.exp ? inr(r.exp) : '—'}</Td>
+                      <Td right className="font-semibold text-orange-700">{inr(r.cost)}</Td>
+                      <Td right>{r.eggs > 0 ? `Rs ${r.perEgg.toFixed(3)}` : '—'}</Td>
+                    </tr>
+                  ))}
+                  {ciDaily.length === 0 && (
+                    <tr><Td colSpan={12} className="text-center text-gray-400 py-8">No daily records in this range.</Td></tr>
+                  )}
+                </tbody>
+                {ciDaily.length > 0 && (
+                  <tfoot><tr className="bg-brand-50 text-xs font-semibold text-brand-800">
+                    <Td colSpan={2}>TOTAL</Td>
+                    <Td right>{ciDaily.reduce((a: number, r: any) => a + r.eggs, 0).toLocaleString('en-IN')}</Td>
+                    <Td right>{ciDaily.reduce((a: number, r: any) => a + r.he, 0).toLocaleString('en-IN')}</Td>
+                    <Td right>{inr(ciDaily.reduce((a: number, r: any) => a + r.value, 0))}</Td>
+                    <Td right>{inr(ciDaily.reduce((a: number, r: any) => a + r.sales, 0))}</Td>
+                    <Td right>{ciDaily.reduce((a: number, r: any) => a + r.feedKg, 0).toLocaleString('en-IN')}</Td>
+                    <Td right>{inr(ciDaily.reduce((a: number, r: any) => a + r.feedCost, 0))}</Td>
+                    <Td right>{inr(ciDaily.reduce((a: number, r: any) => a + r.med, 0))}</Td>
+                    <Td right>{inr(ciDaily.reduce((a: number, r: any) => a + r.exp, 0))}</Td>
+                    <Td right>{inr(ciDaily.reduce((a: number, r: any) => a + r.cost, 0))}</Td>
+                    <Td right>—</Td>
+                  </tr></tfoot>
+                )}
+              </Table>
+            </div>
+            <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-gray-500">
+              Day-wise deliberately excludes salary and electricity — they are recorded monthly, and dividing a month
+              by its days would put a made-up number next to measured ones. Chick cost sits on the placement day only,
+              so it never distorts cost per egg. For the complete cost, read the month table above.
+            </div>
+          </Card>
+        </div>
+      )}
+
       {tab === 'financial' && (
         <div className="space-y-5">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
