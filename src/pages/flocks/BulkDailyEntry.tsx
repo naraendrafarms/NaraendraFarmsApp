@@ -159,10 +159,25 @@ export const BulkDailyEntry: React.FC = () => {
     }
   })
 
+  // unit + the linked item's unit are needed on SAVE. This page used to store a
+  // hardcoded 'ml' on every medicine row, which stamped 585 of 615 usage rows
+  // with the wrong unit and made Daily Summary print doses, kilos and litres
+  // all as "ml". The unit is never typed here — it comes from the master.
   const { data: medicines } = useQuery({
     queryKey: ['medicines_master_list'],
-    queryFn: async () => { const { data } = await supabase.from('medicines_master').select('id,name').order('name'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('medicines_master').select('id,name,unit,item_id,items(unit)').order('name'); return data ?? [] }
   })
+
+  // Item Master is where these things are actually kept, so its unit wins.
+  // 13 of 105 medicines have no item link, so medicines_master.unit is the
+  // fallback rather than the other way round — measured, not assumed.
+  const unitForMedicine = (medId: string | null | undefined): string | null => {
+    if (!medId) return null
+    const m: any = (medicines as any[] ?? []).find((x: any) => x.id === medId)
+    if (!m) return null
+    const itemUnit = Array.isArray(m.items) ? m.items[0]?.unit : m.items?.unit
+    return itemUnit || m.unit || null
+  }
   const { options: medOptionsAlias } = useMedicineOptionsWithAliases()
 
   // ── Sheds for selected flock: flock_sheds → shed_allocations → farm sheds ──
@@ -545,7 +560,7 @@ export const BulkDailyEntry: React.FC = () => {
     // vaccine + a supplement on the same day) — each is its own usage row.
     for (const m of medRows) {
       if (m.med_id && m.med_qty) {
-        const medPayload = { flock_id: selectedFlock, usage_date: date, medicine_id: m.med_id, quantity: parseFloat(m.med_qty) || 0, unit: 'ml' }
+        const medPayload = { flock_id: selectedFlock, usage_date: date, medicine_id: m.med_id, quantity: parseFloat(m.med_qty) || 0, unit: unitForMedicine(m.med_id) }
         const { error: me } = m.existingMedId
           ? await supabase.from('medicine_usage').update(medPayload).eq('id', m.existingMedId)
           : await supabase.from('medicine_usage').insert(medPayload)
@@ -673,7 +688,7 @@ export const BulkDailyEntry: React.FC = () => {
           }
         }
         if (r.med_id && r.med_qty) {
-          const medPayload = { flock_id: flock.id, usage_date: date, medicine_id: r.med_id, quantity: parseFloat(r.med_qty) || 0, unit: 'ml' }
+          const medPayload = { flock_id: flock.id, usage_date: date, medicine_id: r.med_id, quantity: parseFloat(r.med_qty) || 0, unit: unitForMedicine(r.med_id) }
           const { error } = r.existingMedId
             ? await supabase.from('medicine_usage').update(medPayload).eq('id', r.existingMedId)
             : await supabase.from('medicine_usage').insert(medPayload)
@@ -1095,7 +1110,7 @@ export const BulkDailyEntry: React.FC = () => {
           const mid = medName && medNameToId[medName.toLowerCase()] ? medNameToId[medName.toLowerCase()] : null
           if (mid && medQty) {
             const existingMedId = existingMedMap.get(d)
-            const medPayload = { flock_id: selectedFlock, usage_date: d, medicine_id: mid, quantity: parseFloat(medQty) || 0, unit: 'ml' }
+            const medPayload = { flock_id: selectedFlock, usage_date: d, medicine_id: mid, quantity: parseFloat(medQty) || 0, unit: unitForMedicine(mid) }
             const { error: me } = existingMedId
               ? await supabase.from('medicine_usage').update(medPayload).eq('id', existingMedId)
               : await supabase.from('medicine_usage').insert(medPayload)
@@ -1500,6 +1515,11 @@ export const BulkDailyEntry: React.FC = () => {
                       <input type="number" min="0" value={m.med_qty} placeholder="qty" disabled={!m.med_id}
                         onChange={e => updateMedRow(m.key, 'med_qty', e.target.value)}
                         className="w-24 text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
+                      {/* The unit is shown, not typed — it comes from Item Master
+                          (falling back to the medicine master when unlinked). */}
+                      <span className="text-xs text-gray-500 w-16">
+                        {m.med_id ? (unitForMedicine(m.med_id) ?? <span className="text-amber-600" title="No unit set in Item Master or Medicine Master">no unit</span>) : ''}
+                      </span>
                       {medRows.length > 1 && (
                         <button type="button" onClick={() => removeMedRow(m.key)}
                           className="text-xs text-red-500 hover:text-red-700 px-1" title="Remove">✕</button>
@@ -1631,6 +1651,7 @@ export const BulkDailyEntry: React.FC = () => {
                             <input type="number" min="0" value={r.med_qty} placeholder="qty" disabled={!r.med_id}
                               onChange={e => updateFlockRow(flock.id, 'med_qty', e.target.value)}
                               className="w-16 text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
+                            {r.med_id && <span className="text-[10px] text-gray-500 ml-1">{unitForMedicine(r.med_id) ?? 'no unit'}</span>}
                           </td>
                         </tr>
                       )
