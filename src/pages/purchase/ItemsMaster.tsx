@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { friendlyDbError } from '@/lib/utils'
 import {
   Card, CardHeader, Input, Select, FormRow, Modal,
   EmptyState, Spinner, Td, Th
@@ -102,7 +103,7 @@ export const ItemsMasterPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['items_master'] })
       setShowForm(false); setEditing(null); setForm(emptyForm())
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyDbError(e, 'item')),
   })
 
   const toggleActive = useMutation({
@@ -111,7 +112,7 @@ export const ItemsMasterPage: React.FC = () => {
       if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items_master'] }),
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyDbError(e, 'item')),
   })
 
   // All aliases, for the list's own search box below — searching by an
@@ -177,7 +178,7 @@ export const ItemsMasterPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['item_aliases_for_item', aliasItem?.id] })
       qc.invalidateQueries({ queryKey: ['item_aliases_all'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyDbError(e, 'item')),
   })
 
   const deleteMut = useMutation({
@@ -199,7 +200,7 @@ export const ItemsMasterPage: React.FC = () => {
       setConfirmDelete(null)
       qc.invalidateQueries({ queryKey: ['items_master'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyDbError(e, 'item')),
   })
 
   const handleMerge = async () => {
@@ -446,7 +447,7 @@ export const ItemsMasterPage: React.FC = () => {
       toast.success(`Imported ${newRecords.length} items${skipCount ? ` (${skipCount} skipped — already exist)` : ''}`)
       qc.invalidateQueries({ queryKey: ['items_master'] })
     } catch (e: any) {
-      toast.error('Import failed: ' + e.message)
+      toast.error('Import failed: ' + friendlyDbError(e, 'item'))
     } finally {
       if (fileRef.current) fileRef.current.value = ''
     }

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { fmtDate } from '@/lib/utils'
+import { fmtDate, friendlyDbError } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td,
   Badge, SectionHeader, Spinner, EmptyState, Divider
@@ -143,7 +143,7 @@ export const FarmsMaster: React.FC = () => {
       else{const{error}=await supabase.from('farms').insert(p);if(error)throw error}
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['farms']});setShowForm(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const delMut=useMutation({
@@ -245,7 +245,7 @@ export const IngredientsMaster: React.FC = () => {
       else{const{error}=await supabase.from('feed_ingredients').insert(p);if(error)throw error}
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['ingredients']});setShowForm(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const delMut=useMutation({
@@ -284,7 +284,7 @@ export const IngredientsMaster: React.FC = () => {
       }
     },
     onSuccess:()=>{toast.success('Merged successfully');qc.invalidateQueries({queryKey:['ingredients']});setSel(new Set());setMergeOpen(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const [search, setSearch] = useState('')
@@ -509,7 +509,7 @@ export const PartiesMaster: React.FC = () => {
       else{const{error}=await supabase.from('parties').insert(p);if(error)throw error}
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['parties']});setShowForm(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const delMut=useMutation({
@@ -827,19 +827,21 @@ export const MedicinesMaster: React.FC = () => {
       const p={name:form.name,type:form.type,unit:form.unit,manufacturer:form.manufacturer||null,rate:parseFloat(form.rate)||null,batch_no:form.batch_no||null,expiry_date:form.expiry_date||null}
       if(editing){const{error}=await supabase.from('medicines_master').update(p).eq('id',editing.id);if(error)throw error}
       else{
-        // No DB constraint prevents a duplicate name (same class of bug as
-        // the duplicate bank-account issue found and cleaned up earlier) —
-        // check client-side before inserting. normalizeName collapses
-        // internal whitespace too (not just trim), since "Vitalosin 62.5 %"
-        // vs "Vitalosin 62.5%" previously slipped past a trim-only check
-        // and created a real duplicate row.
+        // The database now REFUSES a duplicate name (migration 616's unique
+        // index on the normalised name), which is what finally stopped them
+        // coming back. This client-side check stays in front of it so the
+        // common case shows a sentence rather than a Postgres constraint
+        // error; friendlyDbError in onError covers every other route in.
+        // normalizeName collapses internal whitespace too (not just trim),
+        // since "Vitalosin 62.5 %" vs "Vitalosin 62.5%" previously slipped
+        // past a trim-only check and created a real duplicate row.
         const dup=(data??[]).find((m:any)=>normalizeName(m.name)===normalizeName(form.name))
         if(dup)throw new Error(`"${form.name}" already exists — edit that entry instead of adding a duplicate.`)
         const{error}=await supabase.from('medicines_master').insert(p);if(error)throw error
       }
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['medicines']});qc.invalidateQueries({queryKey:['medicines_master']});qc.invalidateQueries({queryKey:['medicines_master_list']});qc.invalidateQueries({queryKey:['medicines_active']});qc.invalidateQueries({queryKey:['medicines_all']});setShowForm(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const delMut=useMutation({
@@ -879,7 +881,7 @@ export const MedicinesMaster: React.FC = () => {
       }
     },
     onSuccess:()=>{toast.success('Merged — history remapped, duplicates deleted');qc.invalidateQueries({queryKey:['medicines']});qc.invalidateQueries({queryKey:['medicines_master']});qc.invalidateQueries({queryKey:['medicines_master_list']});qc.invalidateQueries({queryKey:['medicines_active']});qc.invalidateQueries({queryKey:['medicines_all']});setSel(new Set());setMergeOpen(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const [medSearch, setMedSearch] = useState('')
@@ -924,7 +926,7 @@ export const MedicinesMaster: React.FC = () => {
     const newRows = toUpsert.filter(r => !existingNames.has(normalizeName(r.name)))
     if (newRows.length) {
       const { error } = await supabase.from('medicines_master').insert(newRows)
-      if (error) { toast.error(error.message); return }
+      if (error) { toast.error(friendlyDbError(error, 'medicine')); return }
     }
     toast.success(`Imported ${newRows.length} new medicines${toUpsert.length - newRows.length ? ` (${toUpsert.length - newRows.length} already existed, skipped)` : ''}`)
     qc.invalidateQueries({ queryKey: ['medicines'] })
@@ -1095,7 +1097,7 @@ export const ShedsMaster: React.FC = () => {
       else{const{error}=await supabase.from('sheds').insert(p);if(error)throw error}
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['sheds']});setShowForm(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const delMut=useMutation({
@@ -1226,7 +1228,7 @@ export const HatcheriesMaster: React.FC = () => {
       }
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['hatcheries']});setShowForm(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const delMut=useMutation({
@@ -1263,7 +1265,7 @@ export const HatcheriesMaster: React.FC = () => {
       }
     },
     onSuccess:()=>{toast.success('Merged successfully');qc.invalidateQueries({queryKey:['hatcheries']});setSel(new Set());setMergeOpen(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const rows=data??[]
@@ -1436,7 +1438,7 @@ export const MetersMaster: React.FC = () => {
       else{const{error}=await supabase.from('electricity_meters').insert(p);if(error)throw error}
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['meters']});setShowForm(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const bulkDelMut=useMutation({
@@ -1552,13 +1554,13 @@ export const FeedTypesMaster: React.FC = () => {
       else{const{error}=await supabase.from('feed_types').insert(p);if(error)throw error}
     },
     onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['feed_types']});setShowForm(false)},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const delMut=useMutation({
     mutationFn:async(id:string)=>{const{error}=await supabase.from('feed_types').delete().eq('id',id);if(error)throw error},
     onSuccess:()=>{toast.success('Deleted');qc.invalidateQueries({queryKey:['feed_types']})},
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const bulkDelMut=useMutation({
@@ -1575,7 +1577,7 @@ export const FeedTypesMaster: React.FC = () => {
   const toggleMut=useMutation({
     mutationFn:async(row:any)=>{const{error}=await supabase.from('feed_types').update({is_active:!row.is_active}).eq('id',row.id);if(error)throw error},
     onSuccess:()=>qc.invalidateQueries({queryKey:['feed_types']}),
-    onError:(e:any)=>toast.error(e.message)
+    onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
   const rows=data??[]

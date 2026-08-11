@@ -220,3 +220,36 @@ export const flockAgeWeekBucket = (placementDate: string | null | undefined, rec
     (new Date(recordDate).getTime() - new Date(placementDate).getTime()) / 86400000)
   return days < 0 ? -1 : Math.floor(days / 7)
 }
+
+// ── Friendly master-data errors ─────────────────────────────────────────────
+// Migration 616 put UNIQUE indexes on the normalised name of medicines_master
+// and items, because the only guard until then was a client-side check inside
+// one form — bypassed by the CSV imports, the quick-add widgets, and two people
+// adding the same thing at once. The database is now the guard, which is right,
+// but a raw Postgres unique-violation ("duplicate key value violates unique
+// constraint ux_medicines_master_name_norm") is not something to show a user.
+//
+// Pass any Supabase/Postgres error through this to get a sentence that says
+// what happened and what to do instead. Anything it does not recognise comes
+// back unchanged, so no error is ever swallowed or disguised.
+export function friendlyDbError(error: any, entityLabel = 'record'): string {
+  const raw = String(error?.message ?? error ?? 'Unknown error')
+  const code = String(error?.code ?? '')
+  const hay = raw.toLowerCase()
+
+  if (code === '23505' || hay.includes('duplicate key value')) {
+    if (hay.includes('ux_medicines_master_name_norm')) {
+      return 'A medicine with this name already exists. Open that entry and edit it, or use Merge if it is a duplicate — names are compared ignoring case and extra spaces.'
+    }
+    if (hay.includes('ux_items_name_norm')) {
+      return 'An item with this name already exists in Item Master. Open that entry and edit it instead of adding a second copy — names are compared ignoring case and extra spaces.'
+    }
+    return `This ${entityLabel} already exists. Edit the existing entry instead of adding a duplicate.`
+  }
+
+  if (code === '23503' || hay.includes('violates foreign key constraint')) {
+    return `This ${entityLabel} is still used by other records, so it cannot be deleted. Merge it into the entry you want to keep instead.`
+  }
+
+  return raw
+}

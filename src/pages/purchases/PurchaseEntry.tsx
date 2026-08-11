@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, friendlyDbError } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState,
@@ -351,7 +351,7 @@ export const PurchaseEntry: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['pending_payments'] })
       qc.invalidateQueries({ queryKey: ['cash_book'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyDbError(e, 'item')),
   })
 
   const addItemMut = useMutation({
@@ -359,16 +359,22 @@ export const PurchaseEntry: React.FC = () => {
       if (!newItemName.trim()) throw new Error('Item name required')
       const payload: any = { name: newItemName.trim(), unit: newItemUnit || form.unit, category: itemCategoryFor(form.category) }
       const { data, error } = await supabase.from('items').insert(payload).select('id,name').single()
-      if (error) throw error
-      return data
+      // Item Master refuses duplicate names (migration 616). Mid-entry, the
+      // useful response is to select the existing item rather than stop.
+      if (error && !(String(error.code) === '23505' || error.message?.toLowerCase().includes('duplicate key value'))) throw error
+      if (data) return { ...data, reused: false }
+      const { data: existing } = await supabase.from('items')
+        .select('id,name').ilike('name', payload.name).limit(1).maybeSingle()
+      if (!existing) throw new Error(`"${payload.name}" already exists but could not be found — check Item Master.`)
+      return { ...existing, reused: true }
     },
     onSuccess: (d: any) => {
-      toast.success('Item added')
+      toast.success(d.reused ? `${d.name} already existed — selected it` : 'Item added')
       setForm(f => ({ ...f, item_id: d.id, item_name: d.name }))
       setShowItem(false); setNewItemName(''); setNewItemUnit('')
       qc.invalidateQueries({ queryKey: ['v_purchase_items'] })
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyDbError(e, 'item')),
   })
 
   const exportRows = () => {

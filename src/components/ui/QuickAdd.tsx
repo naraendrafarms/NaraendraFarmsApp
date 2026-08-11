@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { friendlyDbError } from '@/lib/utils'
 import { Input, Select, Button } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Plus, X } from 'lucide-react'
@@ -183,22 +184,45 @@ export const QuickAddMedicine: React.FC<QuickAddMedicineProps> = ({ onCreated, d
     mutationFn: async () => {
       if (!name.trim()) throw new Error('Name is required')
       const trimmed = name.trim()
+      // The database refuses a duplicate name in either master (migration 616).
+      // Quick Add is used mid-entry, so the useful response to "it already
+      // exists" is not an error — it is to reuse the existing entry and let the
+      // user carry on. isDuplicate below only ever swallows the unique
+      // violation; any other error is still thrown.
+      const isDuplicate = (e: any) =>
+        String(e?.code ?? '') === '23505' || String(e?.message ?? '').toLowerCase().includes('duplicate key value')
+
+      let itemId: string | null = null
       const { data: item, error: itemErr } = await supabase
         .from('items')
         .insert({ name: trimmed, category, unit })
         .select('id,name')
         .single()
-      if (itemErr) throw itemErr
+      if (itemErr && !isDuplicate(itemErr)) throw itemErr
+      if (item) itemId = item.id
+      else {
+        const { data: existing } = await supabase.from('items')
+          .select('id').ilike('name', trimmed).limit(1).maybeSingle()
+        itemId = existing?.id ?? null
+      }
+
       const { data: med, error: medErr } = await supabase
         .from('medicines_master')
-        .insert({ name: trimmed, unit, item_id: item.id })
+        .insert({ name: trimmed, unit, item_id: itemId })
         .select('id,name')
         .single()
-      if (medErr) throw medErr
-      return med
+      if (medErr && !isDuplicate(medErr)) throw medErr
+      if (med) return { ...med, reused: false }
+
+      const { data: existingMed, error: lookupErr } = await supabase
+        .from('medicines_master')
+        .select('id,name').ilike('name', trimmed).limit(1).maybeSingle()
+      if (lookupErr) throw lookupErr
+      if (!existingMed) throw new Error(`"${trimmed}" already exists but could not be found — check Masters → Medicines.`)
+      return { ...existingMed, reused: true }
     },
-    onSuccess: (data) => {
-      toast.success(`${data.name} added`)
+    onSuccess: (data: any) => {
+      toast.success(data.reused ? `${data.name} already existed — selected it` : `${data.name} added`)
       qc.invalidateQueries({ queryKey: ['medicines_master_list'] })
       qc.invalidateQueries({ queryKey: ['medicines_for_alias_search'] })
       qc.invalidateQueries({ queryKey: ['items_for_alias_search'] })
@@ -208,7 +232,7 @@ export const QuickAddMedicine: React.FC<QuickAddMedicineProps> = ({ onCreated, d
       setOpen(false)
       setName(''); setCategory(defaultCategory); setUnit('ml')
     },
-    onError: (e: any) => toast.error(e.message)
+    onError: (e: any) => toast.error(friendlyDbError(e, 'medicine'))
   })
 
   if (!open) {
