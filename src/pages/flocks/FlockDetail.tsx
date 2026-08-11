@@ -905,6 +905,60 @@ export const FlockDetail: React.FC = () => {
     }).sort((a: any, b: any) => b.month.localeCompare(a.month))
   })()
 
+  // ── Financial tab date range ─────────────────────────────────────────────
+  // The Revenue and Cost cards were lifetime-only, so there was no way to ask
+  // "what did this flock earn and cost in July". The same From/To that filters
+  // the HE Dispatch table now filters every figure on the tab, so the cards and
+  // the table can never describe different periods.
+  const inFin = (d: any) => {
+    const k = String(d ?? '')
+    return (!heFromDate || k >= heFromDate) && (!heToDate || k <= heToDate)
+  }
+  const finRanged = !!(heFromDate || heToDate)
+
+  const fHeRevenue = (heDispatch ?? []).filter((d: any) => inFin(d.dispatch_date))
+    .reduce((s2: number, d: any) => s2 + (d.amount ?? 0), 0)
+  const fNheSales = (nheSales ?? []).filter((d: any) => inFin(d.sale_date))
+  const fNheRevenue = fNheSales.reduce((s2: number, d: any) => s2 + (d.amount ?? 0), 0)
+  const fTotalRevenue = fHeRevenue + fNheRevenue
+
+  const fMedCost = (medUsage ?? []).filter((m: any) => inFin(m.usage_date))
+    .reduce((s2: number, m: any) => s2 + (m.amount ?? 0), 0)
+  const fDaily = (daily ?? []).filter((d: any) => inFin(d.record_date))
+  const fFeedCost = fDaily.reduce((sum: number, d: any) =>
+    sum + (d.feed_female_kg ?? 0) * feedRate(d.feed_type_f)
+        + (d.feed_male_kg ?? 0) * feedRate(d.feed_type_m), 0)
+  const fFeedKg = fDaily.reduce((sum: number, d: any) =>
+    sum + (d.feed_female_kg ?? 0) + (d.feed_male_kg ?? 0), 0)
+  const fFeedKgUnpriced = fDaily.reduce((sum: number, d: any) =>
+    sum + (feedRate(d.feed_type_f) ? 0 : (d.feed_female_kg ?? 0))
+        + (feedRate(d.feed_type_m) ? 0 : (d.feed_male_kg ?? 0)), 0)
+  const fExpenses = (otherExpenses ?? []).filter((e: any) => inFin(e.expense_date))
+  const fOtherExpCost = fExpenses.reduce((s2: number, e: any) => s2 + (e.amount ?? 0), 0)
+  const fOtherExpByCat = fExpenses.reduce((acc: any, e: any) => {
+    const k = e.category || 'other'; acc[k] = (acc[k] ?? 0) + (e.amount ?? 0); return acc
+  }, {} as Record<string, number>)
+
+  // Chick cost is a single event on the placement date, so it only belongs in
+  // the range if that date falls inside it. Including it regardless would make
+  // any one-month view read as though the birds were bought again that month.
+  const fChickCost = (!finRanged || inFin(flock.placement_date)) ? chickCost : 0
+
+  // Site salary/electricity for the months touched by the range.
+  const fMonths = new Set(fDaily.map((d: any) => String(d.record_date).slice(0, 7)))
+  const fSiteMonths = new Set(Array.from(fMonths).map((m: any) => `${m}|${siteOnDate(m + '-15') ?? ''}`))
+  const fSalaryCost = (siteSalary ?? []).reduce((sum: number, r: any) =>
+    fSiteMonths.has(`${String(r.month ?? '').slice(0, 7)}|${r.employees?.farm_id ?? ''}`)
+      ? sum + (r.earned_salary ?? r.net_salary ?? 0) : sum, 0)
+  const fElectricityCost = (siteElectricity ?? []).reduce((sum: number, b: any) =>
+    fSiteMonths.has(`${String(b.bill_month ?? '').slice(0, 7)}|${b.electricity_meters?.farm_id ?? ''}`)
+      ? sum + (b.amount ?? 0) : sum, 0)
+
+  const fEggs = fDaily.reduce((s2: number, d: any) => s2 + (d.total_eggs ?? 0), 0)
+  const fDirectCost = fChickCost + fMedCost + fFeedCost + fOtherExpCost
+  const fTotalCost = fDirectCost + fSalaryCost + fElectricityCost
+  const fCostPerEgg = fEggs > 0 ? fTotalCost / fEggs : 0
+
   const directCost = chickCost + medCost + feedCost + otherExpCost
   const totalCost  = directCost + salaryCost + electricityCost
   const costPerEgg = totalEggs > 0 ? totalCost / totalEggs : 0
@@ -2097,6 +2151,27 @@ export const FlockDetail: React.FC = () => {
 
       {tab === 'financial' && (
         <div className="space-y-5">
+          <Card>
+            <div className="flex flex-wrap gap-3 items-end">
+              <label className="flex items-center gap-1.5 text-sm text-gray-600">From
+                <DateInput value={heFromDate} onChange={e => setHeFromDate(e.target.value)} /></label>
+              <label className="flex items-center gap-1.5 text-sm text-gray-600">To
+                <DateInput value={heToDate} onChange={e => setHeToDate(e.target.value)} /></label>
+              {finRanged && <Button variant="ghost" size="sm" onClick={() => { setHeFromDate(''); setHeToDate('') }}>Clear</Button>}
+              <p className="text-[11px] text-gray-500 ml-auto max-w-lg">
+                {finRanged
+                  ? 'This range applies to EVERYTHING on this tab — Revenue, Cost and the dispatch table below, so they always describe the same period.'
+                  : 'No range set — showing the whole life of the flock. Set From/To to see one month or one week.'}
+              </p>
+            </div>
+          </Card>
+          {finRanged && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              Showing <strong>{heFromDate ? fmtDate(heFromDate) : 'start'} → {heToDate ? fmtDate(heToDate) : 'today'}</strong>.
+              Chick cost is counted only if the placement date falls inside this range, otherwise a one-month view would
+              read as though the birds were bought again that month.
+            </div>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <Card>
               <CardHeader title="Revenue" />
@@ -2104,10 +2179,10 @@ export const FlockDetail: React.FC = () => {
                 <tbody>
                   <tr className="border-b border-gray-50">
                     <td className="py-2 text-gray-500">HE Revenue</td>
-                    <td className="py-2 text-right font-semibold text-green-700">{inr(heRevenue)}</td>
+                    <td className="py-2 text-right font-semibold text-green-700">{inr(fHeRevenue)}</td>
                   </tr>
                   {/* NHE by type — use lines when available, else header sale_type */}
-                  {Object.entries(nheSales?.reduce((acc: any, s: any) => {
+                  {Object.entries(fNheSales.reduce((acc: any, s: any) => {
                     if (s.nhe_sale_lines?.length > 0) {
                       s.nhe_sale_lines.forEach((l: any) => {
                         acc[l.sale_type] = (acc[l.sale_type] ?? 0) + (l.amount ?? 0)
@@ -2124,7 +2199,7 @@ export const FlockDetail: React.FC = () => {
                   ))}
                   <tr className="bg-green-50">
                     <td className="py-2 font-bold">TOTAL REVENUE</td>
-                    <td className="py-2 text-right font-bold text-green-700 text-base">{inr(totalRevenue)}</td>
+                    <td className="py-2 text-right font-bold text-green-700 text-base">{inr(fTotalRevenue)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -2141,27 +2216,27 @@ export const FlockDetail: React.FC = () => {
                 <tbody>
                   <tr className="border-b border-gray-50">
                     <td className="py-2 text-gray-500">Chick Cost ({flock.paid_female+flock.paid_male} paid × Rs{flock.chick_rate})</td>
-                    <td className="py-2 text-right font-semibold">{inr(chickCost)}</td>
+                    <td className="py-2 text-right font-semibold">{fChickCost ? inr(fChickCost) : <span className="text-xs text-gray-400">outside range</span>}</td>
                   </tr>
                   <tr className="border-b border-gray-50">
                     <td className="py-2 text-gray-500">Medicine & Vaccine</td>
-                    <td className="py-2 text-right font-semibold">{inr(medCost)}</td>
+                    <td className="py-2 text-right font-semibold">{inr(fMedCost)}</td>
                   </tr>
                   <tr className="border-b border-gray-50">
                     <td className="py-2 text-gray-500">
-                      Feed Cost <span className="text-xs text-gray-400">({(totalFeedF + totalFeedM).toLocaleString('en-IN')} kg × recipe cost/kg)</span>
+                      Feed Cost <span className="text-xs text-gray-400">({fFeedKg.toLocaleString('en-IN')} kg × recipe cost/kg)</span>
                     </td>
-                    <td className="py-2 text-right font-semibold">{inr(feedCost)}</td>
+                    <td className="py-2 text-right font-semibold">{inr(fFeedCost)}</td>
                   </tr>
-                  {feedKgUnpriced > 0 && (
+                  {fFeedKgUnpriced > 0 && (
                     <tr className="border-b border-gray-50">
                       <td className="py-2 pl-4 text-xs text-amber-700" colSpan={2}>
-                        ⚠️ {feedKgUnpriced.toLocaleString('en-IN')} kg has no feed type recorded, so it could not be
+                        ⚠️ {fFeedKgUnpriced.toLocaleString('en-IN')} kg has no feed type recorded, so it could not be
                         priced — the feed cost above excludes it.
                       </td>
                     </tr>
                   )}
-                  {Object.entries(otherExpByCat).map(([cat, amt]: any) => (
+                  {Object.entries(fOtherExpByCat).map(([cat, amt]: any) => (
                     <tr key={cat} className="border-b border-gray-50">
                       <td className="py-2 text-gray-500 pl-4 capitalize">• {cat}</td>
                       <td className="py-2 text-right font-medium">{inr(amt)}</td>
@@ -2169,23 +2244,23 @@ export const FlockDetail: React.FC = () => {
                   ))}
                   <tr className="bg-orange-50/60">
                     <td className="py-2 font-semibold">Direct Cost (chick, feed, medicine, expenses)</td>
-                    <td className="py-2 text-right font-semibold text-orange-700">{inr(directCost)}</td>
+                    <td className="py-2 text-right font-semibold text-orange-700">{inr(fDirectCost)}</td>
                   </tr>
                   <tr className="border-b border-gray-50">
                     <td className="py-2 text-gray-500">Salary <span className="text-xs text-gray-400">(site total)</span></td>
-                    <td className="py-2 text-right font-semibold">{inr(salaryCost)}</td>
+                    <td className="py-2 text-right font-semibold">{inr(fSalaryCost)}</td>
                   </tr>
                   <tr className="border-b border-gray-50">
                     <td className="py-2 text-gray-500">Electricity <span className="text-xs text-gray-400">(site, all meters)</span></td>
-                    <td className="py-2 text-right font-semibold">{inr(electricityCost)}</td>
+                    <td className="py-2 text-right font-semibold">{inr(fElectricityCost)}</td>
                   </tr>
                   <tr className="bg-orange-50">
                     <td className="py-2 font-bold">TOTAL COST</td>
-                    <td className="py-2 text-right font-bold text-orange-700 text-base">{inr(totalCost)}</td>
+                    <td className="py-2 text-right font-bold text-orange-700 text-base">{inr(fTotalCost)}</td>
                   </tr>
                   <tr className="bg-gray-50">
-                    <td className="py-2 font-semibold">Cost per Egg <span className="text-xs font-normal text-gray-400">(on {totalEggs.toLocaleString('en-IN')} total eggs)</span></td>
-                    <td className="py-2 text-right font-bold text-gray-800">{totalEggs > 0 ? `Rs ${costPerEgg.toFixed(3)}` : '—'}</td>
+                    <td className="py-2 font-semibold">Cost per Egg <span className="text-xs font-normal text-gray-400">(on {fEggs.toLocaleString('en-IN')} total eggs)</span></td>
+                    <td className="py-2 text-right font-bold text-gray-800">{fEggs > 0 ? `Rs ${fCostPerEgg.toFixed(3)}` : '—'}</td>
                   </tr>
                 </tbody>
               </table>
@@ -2193,7 +2268,7 @@ export const FlockDetail: React.FC = () => {
           </div>
           {/* HE Dispatch table */}
           <Card>
-            <CardHeader title={`HE Dispatch (${heDispatch?.length ?? 0} records)`} />
+            <CardHeader title={`HE Dispatch (${displayHeDispatch.length} of ${heDispatch?.length ?? 0} records)`} />
             {/* Date filter for HE dispatch */}
             <div className="flex items-center gap-3 flex-wrap mb-3 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2">
               <span className="text-sm font-medium text-gray-600">Filter:</span>
@@ -2235,7 +2310,30 @@ export const FlockDetail: React.FC = () => {
                       <Td right className="font-semibold text-green-700">{d.amount ? inr(d.amount) : '—'}</Td>
                     </tr>
                   ))}
+                  {displayHeDispatch.length === 0 && (
+                    <tr><Td colSpan={8} className="text-center text-gray-400 py-6">No dispatches in this range.</Td></tr>
+                  )}
                 </tbody>
+                {displayHeDispatch.length > 0 && (
+                  <tfoot>
+                    <tr className="bg-brand-50 border-t-2 border-brand-200 text-xs font-semibold text-brand-800">
+                      <Td colSpan={3}>TOTAL ({displayHeDispatch.length} dispatches)</Td>
+                      <Td right>{displayHeDispatch.reduce((a: number, d: any) => a + (d.total_dispatched ?? 0), 0).toLocaleString('en-IN')}</Td>
+                      <Td right className="text-orange-600">{displayHeDispatch.reduce((a: number, d: any) => a + (d.free_eggs ?? 0), 0).toLocaleString('en-IN')}</Td>
+                      <Td right>{displayHeDispatch.reduce((a: number, d: any) => a + (d.invoice_eggs ?? 0), 0).toLocaleString('en-IN')}</Td>
+                      {/* Rate is per dispatch, so an average is the only honest
+                          figure here — total amount ÷ total invoiced eggs. */}
+                      <Td right className="font-normal text-gray-500">
+                        {(() => {
+                          const eggs = displayHeDispatch.reduce((a: number, d: any) => a + (d.invoice_eggs ?? 0), 0)
+                          const amt = displayHeDispatch.reduce((a: number, d: any) => a + (d.amount ?? 0), 0)
+                          return eggs > 0 ? `avg Rs ${(amt / eggs).toFixed(2)}` : '—'
+                        })()}
+                      </Td>
+                      <Td right className="text-green-700">{inr(displayHeDispatch.reduce((a: number, d: any) => a + (d.amount ?? 0), 0))}</Td>
+                    </tr>
+                  </tfoot>
+                )}
               </Table>
             </div>
           </Card>
