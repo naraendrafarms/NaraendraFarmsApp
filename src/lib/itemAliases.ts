@@ -56,8 +56,12 @@ export function useMedicineOptionsWithAliases() {
   const { data: medicines } = useQuery({
     queryKey: ['medicines_for_alias_search'],
     queryFn: async () => {
+      // The linked item is fetched too, because Item Master is the source of
+      // truth: a medicine whose item has been deleted or deactivated must not
+      // keep appearing in the dropdown after the master was cleaned up.
       const { data, error } = await supabase.from('medicines_master')
-        .select('id,name,unit,rate,item_id').eq('is_active', true).order('name')
+        .select('id,name,unit,rate,item_id,items!item_id(id,name,is_active)')
+        .eq('is_active', true).order('name')
       if (error) throw error
       return data ?? []
     },
@@ -79,7 +83,39 @@ export function useMedicineOptionsWithAliases() {
     aliasMap.set(a.item_id, list)
   }
 
-  const options = (medicines ?? []).map((m: any) => ({
+  // Two things the dropdown got wrong, both of which survived a master cleanup
+  // and kept showing entries the user had already dealt with:
+  //
+  //   1. Every medicines_master row was listed, so two rows with the SAME name
+  //      appeared twice — indistinguishable, and picking the wrong one splits
+  //      the history across two entries again.
+  //   2. The linked item was never checked, so a medicine pointing at an item
+  //      that had been merged away or deactivated stayed in the list forever.
+  //
+  // Deduplication is by NAME, not by item_id. Two different medicines can
+  // legitimately share one item — "Anichol 60" is the Jubilant brand of the
+  // item "Choline Chloride 60%" — and collapsing those would hide a real,
+  // separately-tracked product.
+  const live = (medicines ?? []).filter((m: any) => {
+    const it = Array.isArray(m.items) ? m.items[0] : m.items
+    // No link at all is allowed — a just-added medicine is linked a moment
+    // later by the trigger, and hiding it would look like the save failed.
+    // A link to an item that is gone or inactive is not.
+    if (!m.item_id) return true
+    return !!it && it.is_active !== false
+  })
+
+  const normName = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const byName = new Map<string, any>()
+  for (const m of live) {
+    const key = normName(m.name)
+    const kept = byName.get(key)
+    // Prefer the linked row: it is the one Item Master knows about, and the
+    // one whose unit comes from the source of truth.
+    if (!kept || (!kept.item_id && m.item_id)) byName.set(key, m)
+  }
+
+  const options = Array.from(byName.values()).map((m: any) => ({
     value: m.id,
     label: `${m.name}${m.unit ? ` (${m.unit})` : ''}`,
     searchText: m.item_id ? (aliasMap.get(m.item_id) ?? [m.name]).join(' ') : m.name,
