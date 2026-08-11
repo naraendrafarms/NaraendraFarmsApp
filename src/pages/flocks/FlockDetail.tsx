@@ -15,6 +15,7 @@ import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 import { printReport } from '@/lib/invoicePrint'
 import { useFeedRates } from '@/hooks/useFeedRates'
+import { useMedicineRates } from '@/lib/medicineRates'
 
 // ── Bulk selection helpers ─────────────────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
@@ -464,7 +465,7 @@ export const FlockDetail: React.FC = () => {
   const { data: medUsage } = useQuery({
     queryKey: ['flock_med_usage', id],
     queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('medicine_usage')
-      .select('usage_date,quantity,unit,amount,rate,medicines_master(name,type)')
+      .select('usage_date,quantity,unit,amount,rate,medicine_id,medicines_master(name,type,item_id)')
       .eq('flock_id', id!).order('usage_date').range(from, to), 'Medicine usage', toast.error),
   })
 
@@ -513,6 +514,13 @@ export const FlockDetail: React.FC = () => {
   })
   const [ciFrom, setCiFrom] = useState('')
   const [ciTo, setCiTo] = useState('')
+  // Stock rate = what the medicine is actually valued at in stock. The row's
+  // own `amount` is only as good as the rate typed when it was saved, and on
+  // Flock 20 that read Rs 1,816 against a real Rs 3,27,856 — so the Financial
+  // and Cost & Income tabs were understating medicine ~180x. Same helper the
+  // Dashboard's "Cost (Stock Rates)" uses, so all pages agree by construction.
+  const medRate = useMedicineRates()
+
   const { data: otherExpenses } = useQuery({
     queryKey: ['flock_other_expenses', id],
     queryFn: async () => {
@@ -736,7 +744,15 @@ export const FlockDetail: React.FC = () => {
 
   const heRevenue  = heDispatch?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
   const nheRevenue = nheSales?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
-  const medCost    = (medUsage ?? []).reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
+  // quantity x stock rate, falling back to the row's own rate only when the
+  // item has never been priced in stock.
+  const medRowCost = (m: any) => {
+    const stock = medRate(m.medicines_master?.item_id, m.medicines_master?.name ?? '')
+    return (m.quantity ?? 0) * (stock ?? m.rate ?? 0)
+  }
+  const medUnpricedCount = (medUsage ?? []).filter((m: any) =>
+    medRate(m.medicines_master?.item_id, m.medicines_master?.name ?? '') == null && !m.rate).length
+  const medCost    = (medUsage ?? []).reduce((s: number, m: any) => s + medRowCost(m), 0)
   const chickCost  = flock.chick_cost ?? 0
   const totalRevenue = heRevenue + nheRevenue
 
@@ -827,7 +843,7 @@ export const FlockDetail: React.FC = () => {
   const medByDate = (() => {
     const m: Record<string, number> = {}
     for (const r of (medUsage ?? []) as any[]) {
-      const k = String(r.usage_date); m[k] = (m[k] ?? 0) + (r.amount ?? 0)
+      const k = String(r.usage_date); m[k] = (m[k] ?? 0) + medRowCost(r)
     }
     return m
   })()
@@ -922,8 +938,10 @@ export const FlockDetail: React.FC = () => {
   const fNheRevenue = fNheSales.reduce((s2: number, d: any) => s2 + (d.amount ?? 0), 0)
   const fTotalRevenue = fHeRevenue + fNheRevenue
 
-  const fMedCost = (medUsage ?? []).filter((m: any) => inFin(m.usage_date))
-    .reduce((s2: number, m: any) => s2 + (m.amount ?? 0), 0)
+  const fMedUsage = (medUsage ?? []).filter((m: any) => inFin(m.usage_date))
+  const fMedCost = fMedUsage.reduce((s2: number, m: any) => s2 + medRowCost(m), 0)
+  const fMedUnpriced = fMedUsage.filter((m: any) =>
+    medRate(m.medicines_master?.item_id, m.medicines_master?.name ?? '') == null && !m.rate).length
   const fDaily = (daily ?? []).filter((d: any) => inFin(d.record_date))
   const fFeedCost = fDaily.reduce((sum: number, d: any) =>
     sum + (d.feed_female_kg ?? 0) * feedRate(d.feed_type_f)
@@ -933,6 +951,13 @@ export const FlockDetail: React.FC = () => {
   const fFeedKgUnpriced = fDaily.reduce((sum: number, d: any) =>
     sum + (feedRate(d.feed_type_f) ? 0 : (d.feed_female_kg ?? 0))
         + (feedRate(d.feed_type_m) ? 0 : (d.feed_male_kg ?? 0)), 0)
+  // Which feed types are behind the unpriced kg — "no feed type at all" is only
+  // one of the two causes, and saying so without checking would be a guess.
+  const fFeedUnpricedTypes = Array.from(new Set(fDaily.flatMap((d: any) => [
+    (d.feed_female_kg ?? 0) > 0 && !feedRate(d.feed_type_f) ? (d.feed_type_f ? String(d.feed_type_f) : '(none recorded)') : null,
+    (d.feed_male_kg ?? 0) > 0 && !feedRate(d.feed_type_m) ? (d.feed_type_m ? String(d.feed_type_m) : '(none recorded)') : null,
+  ]).filter(Boolean) as string[])).slice(0, 6)
+
   const fExpenses = (otherExpenses ?? []).filter((e: any) => inFin(e.expense_date))
   const fOtherExpCost = fExpenses.reduce((s2: number, e: any) => s2 + (e.amount ?? 0), 0)
   const fOtherExpByCat = fExpenses.reduce((acc: any, e: any) => {
@@ -2219,9 +2244,20 @@ export const FlockDetail: React.FC = () => {
                     <td className="py-2 text-right font-semibold">{fChickCost ? inr(fChickCost) : <span className="text-xs text-gray-400">outside range</span>}</td>
                   </tr>
                   <tr className="border-b border-gray-50">
-                    <td className="py-2 text-gray-500">Medicine & Vaccine</td>
+                    <td className="py-2 text-gray-500">
+                      Medicine &amp; Vaccine <span className="text-xs text-gray-400">(qty × stock rate)</span>
+                    </td>
                     <td className="py-2 text-right font-semibold">{inr(fMedCost)}</td>
                   </tr>
+                  {fMedUnpriced > 0 && (
+                    <tr className="border-b border-gray-50">
+                      <td className="py-2 pl-4 text-xs text-amber-700" colSpan={2}>
+                        ⚠️ {fMedUnpriced} medicine entr{fMedUnpriced === 1 ? 'y has' : 'ies have'} no stock rate and no
+                        rate of their own, so they count as zero. Price them by recording a purchase (GRN) or an
+                        Inventory opening/adjustment for that item.
+                      </td>
+                    </tr>
+                  )}
                   <tr className="border-b border-gray-50">
                     <td className="py-2 text-gray-500">
                       Feed Cost <span className="text-xs text-gray-400">({fFeedKg.toLocaleString('en-IN')} kg × recipe cost/kg)</span>
@@ -2231,8 +2267,12 @@ export const FlockDetail: React.FC = () => {
                   {fFeedKgUnpriced > 0 && (
                     <tr className="border-b border-gray-50">
                       <td className="py-2 pl-4 text-xs text-amber-700" colSpan={2}>
-                        ⚠️ {fFeedKgUnpriced.toLocaleString('en-IN')} kg has no feed type recorded, so it could not be
-                        priced — the feed cost above excludes it.
+                        ⚠️ {fFeedKgUnpriced.toLocaleString('en-IN')} kg could not be priced, so the feed cost above
+                        excludes it. Either the day's row has no Feed Type filled in (older entries and imports often
+                        don't), or the feed type used has no costed formula behind it — a formula's cost/kg is built
+                        from its ingredients' latest purchase prices, so a feed type with no formula mapped, or with
+                        ingredients that have never been purchased, prices at zero.
+                        {fFeedUnpricedTypes.length > 0 && <> Feed types involved: <strong>{fFeedUnpricedTypes.join(', ')}</strong>.</>}
                       </td>
                     </tr>
                   )}

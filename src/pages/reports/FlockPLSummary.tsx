@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fetchAllPages } from '@/lib/utils'
 import { useFeedRates } from '@/hooks/useFeedRates'
+import { useMedicineRates } from '@/lib/medicineRates'
 import { Card, CardHeader, Button, Select, Spinner } from '@/components/ui'
 import { Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -65,7 +66,12 @@ export const FlockPLSummary: React.FC = () => {
 
   const { data: medicineUsage } = useQuery({
     queryKey: ['pl_summary_medicine_usage'],
-    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('medicine_usage').select('flock_id,amount').range(from, to), 'Medicine Usage', toast.error)
+    // amount is only as good as the rate typed when the row was saved, and on
+    // Flock 20 it summed to Rs 1,816 against a real Rs 3,27,856 — this report
+    // understated medicine ~180x. Price it the way the Flock Dashboard's
+    // "Cost (Stock Rates)" does: quantity x the item's stock rate.
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('medicine_usage')
+      .select('flock_id,quantity,amount,rate,medicines_master(name,item_id)').range(from, to), 'Medicine Usage', toast.error)
   })
 
   const { data: electricityAlloc } = useQuery({
@@ -74,6 +80,8 @@ export const FlockPLSummary: React.FC = () => {
   })
 
   const isLoading = flocksLoading || !heDispatch || !nheSales || !dailyFeed || !medicineUsage || !electricityAlloc
+
+  const medRate = useMedicineRates()
 
   const rows = useMemo(() => {
     if (!flocks || !heDispatch || !nheSales || !dailyFeed || !medicineUsage || !electricityAlloc) return []
@@ -109,7 +117,10 @@ export const FlockPLSummary: React.FC = () => {
 
       const medicineCost = medicineUsage
         .filter((r: any) => r.flock_id === fid)
-        .reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+        .reduce((s: number, r: any) => {
+          const stock = medRate(r.medicines_master?.item_id, r.medicines_master?.name ?? '')
+          return s + (r.quantity ?? 0) * (stock ?? r.rate ?? 0)
+        }, 0)
 
       const electricityCost = electricityAlloc
         .filter((r: any) => r.flock_id === fid)
@@ -145,7 +156,7 @@ export const FlockPLSummary: React.FC = () => {
         margin,
       }
     })
-  }, [flocks, heDispatch, nheSales, dailyFeed, feedRates, medicineUsage, electricityAlloc, fy, statusFilter, start, end])
+  }, [flocks, heDispatch, nheSales, dailyFeed, feedRates, medicineUsage, medRate, electricityAlloc, fy, statusFilter, start, end])
 
   const totals = useMemo(() => {
     return rows.reduce((acc, r) => ({
