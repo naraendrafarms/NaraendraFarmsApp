@@ -1072,6 +1072,24 @@ export const HEDispatch: React.FC = () => {
     }
   })
 
+  // The register's running balance is only correct when every earlier day has
+  // been walked, so the date range is applied to the DISPLAY, never to the
+  // calculation — stockData is always computed from the beginning of the flock.
+  // A row shown for 05/08 therefore still carries the opening it really had,
+  // not one restarted at the filter's From date.
+  const stockRows = React.useMemo(() => (stockData ?? []).filter((r: any) =>
+    (!fromDate || r.date >= fromDate) && (!toDate || r.date <= toDate)
+  ), [stockData, fromDate, toDate])
+
+  // Subtotals cover PRODUCTION and DISPATCH only. Opening and Balance are
+  // point-in-time figures for one flock on one day — adding them down a column
+  // that spans several days and several flocks would produce a number that
+  // means nothing. The closing position is the latest row's balance, not a sum.
+  const stockTotals = React.useMemo(() => stockRows.reduce((a: any, r: any) => ({
+    prod_a: a.prod_a + (r.prod_a || 0), prod_b: a.prod_b + (r.prod_b || 0), prod_c: a.prod_c + (r.prod_c || 0),
+    disp_a: a.disp_a + (r.disp_a || 0), disp_b: a.disp_b + (r.disp_b || 0), disp_c: a.disp_c + (r.disp_c || 0),
+  }), { prod_a: 0, prod_b: 0, prod_c: 0, disp_a: 0, disp_b: 0, disp_c: 0 }), [stockRows])
+
   const flockOptions = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const partyOptions = parties?.map((p: any) => ({ value: p.id, label: p.name })) ?? []
 
@@ -1232,7 +1250,6 @@ export const HEDispatch: React.FC = () => {
       <div className="flex gap-3 flex-wrap items-end">
         <SearchableSelect placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
-        {tab === 'dispatch' && <>
         <label className="flex items-center gap-1.5 text-sm text-gray-600">
           From
           <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)}
@@ -1243,6 +1260,7 @@ export const HEDispatch: React.FC = () => {
           <DateInput value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-300 rounded px-2 py-1 text-sm" />
         </label>
+        {tab === 'dispatch' && (
         <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
           <input type="checkbox" checked={noInvoiceOnly} onChange={e => setNoInvoiceOnly(e.target.checked)}
             className="rounded border-gray-300 text-orange-500"/>
@@ -1250,7 +1268,7 @@ export const HEDispatch: React.FC = () => {
             No Invoice only {noInvoiceCount > 0 && <span className="bg-orange-100 text-orange-700 text-xs px-1.5 rounded-full">{noInvoiceCount}</span>}
           </span>
         </label>
-        </>}
+        )}
         {tab === 'dispatch' && (
           <input
             type="text"
@@ -1447,6 +1465,8 @@ export const HEDispatch: React.FC = () => {
         <Card padding={false}>
           <div className="px-4 py-3 border-b border-gray-100 bg-blue-50 text-sm text-blue-700">
             Running balance per flock = Opening stock + Production (Grade A/B/C) − Dispatched (Grade A/B/C).
+            The From/To dates narrow which days are LISTED — the balance on each row is still built from the
+            flock's whole history, so it never restarts at the From date.
           </div>
           <Table>
             <thead>
@@ -1468,7 +1488,7 @@ export const HEDispatch: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {(stockData ?? []).map((r: any, i: number) => (
+              {stockRows.map((r: any, i: number) => (
                 <tr key={i} className={`hover:bg-gray-50 text-xs ${r.bal_total < 0 ? 'bg-red-50' : ''}`}>
                   <Td className="text-xs">{fmtDate(r.date)}</Td>
                   <Td><Badge color="green">{r.flock}</Badge></Td>
@@ -1487,11 +1507,45 @@ export const HEDispatch: React.FC = () => {
                   <Td right className={`font-semibold text-sm bg-purple-50/50 ${r.bal_total < 0 ? 'text-red-700' : 'text-gray-900'}`}>{r.bal_total.toLocaleString('en-IN')}</Td>
                 </tr>
               ))}
-              {(stockData ?? []).length === 0 && (
-                <tr><Td colSpan={15} className="text-center text-gray-400 py-8">No data — add daily records with grade breakdown and dispatches first</Td></tr>
+              {stockRows.length === 0 && (
+                <tr><Td colSpan={15} className="text-center text-gray-400 py-8">
+                  {(stockData ?? []).length > 0
+                    ? 'No days in this date range — widen the From/To dates.'
+                    : 'No data — add daily records with grade breakdown and dispatches first'}
+                </Td></tr>
               )}
             </tbody>
+            {stockRows.length > 0 && (
+              <tfoot>
+                <tr className="bg-brand-50 border-t-2 border-brand-200 text-xs font-semibold text-brand-800">
+                  <Td colSpan={2}>TOTAL ({stockRows.length} day-rows)</Td>
+                  {/* Opening and Balance are point-in-time, so they are not summed. */}
+                  <Td right className="text-gray-400">—</Td>
+                  <Td right className="text-gray-400">—</Td>
+                  <Td right className="text-gray-400">—</Td>
+                  <Td right className="text-green-700">{stockTotals.prod_a.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-green-700">{stockTotals.prod_b.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-green-700">{stockTotals.prod_c.toLocaleString('en-IN')}</Td>
+                  <Td right className="text-red-500">{stockTotals.disp_a ? `-${stockTotals.disp_a.toLocaleString('en-IN')}` : '—'}</Td>
+                  <Td right className="text-red-500">{stockTotals.disp_b ? `-${stockTotals.disp_b.toLocaleString('en-IN')}` : '—'}</Td>
+                  <Td right className="text-red-500">{stockTotals.disp_c ? `-${stockTotals.disp_c.toLocaleString('en-IN')}` : '—'}</Td>
+                  <Td right className="text-gray-400">—</Td>
+                  <Td right className="text-gray-400">—</Td>
+                  <Td right className="text-gray-400">—</Td>
+                  <Td right className="text-gray-800">
+                    {(stockTotals.prod_a + stockTotals.prod_b + stockTotals.prod_c
+                      - stockTotals.disp_a - stockTotals.disp_b - stockTotals.disp_c).toLocaleString('en-IN')}
+                  </Td>
+                </tr>
+              </tfoot>
+            )}
           </Table>
+          <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-gray-500">
+            TOTAL adds up <strong>Production</strong> and <strong>Dispatched</strong> for the rows shown, and the last
+            column is the net movement (produced − dispatched) over the range. Opening and Balance are left blank on
+            purpose: they are the position of one flock on one day, so adding them down the column would give a
+            meaningless figure. For the closing stock, read the Balance on the most recent row.
+          </div>
         </Card>
       )}
 
