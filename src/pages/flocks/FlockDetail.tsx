@@ -14,6 +14,7 @@ import {
 import toast from 'react-hot-toast'
 import { parseFile } from '@/lib/parseFile'
 import { printReport } from '@/lib/invoicePrint'
+import { useFeedRates } from '@/hooks/useFeedRates'
 
 // ── Bulk selection helpers ─────────────────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
@@ -456,13 +457,52 @@ export const FlockDetail: React.FC = () => {
     if (e.target) e.target.value = ''
   }
 
-  const { data: medMonthly } = useQuery({
-    queryKey: ['flock_med', id],
+  // Medicine cost used to be read from medicine_monthly, a rollup table that is
+  // not being filled — so every flock's Financial tab showed Medicine 0.00 while
+  // Flock Management → Dashboard → Medicine, which reads medicine_usage, showed
+  // the real amounts. Read the same table the entries actually go into.
+  const { data: medUsage } = useQuery({
+    queryKey: ['flock_med_usage', id],
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('medicine_usage')
+      .select('usage_date,quantity,unit,amount,rate,medicines_master(name,type)')
+      .eq('flock_id', id!).order('usage_date').range(from, to), 'Medicine usage', toast.error),
+  })
+
+  // Feed cost: kg from the daily records × recipe cost/kg for the feed type fed
+  // that day. Falls back to the flock's average when a day carries no feed type.
+  const feedRates = useFeedRates()
+
+  // Site-level costs. Attendance and electricity are recorded per SITE, never
+  // per flock, so these are the site's own figures — see the note rendered with
+  // them. Salary is built from each employee's real per-day rate
+  // (earned_salary / days_worked) times the days they were actually present,
+  // NOT a month divided by 30.
+  const { data: siteSalary } = useQuery({
+    queryKey: ['flock_site_salary', id],
     queryFn: async () => {
-      const { data } = await supabase.from('medicine_monthly')
-        .select('*').eq('flock_id', id!).order('month', { ascending: false })
+      const { data } = await supabase.from('salary_monthly')
+        .select('month,earned_salary,net_salary,days_worked,employee_id,employees!employee_id(farm_id)')
       return data ?? []
-    }
+    },
+  })
+  const { data: siteElectricity } = useQuery({
+    queryKey: ['flock_site_electricity', id],
+    queryFn: async () => {
+      // A site can have more than one transformer/meter — every meter's bill
+      // for that site is added, per your instruction.
+      const { data } = await supabase.from('electricity_bills')
+        .select('bill_month,amount,electricity_meters(farm_id)')
+      return data ?? []
+    },
+  })
+  const { data: otherExpenses } = useQuery({
+    queryKey: ['flock_other_expenses', id],
+    queryFn: async () => {
+      const { data } = await supabase.from('farm_expenses')
+        .select('expense_date,category,description,amount,farm_id,flock_id')
+        .eq('flock_id', id!).order('expense_date')
+      return data ?? []
+    },
   })
 
   const bulkDelMut = useMutation({
@@ -678,10 +718,66 @@ export const FlockDetail: React.FC = () => {
 
   const heRevenue  = heDispatch?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
   const nheRevenue = nheSales?.reduce((s, d) => s + (d.amount ?? 0), 0) ?? 0
-  const medCost    = medMonthly?.reduce((s, m) => s + (m.total_amount ?? 0), 0) ?? 0
+  const medCost    = (medUsage ?? []).reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
   const chickCost  = flock.chick_cost ?? 0
   const totalRevenue = heRevenue + nheRevenue
-  const totalCost    = chickCost + medCost
+
+  // ── Feed cost ────────────────────────────────────────────────────────────
+  // kg actually fed × the recipe cost/kg of the feed type fed that day. The
+  // Financial tab used to say "See Feed Report" and leave it out of the total,
+  // which made every flock's cost understated by its single largest expense.
+  const feedRate = (t: any) => (t ? (feedRates.byTypeId[t] ?? feedRates.rate(t)) : 0)
+  const feedCost = (daily ?? []).reduce((sum: number, d: any) =>
+    sum + (d.feed_female_kg ?? 0) * feedRate(d.feed_type_f)
+        + (d.feed_male_kg ?? 0) * feedRate(d.feed_type_m), 0)
+  // Fallback: if no feed type is recorded, the rate resolves to 0 and the cost
+  // silently vanishes. Surface how much feed that applies to instead of hiding it.
+  const feedKgUnpriced = (daily ?? []).reduce((sum: number, d: any) =>
+    sum + (feedRate(d.feed_type_f) ? 0 : (d.feed_female_kg ?? 0))
+        + (feedRate(d.feed_type_m) ? 0 : (d.feed_male_kg ?? 0)), 0)
+
+  // ── Which site the flock was on, for any date ────────────────────────────
+  // Costs follow the batch: the day it moves to Bodjanampet-1, that day's cost
+  // is Bodjanampet-1's and never Kethireddypally's.
+  const transfersAsc = [...(transfers ?? [])].sort((a: any, b: any) =>
+    String(a.transfer_date).localeCompare(String(b.transfer_date)))
+  const siteOnDate = (d: string): string | null => {
+    let site = flock.rearing_farm_id ?? flock.laying_farm_id ?? null
+    if (flock.laying_start_date && d >= flock.laying_start_date) site = flock.laying_farm_id ?? site
+    for (const t of transfersAsc) {
+      if (t.transfer_date && d >= t.transfer_date && t.to_farm_id) site = t.to_farm_id
+    }
+    return site
+  }
+  const monthsActive = Array.from(new Set((daily ?? []).map((d: any) => String(d.record_date).slice(0, 7))))
+
+  // ── Site costs: salary and electricity ───────────────────────────────────
+  // Both are recorded per SITE and there is nothing in the data that says which
+  // flock a worker or a unit of power went to. They are reported as the SITE's
+  // figure, never divided between flocks sharing that site — a split would be
+  // an invented number, and you asked for option (c).
+  const siteMonths = new Set(monthsActive.map(m => `${m}|${siteOnDate(m + '-15') ?? ''}`))
+  const salaryCost = (siteSalary ?? []).reduce((sum: number, r: any) => {
+    const m = String(r.month ?? '').slice(0, 7)
+    const farm = r.employees?.farm_id ?? ''
+    return siteMonths.has(`${m}|${farm}`) ? sum + (r.earned_salary ?? r.net_salary ?? 0) : sum
+  }, 0)
+  const electricityCost = (siteElectricity ?? []).reduce((sum: number, b: any) => {
+    const m = String(b.bill_month ?? '').slice(0, 7)
+    const farm = b.electricity_meters?.farm_id ?? ''
+    // Every meter/transformer on the site counts — a site with two of them adds both.
+    return siteMonths.has(`${m}|${farm}`) ? sum + (b.amount ?? 0) : sum
+  }, 0)
+
+  // Diesel, transport, bags, repairs — whatever was entered against this flock.
+  const otherExpCost = (otherExpenses ?? []).reduce((s: number, e: any) => s + (e.amount ?? 0), 0)
+  const otherExpByCat = (otherExpenses ?? []).reduce((acc: any, e: any) => {
+    const k = e.category || 'other'; acc[k] = (acc[k] ?? 0) + (e.amount ?? 0); return acc
+  }, {} as Record<string, number>)
+
+  const directCost = chickCost + medCost + feedCost + otherExpCost
+  const totalCost  = directCost + salaryCost + electricityCost
+  const costPerEgg = totalEggs > 0 ? totalCost / totalEggs : 0
 
   // Monthly chart data (from full ascending daily array)
   const monthlyData = daily?.reduce((acc: any[], d) => {
@@ -1778,6 +1874,12 @@ export const FlockDetail: React.FC = () => {
             </Card>
             <Card>
               <CardHeader title="Cost" />
+              <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                <strong>Salary and Electricity are the SITE's totals for the months this flock was running</strong>,
+                not this flock's share. Attendance and power are recorded per site, and nothing in the data says which
+                flock a worker or a unit of power went to — so where two flocks share a site, both show the same site
+                figure. Splitting it would be an invented number.
+              </div>
               <table className="w-full text-sm">
                 <tbody>
                   <tr className="border-b border-gray-50">
@@ -1789,16 +1891,44 @@ export const FlockDetail: React.FC = () => {
                     <td className="py-2 text-right font-semibold">{inr(medCost)}</td>
                   </tr>
                   <tr className="border-b border-gray-50">
-                    <td className="py-2 text-gray-500 text-xs">Feed Cost (See Feed Report for calculation)</td>
-                    <td className="py-2 text-right text-xs text-gray-400">See Reports</td>
+                    <td className="py-2 text-gray-500">
+                      Feed Cost <span className="text-xs text-gray-400">({(totalFeedF + totalFeedM).toLocaleString('en-IN')} kg × recipe cost/kg)</span>
+                    </td>
+                    <td className="py-2 text-right font-semibold">{inr(feedCost)}</td>
+                  </tr>
+                  {feedKgUnpriced > 0 && (
+                    <tr className="border-b border-gray-50">
+                      <td className="py-2 pl-4 text-xs text-amber-700" colSpan={2}>
+                        ⚠️ {feedKgUnpriced.toLocaleString('en-IN')} kg has no feed type recorded, so it could not be
+                        priced — the feed cost above excludes it.
+                      </td>
+                    </tr>
+                  )}
+                  {Object.entries(otherExpByCat).map(([cat, amt]: any) => (
+                    <tr key={cat} className="border-b border-gray-50">
+                      <td className="py-2 text-gray-500 pl-4 capitalize">• {cat}</td>
+                      <td className="py-2 text-right font-medium">{inr(amt)}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-orange-50/60">
+                    <td className="py-2 font-semibold">Direct Cost (chick, feed, medicine, expenses)</td>
+                    <td className="py-2 text-right font-semibold text-orange-700">{inr(directCost)}</td>
                   </tr>
                   <tr className="border-b border-gray-50">
-                    <td className="py-2 text-gray-500 text-xs">Salary / Electricity / Bonus</td>
-                    <td className="py-2 text-right text-xs text-gray-400">Allocated separately</td>
+                    <td className="py-2 text-gray-500">Salary <span className="text-xs text-gray-400">(site total)</span></td>
+                    <td className="py-2 text-right font-semibold">{inr(salaryCost)}</td>
+                  </tr>
+                  <tr className="border-b border-gray-50">
+                    <td className="py-2 text-gray-500">Electricity <span className="text-xs text-gray-400">(site, all meters)</span></td>
+                    <td className="py-2 text-right font-semibold">{inr(electricityCost)}</td>
                   </tr>
                   <tr className="bg-orange-50">
-                    <td className="py-2 font-bold">Partial Cost (no feed/salary/elec)</td>
-                    <td className="py-2 text-right font-bold text-orange-700">{inr(totalCost)}</td>
+                    <td className="py-2 font-bold">TOTAL COST</td>
+                    <td className="py-2 text-right font-bold text-orange-700 text-base">{inr(totalCost)}</td>
+                  </tr>
+                  <tr className="bg-gray-50">
+                    <td className="py-2 font-semibold">Cost per Egg <span className="text-xs font-normal text-gray-400">(on {totalEggs.toLocaleString('en-IN')} total eggs)</span></td>
+                    <td className="py-2 text-right font-bold text-gray-800">{totalEggs > 0 ? `Rs ${costPerEgg.toFixed(3)}` : '—'}</td>
                   </tr>
                 </tbody>
               </table>
