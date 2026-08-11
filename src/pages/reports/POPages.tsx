@@ -610,16 +610,23 @@ const POTab: React.FC = () => {
         }
       }
 
-      // Auto-add to feed_ingredients ONLY for Feed Raw Material type
+      // This used to auto-create a Feed Ingredient whenever a PO's Material
+      // Type read "Feed Raw Material", trusting that one dropdown and nothing
+      // else. A vaccine (PREVEXXION MAREK's) raised under the wrong Material
+      // Type therefore appeared in the feed ingredient list, where a formula
+      // could have picked it up.
+      //
+      // Masters are no longer created as a side effect of receiving a PO. If
+      // the ingredient is genuinely missing, say so and let it be added in the
+      // master — where its category, protein and moisture are set properly,
+      // none of which a PO line knows.
       if (receiptPO.item_name && receiptPO.material_type === 'Feed Raw Material') {
+        const nm = receiptPO.item_name.trim()
         const { data: existingIngr } = await supabase.from('feed_ingredients')
-          .select('id').ilike('name', receiptPO.item_name.trim()).limit(1)
+          .select('id').ilike('name', nm).limit(1)
         if (!existingIngr || existingIngr.length === 0) {
-          await supabase.from('feed_ingredients').insert({
-            name:      receiptPO.item_name.trim(),
-            unit:      receiptPO.unit ?? 'kg',
-            is_active: true,
-          })
+          toast(`"${nm}" is not in Feed Ingredients. Add it under Masters → Feed Ingredients if it really is a raw material — otherwise check this PO's Material Type.`,
+            { icon: '⚠️', duration: 8000 })
         }
       }
 
@@ -2482,12 +2489,17 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
   const [preview, setPreview] = useState<{type:'excel'|'pdf'; rows: any[]; payRows?: any[]; summary: string; isAmendment?: boolean; poNo?: string} | null>(null)
   const [editableRows, setEditableRows] = useState<any[]>([])
   const [parsing, setParsing] = useState(false)
-  // Item names come in as free text from the import — without an explicit
-  // link to Items Master, a slightly different spelling on the next import
-  // (or the next GRN) creates a duplicate item instead of resolving to the
-  // same real one. Every unique item_name in this batch must be resolved
-  // (auto-matched, manually linked, or explicitly kept as new) before import.
-  const [itemLinks, setItemLinks] = useState<Record<string, { itemId: string; keepAsNew: boolean }>>({})
+  // Item names come in as free text from the import. The import is NOT allowed
+  // to create items: Item Master is the single source of truth, so every name
+  // in the file must resolve to an item that already exists there before the
+  // PO can be imported. Anything unknown is the operator's cue to add it in
+  // Item Master first — which is where its category, unit, HSN and
+  // manufacturer get set properly, none of which an import can invent.
+  //
+  // The old "Keep as new item" checkbox created the row here instead, with a
+  // guessed category of Feed Ingredient and unit Kg. That is how a vaccine
+  // (PREVEXXION MAREK's) ended up classified as a feed raw material.
+  const [itemLinks, setItemLinks] = useState<Record<string, { itemId: string }>>({})
   const { options: itemOptions } = useItemOptionsWithAliases()
   const invalidateAliases = useInvalidateItemAliases()
 
@@ -2515,7 +2527,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
         if (itemLinks[key]) continue
         const resolved = await resolveItemIdByName(name)
         if (cancelled) return
-        if (resolved) setItemLinks(prev => ({ ...prev, [key]: { itemId: resolved, keepAsNew: false } }))
+        if (resolved) setItemLinks(prev => ({ ...prev, [key]: { itemId: resolved } }))
       }
     })()
     return () => { cancelled = true }
@@ -2524,7 +2536,7 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
 
   const unresolvedItemNames = uniqueItemNames.filter(n => {
     const link = itemLinks[normName(n)]
-    return !link || (!link.itemId && !link.keepAsNew)
+    return !link?.itemId
   })
 
   const handleExcel = async (file: File) => {
@@ -2572,13 +2584,10 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
       if (link?.itemId) {
         nameToId[key] = link.itemId
         await registerItemAlias(link.itemId, name, 'po_import')
-      } else if (link?.keepAsNew) {
-        const { data: newItem, error } = await supabase.from('items')
-          .insert({ name: name.trim(), category: 'Feed Ingredient', unit: 'Kg' })
-          .select('id').single()
-        if (error) throw new Error(`Could not create item "${name}": ${error.message}`)
-        nameToId[key] = newItem.id
-        await registerItemAlias(newItem.id, name, 'po_import')
+      } else {
+        // Reached only if something bypassed the guard in handleSave. Fail
+        // loudly rather than fall back to creating an item behind the scenes.
+        throw new Error(`"${name}" is not linked to Item Master. Add it under Purchase → Item Master first, then import again.`)
       }
     }
     invalidateAliases()
@@ -2587,7 +2596,10 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
 
   const handleSave = async () => {
     if (!preview) return
-    if (unresolvedItemNames.length > 0) { toast.error('Link or mark every item name as new before importing'); return }
+    if (unresolvedItemNames.length > 0) {
+      toast.error(`${unresolvedItemNames.length} item(s) are not in Item Master. Add them there first, then import.`)
+      return
+    }
     setSaving(true)
     const rows = editableRows.length ? editableRows : preview.rows
     try {
@@ -2793,9 +2805,15 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
                 <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
                   Link Items to Master ({uniqueItemNames.length - unresolvedItemNames.length}/{uniqueItemNames.length} resolved)
                 </p>
+                <p className="text-[11px] text-gray-500 mb-2">
+                  The import never creates items. Every name in the file must be
+                  picked from Item Master, so its category, unit, HSN and
+                  manufacturer come from one place. Missing something? Add it
+                  under <strong>Purchase → Item Master</strong>, then reopen this import.
+                </p>
                 {unresolvedItemNames.length === 0 ? (
                   <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                    ✓ All {uniqueItemNames.length} item name(s) are linked to Items Master or explicitly marked as new.
+                    ✓ All {uniqueItemNames.length} item name(s) are linked to Item Master.
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -2806,15 +2824,10 @@ export const POImportModal: React.FC<{ open: boolean; onClose: () => void }> = (
                         <div key={key} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                           <span className="text-xs font-medium text-amber-800 flex-1 truncate">{name}</span>
                           <SearchableSelect
-                            options={itemOptions} value={link?.itemId ?? ''} placeholder="Link to existing item…"
-                            onChange={v => setItemLinks(prev => ({ ...prev, [key]: { itemId: v, keepAsNew: false } }))}
-                            className="w-56"
+                            options={itemOptions} value={link?.itemId ?? ''} placeholder="Pick from Item Master…"
+                            onChange={v => setItemLinks(prev => ({ ...prev, [key]: { itemId: v } }))}
+                            className="w-64"
                           />
-                          <label className="flex items-center gap-1 text-xs text-gray-600 whitespace-nowrap">
-                            <input type="checkbox" checked={!!link?.keepAsNew}
-                              onChange={e => setItemLinks(prev => ({ ...prev, [key]: { itemId: '', keepAsNew: e.target.checked } }))} />
-                            Keep as new item
-                          </label>
                         </div>
                       )
                     })}
