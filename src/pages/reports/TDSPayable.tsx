@@ -418,13 +418,13 @@ export const TDSPayable: React.FC = () => {
     // reach for when reconciling a quarter.
     const val = (r: any) => {
       switch (sortKey) {
-        case 'vendor':   return (r.vendor_name ?? '').toLowerCase()
-        case 'invoice':  return (r.invoice_no ?? '').toLowerCase()
+        case 'vendor':   return String(r.vendor_name ?? '').toLowerCase()
+        case 'invoice':  return String(r.invoice_no ?? '').toLowerCase()
         case 'amount':   return r.invoice_amount ?? 0
         case 'tds':      return r.tds_amount ?? 0
         case 'pct':      return effPct(r)
-        case 'section':  return (r.tds_section ?? '').toLowerCase()
-        case 'pan':      return (pan(r) ?? '').toLowerCase()
+        case 'section':  return String(r.tds_section ?? '').toLowerCase()
+        case 'pan':      return String(pan(r) ?? '').toLowerCase()
         case 'deposit':  return r.tds_deposited ? 1 : 0
         default:         return refDate(r) ?? ''
       }

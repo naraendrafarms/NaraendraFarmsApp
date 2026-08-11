@@ -160,11 +160,11 @@ function useFlockNheAgg(flockId: string) {
         .eq('flock_id', flockId)
       const rows = (data ?? []) as any[]
       const birdRevenue  = rows.reduce((s, r) => {
-        const t = (r.sale_type ?? '').toLowerCase()
+        const t = String(r.sale_type ?? '').toLowerCase()
         return s + (t.startsWith('bird') ? (r.amount ?? 0) : 0)
       }, 0)
       const otherRevenue = rows.reduce((s, r) => {
-        const t = (r.sale_type ?? '').toLowerCase()
+        const t = String(r.sale_type ?? '').toLowerCase()
         return s + (!t.startsWith('bird') ? (r.amount ?? 0) : 0)
       }, 0)
       return { birdRevenue, otherRevenue }

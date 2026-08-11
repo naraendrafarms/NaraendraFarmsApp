@@ -304,11 +304,11 @@ export const VendorAdvancesPage: React.FC = () => {
   const visibleAdvances = (advances as any[]).filter((a: any) => {
     const q = search.trim().toLowerCase()
     if (!q) return true
-    return (a.parties?.name ?? '').toLowerCase().includes(q)
-      || (a.reference_no ?? '').toLowerCase().includes(q)
-      || (a.remarks ?? '').toLowerCase().includes(q)
-      || (a.payment_mode ?? '').toLowerCase().includes(q)
-      || (a.tds_section ?? '').toLowerCase().includes(q)
+    return String(a.parties?.name ?? '').toLowerCase().includes(q)
+      || String(a.reference_no ?? '').toLowerCase().includes(q)
+      || String(a.remarks ?? '').toLowerCase().includes(q)
+      || String(a.payment_mode ?? '').toLowerCase().includes(q)
+      || String(a.tds_section ?? '').toLowerCase().includes(q)
       || String(a.amount ?? '').includes(q)
       || (a.advance_date ?? '').includes(q)
   })

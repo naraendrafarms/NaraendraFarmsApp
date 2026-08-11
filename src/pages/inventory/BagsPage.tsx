@@ -189,7 +189,7 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
         if (!row[ci.date] || !qty) continue
         const rate = ci.rate >= 0 ? parseFloat(row[ci.rate]) || 0 : 0
         const farmName = ci.farm >= 0 ? row[ci.farm]?.trim() : ''
-        const farm = farms.find((f: any) => f.name.toLowerCase() === (farmName ?? '').toLowerCase())
+        const farm = farms.find((f: any) => f.name.toLowerCase() === String(farmName ?? '').toLowerCase())
         const paymentMode = (ci.mode >= 0 ? row[ci.mode]?.trim() : '') || 'Cash'
         const condition = (ci.condition >= 0 ? row[ci.condition]?.trim() : '') || 'Good'
         const payload = {

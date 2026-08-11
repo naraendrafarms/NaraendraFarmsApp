@@ -815,7 +815,7 @@ export const ImportGRN: React.FC = () => {
       const colIdx: Record<string,number> = {}
       for (let i = 0; i < Math.min(10, data.length); i++) {
         const r = data[i] ?? []
-        const norm = r.map((v:any) => String(v??'').toLowerCase().replace(/[_\s/]+/g,''))
+        const norm = r.map((v:any) => String(v ?? '').toLowerCase().replace(/[_\s/]+/g,''))
         if (norm.some(v=>v.includes('grn')) || norm.some(v=>v.includes('item'))) {
           headerRow = i
           const aliases: Record<string,string[]> = {

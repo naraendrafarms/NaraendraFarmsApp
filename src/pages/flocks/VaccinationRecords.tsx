@@ -56,7 +56,7 @@ const addDays = (dateStr: string, days: number) => {
   const d = new Date(dateStr + 'T00:00:00'); d.setDate(d.getDate() + days)
   return d.toISOString().slice(0, 10)
 }
-const normVaccineName = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+const normVaccineName = (s?: string | null) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
 const empty = () => ({
   flock_id: '', shed_id: '', farm_id: '', medicine_id: '',

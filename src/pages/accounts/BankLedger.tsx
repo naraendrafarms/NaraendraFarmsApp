@@ -1338,8 +1338,8 @@ export const BankLedgerPage: React.FC = () => {
           // mention the vendor's name? Cheap fuzzy check: the first "real" word
           // (3+ chars, so we skip things like "M/s") of vendor_name appears in
           // the description, case-insensitive.
-          const vendorWords = (p.vendor_name ?? '').toLowerCase().split(/\s+/).filter((w: string) => w.length >= 3)
-          const desc = (row.description ?? '').toLowerCase()
+          const vendorWords = String(p.vendor_name ?? '').toLowerCase().split(/\s+/).filter((w: string) => w.length >= 3)
+          const desc = String(row.description ?? '').toLowerCase()
           const nameMatch = vendorWords.length > 0 && vendorWords.some((w: string) => desc.includes(w))
           // Two different vendors can have similar bill amounts, so amount
           // alone must never be sufficient to auto-settle a bill — it now

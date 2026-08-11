@@ -3632,7 +3632,7 @@ export const BulkSalaryPage: React.FC = () => {
     if (!paymentSearch.trim()) return true
     const q = paymentSearch.trim().toLowerCase()
     const emp = r.employees ?? {}
-    return (emp.name ?? '').toLowerCase().includes(q) || (emp.emp_id ?? '').toLowerCase().includes(q)
+    return String(emp.name ?? '').toLowerCase().includes(q) || String(emp.emp_id ?? '').toLowerCase().includes(q)
   }
 
   const monthDate = month + '-01'

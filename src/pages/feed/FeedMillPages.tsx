@@ -1023,7 +1023,7 @@ const ProductionTab: React.FC = () => {
           if (fi.code) byCode[fi.code.toLowerCase().trim()] = fi.id
         }
         const rows = ings.map((i: any) => {
-          const key = (i.ingredient_name ?? '').toLowerCase().trim()
+          const key = String(i.ingredient_name ?? '').toLowerCase().trim()
           const item_id = byName[key] ?? byCode[key] ?? null
           return { production_id: logData.id, ingredient_name: i.ingredient_name, quantity_kg: i.quantity_kg, item_id }
         })

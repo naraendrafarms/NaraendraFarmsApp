@@ -219,7 +219,7 @@ export const GRNPage: React.FC = () => {
       if (fTo && g.grn_date > fTo) return false
       if (fFarm && g.farm_id !== fFarm) return false
       if (fCat && g.category !== fCat) return false
-      if (fItem && !(g.item_name ?? '').toLowerCase().includes(fItem.toLowerCase())) return false
+      if (fItem && !String(g.item_name ?? '').toLowerCase().includes(fItem.toLowerCase())) return false
       if (fParty && g.party_id !== fParty) return false
       return true
     })

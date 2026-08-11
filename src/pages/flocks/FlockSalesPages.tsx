@@ -960,9 +960,9 @@ export const HEDispatch: React.FC = () => {
     if (noInvoiceOnly && d.invoice_no) return false
     if (hePartyFilter.trim()) {
       const q = hePartyFilter.trim().toLowerCase()
-      if (!(d.parties?.name ?? '').toLowerCase().includes(q) &&
-          !(d.dc_no ?? '').toLowerCase().includes(q) &&
-          !(d.invoice_no ?? '').toLowerCase().includes(q)) return false
+      if (!String(d.parties?.name ?? '').toLowerCase().includes(q) &&
+          !String(d.dc_no ?? '').toLowerCase().includes(q) &&
+          !String(d.invoice_no ?? '').toLowerCase().includes(q)) return false
     }
     return true
   })
@@ -2690,10 +2690,10 @@ export const NHESales: React.FC = () => {
     if (typeFilter && typeFilter !== 'bird_sale' && s.sale_type !== typeFilter) return false
     if (partyFilter.trim()) {
       const q = partyFilter.trim().toLowerCase()
-      if (!(s.parties?.name ?? '').toLowerCase().includes(q) &&
-          !(s.employees?.name ?? '').toLowerCase().includes(q) &&
-          !(s.employees?.emp_id ?? '').toLowerCase().includes(q) &&
-          !(s.dc_no ?? '').toLowerCase().includes(q)) return false
+      if (!String(s.parties?.name ?? '').toLowerCase().includes(q) &&
+          !String(s.employees?.name ?? '').toLowerCase().includes(q) &&
+          !String(s.employees?.emp_id ?? '').toLowerCase().includes(q) &&
+          !String(s.dc_no ?? '').toLowerCase().includes(q)) return false
     }
     return true
   })
@@ -3585,7 +3585,7 @@ export const MedicineEntry: React.FC = () => {
   }
 
   const filteredUsage = (usage ?? []).filter((u: any) =>
-    !medSearch || (u.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
+    !medSearch || String(u.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
 
   const usageIds = filteredUsage.map((u: any) => u.id)
   const allUsageSel = usageIds.length > 0 && usageIds.every((id: string) => sel.has(id))
@@ -3594,7 +3594,7 @@ export const MedicineEntry: React.FC = () => {
   const toggleAllUsage = () => setSel(s => { const n = new Set(s); allUsageSel ? usageIds.forEach((id: string) => n.delete(id)) : usageIds.forEach((id: string) => n.add(id)); return n })
 
   const filteredAllocations = (allocations ?? []).filter((a: any) =>
-    !medSearch || (a.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
+    !medSearch || String(a.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
   const allocIds = filteredAllocations.map((a: any) => a.id)
   const allAllocSel = allocIds.length > 0 && allocIds.every((id: string) => selAlloc.has(id))
   const someAllocSel = allocIds.some((id: string) => selAlloc.has(id))

@@ -214,7 +214,7 @@ function useStockRows(asOf: string) {
     // "Toxfin 360 Dry" vs "Toxfin360 Dry" (a real case) never matched. This
     // stripped-to-alphanumeric key matches the item/alias regardless of
     // internal spacing/punctuation, folding the row into the real item.
-    const looseKey = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const looseKey = (s?: string | null) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
     const looseNameToId: Record<string, string> = {}
     for (const item of itemsMaster ?? []) looseNameToId[looseKey(item.name)] = item.id
     for (const a of aliases ?? []) if (!looseNameToId[looseKey(a.alias)]) looseNameToId[looseKey(a.alias)] = a.item_id

@@ -1970,7 +1970,7 @@ const RateAnalysisTab: React.FC = () => {
                       ? <tr><td colSpan={9} className="text-center py-8 text-gray-400 text-sm">No rate differences found</td></tr>
                       : grnFiltered.map((r: any, i: number) => {
                         const diff = Number(r.rate_diff ?? 0)
-                        const itemMismatch = r.po_item_name && r.po_item_name.toLowerCase().trim() !== (r.grn_item_name ?? r.item_name ?? '').toLowerCase().trim()
+                        const itemMismatch = r.po_item_name && r.po_item_name.toLowerCase().trim() !== String(r.grn_item_name ?? r.item_name ?? '').toLowerCase().trim()
                         return (
                           <tr key={i} className="text-sm hover:bg-gray-50 border-t border-gray-100">
                             <Td className="text-xs font-mono">{r.grn_no}</Td>

@@ -26,7 +26,7 @@ function exportCSV(filename: string, headers: string[], rows: (string|number|nul
 // vs absence of a single space, e.g. "Vitalosin 62.5 %" vs "Vitalosin
 // 62.5%" — trim-only, and even collapse-only, both let this through as
 // "different" names and created a real duplicate row).
-const normalizeName = (s: string) => (s ?? '').toLowerCase().replace(/\s+/g, '')
+const normalizeName = (s: string) => String(s ?? '').toLowerCase().replace(/\s+/g, '')
 
 // ── SHARED BULK HELPERS ──────────────────────────────────────────
 const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => void }> = ({ checked, indeterminate, onChange }) => {
@@ -292,7 +292,7 @@ export const IngredientsMaster: React.FC = () => {
 
   const allRows = data??[]
   const rows = allRows.filter((r:any)=>{
-    if(search && !r.name.toLowerCase().includes(search.toLowerCase()) && !r.code.toLowerCase().includes(search.toLowerCase()) && !(r.short_name??'').toLowerCase().includes(search.toLowerCase())) return false
+    if(search && !r.name.toLowerCase().includes(search.toLowerCase()) && !r.code.toLowerCase().includes(search.toLowerCase()) && !String(r.short_name ?? '').toLowerCase().includes(search.toLowerCase())) return false
     if(filterCat && r.category !== filterCat) return false
     return true
   })
@@ -889,7 +889,7 @@ export const MedicinesMaster: React.FC = () => {
 
   const allMedRows=data??[]
   const rows=allMedRows.filter((r:any)=>{
-    if(medSearch && !r.name.toLowerCase().includes(medSearch.toLowerCase()) && !(r.manufacturer??'').toLowerCase().includes(medSearch.toLowerCase())) return false
+    if(medSearch && !r.name.toLowerCase().includes(medSearch.toLowerCase()) && !String(r.manufacturer ?? '').toLowerCase().includes(medSearch.toLowerCase())) return false
     if(medTypeFilter && r.type !== medTypeFilter) return false
     return true
   })
@@ -1781,7 +1781,7 @@ export const VaccinationSchedulePage: React.FC = () => {
   const [creatingFor, setCreatingFor] = useState<any>(null)
   const [createForm, setCreateForm] = useState({ manufacturer: '', unit: 'dose' })
 
-  const looseKey = (s?: string | null) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const looseKey = (s?: string | null) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
   const unlinkedRows = rows.filter((r: any) => !r.medicine_id)
   const suggestionFor = (vaccineName: string) => {
     const key = looseKey(vaccineName)

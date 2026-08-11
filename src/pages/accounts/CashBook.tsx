@@ -301,7 +301,7 @@ export const CashBookPage: React.FC = () => {
     const q = filterParty.trim().toLowerCase()
     return reversed.filter((t: any) =>
       partyLabel(t).toLowerCase().includes(q) ||
-      (t.description ?? '').toLowerCase().includes(q)
+      String(t.description ?? '').toLowerCase().includes(q)
     )
   }, [rowsWithBalance, filterParty, filterMode])
 

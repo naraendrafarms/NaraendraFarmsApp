@@ -129,7 +129,7 @@ export const GRNEntry: React.FC = () => {
     if (fParties.length > 0 && !fParties.includes(g.party_id)) return false
     if (fCat && (g.category ?? 'Feed Ingredient') !== fCat) return false
     if (fItem) {
-      const name = (g.feed_ingredients?.name ?? g.item_name ?? '').toLowerCase()
+      const name = String(g.feed_ingredients?.name ?? g.item_name ?? '').toLowerCase()
       if (!name.includes(fItem.toLowerCase())) return false
     }
     if (fFrom && g.grn_date < fFrom) return false
