@@ -593,20 +593,21 @@ const POTab: React.FC = () => {
       // Auto-update PO status to Received
       await supabase.from('purchase_orders').update({ material_status: 'Received', grn_date: receiptForm.receipt_date, payment_status: 'Pending' }).eq('id', receiptPO.id)
 
-      // Auto-add vendor to parties master if not already present
+      // Suppliers are no longer created as a side effect of receiving a PO,
+      // for the same reason items and feed ingredients no longer are: the row
+      // was built from whatever the PO happened to carry, with category
+      // defaulting to 'Feed Raw Material' when the PO had none. A supplier
+      // created that way has no PAN, no TDS section, no payment terms beyond
+      // credit days — all of which matter for TDS Payable and Pending
+      // Payments, and none of which a PO line knows. Warn instead, and let it
+      // be added properly in the master.
       if (receiptPO.vendor_name) {
+        const nm = receiptPO.vendor_name.trim()
         const { data: existingParty } = await supabase.from('parties')
-          .select('id').ilike('name', receiptPO.vendor_name.trim()).limit(1)
+          .select('id').ilike('name', nm).limit(1)
         if (!existingParty || existingParty.length === 0) {
-          await supabase.from('parties').insert({
-            name:        receiptPO.vendor_name.trim(),
-            type:        'supplier',
-            category:    receiptPO.material_type ?? 'Feed Raw Material',
-            gstin:       receiptPO.vendor_gstin ?? null,
-            address:     receiptPO.vendor_address ?? null,
-            credit_days: receiptPO.credit_limit_days ?? 0,
-            is_active:   true,
-          })
+          toast(`"${nm}" is not in Suppliers. Add it under Purchase → Suppliers so its PAN, GSTIN and TDS section are recorded — the receipt itself has been saved.`,
+            { icon: '⚠️', duration: 8000 })
         }
       }
 
