@@ -1035,7 +1035,7 @@ export const FlockDetail: React.FC = () => {
 
   // Builds the headers/rows for whichever tab is currently active, shared by
   // both the generic Export (CSV) and Print buttons in the tab bar below.
-  const getTabExportData = (): { title: string; headers: string[]; rows: (string|number)[][]; rightAlignFrom?: number } | null => {
+  const getTabExportData = (): { title: string; subtitle?: string; headers: string[]; rows: (string|number)[][]; rightAlignFrom?: number } | null => {
     switch (tab) {
       case 'overview':
         return {
@@ -1122,26 +1122,83 @@ export const FlockDetail: React.FC = () => {
           ]),
         }
       case 'financial':
+        // Prints the SAME figures the tab is showing, range included. It used
+        // to print the lifetime totals and the old "Partial Cost" line, so a
+        // filtered screen and its printout disagreed — and the printout was
+        // the one that left out feed, salary and electricity.
         return {
           title: `Flock ${flock.flock_no} — Financial Summary`,
+          subtitle: finRanged
+            ? `${heFromDate ? fmtDate(heFromDate) : 'start'} to ${heToDate ? fmtDate(heToDate) : 'today'}`
+            : 'Whole life of the flock',
           headers: ['Item', 'Amount'],
           rightAlignFrom: 1,
           rows: [
-            ['HE Revenue', inr(heRevenue)],
-            ...Object.entries(nheSales?.reduce((acc: any, s: any) => {
-              if (s.nhe_sale_lines?.length > 0) s.nhe_sale_lines.forEach((l: any) => { acc[l.sale_type] = (acc[l.sale_type] ?? 0) + (l.amount ?? 0) })
-              else acc[s.sale_type] = (acc[s.sale_type] ?? 0) + (s.amount ?? 0)
+            ['HE Revenue', inr(fHeRevenue)],
+            ...Object.entries(fNheSales.reduce((acc: any, s2: any) => {
+              if (s2.nhe_sale_lines?.length > 0) s2.nhe_sale_lines.forEach((l: any) => { acc[l.sale_type] = (acc[l.sale_type] ?? 0) + (l.amount ?? 0) })
+              else acc[s2.sale_type] = (acc[s2.sale_type] ?? 0) + (s2.amount ?? 0)
               return acc
             }, {}) ?? {}).map(([type, amt]: any) => [`• ${NHE_LABEL[type] ?? type}`, inr(amt)]),
-            ['TOTAL REVENUE', inr(totalRevenue)],
-            ['Chick Cost', inr(chickCost)],
-            ['Medicine & Vaccine', inr(medCost)],
-            ['Partial Cost (no feed/salary/elec)', inr(totalCost)],
+            ['TOTAL REVENUE', inr(fTotalRevenue)],
             ['', ''],
+            ['Chick Cost', fChickCost ? inr(fChickCost) : 'outside range'],
+            ['Medicine & Vaccine (qty × stock rate)', inr(fMedCost)],
+            [`Feed Cost (${fFeedKg.toLocaleString('en-IN')} kg)`, inr(fFeedCost)],
+            ...(fFeedKgUnpriced > 0
+              ? [[`  ⚠ ${fFeedKgUnpriced.toLocaleString('en-IN')} kg unpriced — excluded`, '']] : []),
+            ...Object.entries(fOtherExpByCat).map(([cat, amt]: any) => [`• ${cat}`, inr(amt)]),
+            ['DIRECT COST', inr(fDirectCost)],
+            ['Salary (site total, not split)', inr(fSalaryCost)],
+            ['Electricity (site, all meters)', inr(fElectricityCost)],
+            ['TOTAL COST', inr(fTotalCost)],
+            [`Cost per Egg (on ${fEggs.toLocaleString('en-IN')} eggs)`, fEggs > 0 ? `Rs ${fCostPerEgg.toFixed(3)}` : '—'],
+            ['', ''],
+            [`HE DISPATCH (${displayHeDispatch.length} records)`, ''],
             ...displayHeDispatch.map((d: any) => [
-              `HE Dispatch ${fmtDate(d.dispatch_date)} (DC ${d.dc_no ?? '—'})`,
+              `${fmtDate(d.dispatch_date)} — DC ${d.dc_no ?? '—'} · ${(d.total_dispatched ?? 0).toLocaleString('en-IN')} eggs`,
               d.amount ? inr(d.amount) : '—',
             ]),
+            ['DISPATCH TOTAL', inr(displayHeDispatch.reduce((a: number, d: any) => a + (d.amount ?? 0), 0))],
+          ],
+        }
+      case 'costincome':
+        // Month rows carry the complete cost; day rows carry the direct costs.
+        // Both are printed, so the sheet matches the screen exactly.
+        return {
+          title: `Flock ${flock.flock_no} — Cost & Income`,
+          subtitle: (ciFrom || ciTo)
+            ? `${ciFrom ? fmtDate(ciFrom) : 'start'} to ${ciTo ? fmtDate(ciTo) : 'today'}`
+            : 'Whole life of the flock',
+          headers: ['Period','Site','Total Eggs','HE Eggs','Egg Value','Actual Sales','Feed','Medicine','Expenses','Chick','Salary*','Electricity*','Total Cost','Cost/Egg'],
+          rightAlignFrom: 2,
+          rows: [
+            ['— MONTH-WISE (complete cost) —', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+            ...ciMonthly.map((r: any) => [
+              r.month, r.site, r.eggs, r.he, inr(r.value), inr(r.sales),
+              inr(r.feedCost), inr(r.med), inr(r.exp), r.chick ? inr(r.chick) : '—',
+              inr(r.sal), inr(r.elec), inr(r.total), r.eggs > 0 ? `Rs ${r.perEgg.toFixed(3)}` : '—',
+            ]),
+            ['', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+            ['— DAY-WISE (direct cost only) —', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+            ...ciDaily.map((r: any) => [
+              fmtDate(r.date), r.site, r.eggs, r.he, inr(r.value), inr(r.sales),
+              inr(r.feedCost), inr(r.med), inr(r.exp), r.chick ? inr(r.chick) : '—',
+              '—', '—', inr(r.cost), r.eggs > 0 ? `Rs ${r.perEgg.toFixed(3)}` : '—',
+            ]),
+            ['DAY TOTAL', '',
+              ciDaily.reduce((a: number, r: any) => a + r.eggs, 0),
+              ciDaily.reduce((a: number, r: any) => a + r.he, 0),
+              inr(ciDaily.reduce((a: number, r: any) => a + r.value, 0)),
+              inr(ciDaily.reduce((a: number, r: any) => a + r.sales, 0)),
+              inr(ciDaily.reduce((a: number, r: any) => a + r.feedCost, 0)),
+              inr(ciDaily.reduce((a: number, r: any) => a + r.med, 0)),
+              inr(ciDaily.reduce((a: number, r: any) => a + r.exp, 0)),
+              '—', '—', '—',
+              inr(ciDaily.reduce((a: number, r: any) => a + r.cost, 0)), '—'],
+            ['', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+            ['* Salary and Electricity are the SITE totals for the month, not this flock\'s share, and are never split between flocks sharing a site. Day-wise excludes them because they are monthly figures.',
+              '', '', '', '', '', '', '', '', '', '', '', '', ''],
           ],
         }
       case 'std':
@@ -1171,7 +1228,7 @@ export const FlockDetail: React.FC = () => {
   const handleTabPrint = () => {
     const d = getTabExportData()
     if (!d) return
-    printReport({ title: d.title, headers: d.headers, rows: d.rows, rightAlignFrom: d.rightAlignFrom })
+    printReport({ title: d.title, subtitle: d.subtitle, headers: d.headers, rows: d.rows, rightAlignFrom: d.rightAlignFrom })
   }
 
   // CSV template download
