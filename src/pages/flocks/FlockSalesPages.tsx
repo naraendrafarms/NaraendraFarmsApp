@@ -58,6 +58,13 @@ export const ReceivePaymentModal: React.FC<{
   const [cashFarmId, setCashFarmId] = useState('ho') // 'ho' = Head Office, or a farm UUID
   const [date, setDate] = useState(today())
   const [amtReceived, setAmtReceived] = useState('')
+  // Split receipt — part cash, part online. nhe_sales has carried
+  // payment_cash/payment_online since migration 061 but only the bird-sale
+  // entry form ever used them; this modal could record one mode only, and
+  // saving a second payment overwrote the first AND deleted its ledger row.
+  const [splitOn, setSplitOn] = useState(false)
+  const [cashAmt, setCashAmt] = useState('')
+  const [onlineAmt, setOnlineAmt] = useState('')
   const [utr, setUtr] = useState('')
   const [status, setStatus] = useState('Received')
   const [saving, setSaving] = useState(false)
@@ -95,6 +102,10 @@ export const ReceivePaymentModal: React.FC<{
       setUtr(sale.utr_ref ?? '')
       setStatus(sale.payment_status === 'Pending' || !sale.payment_status ? 'Received' : sale.payment_status)
       setSelectedAdvanceId('')
+      const pc = Number(sale.payment_cash ?? 0), po = Number(sale.payment_online ?? 0)
+      setSplitOn(pc > 0 && po > 0)
+      setCashAmt(pc ? String(pc) : '')
+      setOnlineAmt(po ? String(po) : '')
     }
   }, [sale])
 
@@ -102,12 +113,23 @@ export const ReceivePaymentModal: React.FC<{
     if (!sale) return
     setSaving(true)
     try {
-      const amt = parseFloat(amtReceived) || 0
+      const splitCash   = splitOn ? (parseFloat(cashAmt) || 0) : 0
+      const splitOnline = splitOn ? (parseFloat(onlineAmt) || 0) : 0
+      // In split mode the total received IS the two parts — typing a separate
+      // total that disagreed with them is how a receipt ends up in the ledgers
+      // for one figure and on the sale for another.
+      const amt = splitOn ? splitCash + splitOnline : (parseFloat(amtReceived) || 0)
       const isAdvance = mode === 'Advance'
+      if (splitOn) {
+        if (amt <= 0) throw new Error('Enter the cash and/or online amount')
+        if (splitOnline > 0 && !bankId) {
+          throw new Error('Select a Bank Account for the online part, or it won\'t be recorded in any ledger')
+        }
+      }
       // Never let a non-cash receipt flip to "Received" without a bank account —
       // that used to silently post to no ledger at all (money marked received
       // but invisible in both Cash Book and Bank Ledger).
-      if (!isAdvance && mode !== 'Cash' && amt > 0 && status !== 'Pending' && !bankId) {
+      if (!isAdvance && !splitOn && mode !== 'Cash' && amt > 0 && status !== 'Pending' && !bankId) {
         throw new Error('Select a Bank Account for this payment mode, or it won\'t be recorded in any ledger')
       }
 
@@ -174,10 +196,14 @@ export const ReceivePaymentModal: React.FC<{
 
       const update: any = {
         payment_status: status,
-        payment_mode: mode,
+        payment_mode: splitOn
+          ? (splitCash > 0 && splitOnline > 0 ? 'Cash+NEFT' : splitOnline > 0 ? 'NEFT' : 'Cash')
+          : mode,
+        payment_cash: splitOn ? splitCash : (mode === 'Cash' ? (amt || 0) : 0),
+        payment_online: splitOn ? splitOnline : (mode !== 'Cash' && mode !== 'Advance' ? (amt || 0) : 0),
         received_date: date || null,
         amount_received: amt || null,
-        bank_account_id: (mode !== 'Cash' && bankId) ? bankId : null,
+        bank_account_id: splitOn ? (splitOnline > 0 ? bankId : null) : ((mode !== 'Cash' && bankId) ? bankId : null),
         utr_ref: utr || null,
         // "Cash Received At (Location)" was written to the Cash Book entry but
         // never back to the sale, so reopening this modal always fell back to
@@ -198,7 +224,35 @@ export const ReceivePaymentModal: React.FC<{
       const flockLabel = sale.flocks?.flock_no ? `F-${sale.flocks.flock_no}` : ''
       const description = [typeLabel, flockLabel, sale.dc_no ?? sale.invoice_no ?? ''].filter(Boolean).join(' — ')
 
-      if (mode === 'Cash' && amt > 0 && status !== 'Pending') {
+      // A split posts BOTH ledger rows — one cash receipt and one bank credit,
+      // each for its own amount. The single-mode branches below are unchanged.
+      if (splitOn && status !== 'Pending') {
+        const sourceCol = table === 'he_dispatch' ? { he_dispatch_id: sale.id } : { nhe_sale_id: sale.id }
+        if (splitCash > 0) {
+          const { error: cbErr } = await supabase.from('cash_book').insert({
+            txn_date: date, txn_type: 'receipt', category: cbCategory,
+            description: description + ' (cash part)',
+            party_name: sale.parties?.name ?? null,
+            farm_id: cashFarmId === 'ho' ? null : cashFarmId,
+            flock_id: sale.flock_id ?? null,
+            reference_no: sale.dc_no ?? sale.invoice_no ?? null,
+            amount_in: splitCash, amount_out: 0, payment_mode: 'cash',
+            ...sourceCol,
+          })
+          if (cbErr) throw new Error('Payment saved but Cash Book entry failed: ' + cbErr.message)
+        }
+        if (splitOnline > 0) {
+          const { error: btErr } = await supabase.from('bank_transactions').insert({
+            bank_account_id: bankId, txn_date: date, txn_type: 'Credit',
+            category: 'Sale Receipt',
+            reference_no: utr || sale.dc_no || sale.invoice_no || null,
+            description: description + ' (online part)',
+            amount: splitOnline, party_id: sale.party_id ?? null,
+            [linkCol]: sale.id,
+          })
+          if (btErr) throw new Error('Payment saved but Bank entry failed: ' + btErr.message)
+        }
+      } else if (mode === 'Cash' && amt > 0 && status !== 'Pending') {
         const sourceCol = table === 'he_dispatch' ? { he_dispatch_id: sale.id } : { nhe_sale_id: sale.id }
         // Create cash_book receipt entry
         const { error: cbErr } = await supabase.from('cash_book').insert({
@@ -271,13 +325,40 @@ export const ReceivePaymentModal: React.FC<{
           <div className="grid grid-cols-2 gap-3">
             <Select label="Status" value={status} onChange={e => setStatus(e.target.value)}
               options={[{value:'Received',label:'Fully Received'},{value:'Partial',label:'Partial'},{value:'Pending',label:'Pending'}]} />
-            <Input label="Amount (₹)" type="number" step="0.01" value={amtReceived} onChange={e => setAmtReceived(e.target.value)} />
+            <Input label="Amount (₹)" type="number" step="0.01" value={splitOn ? String(((parseFloat(cashAmt)||0) + (parseFloat(onlineAmt)||0)) || '') : amtReceived}
+              disabled={splitOn} onChange={e => setAmtReceived(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Select label="Payment Mode" value={mode} onChange={e => { setMode(e.target.value); setSelectedAdvanceId('') }}
-              options={paymentModeOptions} />
-            <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
-          </div>
+
+          {mode !== 'Advance' && (
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+              <input type="checkbox" checked={splitOn} onChange={e => setSplitOn(e.target.checked)} />
+              Split this receipt — part cash, part online
+            </label>
+          )}
+
+          {splitOn ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Cash (₹)" type="number" step="0.01" value={cashAmt} onChange={e => setCashAmt(e.target.value)} />
+                <Input label="Online / Bank (₹)" type="number" step="0.01" value={onlineAmt} onChange={e => setOnlineAmt(e.target.value)} />
+              </div>
+              <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
+              <p className="text-[11px] text-blue-800">
+                Each part is posted separately — the cash part to the <strong>Cash Book</strong> and the online part to
+                the <strong>Bank Ledger</strong> — so both are traceable on their own. The Amount above is the two added
+                together and cannot be typed over, otherwise the sale and the ledgers could disagree.
+                {(parseFloat(onlineAmt) || 0) > 0 && !bankId && (
+                  <span className="block mt-1 text-red-600 font-medium">Pick a Bank Account below for the online part.</span>
+                )}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <Select label="Payment Mode" value={mode} onChange={e => { setMode(e.target.value); setSelectedAdvanceId('') }}
+                options={paymentModeOptions} />
+              <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
+            </div>
+          )}
           {mode === 'Advance' && (
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Select Advance Entry</label>
@@ -300,15 +381,15 @@ export const ReceivePaymentModal: React.FC<{
               </select>
             </div>
           )}
-          {mode === 'Cash' && (
+          {(splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash') && (
             <Select label="Cash Location" value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
               options={cashLocationOptions} />
           )}
-          {mode !== 'Cash' && mode !== 'Advance' && (
+          {(splitOn ? (parseFloat(onlineAmt) || 0) > 0 : (mode !== 'Cash' && mode !== 'Advance')) && (
             <Select label="Bank Account" placeholder="— Select bank —" value={bankId} onChange={e => setBankId(e.target.value)}
               options={bankOptions} />
           )}
-          {(mode === 'Bank Transfer' || mode === 'UPI' || mode === 'Cheque') && (
+          {(splitOn ? (parseFloat(onlineAmt) || 0) > 0 : (mode === 'Bank Transfer' || mode === 'UPI' || mode === 'Cheque')) && (
             <Input label={mode === 'Cheque' ? 'Cheque No' : 'UTR / Reference No'} value={utr} onChange={e => setUtr(e.target.value)} placeholder="Transaction reference" />
           )}
         </div>
