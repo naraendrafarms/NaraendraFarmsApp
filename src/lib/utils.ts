@@ -253,3 +253,37 @@ export function friendlyDbError(error: any, entityLabel = 'record'): string {
 
   return raw
 }
+
+// ── NHE eggs leaving stock ──────────────────────────────────────────────────
+// A sale removes the eggs it BILLED plus the eggs it gave away free. free_qty
+// is complimentary stock — never invoiced, but gone from the farm all the same.
+// The Egg Stock report deducted only the billed quantity, so every free egg
+// stayed on the books for ever.
+//
+// It is recorded in TWO places: nhe_sale_lines.free_qty on multi-line sales,
+// and nhe_sales.free_qty on the header. Measured before writing this: on all 5
+// sales that carry free eggs the header is an exact mirror of its lines
+// (header_equals_lines 5, differs 0), so adding both would deduct 1,260 where
+// only 630 left the farm. Lines win when they exist; the header is used only
+// for sales saved without lines.
+//
+// Every stock calculation must go through this, so the rule lives in one place
+// for existing flocks and any added later.
+export interface NheStockLine { sale_type: string; quantity?: number | null; free_qty?: number | null }
+export interface NheStockSale {
+  sale_type?: string | null; quantity?: number | null; free_qty?: number | null
+  nhe_sale_lines?: NheStockLine[] | null
+}
+export function nheEggsLeavingStock(sale: NheStockSale): { sale_type: string; quantity: number }[] {
+  const lines = sale.nhe_sale_lines ?? []
+  if (lines.length > 0) {
+    return lines.map(l => ({
+      sale_type: l.sale_type,
+      quantity: (Number(l.quantity) || 0) + (Number(l.free_qty) || 0),
+    }))
+  }
+  return [{
+    sale_type: sale.sale_type ?? '',
+    quantity: (Number(sale.quantity) || 0) + (Number(sale.free_qty) || 0),
+  }]
+}

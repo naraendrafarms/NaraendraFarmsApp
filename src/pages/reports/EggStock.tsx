@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { today, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
+import { today, fyRange, FY_OPTIONS, fetchAllPages, nheEggsLeavingStock } from '@/lib/utils'
 import {
   Card, Select, SectionHeader, Spinner, Table, Th, Td, Badge, SearchableSelect
 } from '@/components/ui'
@@ -81,20 +81,19 @@ export const EggStockPage: React.FC = () => {
     queryFn: async () => {
       const data = await fetchAllPages<any>(
         (from, to) => supabase.from('nhe_sales')
-          .select('id, flock_id, sale_date, sale_type, quantity, nhe_sale_lines(sale_type, quantity)')
+          .select('id, flock_id, sale_date, sale_type, quantity, free_qty, nhe_sale_lines(sale_type, quantity, free_qty)')
           .lte('sale_date', toDate)
           .range(from, to),
         'Egg stock NHE sales'
       )
+      // Eggs given away free leave the farm exactly like billed ones — the
+      // deduction is billed + free. nheEggsLeavingStock owns that rule (and the
+      // header-vs-lines double-count guard) so every stock figure uses one
+      // definition rather than each report inventing its own.
       const rows: { flock_id: string; sale_date: string; sale_type: string; quantity: number }[] = []
       for (const s of data) {
-        const lines: any[] = (s as any).nhe_sale_lines ?? []
-        if (lines.length > 0) {
-          for (const l of lines) {
-            rows.push({ flock_id: s.flock_id, sale_date: s.sale_date, sale_type: l.sale_type, quantity: l.quantity ?? 0 })
-          }
-        } else {
-          rows.push({ flock_id: s.flock_id, sale_date: s.sale_date, sale_type: s.sale_type, quantity: s.quantity ?? 0 })
+        for (const part of nheEggsLeavingStock(s as any)) {
+          rows.push({ flock_id: s.flock_id, sale_date: s.sale_date, sale_type: part.sale_type, quantity: part.quantity })
         }
       }
       return rows
