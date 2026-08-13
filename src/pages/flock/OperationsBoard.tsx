@@ -31,7 +31,8 @@ type Sev = 'act' | 'check' | 'fyi'
 interface Alert { sev: Sev; title: string; detail: string; to?: string; rank: number }
 
 export const OperationsBoard: React.FC = () => {
-  const [scope, setScope] = useState<'all' | 'site'>('all')
+  const [scope, setScope] = useState<'all' | 'site' | 'day' | 'month'>('all')
+  const [periodFlock, setPeriodFlock] = useState('')
   const feedRates = useFeedRates()
   const medRate = useMedicineRates()
 
@@ -39,6 +40,10 @@ export const OperationsBoard: React.FC = () => {
   const iso = (d: Date) => d.toISOString().slice(0, 10)
   const from = iso(new Date(today.getTime() - DAYS * 864e5))
   const monthStart = iso(new Date(today.getFullYear(), today.getMonth(), 1))
+  // Twelve months back, so the month-wise view has something to show. The
+  // month-to-date cost still uses monthStart; only the production history is
+  // fetched wider.
+  const histFrom = iso(new Date(today.getFullYear() - 1, today.getMonth(), 1))
 
   const { data: flocks, isLoading: flocksLoading } = useQuery({
     queryKey: ['ob_flocks'],
@@ -72,10 +77,10 @@ export const OperationsBoard: React.FC = () => {
   // Daily records from the start of this month — enough for the 7-day rates and
   // the month-to-date cost, in one fetch rather than two overlapping ones.
   const { data: daily, isLoading: dailyLoading } = useQuery({
-    queryKey: ['ob_daily', monthStart],
+    queryKey: ['ob_daily', histFrom],
     queryFn: async () => fetchAllPages<any>((f, t) => supabase.from('daily_records')
-      .select('flock_id,record_date,total_eggs,he_eggs,opening_female,mortality_female,mortality_male,feed_female_kg,feed_male_kg,feed_type_f,feed_type_m')
-      .gte('record_date', monthStart).range(f, t), 'Daily records', toast.error),
+      .select('flock_id,record_date,total_eggs,he_eggs,opening_female,opening_male,mortality_female,mortality_male,feed_female_kg,feed_male_kg,feed_type_f,feed_type_m')
+      .gte('record_date', histFrom).range(f, t), 'Daily records', toast.error),
   })
   const { data: stdCurve } = useQuery({
     queryKey: ['ob_std_curve'],
@@ -141,7 +146,7 @@ export const OperationsBoard: React.FC = () => {
     const recent = dr.filter(r => r.record_date >= from)
 
     return (flocks as any[]).map(fl => {
-      const mine = dr.filter(r => r.flock_id === fl.id)
+      const mine = dr.filter(r => r.flock_id === fl.id && r.record_date >= monthStart)
       const mine7 = recent.filter(r => r.flock_id === fl.id)
 
       const eggs7 = mine7.reduce((s, r) => s + (r.total_eggs ?? 0), 0)
@@ -160,8 +165,18 @@ export const OperationsBoard: React.FC = () => {
       const placed = (sm?.total_placed_f ?? 0) + (sm?.total_placed_m ?? 0)
       const mortMtd = mine.reduce((s, r) => s + (r.mortality_female ?? 0) + (r.mortality_male ?? 0), 0)
 
-      const feedKg7 = mine7.reduce((s, r) => s + (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0), 0)
-      const feedPerBird = birds > 0 && mine7.length > 0 ? (feedKg7 * 1000) / (birds * mine7.length) : null
+      // Feed per bird per day, SEPARATELY for each sex. The first version
+      // divided the combined feed by the combined bird count, which is
+      // meaningless — males and females are fed different quantities, and a
+      // blended figure matches neither. Each is grams fed to that sex divided
+      // by that sex's bird-DAYS (the sum of its opening count across the days),
+      // so a day with fewer birds counts for less, exactly as it should.
+      const femDays = mine7.reduce((s, r) => s + (r.opening_female ?? 0), 0)
+      const maleDays = mine7.reduce((s, r) => s + (r.opening_male ?? 0), 0)
+      const feedFkg = mine7.reduce((s, r) => s + (r.feed_female_kg ?? 0), 0)
+      const feedMkg = mine7.reduce((s, r) => s + (r.feed_male_kg ?? 0), 0)
+      const feedPerBirdF = femDays > 0 ? (feedFkg * 1000) / femDays : null
+      const feedPerBirdM = maleDays > 0 ? (feedMkg * 1000) / maleDays : null
 
       // Month-to-date DIRECT cost. Salary and electricity are deliberately not
       // here: they are recorded per SITE and nothing says which flock they
@@ -195,7 +210,7 @@ export const OperationsBoard: React.FC = () => {
         fl, wk, birds, birdsF, birdsM, placed, site: farmName[siteOf(fl, iso(today)) ?? ''] ?? '—',
         eggs7, hd, hePct, mortMtd,
         mortPct: placed > 0 ? (mortMtd / placed) * 100 : null,
-        feedPerBird, directCost, costPerEgg, costPerHe, feedUnpriced,
+        feedPerBirdF, feedPerBirdM, directCost, costPerEgg, costPerHe, feedUnpriced,
         eggsMtd, heMtd,
         stdHd: std?.hen_week_pct ?? null,
         stdHe: std?.he_pct ?? null,
@@ -271,6 +286,33 @@ export const OperationsBoard: React.FC = () => {
     return Object.values(m)
   }, [rows, attendance, employees, farmName])
 
+  // Day-wise and month-wise, on exactly the same bird-days rule as the cards —
+  // one definition of feed per bird for the whole page, so the views cannot
+  // quietly disagree with each other.
+  const periodRows = useMemo(() => {
+    const dr = ((daily ?? []) as any[]).filter(r => !periodFlock || r.flock_id === periodFlock)
+    const key = (d: string) => (scope === 'month' ? d.slice(0, 7) : d)
+    const m: Record<string, any> = {}
+    for (const r of dr) {
+      const k = key(String(r.record_date))
+      m[k] ??= { k, eggs: 0, he: 0, femDays: 0, maleDays: 0, feedF: 0, feedM: 0, mort: 0, days: new Set<string>() }
+      const g = m[k]
+      g.eggs += r.total_eggs ?? 0; g.he += r.he_eggs ?? 0
+      g.femDays += r.opening_female ?? 0; g.maleDays += r.opening_male ?? 0
+      g.feedF += r.feed_female_kg ?? 0; g.feedM += r.feed_male_kg ?? 0
+      g.mort += (r.mortality_female ?? 0) + (r.mortality_male ?? 0)
+      g.days.add(String(r.record_date))
+    }
+    return Object.values(m).map((g: any) => ({
+      k: g.k, eggs: g.eggs, he: g.he, mort: g.mort, days: g.days.size,
+      hd: g.femDays > 0 ? (g.eggs / g.femDays) * 100 : null,
+      hePct: g.eggs > 0 ? (g.he / g.eggs) * 100 : null,
+      feedF: g.femDays > 0 ? (g.feedF * 1000) / g.femDays : null,
+      feedM: g.maleDays > 0 ? (g.feedM * 1000) / g.maleDays : null,
+      feedKg: g.feedF + g.feedM,
+    })).sort((a, b) => b.k.localeCompare(a.k))
+  }, [daily, scope, periodFlock])
+
   const totals = useMemo(() => {
     const birds = rows.reduce((s, r) => s + r.birds, 0)
     const eggs7 = rows.reduce((s, r) => s + r.eggs7, 0)
@@ -305,8 +347,16 @@ export const OperationsBoard: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Operations Board"
         subtitle={`${rows.length} active flock${rows.length > 1 ? 's' : ''} · production over the last ${DAYS} days · cost month to date`}
-        action={<Select value={scope} onChange={e => setScope(e.target.value as any)}
-          options={[{ value: 'all', label: 'By flock' }, { value: 'site', label: 'By site' }]} />} />
+        action={<div className="flex gap-2 flex-wrap">
+          {(scope === 'day' || scope === 'month') && (
+            <Select value={periodFlock} onChange={e => setPeriodFlock(e.target.value)}
+              options={[{ value: '', label: 'All flocks' },
+                ...rows.map(r => ({ value: r.fl.id, label: `Flock ${r.fl.flock_no}` }))]} />
+          )}
+          <Select value={scope} onChange={e => setScope(e.target.value as any)}
+            options={[{ value: 'all', label: 'By flock' }, { value: 'site', label: 'By site' },
+              { value: 'day', label: 'Day-wise' }, { value: 'month', label: 'Month-wise' }]} />
+        </div>} />
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-px bg-gray-200 border border-gray-200 rounded-xl overflow-hidden">
@@ -398,7 +448,8 @@ export const OperationsBoard: React.FC = () => {
                   std={r.stdHe} actual={r.hePct} hasStd={r.hasStd}
                   note={!r.laying ? 'brooding' : undefined} />
                 <Metric k="Mortality (mtd)" v={pct1(r.mortPct)} note={`${numFmt(r.mortMtd)} of ${numFmt(r.placed)} placed`} />
-                <Metric k="Feed / bird / day" v={r.feedPerBird != null ? `${r.feedPerBird.toFixed(0)} g` : '—'} />
+                <Metric k="Feed / ♀ / day" v={r.feedPerBirdF != null ? `${r.feedPerBirdF.toFixed(0)} g` : '—'} />
+                <Metric k="Feed / ♂ / day" v={r.feedPerBirdM != null ? `${r.feedPerBirdM.toFixed(0)} g` : '—'} />
               </div>
 
               <div className="mt-auto px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex justify-between text-xs">
@@ -415,6 +466,47 @@ export const OperationsBoard: React.FC = () => {
             </Card>
           ))}
         </div>
+      )}
+
+      {(scope === 'day' || scope === 'month') && (
+        <Card padding={false}>
+          <div className="px-4 py-3 border-b border-gray-100 flex items-baseline justify-between gap-3 flex-wrap">
+            <h3 className="font-semibold text-gray-800">
+              {scope === 'day' ? 'Day-wise' : 'Month-wise'}
+              {periodFlock ? ` — Flock ${rows.find(r => r.fl.id === periodFlock)?.fl.flock_no ?? ''}` : ' — all active flocks'}
+            </h3>
+            <p className="text-[11px] text-gray-500">
+              Feed per bird is grams fed to that sex ÷ that sex's bird-days, so a day with fewer birds counts for less.
+            </p>
+          </div>
+          <div className="overflow-x-auto max-h-[36rem] overflow-y-auto">
+            <Table>
+              <thead><tr>
+                <Th>{scope === 'day' ? 'Date' : 'Month'}</Th>
+                <Th right>Eggs</Th><Th right>HE</Th><Th right>HD %</Th><Th right>HE %</Th>
+                <Th right>Feed kg</Th><Th right>Feed / ♀ / day</Th><Th right>Feed / ♂ / day</Th><Th right>Mortality</Th>
+              </tr></thead>
+              <tbody>
+                {periodRows.map((r: any) => (
+                  <tr key={r.k} className="hover:bg-gray-50">
+                    <Td>{scope === 'day' ? fmtDate(r.k) : r.k}</Td>
+                    <Td right>{numFmt(r.eggs)}</Td>
+                    <Td right>{numFmt(r.he)}</Td>
+                    <Td right>{pct1(r.hd)}</Td>
+                    <Td right>{pct1(r.hePct)}</Td>
+                    <Td right>{numFmt(Math.round(r.feedKg))}</Td>
+                    <Td right>{r.feedF != null ? `${r.feedF.toFixed(0)} g` : '—'}</Td>
+                    <Td right>{r.feedM != null ? `${r.feedM.toFixed(0)} g` : '—'}</Td>
+                    <Td right>{r.mort || '—'}</Td>
+                  </tr>
+                ))}
+                {periodRows.length === 0 && (
+                  <tr><Td colSpan={9} className="text-center text-gray-400 py-8">No daily records in this period.</Td></tr>
+                )}
+              </tbody>
+            </Table>
+          </div>
+        </Card>
       )}
 
       {/* Site roll-up */}
