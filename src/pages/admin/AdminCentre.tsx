@@ -46,12 +46,19 @@ const CompanySettingsCard: React.FC = () => {
         po_terms: form.po_terms || null,
         pan_no: form.pan_no || null,
         tan_no: form.tan_no || null,
+        show_watermark: form.show_watermark !== false,
         updated_at: new Date().toISOString(),
       }
       const { error } = await supabase.from('company_settings').update(payload).eq('id', form.id)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('Company profile saved'); qc.invalidateQueries({ queryKey: ['company_settings'] }) },
+    onSuccess: () => {
+      toast.success('Company profile saved')
+      qc.invalidateQueries({ queryKey: ['company_settings'] })
+      // The watermark reads its own cached copy of this setting — refresh it
+      // too, or turning it off would appear to do nothing until a reload.
+      qc.invalidateQueries({ queryKey: ['company_show_watermark'] })
+    },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -84,6 +91,20 @@ const CompanySettingsCard: React.FC = () => {
       </FormRow>
       <Textarea label="Purchase Order — Terms & Conditions" rows={4} value={form.po_terms ?? ''} onChange={e => s('po_terms', e.target.value)} />
       <p className="text-xs text-gray-400 -mt-2">One point per line — shown as-is on the PO printout.</p>
+      <div className="border-t border-gray-100 pt-4">
+        <label className="flex items-start gap-2.5 cursor-pointer select-none">
+          <input type="checkbox" className="mt-0.5"
+            checked={form.show_watermark !== false}
+            onChange={e => setForm((f: any) => ({ ...f, show_watermark: e.target.checked }))} />
+          <span>
+            <span className="text-sm font-medium text-gray-800">Show the NF watermark behind pages</span>
+            <span className="block text-xs text-gray-500 mt-0.5">
+              A faint monogram in the background of every screen. It sits behind the cards, so it never covers a figure
+              you are reading or a box you are typing into, and it never appears on printed output.
+            </span>
+          </span>
+        </label>
+      </div>
       <Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save Company Profile</Button>
     </Card>
   )

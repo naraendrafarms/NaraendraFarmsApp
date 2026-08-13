@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Link, useLocation, Outlet, Navigate, useSearchParams, useNavigate } from 'react-router-dom'
+import { Watermark, useWatermarkEnabled } from '@/components/Watermark'
 import {
   LayoutDashboard, Bird, Factory, Zap, Users, Settings,
   ChevronDown, ChevronRight, LogOut, Menu, X,
@@ -448,6 +449,7 @@ const ModuleGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 }
 
 export const AppLayout: React.FC = () => {
+  const watermarkOn = useWatermarkEnabled()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
   const { profile, signOut } = useAuth()
@@ -585,12 +587,17 @@ export const AppLayout: React.FC = () => {
           </span>
         </header>
         <NotificationBanner />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <ErrorBoundary key={location.pathname}>
-            <ModuleGuard>
-              <Outlet />
-            </ModuleGuard>
-          </ErrorBoundary>
+        <main className="relative flex-1 overflow-y-auto p-4 sm:p-6">
+          {/* Behind every page. `relative` on the scrolling container and z-10
+              on the content keep the mark under the cards, never over them. */}
+          {watermarkOn && <Watermark />}
+          <div className="relative z-10">
+            <ErrorBoundary key={location.pathname}>
+              <ModuleGuard>
+                <Outlet />
+              </ModuleGuard>
+            </ErrorBoundary>
+          </div>
         </main>
       </div>
     </div>
