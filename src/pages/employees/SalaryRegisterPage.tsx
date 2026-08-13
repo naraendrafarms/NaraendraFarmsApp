@@ -12,6 +12,22 @@ import { ACCOUNT_KIND_OPTIONS, matchesAccountKind } from '@/pages/employees/Sala
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
+// Statutory deduction filter. Each option asks a question you would otherwise
+// answer by exporting and sorting: who is on ESI, who on PF, who on all three,
+// and — the useful one when reconciling a challan — who is on none.
+const STATUTORY_OPTIONS = [
+  { value: '',       label: 'All employees' },
+  { value: 'esi',    label: 'ESI deducted' },
+  { value: 'pf',     label: 'PF deducted' },
+  { value: 'pt',     label: 'PT deducted' },
+  { value: 'esi_pf', label: 'ESI + PF' },
+  { value: 'pf_pt',  label: 'PF + PT' },
+  { value: 'esi_pt', label: 'ESI + PT' },
+  { value: 'all',    label: 'All three (ESI + PF + PT)' },
+  { value: 'any',    label: 'Any one or more' },
+  { value: 'none',   label: 'None — no statutory deduction' },
+]
+
 function monthLabel(m: string) {
   if (!m) return ''
   const [y, mo] = m.split('-')
@@ -39,6 +55,7 @@ export const SalaryRegisterPage: React.FC = () => {
   const [filterDesignation, setFilterDesignation] = useState('')
   const [acctFilter, setAcctFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [statFilter, setStatFilter] = useState('')
   const navigate = useNavigate()
   const [voucherEmp, setVoucherEmp] = useState<{ id: string; name: string } | null>(null)
   const [dedEmp, setDedEmp] = useState<{ id: string; name: string } | null>(null)
@@ -152,8 +169,31 @@ export const SalaryRegisterPage: React.FC = () => {
       .some(v => String(v ?? '').toLowerCase().includes(q))
   }
 
+  // Statutory filter — who actually had ESI / PF / PT deducted this month, singly
+  // or in combination. "Has X" means a deduction was taken, not that the
+  // employee is registered: someone enrolled but with no paid days has nothing
+  // deducted, and would correctly not appear.
+  const hasEsi = (r: any) => (r.esi_employee ?? 0) > 0
+  const hasPf  = (r: any) => (r.pf_employee ?? 0) > 0
+  const hasPt  = (r: any) => (r.pt ?? 0) > 0
+  const matchesStatutory = (r: any) => {
+    switch (statFilter) {
+      case 'esi':  return hasEsi(r)
+      case 'pf':   return hasPf(r)
+      case 'pt':   return hasPt(r)
+      case 'any':  return hasEsi(r) || hasPf(r) || hasPt(r)
+      case 'all':  return hasEsi(r) && hasPf(r) && hasPt(r)
+      case 'none': return !hasEsi(r) && !hasPf(r) && !hasPt(r)
+      case 'esi_pf': return hasEsi(r) && hasPf(r)
+      case 'pf_pt':  return hasPf(r) && hasPt(r)
+      case 'esi_pt': return hasEsi(r) && hasPt(r)
+      default: return true
+    }
+  }
+
   const visibleRows = (rows as any[] ?? []).filter(r =>
-    matchesAccountKind((depositHolder(r)?.kind ?? 'Own').toLowerCase() as any, acctFilter) && matchesSearch(r))
+    matchesAccountKind((depositHolder(r)?.kind ?? 'Own').toLowerCase() as any, acctFilter)
+    && matchesSearch(r) && matchesStatutory(r))
 
   const payableRows = visibleRows.filter(r => (r.net_salary ?? 0) > 0)
 
@@ -204,7 +244,8 @@ export const SalaryRegisterPage: React.FC = () => {
       title: 'Salary Register',
       subtitle: monthLabel(month)
         + (acctFilter ? ` — ${ACCOUNT_KIND_OPTIONS.find(o => o.value === acctFilter)?.label}` : '')
-        + (q ? ` — search "${search.trim()}"` : ''),
+        + (q ? ` — search "${search.trim()}"` : '')
+        + (statFilter ? ` — ${STATUTORY_OPTIONS.find(o => o.value === statFilter)?.label}` : ''),
       headers: ['Emp Code','Name','Designation','Farm','Days','Absent','Paid','Extra','Total Earning',
         'Employee Deductions (PF,ESI,PT)','Advance','Other Deductions','Net Salary','Employer Amount (ESI,PF)','CTC','Deposited Into'],
       rows: payableRows.map(r => {
@@ -303,6 +344,14 @@ export const SalaryRegisterPage: React.FC = () => {
             options={[{ value: '', label: 'All Designations' }, ...designations.map((d: string) => ({ value: d, label: d }))]} />
         </div>
         <div>
+          <label className="block text-xs text-gray-500 mb-1">ESI / PF / PT</label>
+          <Select value={statFilter} onChange={e => setStatFilter(e.target.value)}
+            options={STATUTORY_OPTIONS} />
+          <p className="text-[10px] text-gray-400 mt-1 max-w-[13rem]">
+            Based on what was actually deducted this month, not on who is registered.
+          </p>
+        </div>
+        <div>
           <label className="block text-xs text-gray-500 mb-1">Account</label>
           <Select value={acctFilter} onChange={e => setAcctFilter(e.target.value)}
             options={ACCOUNT_KIND_OPTIONS} />
@@ -317,7 +366,7 @@ export const SalaryRegisterPage: React.FC = () => {
         (rows as any[] ?? []).length
           ? <EmptyState icon={<Search size={32}/>} title="Nothing matches these filters"
               subtitle={`${(rows as any[]).length} salary rows exist for ${monthLabel(month)} — clear the search or the filters to see them.`}
-              action={<Button size="sm" variant="outline" onClick={() => { setSearch(''); setAcctFilter('') }}>Clear search &amp; account filter</Button>} />
+              action={<Button size="sm" variant="outline" onClick={() => { setSearch(''); setAcctFilter(''); setStatFilter('') }}>Clear search &amp; filters</Button>} />
           : <EmptyState icon={<IndianRupee size={32}/>} title="No salary data for this month" subtitle="Run Bulk Salary to generate records" />
       )}
       {!isLoading && !!visibleRows.length && (
