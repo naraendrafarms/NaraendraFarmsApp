@@ -50,6 +50,21 @@ export const OperationsBoard: React.FC = () => {
       return data ?? []
     },
   })
+  // Live birds come from v_flock_summary, the one place that owns the rule:
+  // closing_female, else opening_female, else total placed — and MALES as well
+  // as females. The first version of this page read the latest daily record's
+  // opening_female on its own, which both ignored the closing figure and
+  // dropped every male bird, so it disagreed with the Dashboard and with All
+  // Flocks Data. One source, not a third opinion.
+  const { data: summary } = useQuery({
+    queryKey: ['ob_flock_summary'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('v_flock_summary')
+        .select('id,current_female,current_male,total_placed_f,total_placed_m')
+      if (error) { toast.error(error.message); throw error }
+      return data ?? []
+    },
+  })
   const { data: farms } = useQuery({
     queryKey: ['ob_farms'],
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code'); return data ?? [] },
@@ -138,9 +153,11 @@ export const OperationsBoard: React.FC = () => {
       const hd = openF7 > 0 ? (eggs7 / openF7) * 100 : null
       const hePct = eggs7 > 0 ? (he7 / eggs7) * 100 : null
 
-      const latest = mine.slice().sort((a, b) => b.record_date.localeCompare(a.record_date))[0]
-      const birds = latest?.opening_female ?? 0
-      const placed = (fl.paid_female ?? 0) + (fl.free_female ?? 0) + (fl.paid_male ?? 0) + (fl.free_male ?? 0)
+      const sm = ((summary ?? []) as any[]).find(v => v.id === fl.id)
+      const birdsF = sm?.current_female ?? 0
+      const birdsM = sm?.current_male ?? 0
+      const birds = birdsF + birdsM
+      const placed = (sm?.total_placed_f ?? 0) + (sm?.total_placed_m ?? 0)
       const mortMtd = mine.reduce((s, r) => s + (r.mortality_female ?? 0) + (r.mortality_male ?? 0), 0)
 
       const feedKg7 = mine7.reduce((s, r) => s + (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0), 0)
@@ -175,7 +192,7 @@ export const OperationsBoard: React.FC = () => {
         : null
 
       return {
-        fl, wk, birds, placed, site: farmName[siteOf(fl, iso(today)) ?? ''] ?? '—',
+        fl, wk, birds, birdsF, birdsM, placed, site: farmName[siteOf(fl, iso(today)) ?? ''] ?? '—',
         eggs7, hd, hePct, mortMtd,
         mortPct: placed > 0 ? (mortMtd / placed) * 100 : null,
         feedPerBird, directCost, costPerEgg, costPerHe, feedUnpriced,
@@ -186,7 +203,7 @@ export const OperationsBoard: React.FC = () => {
         laying: !!fl.laying_start_date && iso(today) >= fl.laying_start_date,
       }
     })
-  }, [flocks, daily, stdCurve, medUsage, expenses, farmName, feedRates, medRate])
+  }, [flocks, summary, daily, stdCurve, medUsage, expenses, farmName, feedRates, medRate])
 
   // Every deviation, worst first. Nothing is filtered out by a threshold.
   const alerts = useMemo(() => {
@@ -373,14 +390,14 @@ export const OperationsBoard: React.FC = () => {
               </div>
 
               <div className="divide-y divide-gray-50 text-sm">
-                <Metric k="Live birds" v={numFmt(r.birds)} note={`${numFmt(r.placed)} placed`} />
+                <Metric k="Live birds" v={numFmt(r.birds)} note={`♀ ${numFmt(r.birdsF)} · ♂ ${numFmt(r.birdsM)}`} />
                 <Metric k={`HD % (${DAYS}d)`} v={pct1(r.hd)}
                   std={r.stdHd} actual={r.hd} hasStd={r.hasStd}
                   note={!r.laying ? 'brooding' : undefined} />
                 <Metric k="HE %" v={pct1(r.hePct)}
                   std={r.stdHe} actual={r.hePct} hasStd={r.hasStd}
                   note={!r.laying ? 'brooding' : undefined} />
-                <Metric k="Mortality (mtd)" v={pct1(r.mortPct)} note={`${numFmt(r.mortMtd)} birds`} />
+                <Metric k="Mortality (mtd)" v={pct1(r.mortPct)} note={`${numFmt(r.mortMtd)} of ${numFmt(r.placed)} placed`} />
                 <Metric k="Feed / bird / day" v={r.feedPerBird != null ? `${r.feedPerBird.toFixed(0)} g` : '—'} />
               </div>
 
