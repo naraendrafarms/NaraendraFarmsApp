@@ -29,6 +29,7 @@ import { EmployeeList, SalaryAbstractPage, SalaryEntryPage, BonusPage, ESIPFRepo
 import { SalaryRegisterPage } from '@/pages/employees/SalaryRegisterPage'
 import { SalaryCMSExportPage } from '@/pages/employees/SalaryCMSExportPage'
 import { WorkforceReviewPage } from '@/pages/employees/WorkforceReviewPage'
+import { OperationsBoard } from '@/pages/flock/OperationsBoard'
 import { SalaryHistoryPage } from '@/pages/employees/SalaryHistoryPage'
 import { PartnerRemunerationPage } from '@/pages/employees/PartnerRemunerationPage'
 import { DailyAttendancePage, MonthAttendancePage, EmployeeAdvancesPage, MonthlyAttendanceGridPage } from '@/pages/employees/AttendancePages'
@@ -309,6 +310,7 @@ export const App: React.FC = () => {
 
             {/* Flock Management (new) */}
             <Route path="flock" element={<FlockDashboard />} />
+            <Route path="flock/operations" element={<OperationsBoard />} />
             <Route path="flock/compare" element={<FlockComparison />} />
             <Route path="flock/shed-performance" element={<ShedPerformancePage />} />
             <Route path="expenses" element={<FarmExpensesPage />} />
