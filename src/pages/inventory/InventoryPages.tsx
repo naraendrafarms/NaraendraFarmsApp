@@ -151,7 +151,13 @@ export const InventoryPage: React.FC = () => {
 // ════════════════════════════════════════════════════════════════════
 const OUT_TYPES = new Set(['production_out','medicine_out','adjustment_out','transfer_out','dispatch_out'])
 
-function useStockRows(asOf: string) {
+// `from` is optional. Without it the page behaves exactly as before: every
+// movement up to asOf is counted, and `opening` holds only the rows explicitly
+// typed 'opening'. With it, everything BEFORE that date collapses into opening
+// and the received/used columns describe the period alone — so the row reads as
+// a stock statement (opening + received + adjusted − used = closing) rather
+// than a lifetime total with a date applied to part of it.
+function useStockRows(asOf: string, from?: string) {
   // Item master is the source of truth for names, category, unit, reorder_level
   const { data: itemsMaster, isLoading: itemsLoading } = useQuery({
     queryKey: ['items_master_inv'],
@@ -176,7 +182,7 @@ function useStockRows(asOf: string) {
   })
 
   const { data: slData, isLoading: slLoading } = useQuery({
-    queryKey: ['sl_all', asOf],
+    queryKey: ['sl_all', asOf],   // `from` only re-buckets rows already fetched
     queryFn: async () => {
       let all: any[] = [], from = 0
       while (true) {
@@ -232,7 +238,11 @@ function useStockRows(asOf: string) {
       }
       const row = m[key]
       const qty = Number(r.qty ?? 0)
-      if (OUT_TYPES.has(r.txn_type)) {
+      if (from && (r.txn_date ?? '') < from) {
+        // Before the window: net it into opening, whatever kind of movement it
+        // was. Its own in/out detail belongs to a period we are not showing.
+        row.opening += OUT_TYPES.has(r.txn_type) ? -qty : qty
+      } else if (OUT_TYPES.has(r.txn_type)) {
         row.used += qty
       } else if (r.txn_type === 'opening') {
         row.opening += qty
@@ -258,7 +268,7 @@ function useStockRows(asOf: string) {
       const searchText = `${r.item_name} ${(aliasMap[r.key] ?? []).join(' ')}`.toLowerCase()
       return { ...r, closing, value: closing * (r.rate || 0), searchText }
     }).sort((a, b) => (a.category || 'zzz').localeCompare(b.category || 'zzz') || a.item_name.localeCompare(b.item_name))
-  }, [itemsMaster, slData, aliases, asOf])
+  }, [itemsMaster, slData, aliases, asOf, from])
 
   return { rows, isLoading: itemsLoading || slLoading }
 }
@@ -269,10 +279,11 @@ function useStockRows(asOf: string) {
 const StockStatusTab: React.FC = () => {
   const CATEGORIES = useCategoryList()
   const [asOf, setAsOf] = useState(today())
+  const [fromDate, setFromDate] = useState('')
   const [cat, setCat] = useState('')
   const [q, setQ] = useState('')
   const [onlyLow, setOnlyLow] = useState(false)
-  const { rows, isLoading } = useStockRows(asOf)
+  const { rows, isLoading } = useStockRows(asOf, fromDate || undefined)
 
   const filtered = useMemo(() => rows.filter(r => {
     if (cat && r.category !== cat) return false
@@ -282,6 +293,7 @@ const StockStatusTab: React.FC = () => {
   }), [rows, cat, q, onlyLow])
 
   const totalValue = filtered.reduce((s, r) => s + (r.value > 0 ? r.value : 0), 0)
+  const ranged = !!fromDate
   const lowCount = rows.filter(r => r.reorder_level > 0 && r.closing <= r.reorder_level).length
 
   const exportCsv = () => {
@@ -291,7 +303,7 @@ const StockStatusTab: React.FC = () => {
       roundQty(r.closing, r.unit), r.rate, Math.round(r.value)])]
       .map(row => row.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\n')
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}))
-    a.download = `stock_status_${asOf}.csv`; a.click()
+    a.download = `stock_status_${fromDate ? `${fromDate}_to_` : ''}${asOf}.csv`; a.click()
   }
 
   return (
@@ -305,7 +317,11 @@ const StockStatusTab: React.FC = () => {
 
       <Card>
         <div className="flex flex-wrap gap-3 items-end">
+          <DateInput label="Movements from" value={fromDate} onChange={e => setFromDate(e.target.value)} className="w-40" />
           <DateInput label="Stock as on" value={asOf} onChange={e => setAsOf(e.target.value)} className="w-40" />
+          {fromDate && (
+            <Button variant="ghost" size="sm" className="self-end mb-0.5" onClick={() => setFromDate('')}>Clear from</Button>
+          )}
           <Select label="Category" value={cat} onChange={e => setCat(e.target.value)}
             options={[{value:'',label:'All categories'}, ...CATEGORIES.map(c => ({value:c,label:c}))]} className="w-44" />
           <div className="flex-1 min-w-[180px]">
@@ -323,13 +339,24 @@ const StockStatusTab: React.FC = () => {
         </div>
       </Card>
 
+      {ranged && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          Showing movements <strong>{fromDate} → {asOf}</strong>. <strong>Opening</strong> is everything before
+          {' '}{fromDate} netted together, <strong>Received</strong> and <strong>Used</strong> are the period alone, and
+          {' '}<strong>Closing</strong> is opening + received + adjusted − used. Leave “Movements from” blank to go back
+          to the running totals.
+        </div>
+      )}
+
       <Card padding={false}>
         {isLoading ? <Spinner /> : filtered.length === 0 ? <EmptyState icon={<Boxes size={28}/>} title="No items found" subtitle="Add items in Purchase → Items Master first. Stock balance is computed automatically from GRN receipts and usage." /> : (
           <div className="overflow-x-auto">
             <Table>
               <thead><tr>
                 <Th>Code</Th><Th>Item</Th><Th>Category</Th><Th>Unit</Th>
-                <Th right>Opening</Th><Th right>Received</Th><Th right>Used</Th><Th right>Adjust</Th>
+                <Th right>Opening</Th>
+                <Th right>{ranged ? 'Received (period)' : 'Received'}</Th>
+                <Th right>{ranged ? 'Used (period)' : 'Used'}</Th><Th right>Adjust</Th>
                 <Th right>Closing</Th><Th right>Rate</Th><Th right>Value</Th>
               </tr></thead>
               <tbody>
@@ -387,11 +414,18 @@ const AdjustmentsTab: React.FC = () => {
   })
   const [typeFilter, setTypeFilter] = useState('')
   const [q, setQ] = useState('')
+  // The list had no date filter at all — every adjustment ever made, with no way
+  // to ask what was adjusted last month when a stock figure looks wrong.
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const filtered = useMemo(() => (rows as any[]).filter((r: any) => {
     if (typeFilter && r.adjustment_type !== typeFilter) return false
-    if (q && !r.ingredient_name?.toLowerCase().includes(q.toLowerCase())) return false
+    if (q && !String(r.ingredient_name ?? '').toLowerCase().includes(q.toLowerCase())) return false
+    const d = String(r.adjustment_date ?? '')
+    if (fromDate && d < fromDate) return false
+    if (toDate && d > toDate) return false
     return true
-  }), [rows, typeFilter, q])
+  }), [rows, typeFilter, q, fromDate, toDate])
 
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<any>(null)
@@ -478,6 +512,13 @@ const AdjustmentsTab: React.FC = () => {
           </select>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item…"
             className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-1 focus:ring-brand-500 w-48" />
+          <label className="flex items-center gap-1.5 text-sm text-gray-600">From
+            <DateInput value={fromDate} onChange={e => setFromDate(e.target.value)} /></label>
+          <label className="flex items-center gap-1.5 text-sm text-gray-600">To
+            <DateInput value={toDate} onChange={e => setToDate(e.target.value)} /></label>
+          {(fromDate || toDate) && (
+            <Button size="sm" variant="ghost" onClick={() => { setFromDate(''); setToDate('') }}>Clear dates</Button>
+          )}
           <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={downloadTemplate}>Template</Button>
           {canEdit && <Button size="sm" variant="outline" icon={<Upload size={14}/>} onClick={() => importRef.current?.click()}>Import</Button>}
           <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
