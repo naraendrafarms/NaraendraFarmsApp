@@ -1,6 +1,17 @@
 # Line-level shed entry — migration plan
 
-**Status: PLAN ONLY. Nothing in this document has been run.**
+**Status (15 Aug 2026): 638, 640, 641, 642 and 644 have been RUN and verified.
+639 and 643 have NOT been run — see below.**
+
+- **639 (provisional line seeding) — dropped, deliberately.** The uploaded shed
+  workbook (`DOC20260815WA0026`) is a shed *capacity* sheet: shed no, type, sex,
+  A side box, B side box, total box, birds, water tank. It contains no line
+  breakdown anywhere, and it does not even fill the A/B gap — Kethireddypalli
+  1–4, Potlapally 1–2 and Bodjanampet‑1 5–7 carry a total box figure only.
+  Seeded lines would therefore have been invention. `shed_lines` is empty and
+  waits for the real line sheet.
+- **643 (the roll-up trigger) — waits.** There is nothing to roll up until real
+  lines exist, and it must be introduced one shed at a time.
 
 Purpose: let shed supervisors record production (4 rounds a day), mortality,
 feed and medicine **per line**, feeding the views management and accounts
