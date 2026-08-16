@@ -200,8 +200,14 @@ export const HatchBatches: React.FC = () => {
     }
   })
 
-  // Fetch dispatch lines for all batches that have a linked dispatch (for egg age + flock age at prod)
-  const dispatchIds = [...new Set((batches ?? []).map((b: any) => b.dispatch_id).filter(Boolean))]
+  // Dispatch lines are needed for two things now: the egg age / flock-age-at-
+  // production of batches that ARE linked, and the production-date range shown
+  // against each candidate in the link dropdown, so choosing the right dispatch
+  // does not mean opening another page.
+  const dispatchIds = [...new Set([
+    ...(batches ?? []).map((b: any) => b.dispatch_id),
+    ...(dispatches ?? []).map((d: any) => d.id),
+  ].filter(Boolean))]
   const { data: allDispatchLines } = useQuery({
     queryKey: ['hatch_dispatch_lines', dispatchIds.join(',')],
     enabled: dispatchIds.length > 0,
@@ -214,6 +220,11 @@ export const HatchBatches: React.FC = () => {
   })
   // Build a map: dispatch_id -> avg prod_date (as Date ms), total eggs
   const dispatchAvgProd: Record<string, number> = {}
+  // And the first/last production date on each dispatch, shown against the
+  // candidates in the dropdown — Flock 20's dispatches around one setting date
+  // span nearly four weeks of production, so which one is picked moves Egg Age
+  // by up to 27 days.
+  const dispatchProdRange: Record<string, { min: string; max: string }> = {}
   if (allDispatchLines) {
     const groups: Record<string, { sumMs: number; count: number }> = {}
     for (const l of allDispatchLines) {
@@ -224,6 +235,12 @@ export const HatchBatches: React.FC = () => {
       // weighted average by egg quantity
       groups[l.dispatch_id].sumMs += ms * (qty || 1)
       groups[l.dispatch_id].count += (qty || 1)
+      const r = dispatchProdRange[l.dispatch_id]
+      if (!r) dispatchProdRange[l.dispatch_id] = { min: l.prod_date, max: l.prod_date }
+      else {
+        if (l.prod_date < r.min) r.min = l.prod_date
+        if (l.prod_date > r.max) r.max = l.prod_date
+      }
     }
     for (const [id, g] of Object.entries(groups)) {
       dispatchAvgProd[id] = g.sumMs / g.count
@@ -345,7 +362,8 @@ export const HatchBatches: React.FC = () => {
       // is the only thing that falls back to the calculation.
       const stdVal     = form.std_chicks.trim() !== '' ? N(form.std_chicks) : (autoStd || null)
       const payload = {
-        dispatch_id:      form.dispatch_id || null,
+        // Unambiguous match links itself; anything less certain stays null.
+        dispatch_id:      form.dispatch_id || autoLinkMatch?.id || null,
         flock_id:         flockId || null,
         invoice_no:       form.invoice_no || null,
         hatchery_id:      form.hatchery_id || null,
@@ -522,10 +540,42 @@ export const HatchBatches: React.FC = () => {
   // ── display state ─────────────────────────────────────────────────────────────
   const flockOptions    = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const hatcheryOptions = (hatcheries ?? []).map((h: any) => ({ value: h.id, label: h.name }))
-  const dispatchOptions = (dispatches ?? []).map((d: any) => ({
-    value: d.id,
-    label: `${d.invoice_no ? d.invoice_no + ' — ' : d.dc_no ? 'DC-' + d.dc_no + ' — ' : ''}${fmtDate(d.dispatch_date)} (${d.total_dispatched?.toLocaleString('en-IN')} eggs) F-${d.flocks?.flock_no}`
-  }))
+  // The link dropdown puts the LIKELY dispatches first: same flock as the form,
+  // dispatched in the three weeks before the setting date — eggs cannot be set
+  // before they are laid. Each carries its production-date range, which is the
+  // thing you actually need to pick the right one.
+  const dispatchOptionLabel = (d: any) => {
+    const rng = dispatchProdRange[d.id]
+    return `${d.invoice_no ? d.invoice_no + ' — ' : d.dc_no ? 'DC-' + d.dc_no + ' — ' : ''}`
+      + `${fmtDate(d.dispatch_date)} (${d.total_dispatched?.toLocaleString('en-IN')} eggs) F-${d.flocks?.flock_no}`
+      + (rng ? ` · prod ${fmtDate(rng.min)}${rng.max !== rng.min ? `–${fmtDate(rng.max)}` : ''}` : '')
+  }
+  const isCandidate = (d: any) => {
+    if (!form.flock_id || d.flock_id !== form.flock_id) return false
+    if (!form.setting_date || d.dispatch_date > form.setting_date) return false
+    return (new Date(form.setting_date).getTime() - new Date(d.dispatch_date).getTime()) / 86400000 <= 21
+  }
+  const dispatchOptions = [
+    ...(dispatches ?? []).filter(isCandidate).map((d: any) => ({
+      value: d.id, label: `★ ${dispatchOptionLabel(d)}`
+    })),
+    ...(dispatches ?? []).filter((d: any) => !isCandidate(d)).map((d: any) => ({
+      value: d.id, label: dispatchOptionLabel(d)
+    })),
+  ]
+
+  // Auto-link, but only when there is nothing to guess: exactly ONE dispatch of
+  // this flock, on or before the setting date, whose quantity equals Received.
+  // Two matches, or none, and it stays blank and asks — a 1,00,800-egg dispatch
+  // can be split across several hatcheries and settings, so "nearest" would be
+  // an assumption dressed up as a fact.
+  const autoLinkMatch = (() => {
+    if (form.dispatch_id || !form.flock_id || !form.eggs_set) return null
+    const want = N(form.eggs_set)
+    if (want <= 0) return null
+    const hits = (dispatches ?? []).filter((d: any) => isCandidate(d) && d.total_dispatched === want)
+    return hits.length === 1 ? hits[0] : null
+  })()
 
   // null/undefined = awaiting hatch; a recorded 0 is a total-failure batch
   // that IS completed (it used to be stuck in "pipeline" forever)
@@ -686,7 +736,12 @@ export const HatchBatches: React.FC = () => {
                   // Flock age at avg production date + egg age (avg prod → setting)
                   const avgProdMs = b.dispatch_id ? dispatchAvgProd?.[b.dispatch_id] : null
                   const avgProdDate = avgProdMs ? new Date(avgProdMs).toISOString().slice(0,10) : null
-                  const ageAtProd = ageDays(placement, avgProdDate ?? b.setting_date)
+                  // No fallback to the setting date. It used to silently use it
+                  // when the batch had no linked dispatch, which made Age@Prod
+                  // an exact copy of Age@Setting — a made-up figure that looked
+                  // real, while Egg Age (which has no fallback) showed a dash
+                  // from the very same missing data.
+                  const ageAtProd = avgProdDate ? ageDays(placement, avgProdDate) : null
                   const eggAgeDays = avgProdDate && b.setting_date
                     ? Math.round((new Date(b.setting_date).getTime() - new Date(avgProdDate).getTime()) / 86400000)
                     : null
@@ -987,7 +1042,14 @@ export const HatchBatches: React.FC = () => {
                   if (d.flock_id)   s('flock_id', d.flock_id)
                   if (d.total_dispatched) s('eggs_set', d.total_dispatched.toString())
                 }
-              }} />
+              }}
+              hint={form.dispatch_id
+                ? ''
+                : autoLinkMatch
+                  ? `Will link automatically to ${autoLinkMatch.invoice_no ?? 'DC-' + autoLinkMatch.dc_no} — same flock, ${autoLinkMatch.total_dispatched?.toLocaleString('en-IN')} eggs on ${fmtDate(autoLinkMatch.dispatch_date)}`
+                  : (dispatchOptions.some(o => o.label.startsWith('★'))
+                      ? '★ marks this flock\u2019s dispatches in the 3 weeks before the setting date. Without a link, Age@Prod and Egg Age stay blank.'
+                      : 'Without a link, Age@Prod and Egg Age stay blank — the app cannot know when these eggs were laid.')} />
             <Input label="Invoice No (override)" placeholder="INV-2026-001"
               value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
           </FormRow>
