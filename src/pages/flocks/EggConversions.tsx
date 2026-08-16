@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, today } from '@/lib/utils'
+import { fmtDate, today, fetchAllPages } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
@@ -51,12 +51,14 @@ export const EggConversions: React.FC = () => {
   const { data: conversions, isLoading } = useQuery({
     queryKey: ['egg_conversions', flockFilter],
     queryFn: async () => {
-      let q = supabase.from('egg_conversions')
-        .select('*, flocks(flock_no)')
-        .order('conversion_date', { ascending: false })
-        .limit(200)
-      if (flockFilter) q = q.eq('flock_id', flockFilter)
-      const { data } = await q; return data ?? []
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('egg_conversions')
+          .select('*, flocks(flock_no)')
+          .order('conversion_date', { ascending: false })
+          .range(from, to)
+        if (flockFilter) q = q.eq('flock_id', flockFilter)
+        return q
+      }, 'Egg conversions')
     }
   })
 

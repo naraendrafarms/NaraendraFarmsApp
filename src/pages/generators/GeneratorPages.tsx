@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, exportCSV, today } from '@/lib/utils'
+import { inr, exportCSV, today, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, DateInput,
@@ -134,7 +134,9 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
 
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ['generator_usage_log'],
-    queryFn: async () => { const { data } = await supabase.from('generator_usage_log').select('*, generators(name,code,farms(name))').order('log_date', { ascending: false }).limit(200); return data ?? [] }
+    // 6 rows today; paged because a usage log only ever grows and the page
+    // sums diesel and hours off these rows.
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('generator_usage_log').select('*, generators(name,code,farms(name))').order('log_date', { ascending: false }).range(from, to), 'Generator usage log')
   })
 
   const saveMut = useMutation({
@@ -236,7 +238,7 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
 
   const { data: purchases = [], isLoading } = useQuery({
     queryKey: ['generator_diesel_purchases'],
-    queryFn: async () => { const { data } = await supabase.from('generator_diesel_purchases').select('*, generators(name), farms(name), bank_accounts(bank_name,account_name)').order('purchase_date', { ascending: false }).limit(200); return data ?? [] }
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('generator_diesel_purchases').select('*, generators(name), farms(name), bank_accounts(bank_name,account_name)').order('purchase_date', { ascending: false }).range(from, to), 'Diesel purchases')
   })
   const { data: bankAccounts = [] } = useQuery({
     queryKey: ['bank_accounts'],

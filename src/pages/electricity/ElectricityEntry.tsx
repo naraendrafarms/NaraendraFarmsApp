@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtMonth, currentFY } from '@/lib/utils'
+import { inr, fmtMonth, currentFY, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
@@ -80,12 +80,15 @@ const BillsTab: React.FC = () => {
   const { data: bills, isLoading } = useQuery({
     queryKey: ['elec_bills', filterMonth, filterMeter],
     queryFn: async () => {
-      let q = supabase.from('electricity_bills')
-        .select('*, electricity_meters(meter_name,usc_no,service_no,farms(name,code))')
-        .order('bill_month', { ascending: false }).limit(500)
-      if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
-      if (filterMeter) q = q.eq('meter_id', filterMeter)
-      const { data } = await q; return data ?? []
+      // Bills are summed on this page, so page rather than cap.
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('electricity_bills')
+          .select('*, electricity_meters(meter_name,usc_no,service_no,farms(name,code))')
+          .order('bill_month', { ascending: false }).range(from, to)
+        if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
+        if (filterMeter) q = q.eq('meter_id', filterMeter)
+        return q
+      }, 'Electricity bills')
     }
   })
 
@@ -651,11 +654,13 @@ const AllocationTab: React.FC = () => {
   const { data: bills, isLoading } = useQuery({
     queryKey: ['elec_bills_alloc', filterMonth],
     queryFn: async () => {
-      let q = supabase.from('electricity_bills')
-        .select('*, electricity_meters(meter_name,usc_no,farms(name,code))')
-        .order('bill_month', { ascending: false }).limit(200)
-      if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
-      const { data } = await q; return data ?? []
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('electricity_bills')
+          .select('*, electricity_meters(meter_name,usc_no,farms(name,code))')
+          .order('bill_month', { ascending: false }).range(from, to)
+        if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
+        return q
+      }, 'Electricity bills')
     }
   })
 
@@ -791,12 +796,14 @@ const HistoryTab: React.FC = () => {
   const { data: bills, isLoading } = useQuery({
     queryKey: ['elec_history', filterMeter, filterFarm],
     queryFn: async () => {
-      let q = supabase.from('electricity_bills')
-        .select('*, electricity_meters!inner(meter_name,usc_no,farm_id,farms(name,code))')
-        .order('bill_month', { ascending: false }).limit(1000)
-      if (filterMeter) q = q.eq('meter_id', filterMeter)
-      if (filterFarm) q = q.eq('electricity_meters.farm_id', filterFarm)
-      const{data}=await q; return data??[]
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('electricity_bills')
+          .select('*, electricity_meters!inner(meter_name,usc_no,farm_id,farms(name,code))')
+          .order('bill_month', { ascending: false }).range(from, to)
+        if (filterMeter) q = q.eq('meter_id', filterMeter)
+        if (filterFarm) q = q.eq('electricity_meters.farm_id', filterFarm)
+        return q
+      }, 'Electricity bills')
     }
   })
 

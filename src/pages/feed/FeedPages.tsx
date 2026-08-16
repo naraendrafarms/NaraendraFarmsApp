@@ -702,9 +702,8 @@ export const FeedProduction: React.FC = () => {
   const { data: productions, isLoading } = useQuery({
     queryKey: ['feed_production'],
     queryFn: async () => {
-      const { data } = await supabase.from('feed_production').select('*, feed_types(code,name)')
-        .order('production_date', { ascending: false }).limit(100)
-      return data ?? []
+      return fetchAllPages<any>((from, to) => supabase.from('feed_production').select('*, feed_types(code,name)')
+        .order('production_date', { ascending: false }).range(from, to), 'Feed production')
     }
   })
 
@@ -833,10 +832,9 @@ export const FeedTransfer: React.FC = () => {
   const { data: transfers, isLoading } = useQuery({
     queryKey: ['feed_transfers'],
     queryFn: async () => {
-      const { data } = await supabase.from('feed_transfers')
+      return fetchAllPages<any>((from, to) => supabase.from('feed_transfers')
         .select('*, from_farm:farms!from_farm_id(name), to_farm:farms!to_farm_id(name), feed_types(code,name), flocks(flock_no)')
-        .order('transfer_date', { ascending: false }).limit(100)
-      return data ?? []
+        .order('transfer_date', { ascending: false }).range(from, to), 'Feed transfers')
     }
   })
 
@@ -956,13 +954,21 @@ export const FeedTransfer: React.FC = () => {
 
 // ── FEED DASHBOARD ────────────────────────────────────────────────
 export const FeedDashboard: React.FC = () => {
-  const { data: grns } = useQuery({ queryKey: ['grns'], queryFn: async () => { const { data } = await supabase.from('grn').select('qty,total_amount,grn_date,feed_ingredients(code)').eq('category','Feed Ingredient').order('grn_date',{ascending:false}).limit(100); return data ?? [] } })
-  const { data: prods } = useQuery({ queryKey: ['feed_production'], queryFn: async () => { const { data } = await supabase.from('feed_production').select('quantity_kg,production_date,feed_types(code)').order('production_date',{ascending:false}).limit(100); return data ?? [] } })
-  const { data: transfers } = useQuery({ queryKey: ['feed_transfers'], queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('quantity_kg,transfer_date').order('transfer_date',{ascending:false}).limit(100); return data ?? [] } })
+  // All three feed the dashboard's purchase/production/transfer totals, and the
+  // GRN one was truncating TODAY — .limit(100) against 293 feed-ingredient GRNs,
+  // so the purchase figure on this dashboard was built from a third of them.
+  const { data: grns } = useQuery({ queryKey: ['grns'], queryFn: async () =>
+    fetchAllPages<any>((from, to) => supabase.from('grn').select('qty,total_amount,grn_date,feed_ingredients(code)').eq('category','Feed Ingredient').order('grn_date',{ascending:false}).range(from, to), 'Feed GRNs') })
+  const { data: prods } = useQuery({ queryKey: ['feed_production'], queryFn: async () =>
+    fetchAllPages<any>((from, to) => supabase.from('feed_production').select('quantity_kg,production_date,feed_types(code)').order('production_date',{ascending:false}).range(from, to), 'Feed production') })
+  const { data: transfers } = useQuery({ queryKey: ['feed_transfers'], queryFn: async () =>
+    fetchAllPages<any>((from, to) => supabase.from('feed_transfers').select('quantity_kg,transfer_date').order('transfer_date',{ascending:false}).range(from, to), 'Feed transfers') })
 
   // Stock alerts: replicate StockPage logic
   const { data: allIngredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit').eq('is_active',true).order('code'); return data ?? [] } })
-  const { data: allGrnQty } = useQuery({ queryKey: ['grn_stock'], queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty').eq('category','Feed Ingredient'); return data ?? [] } })
+  const { data: allGrnQty } = useQuery({ queryKey: ['grn_stock'], queryFn: async () =>
+    fetchAllPages<any>((from, to) => supabase.from('grn').select('ingredient_id,qty')
+      .eq('category','Feed Ingredient').range(from, to), 'GRN stock') })
   // No .limit() at all here, which is the same bug wearing different clothes —
   // a bare .select() still stops at the server's 1,000-row cap. This feeds the
   // low-stock alert, so under-counting usage OVERSTATES stock on hand and the

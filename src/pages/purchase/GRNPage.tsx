@@ -187,11 +187,11 @@ export const GRNPage: React.FC = () => {
   const { data: openPOs } = useQuery({
     queryKey: ['pos_for_grn_link'],
     queryFn: async () => {
-      const { data } = await supabase.from('purchase_orders')
+      // The PO link dropdown — a PO missing from it cannot be linked at all,
+      // so this must be every PO, not the newest 500.
+      return fetchAllPages<any>((from, to) => supabase.from('purchase_orders')
         .select('id,po_no,item_name,quantity,unit,vendor_name,party_id,dose,material_status')
-        .order('po_date', { ascending: false })
-        .limit(500)
-      return data ?? []
+        .order('po_date', { ascending: false }).range(from, to), 'Purchase orders')
     }
   })
 

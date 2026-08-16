@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, inr } from '@/lib/utils'
+import { fmtDate, inr, fetchAllPages } from '@/lib/utils'
 import { today } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
@@ -80,16 +80,19 @@ export const FarmExpensesPage: React.FC = () => {
   const { data: expenses, isLoading } = useQuery({
     queryKey: ['farm_expenses', filterFarm, filterFlock, filterCat, filterFrom, filterTo],
     queryFn: async () => {
-      let q = supabase.from('farm_expenses')
-        .select('*, farms(name,code), flocks(flock_no)')
-        .order('expense_date', { ascending: false })
-        .limit(500)
-      if (filterFarm)  q = q.eq('farm_id', filterFarm)
-      if (filterFlock) q = q.eq('flock_id', filterFlock)
-      if (filterCat)   q = q.eq('category', filterCat)
-      if (filterFrom)  q = q.gte('expense_date', filterFrom)
-      if (filterTo)    q = q.lte('expense_date', filterTo)
-      const { data } = await q; return data ?? []
+      // These rows are summed into the expense total on the page.
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('farm_expenses')
+          .select('*, farms(name,code), flocks(flock_no)')
+          .order('expense_date', { ascending: false })
+          .range(from, to)
+        if (filterFarm)  q = q.eq('farm_id', filterFarm)
+        if (filterFlock) q = q.eq('flock_id', filterFlock)
+        if (filterCat)   q = q.eq('category', filterCat)
+        if (filterFrom)  q = q.gte('expense_date', filterFrom)
+        if (filterTo)    q = q.lte('expense_date', filterTo)
+        return q
+      }, 'Farm expenses')
     }
   })
 

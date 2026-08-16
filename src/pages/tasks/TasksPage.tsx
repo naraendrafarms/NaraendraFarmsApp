@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth'
-import { fmtDate, today } from '@/lib/utils'
+import { fmtDate, today, fetchAllPages } from '@/lib/utils'
 import {
   Card, SectionHeader, Select, Table, Th, Td, Badge, Spinner, EmptyState, StatCard,
   Modal, Input, Textarea, DateInput, FormRow, SearchableSelect,
@@ -53,18 +53,22 @@ export const TasksPage: React.FC = () => {
   const { data: tasks, isLoading } = useQuery({
     queryKey: ['tasks', filterType, filterStatus, filterFarm, effectiveUserFilter],
     queryFn: async () => {
-      let q = supabase.from('tasks')
-        .select('*, assignee:assigned_to_user_id(full_name,role), farms:farm_id(name,code)')
-        .order('due_date', { ascending: true, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(500)
-      if (filterType)   q = q.eq('task_type', filterType)
-      if (filterStatus) q = q.eq('status', filterStatus)
-      if (filterFarm)   q = q.eq('farm_id', filterFarm)
-      if (effectiveUserFilter) q = q.eq('assigned_to_user_id', effectiveUserFilter)
-      const { data, error } = await q
-      if (error) throw error
-      return data ?? []
+      // Paged. 8 tasks today, but a task list is exactly the kind of table
+      // that quietly passes 500 after a couple of busy years — and dropping a
+      // limit alone would not have helped, since a bare select still stops at
+      // the server's 1,000-row cap.
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('tasks')
+          .select('*, assignee:assigned_to_user_id(full_name,role), farms:farm_id(name,code)')
+          .order('due_date', { ascending: true, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .range(from, to)
+        if (filterType)   q = q.eq('task_type', filterType)
+        if (filterStatus) q = q.eq('status', filterStatus)
+        if (filterFarm)   q = q.eq('farm_id', filterFarm)
+        if (effectiveUserFilter) q = q.eq('assigned_to_user_id', effectiveUserFilter)
+        return q
+      }, 'Tasks')
     },
     enabled: scope === 'all' || !!profile?.id,
   })
