@@ -10,6 +10,7 @@ const LAST_UPDATED = '2026-08-16'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-08-16', tag: 'New', text: 'Hatch Analysis — a new page under Flock Management answering why a hatch was good or bad, and whose result it is. Every egg set ends in exactly one of five places (broken in transit, infertile, blaster, unhatched, hatched) and which one decides who can fix it: infertile is the breeder flock, unhatched is incubation and the hatchery\'s own result, broken is transport, blasters are handling and storage. Five tabs, all sharing one flock filter and setting-date range: Flock-wise (Std against actual chicks, plus where every egg went); Hatchery-wise (the same split per hatchery, with a plain-language verdict naming who is worst on UNHATCHED and what the gap costs in chicks); Week-wise (hatch % by setting week against the standard with infertile and unhatched alongside, so a dip with flat infertility reads as an incubation week and a dip with rising infertility reads as an egg week); Egg Age; and Money. The important one is Like-for-like on the Hatchery tab: hatcheries do not all get the same eggs, so it compares them on ONE flock\'s eggs and prints both spreads — on the current data the headline puts 1.5pp between best and worst hatchery, but on the same flock\'s eggs that shrinks to 0.5pp, meaning most of the apparent difference is which eggs each hatchery received, not how they ran them. Ranking on hatch % alone would have blamed the wrong hatchery. Egg Age is built but cannot draw yet: the laying date lives on the HE dispatch and NONE of the 394 batches is linked to one, so instead of a chart from nothing the tab says exactly that and how to switch it on. Money asks for your chick rate rather than inventing one — none of the batches carries a Chick Rate — then values each loss by who owns it.' },
   { date: '2026-08-16', tag: 'Fix', text: 'App-wide: figures that were quietly built from part of the data are now built from all of it. The Hatch Batches page was reading 200 of 395 batches; that turned out to be one instance of a pattern, so every page was audited against measured row counts. The trap is that the server returns at most 1,000 rows per request whatever the app asks for, so .limit(50000) is not "everything" — it is 1,000, with no error. Fixed and verified: Feed consumption in the Company P&L and Production Usage in Inventory were each built from 1,000 of 2,359 ingredient-usage rows (a MONEY figure, understated); the Feed Dashboard\'s purchase total read 100 of 293 feed GRNs; the Feed report dropped 93 GRNs whenever no month was chosen; "Export to Excel → Daily Records", described as all flock daily production records, handed over 1,000 of 3,026 rows; VHL live bird counts read 1,000 of 1,583 daily entries, falling back to placement figures for whichever flocks sorted last; and the low-stock alert under-counted usage, which OVERSTATES stock on hand and keeps the alert quiet on an ingredient that has run out. The Dashboard production chart was bounded by row count rather than by date — 100 rows is only a few days once several sheds report daily, so its oldest bar showed a partial day as a full one; it now asks for the 30 days it actually draws. Pending receivables, farm expenses, electricity bills, tasks, egg conversions, generator logs, the PO link dropdown and the rate-history lists were all capped too and are now paged — most were not truncating yet at today\'s row counts, but every one of them grows every month.' },
   { date: '2026-08-16', tag: 'New', text: 'Hatch Batches: a setting-date range filter beside the flock dropdown, and a new Avg Std tile. From and To are both optional — a From on its own runs to the newest batch — and the range narrows EVERYTHING at once: the table, the TOTAL row, all five tiles, the Hatchery Comparison and the Excel export, so a filtered figure can never end up sitting beside an unfiltered one, and an exported sheet always matches the screen it was taken from. Avg Std is the standard those eggs were expected to deliver (Std ÷ total eggs set), placed next to Avg Hatchability, which is what they actually delivered, on the SAME base so the two can be read straight against each other — the gap between them is the shortfall against standard, and Hatchability turns orange when it falls below Std. The heading above the page now states how many batches the figures cover, and the total it was narrowed from.' },
   { date: '2026-08-16', tag: 'Improved', text: 'Hatch Batches: Avg Hatchability is now chicks hatched ÷ TOTAL eggs set — the farm\'s own definition, breakage included — reading 80.9% (80,17,227 chicks from 99,14,510 eggs). It was hatched ÷ hatchable eggs (setting − infertile − blasters), which measures the incubator alone by excluding eggs that were never going to hatch, and reads about nine points higher at 89.97%. The Avg Fertility tile is removed from the top of the page; Inf% remains on every row and in the totals line for anyone who wants it.' },
@@ -586,6 +587,66 @@ const SECTIONS: Section[] = [
       'Use HHF series only for Hitech Hatch Fresh Pvt Ltd. Use HE for all other hatchery buyers.',
       'All dispatches with an invoice number appear in Accounts → Sales Invoice Register.',
       'Vehicle Type AC/NON-AC appears on the invoice print and in the dispatch table for quick reference.',
+    ]
+  },
+
+  // ── HATCH ANALYSIS ────────────────────────────────────────────────────────────
+  {
+    id: 'hatch-analysis',
+    icon: <Egg size={20}/>,
+    label: 'Hatch Analysis',
+    color: 'bg-violet-600',
+    intro: 'Why a hatch was good or bad, and whose result it is. Every egg set ends up in exactly one of five places — broken in transit, infertile, blaster, unhatched, or hatched — and WHICH one decides who can fix it. Infertile is the breeder flock (males, mating, flock age); unhatched is incubation, the hatchery\'s own result; broken is transport; blasters are egg handling and storage. The page keeps them apart on purpose, because a single hatch % blames whoever happens to be nearest.',
+    workflows: [
+      {
+        title: 'Compare hatcheries fairly',
+        path: 'Flock Management → Hatch Analysis → Hatchery-wise',
+        steps: [
+          { text: 'The stacked bar shows where every egg went at each hatchery, as a share of eggs set. Read the purple band (unhatched) first — that is the part the hatchery controls.' },
+          { text: 'A hatchery is judged on UNHATCHED, not on hatch %. Hatch % also moves with how fertile the eggs arrived, which is the breeder\'s doing, so ranking on hatch % alone can blame a hatchery for a flock\'s problem.', note: 'The verdict line at the top says which hatchery is worst on unhatched, by how much, and roughly how many chicks that gap costs on the eggs it actually received.' },
+          { text: 'Use Like-for-like — pick one flock and the table compares hatcheries on that flock\'s eggs alone. Hatcheries do not all get the same eggs.', note: 'A gap that survives like-for-like belongs to the hatchery. A gap that vanishes was never theirs — it was which eggs they were sent. The page prints both spreads so you can see which case you are in.' },
+        ]
+      },
+      {
+        title: 'Flock-wise — standard against actual',
+        path: 'Flock Management → Hatch Analysis → Flock-wise',
+        steps: [
+          { text: 'Grey bar is Std (what the STD Hatch % expected), green is what actually hatched. The gap is your shortfall in chicks, per flock.' },
+          { text: 'The second chart splits every egg by where it went, so a flock hatching badly because of infertility looks different from one hatching badly for any other reason.' },
+          { text: 'The verdict line names the flock losing the most eggs to infertility and how many eggs that is — a breeder matter no hatchery can fix, since no incubator can hatch an infertile egg.' },
+        ]
+      },
+      {
+        title: 'Week-wise — was it a bad week or a bad hatchery?',
+        path: 'Flock Management → Hatch Analysis → Week-wise',
+        steps: [
+          { text: 'Hatch % by setting week against the standard, with infertile and unhatched drawn alongside.' },
+          { text: 'A week where the hatch line dips while infertile stays flat is an INCUBATION week. A week where infertile climbs with it is an EGG week — the flock, the weather, or storage.', note: 'This is the quickest way to tell a one-off hatchery problem from a season.' },
+        ]
+      },
+      {
+        title: 'Egg Age — the loss you control',
+        path: 'Flock Management → Hatch Analysis → Egg Age',
+        steps: [
+          { text: 'Egg age is the days between an egg being LAID and being SET. Eggs held too long lose hatchability whatever the hatchery does, which makes this one of the few losses entirely in your hands.' },
+          { text: 'It needs a dispatch link, because the laying date lives on the HE dispatch, not on the batch. Until a batch is linked it cannot appear here — the tab says how many are linked rather than drawing a chart from thin air.', note: 'Link them in Hatch Batches → open a batch → Link Dispatch Invoice. Every batch you link shows up here automatically.' },
+          { text: 'Once linked: a dot per batch (bigger dot = more eggs) plus a 0-3 / 4-5 / 6-7 / 8+ day band table, so a holding-time policy can be argued from your own figures.' },
+        ]
+      },
+      {
+        title: 'Money — what each loss is worth',
+        path: 'Flock Management → Hatch Analysis → Money',
+        steps: [
+          { text: 'Type your chick rate (₹ per chick). If the batches carry their own Chick Rate the page uses that instead and says so — it never assumes a rate.' },
+          { text: 'Each loss is valued as one egg lost = one chick not sold, split by who owns it, plus what closing each gap would be worth.' },
+          { text: 'Read those as the size of the prize, not a forecast — no flock or hatchery ever closes a gap completely.' },
+        ]
+      },
+    ],
+    tips: [
+      'Every figure is computed from summed counts, so a 200-egg batch cannot swing a percentage as hard as a 30,000-egg one.',
+      'The flock filter and setting-date range at the top apply to all five tabs at once.',
+      'Infertile and blaster percentages are taken on SETTING eggs (received less broken); hatch % and Std % are on ALL eggs set, which is the farm\'s own definition.',
     ]
   },
 
