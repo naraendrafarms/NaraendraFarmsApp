@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fetchAllPages } from '@/lib/utils'
 import { parseFile } from '@/lib/parseFile'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
@@ -963,7 +963,13 @@ export const FeedDashboard: React.FC = () => {
   // Stock alerts: replicate StockPage logic
   const { data: allIngredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit').eq('is_active',true).order('code'); return data ?? [] } })
   const { data: allGrnQty } = useQuery({ queryKey: ['grn_stock'], queryFn: async () => { const { data } = await supabase.from('grn').select('ingredient_id,qty').eq('category','Feed Ingredient'); return data ?? [] } })
-  const { data: allProdUsage } = useQuery({ queryKey: ['prod_usage_stock'], queryFn: async () => { const { data } = await supabase.from('feed_production_ingredients').select('ingredient_id,qty_used_kg'); return data ?? [] } })
+  // No .limit() at all here, which is the same bug wearing different clothes —
+  // a bare .select() still stops at the server's 1,000-row cap. This feeds the
+  // low-stock alert, so under-counting usage OVERSTATES stock on hand and the
+  // alert stays quiet on an ingredient that has actually run out.
+  const { data: allProdUsage } = useQuery({ queryKey: ['prod_usage_stock'], queryFn: async () =>
+    fetchAllPages<any>((from, to) => supabase.from('feed_production_ingredients')
+      .select('ingredient_id,qty_used_kg').range(from, to), 'Production usage (stock alerts)') })
 
   const LOW_STOCK_THRESHOLD = 500 // kg
   const stockAlerts = React.useMemo(() => {

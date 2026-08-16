@@ -87,21 +87,25 @@ export const PaymentPlanningPage: React.FC = () => {
   const { data: receivables } = useQuery({
     queryKey: ['pending_receivables'],
     queryFn: async () => {
+      // Both were .limit(100). These rows are SUMMED into the receivables
+      // total, so the 101st unpaid invoice would drop off the figure the farm
+      // plans payments against — money missing with nothing to show for it.
+      // Paged, and the count is whatever is really outstanding.
       const [nhe, he] = await Promise.all([
         // SQL NULL never matches IN or NOT EQUAL, so the previous
         // .in('payment_status', ['Pending', null]) silently excluded every
         // NULL-status row instead of catching it — use OR with IS NULL.
-        supabase.from('nhe_sales')
+        fetchAllPages<any>((from, to) => supabase.from('nhe_sales')
           .select('id,sale_date,sale_type,amount,tds_amount,amount_received,parties(name),flocks(flock_no)')
           .or('payment_status.eq.Pending,payment_status.eq.Partial,payment_status.is.null')
           .or('is_employee_sale.is.null,is_employee_sale.eq.false')
           .order('sale_date', { ascending: false })
-          .limit(100),
-        supabase.from('he_dispatch')
+          .range(from, to), 'NHE receivables').then(data => ({ data })),
+        fetchAllPages<any>((from, to) => supabase.from('he_dispatch')
           .select('id,dispatch_date,amount,tds_amount,amount_received,parties(name),flocks(flock_no)')
           .or('payment_status.eq.Pending,payment_status.eq.Partial,payment_status.is.null')
           .order('dispatch_date', { ascending: false })
-          .limit(100),
+          .range(from, to), 'HE receivables').then(data => ({ data })),
       ])
       // Receivable = invoice amount, less TDS deducted at source (HE
       // Dispatch/NHE Sale show this as "Net receivable" on the receipt

@@ -79,10 +79,12 @@ const FlockProjectionTab: React.FC = () => {
     queryKey: ['ref_daily_records', refFlockIds.join(',')],
     queryFn: async () => {
       if (!refFlockIds.length) return []
-      const { data } = await supabase.from('daily_records')
+      // The WHOLE history of every reference flock, and the benchmarks this
+      // page plans against are averaged from it — so a single request stopping
+      // at the server's 1,000-row cap would quietly bend the benchmark.
+      return fetchAllPages<any>((from, to) => supabase.from('daily_records')
         .select('flock_id, record_date, opening_female, opening_male, mortality_female, mortality_male, feed_female_kg, feed_male_kg, total_eggs, he_eggs')
-        .in('flock_id', refFlockIds)
-      return data ?? []
+        .in('flock_id', refFlockIds).range(from, to), 'Reference flock records')
     },
     enabled: refFlockIds.length > 0,
   })

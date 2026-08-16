@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fetchAllPages } from '@/lib/utils'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, SectionHeader, Spinner,
   EmptyState, Table, Th, Td, DateInput, Badge, Modal, SearchableSelect
@@ -71,10 +71,13 @@ export const VHLFlocksPage: React.FC = () => {
   const { data: latestDaily } = useQuery({
     queryKey: ['vhl_flocks_latest_daily'],
     queryFn: async () => {
-      const { data } = await supabase.from('vhl_daily_entry')
+      // Was .limit(2000) against 1,583 rows, which looks safe and is not: the
+      // server caps the response at 1,000 whatever number the client names, so
+      // 583 days never arrived and the live bird count fell back to placement
+      // figures for whichever flocks sorted last. Paged.
+      return fetchAllPages<any>((from, to) => supabase.from('vhl_daily_entry')
         .select('flock_id,record_date,opening_female,opening_male,closing_female,closing_male')
-        .order('record_date', { ascending: false }).limit(2000)
-      return data ?? []
+        .order('record_date', { ascending: false }).range(from, to), 'VHL daily entries')
     }
   })
   const currentByFlock = React.useMemo(() => {
@@ -340,7 +343,11 @@ export const VHLDailyEntryPage: React.FC = () => {
   const handleTemplate = () => downloadXlsxTemplate('vhl_daily_entry_template.xlsx', VHL_DAILY_HEADERS, VHL_DAILY_EXAMPLE)
   const handleExport = async () => {
     if (!flockId) { toast.error('Select a flock first'); return }
-    const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).is('shed_id', null).order('record_date')
+    // Paged: an export that stops at 1,000 days hands over a CSV that looks
+    // complete and is not.
+    const data = await fetchAllPages<any>((from, to) => supabase.from('vhl_daily_entry')
+      .select('*').eq('flock_id', flockId).is('shed_id', null)
+      .order('record_date').range(from, to), 'VHL export', toast.error)
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`vhl_daily_${flock?.flock_no}_records.csv`, VHL_DAILY_HEADERS,
       data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.he_eggs,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.transfer_female,r.transfer_male,r.cull_female,r.cull_male,r.mortality_female,r.mortality_male,r.lighting_hrs,r.age_weeks,r.remarks]))

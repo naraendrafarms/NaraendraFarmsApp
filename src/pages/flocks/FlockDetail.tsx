@@ -507,9 +507,11 @@ export const FlockDetail: React.FC = () => {
   const { data: nheRateRows } = useQuery({
     queryKey: ['nhe_recent_rates'],
     queryFn: async () => {
-      const { data } = await supabase.from('nhe_sales')
-        .select('sale_date,sale_type,rate,qty').order('sale_date', { ascending: false }).limit(500)
-      return data ?? []
+      // 441 rows against .limit(500) — close enough that the next season would
+      // have started dropping the oldest rates out of the rate history.
+      return fetchAllPages<any>((from, to) => supabase.from('nhe_sales')
+        .select('sale_date,sale_type,rate,qty')
+        .order('sale_date', { ascending: false }).range(from, to), 'NHE rate history')
     },
   })
   const [ciFrom, setCiFrom] = useState('')

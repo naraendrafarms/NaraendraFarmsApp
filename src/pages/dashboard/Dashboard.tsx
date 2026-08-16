@@ -1,7 +1,7 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, pct, fmtDate, statusColor } from '@/lib/utils'
+import { inr, pct, fmtDate, statusColor, fetchAllPages } from '@/lib/utils'
 import { StatCard, Card, CardHeader, Badge, Spinner, SectionHeader } from '@/components/ui'
 import {
   Bird, Egg, TrendingUp, AlertTriangle, Zap, Users,
@@ -145,13 +145,17 @@ export const Dashboard: React.FC = () => {
     queryKey: ['recent_daily'],
     queryFn: async () => {
       const today = new Date().toISOString().slice(0, 10)
-      const { data } = await supabase
+      // Bounded by DATE, not by row count. It used to take the newest 100 rows
+      // and group them into days — but every shed reporting on a day is its own
+      // row, so 100 rows is only a handful of days, and the oldest day in the
+      // window arrived half-complete: that bar showed a partial day's eggs as
+      // if it were the whole day. Ask for the 30 days the chart actually wants.
+      const start = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+      return fetchAllPages<any>((from, to) => supabase
         .from('daily_records')
         .select('record_date, total_eggs, he_eggs, mortality_female, mortality_male, flock_id, flocks(flock_no)')
-        .lte('record_date', today)
-        .order('record_date', { ascending: false })
-        .limit(100)
-      return data ?? []
+        .gte('record_date', start).lte('record_date', today)
+        .order('record_date', { ascending: false }).range(from, to), 'Dashboard chart')
     }
   })
 

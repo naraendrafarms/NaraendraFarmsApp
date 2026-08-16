@@ -16,7 +16,7 @@ import {
   FormRow,
   Modal,
   DateInput, SearchableSelect } from '@/components/ui'
-import { pct, fmtDate, today, exportCSV } from '@/lib/utils'
+import { pct, fmtDate, today, exportCSV, fetchAllPages } from '@/lib/utils'
 import { Plus, Edit2, Trash2, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
@@ -93,28 +93,30 @@ function useHatchability() {
   return useQuery<HatchRow[]>({
     queryKey: ['hatchability-full'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('hatchability')
-        .select(`
+      // 393 rows today, so .limit(2000) has not bitten yet — but 2000 is above
+      // the server's 1,000-row response cap, so it never could have delivered
+      // what it asked for. Paged now rather than after the totals go wrong.
+      const FULL = `
           id, flock_id, dc_no, setting_date, invoice_date, hatch_date,
           hatchery, setting_no, age_weeks, eggs_received, eggs_set,
           broken, infertile, chicks_hatched, hatch_pct, created_at,
           production_date, blasters, unhatch, rejects, eggs_weight,
           flocks(flock_no)
-        `)
-        .order('setting_date', { ascending: false })
-        .limit(2000)
+        `
+      const { data, error } = await supabase.from('hatchability').select(FULL)
+        .order('setting_date', { ascending: false }).range(0, 0)
       if (error) {
         // If new columns missing (migration not run yet), retry without them
-        const { data: d2, error: e2 } = await supabase
+        return await fetchAllPages<any>((from, to) => supabase
           .from('hatchability')
           .select('id, flock_id, dc_no, setting_date, invoice_date, hatch_date, hatchery, setting_no, age_weeks, eggs_received, eggs_set, broken, infertile, chicks_hatched, hatch_pct, created_at, flocks(flock_no)')
-          .order('setting_date', { ascending: false })
-          .limit(2000)
-        if (e2) throw e2
-        return (d2 ?? []) as unknown as HatchRow[]
+          .order('setting_date', { ascending: false }).range(from, to),
+          'Hatchability') as unknown as HatchRow[]
       }
-      return (data ?? []) as unknown as HatchRow[]
+      void data
+      return await fetchAllPages<any>((from, to) => supabase.from('hatchability').select(FULL)
+        .order('setting_date', { ascending: false }).range(from, to),
+        'Hatchability') as unknown as HatchRow[]
     },
     staleTime: 5 * 60 * 1000,
   })

@@ -6,7 +6,7 @@ import { ConsumptionReportTab } from '@/pages/inventory/InventoryPages'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fetchAllPages } from '@/lib/utils'
 import { parseFile } from '@/lib/parseFile'
 import { fetchItemNameCanonMap, canonName } from '@/lib/itemAliases'
 import {
@@ -923,10 +923,12 @@ const ProductionTab: React.FC = () => {
         ;(m[k] ??= []).push({ date: g.grn_date ?? '', price: landed })
       }
       // Also include opening-stock / adjustment rates (item may have no GRN purchase)
-      const { data: sl } = await supabase.from('stock_ledger')
+      // Paged for the same reason as useFeedRates — 2,645 ledger rows, and a
+      // bare select silently returns only the first 1,000 of them.
+      const sl = await fetchAllPages<any>((from, to) => supabase.from('stock_ledger')
         .select('item_name,unit_price,txn_date,txn_type')
         .in('txn_type', ['opening', 'adjustment_in'])
-        .order('txn_date', { ascending: false })
+        .order('txn_date', { ascending: false }).range(from, to), 'Ingredient rates')
       for (const r of (sl ?? [])) {
         const k = canonName(canon, r.item_name)
         if (!k || !r.unit_price) continue

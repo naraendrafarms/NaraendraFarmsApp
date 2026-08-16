@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate } from '@/lib/utils'
+import { inr, fmtDate, fetchAllPages } from '@/lib/utils'
 import { Card, Input, Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState } from '@/components/ui'
 
 // Compares the rate we ordered at (latest PO) against the rate actually billed
@@ -13,8 +13,10 @@ export const RateCompare: React.FC = () => {
   const { data, isLoading } = useQuery({
     queryKey: ['v_po_grn_rate'],
     queryFn: async () => {
-      const { data } = await supabase.from('v_po_grn_rate').select('*').order('grn_date', { ascending: false }).limit(500)
-      return data ?? []
+      // 293 rows today against .limit(500) — not truncating yet, but this is a
+      // rate COMPARISON: a silently missing purchase is a rate nobody compares.
+      return fetchAllPages<any>((from, to) => supabase.from('v_po_grn_rate')
+        .select('*').order('grn_date', { ascending: false }).range(from, to), 'Rate comparison')
     },
   })
 

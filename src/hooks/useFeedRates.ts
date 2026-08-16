@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fetchItemNameCanonMap, canonName } from '@/lib/itemAliases'
+import { fetchAllPages } from '@/lib/utils'
 
 /**
  * Recipe-cost per kg for each finished feed type.
@@ -45,11 +46,13 @@ export function useFeedRates(): FeedRates {
         }
       }
       // Fall back to opening-stock / adjustment rate for items with no GRN purchase
-      const { data: slRates } = await supabase
+      // Paged — stock_ledger is 2,645 rows and growing, and these rates decide
+      // what every feed formula costs. A bare select stops at 1,000.
+      const slRates = await fetchAllPages<any>((from, to) => supabase
         .from('stock_ledger')
         .select('item_name,unit_price,txn_date,txn_type')
         .in('txn_type', ['opening', 'adjustment_in'])
-        .order('txn_date', { ascending: false })
+        .order('txn_date', { ascending: false }).range(from, to), 'Stock ledger rates')
       for (const r of (slRates ?? [])) {
         const k = canonName(canon, (r as any).item_name)
         if (k && r.unit_price && !(k in rateByIng)) rateByIng[k] = Number(r.unit_price)

@@ -1476,8 +1476,9 @@ const RateAnalysisTab: React.FC = () => {
   const { data: grnRates=[] } = useQuery({
     queryKey: ['v_po_grn_rate'],
     queryFn: async () => {
-      const { data } = await supabase.from('v_po_grn_rate').select('*').order('grn_date', { ascending: false }).limit(500)
-      return data ?? []
+      // Same view, same reason as Rate Compare — paged rather than capped.
+      return fetchAllPages<any>((from, to) => supabase.from('v_po_grn_rate')
+        .select('*').order('grn_date', { ascending: false }).range(from, to), 'PO rate history')
     }
   })
   // Default OFF — most GRNs here aren't linked to a PO, so "only mismatches"

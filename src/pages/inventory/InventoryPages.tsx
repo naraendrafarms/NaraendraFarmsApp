@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, today } from '@/lib/utils'
+import { inr, fmtDate, today, fetchAllPages } from '@/lib/utils'
 import { useAuth, can } from '@/lib/auth'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import {
@@ -82,9 +82,13 @@ function useProductionUsage() {
   return useQuery({
     queryKey: ['inv_prod_usage'],
     queryFn: async () => {
-      const { data } = await supabase.from('feed_production_ingredients')
+      // Was .limit(50000), which looks like "no limit" but is not — PostgREST
+      // caps one response at 1,000 rows, so 1,359 of the 2,359 ingredient-usage
+      // rows never arrived and production usage was understated by more than
+      // half. Paged instead of asking for a big number and hoping.
+      const data = await fetchAllPages<any>((from, to) => supabase.from('feed_production_ingredients')
         .select('ingredient_name,quantity_kg,feed_production_log(production_date)')
-        .limit(50000)
+        .range(from, to), 'Production usage')
       return (data ?? []).map((r: any) => ({
         item_name: r.ingredient_name,
         qty: Number(r.quantity_kg ?? 0),

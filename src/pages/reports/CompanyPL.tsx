@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr } from '@/lib/utils'
+import { inr, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Select, SectionHeader, Spinner, Table, Th, Td
 } from '@/components/ui'
@@ -245,8 +245,12 @@ export const CompanyPL: React.FC = () => {
   const { data: allProdUsage } = useQuery({
     queryKey: ['cpl_stock_prod'],
     queryFn: async () => {
-      const { data } = await supabase.from('feed_production_ingredients')
-        .select('ingredient_name,quantity_kg,feed_production_log(production_date)').limit(50000)
+      // Same .limit(50000) trap as Inventory, and here it moved a MONEY figure:
+      // the server returns at most 1,000 rows, so feed consumption in the P&L
+      // was built from 1,000 of 2,359 ingredient-usage rows. Paged.
+      const data = await fetchAllPages<any>((from, to) => supabase.from('feed_production_ingredients')
+        .select('ingredient_name,quantity_kg,feed_production_log(production_date)')
+        .range(from, to), 'P&L production usage')
       return (data ?? []).map((r: any) => ({
         item_name: r.ingredient_name,
         qty: Number(r.quantity_kg ?? 0),

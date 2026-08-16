@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, currentFY, fyRange, FY_OPTIONS } from '@/lib/utils'
+import { inr, fmtDate, currentFY, fyRange, FY_OPTIONS, fetchAllPages } from '@/lib/utils'
 import { useFeedRates } from '@/hooks/useFeedRates'
 import {
   Card, Button, Select, SectionHeader, Spinner, Table, Th, Td, Badge, Input, SearchableSelect
@@ -20,11 +20,13 @@ export const ProductionReport: React.FC = () => {
     queryKey: ['prod_report', flockId],
     enabled: !!flockId,
     queryFn: async () => {
-      const { data } = await supabase.from('daily_records')
+      // Paged: this is a flock's WHOLE history and it feeds monthly totals, so
+      // a single request would quietly stop at 1,000 days and understate every
+      // month past that point.
+      return fetchAllPages<any>((from, to) => supabase.from('daily_records')
         .select('record_date,total_eggs,he_eggs,mortality_female,mortality_male,opening_female,opening_male,feed_female_kg,feed_male_kg')
         .eq('flock_id', flockId)
-        .order('record_date')
-      return data ?? []
+        .order('record_date').range(from, to), 'Production report')
     }
   })
 
@@ -431,20 +433,29 @@ export const FeedReport: React.FC = () => {
   const { data: grns, isLoading } = useQuery({
     queryKey: ['feed_report', filterMonth],
     queryFn: async () => {
-      let q = supabase.from('grn').select('*, feed_ingredients(name,short_name,category), farms(name,code), parties(name)').order('grn_date', { ascending: false })
-      if (filterMonth) q = q.gte('grn_date', filterMonth + '-01').lte('grn_date', filterMonth + '-31')
-      const { data } = await q.limit(200)
-      return data ?? []
+      // Was .limit(200) with 293 GRNs in the table — with no month chosen, 93
+      // of them fell off the report and its totals without a word.
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('grn').select('*, feed_ingredients(name,short_name,category), farms(name,code), parties(name)')
+          .order('grn_date', { ascending: false }).range(from, to)
+        if (filterMonth) q = q.gte('grn_date', filterMonth + '-01').lte('grn_date', filterMonth + '-31')
+        return q
+      }, 'Feed report GRNs')
     }
   })
 
   const { data: production } = useQuery({
     queryKey: ['feed_prod_report', filterMonth],
     queryFn: async () => {
-      let q = supabase.from('feed_production').select('*, feed_types(code,name)').order('production_date', { ascending: false })
-      if (filterMonth) q = q.gte('production_date', filterMonth + '-01').lte('production_date', filterMonth + '-31')
-      const { data } = await q.limit(100)
-      return data ?? []
+      // feed_production is empty today, but this figure is summed into Total
+      // Production — a .limit(100) here would start understating it silently
+      // the moment the mill records its 101st batch.
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('feed_production').select('*, feed_types(code,name)')
+          .order('production_date', { ascending: false }).range(from, to)
+        if (filterMonth) q = q.gte('production_date', filterMonth + '-01').lte('production_date', filterMonth + '-31')
+        return q
+      }, 'Feed production report')
     }
   })
 
@@ -539,9 +550,14 @@ export const ExportPage: React.FC = () => {
   const exportTable = async (table: string, label: string, query?: any) => {
     setExporting(table)
     try {
-      const q = query ?? supabase.from(table).select('*').limit(10000)
-      const { data, error } = await q
-      if (error) throw error
+      // Was .limit(10000), which reads as "everything" but is not: PostgREST
+      // caps a single response at 1,000 rows whatever the client asks for, so
+      // "Daily Records — all flock daily production records" handed over 1,000
+      // of the 3,026 rows there actually are, with no error and nothing on the
+      // sheet saying it had been cut. Paged, so the export really is the table.
+      const data = query
+        ? await (async () => { const { data, error } = await query; if (error) throw error; return data ?? [] })()
+        : await fetchAllPages<any>((from, to) => supabase.from(table).select('*').range(from, to), label)
       const ws = XLSX.utils.json_to_sheet(data ?? [])
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, label)
