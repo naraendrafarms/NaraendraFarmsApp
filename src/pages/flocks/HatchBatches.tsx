@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, today, pct } from '@/lib/utils'
+import { fmtDate, today, pct, fetchAllPages } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
@@ -166,11 +166,16 @@ export const HatchBatches: React.FC = () => {
   const { data: dispatches } = useQuery({
     queryKey: ['he_dispatch_for_hatch', flockFilter],
     queryFn: async () => {
-      let q = supabase.from('he_dispatch')
-        .select('id,dispatch_date,invoice_no,dc_no,total_dispatched,flock_id,hatchery_id,flocks(flock_no),hatcheries(name,provides_hatch_report)')
-        .order('dispatch_date', { ascending: false }).limit(300)
-      if (flockFilter) q = q.eq('flock_id', flockFilter)
-      const { data } = await q; return data ?? []
+      // Paged, not capped. The Pipeline must show every dispatch that has no
+      // hatch report — a cap would hide exactly the oldest ones, which are the
+      // ones most overdue.
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('he_dispatch')
+          .select('id,dispatch_date,invoice_no,dc_no,total_dispatched,flock_id,hatchery_id,flocks(flock_no),hatcheries(name,provides_hatch_report)')
+          .order('dispatch_date', { ascending: false }).range(from, to)
+        if (flockFilter) q = q.eq('flock_id', flockFilter)
+        return q
+      }, 'HE dispatches for hatch batches', (m) => toast.error(m))
     }
   })
 
@@ -192,11 +197,17 @@ export const HatchBatches: React.FC = () => {
   const { data: batches, isLoading } = useQuery({
     queryKey: ['hatch_batches', flockFilter],
     queryFn: async () => {
-      let q = supabase.from('hatch_batches')
-        .select('*, hatcheries(name), he_dispatch(dispatch_date,invoice_no,dc_no,total_dispatched,flocks(flock_no,placement_date)), flocks(flock_no,placement_date)')
-        .order('setting_date', { ascending: false }).limit(200)
-      if (flockFilter) q = q.eq('flock_id', flockFilter)
-      const { data } = await q; return data ?? []
+      // Was .limit(200). With 395 batches that silently dropped half the
+      // history from the table, the TOTAL row, the four stat cards, the
+      // Hatchery Comparison and the Excel export — every figure on the page
+      // described only the 200 most recent settings, with nothing saying so.
+      return fetchAllPages<any>((from, to) => {
+        let q = supabase.from('hatch_batches')
+          .select('*, hatcheries(name), he_dispatch(dispatch_date,invoice_no,dc_no,total_dispatched,flocks(flock_no,placement_date)), flocks(flock_no,placement_date)')
+          .order('setting_date', { ascending: false }).range(from, to)
+        if (flockFilter) q = q.eq('flock_id', flockFilter)
+        return q
+      }, 'Hatch batches', (m) => toast.error(m))
     }
   })
 
@@ -683,7 +694,7 @@ export const HatchBatches: React.FC = () => {
   return (
     <div className="space-y-5">
       <SectionHeader title="Hatch Batches"
-        subtitle="Link dispatched invoices to hatchery settings and record hatch reports"
+        subtitle={`${(batches ?? []).length.toLocaleString('en-IN')} batch(es)${flockFilter ? ' in this flock' : ''} — every figure on this page covers all of them`}
         action={
           <div className="flex gap-2">
             {sel.size > 0 && (
