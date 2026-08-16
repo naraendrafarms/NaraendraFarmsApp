@@ -48,6 +48,7 @@ const NAV: NavItem[] = [
       { label: 'Egg Opening Stock',  to: '/flocks/opening-stock' },
       { label: 'Vaccination',        to: '/flocks/vaccination' },
       { label: 'HE Rate Register',   to: '/flocks/he-rate-register' },
+      { label: 'Cull Bird Rates',   to: '/flocks/cull-bird-rate' },
     ]
   },
   {

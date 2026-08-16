@@ -731,7 +731,7 @@ export const HEDispatch: React.FC = () => {
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
     queryFn: async () => {
-      let q = supabase.from('flocks').select('id,flock_no,status,laying_farm_id,rearing_farm_id').eq('is_vhl_contract', false).order('flock_no')
+      let q = supabase.from('flocks').select('id,flock_no,status,laying_farm_id,rearing_farm_id,placement_date').eq('is_vhl_contract', false).order('flock_no')
       q = applyFlockFarmFilter(q)
       const { data } = await q
       return data ?? []
@@ -787,11 +787,42 @@ export const HEDispatch: React.FC = () => {
     queryKey: ['he_vendor_rate_diff_lookup'],
     queryFn: async () => { const { data } = await supabase.from('he_vendor_rate_diff').select('party_id,diff'); return data ?? [] }
   })
-  const suggestedRate = (date: string, partyId?: string) => {
+  // Age-banded vendor rules (see migration 667). Hitech pays (Association -
+  // 1.50) less 35% while a flock is young, and (Association - 1.50) from
+  // 30/1 onward, so the rate depends on the FLOCK's age on the production
+  // date -- not on the buyer alone.
+  const { data: vendorTiers = [] } = useQuery({
+    queryKey: ['he_vendor_rate_tier_lookup'],
+    queryFn: async () => { const { data } = await supabase.from('he_vendor_rate_tier')
+      .select('party_id,flock_id,age_from_days,age_to_days,diff,pct_less'); return data ?? [] }
+  })
+  const suggestedRate = (date: string, partyId?: string, flockId?: string) => {
     const base = rateRegister.find((r: any) => date >= r.week_start && date <= r.week_end)?.rate
     if (base == null) return null
-    const diff = partyId ? (vendorDiffs.find((d: any) => d.party_id === partyId)?.diff ?? 0) : 0
-    return Number(base) + Number(diff)
+    if (partyId) {
+      // Age on the PRODUCTION date, the same date the Association week is taken
+      // from, so both halves of the price describe the same eggs.
+      const placement = flocks?.find((f: any) => f.id === flockId)?.placement_date
+      const ageDays = placement && date
+        ? Math.round((new Date(date + 'T00:00:00').getTime() - new Date(placement + 'T00:00:00').getTime()) / 86400000)
+        : null
+      const tier = (vendorTiers as any[]).find((t: any) =>
+        t.party_id === partyId &&
+        (!t.flock_id || t.flock_id === flockId) &&
+        ageDays != null &&
+        ageDays >= t.age_from_days &&
+        (t.age_to_days == null || ageDays <= t.age_to_days))
+      // The two parts chain in this order: subtract the differential, THEN take
+      // the percentage off. Association 25.75 - 1.5 = 24.25, less 35% = 15.76.
+      // Reversing them gives 15.24 on the same numbers.
+      if (tier) return Math.round((Number(base) + Number(tier.diff)) * (1 - Number(tier.pct_less) / 100) * 100) / 100
+      // No tier matched -- either this vendor has no age rules, or the flock has
+      // no placement date to age it by. Fall back to the flat differential
+      // rather than silently pricing at the bare Association rate.
+      const diff = vendorDiffs.find((d: any) => d.party_id === partyId)?.diff ?? 0
+      return Number(base) + Number(diff)
+    }
+    return Number(base)
   }
 
   // Dispatch lines: one row per production date with grade split
@@ -816,7 +847,7 @@ export const HEDispatch: React.FC = () => {
       if (idx !== i) return l
       const next = { ...l, [k]: v }
       if (k === 'prod_date' && !l.rate) {
-        const sugg = suggestedRate(v, form.party_id)
+        const sugg = suggestedRate(v, form.party_id, form.flock_id)
         if (sugg != null) next.rate = String(sugg)
       }
       return next
@@ -828,11 +859,11 @@ export const HEDispatch: React.FC = () => {
     if (!form.party_id) return
     setLines(ls => ls.map(l => {
       if (l.rate) return l
-      const sugg = suggestedRate(l.prod_date, form.party_id)
+      const sugg = suggestedRate(l.prod_date, form.party_id, form.flock_id)
       return sugg != null ? { ...l, rate: String(sugg) } : l
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.party_id, rateRegister, vendorDiffs])
+  }, [form.party_id, form.flock_id, rateRegister, vendorDiffs, vendorTiers])
   const HE_DRAFT_KEY = 'he_dispatch_draft'
   // Auto-save a draft of NEW (unsaved) dispatches so nothing is lost if the form is closed
   useEffect(() => {

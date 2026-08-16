@@ -263,6 +263,151 @@ const VendorRatesTab: React.FC = () => {
           <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
         </div>
       </Modal>
+
+      <AgeTiers parties={parties} latestRate={latestRate} />
+    </div>
+  )
+}
+
+// ── Flock-age rate tiers ─────────────────────────────────────────────────────
+// Some agreements price by the AGE of the flock the eggs came from, not by the
+// buyer alone. Hitech is the case this was built for: (Association - 1.50) less
+// 35% while a flock is young, and (Association - 1.50) from 30/1 onward.
+//
+// The two parts CHAIN, in this order, and the order is worth stating because it
+// changes the invoice: 25.75 - 1.50 = 24.25, less 35% = 15.76. Taking the 35%
+// off first and then the 1.50 would give 15.24 on the very same numbers.
+//
+// Age is stored in DAYS elapsed since placement, since week/day notation is
+// ambiguous about which end it counts from. Placement day is week 1 day 1 =
+// 0 days, so week W day D = (W-1)*7 + (D-1) days: 29/7 = 202, 30/1 = 203.
+const wdToDays = (w: number, d: number) => (w - 1) * 7 + (d - 1)
+const daysToWd = (days: number | null) => {
+  if (days == null) return '—'
+  return `${Math.floor(days / 7) + 1}/${(days % 7) + 1}`
+}
+
+const AgeTiers: React.FC<{ parties: any[]; latestRate: any }> = ({ parties, latestRate }) => {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
+  const blank = { party_id: '', from_w: '1', from_d: '1', to_w: '', to_d: '', diff: '', pct_less: '', remarks: '' }
+  const [f, setF] = useState(blank)
+  const set = (k: string, v: string) => setF(x => ({ ...x, [k]: v }))
+
+  const { data: tiers = [], isLoading } = useQuery({
+    queryKey: ['he_vendor_rate_tier'],
+    queryFn: async () => { const { data } = await supabase.from('he_vendor_rate_tier')
+      .select('*, parties(name)').order('party_id').order('age_from_days'); return data ?? [] }
+  })
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!f.party_id) throw new Error('Pick a vendor')
+      const from = wdToDays(parseInt(f.from_w) || 1, parseInt(f.from_d) || 1)
+      const to = f.to_w ? wdToDays(parseInt(f.to_w), parseInt(f.to_d) || 7) : null
+      if (to != null && to < from) throw new Error('The "to" age is younger than the "from" age')
+      const pct = parseFloat(f.pct_less) || 0
+      if (pct < 0 || pct >= 100) throw new Error('Percentage off must be between 0 and 100')
+      const row = { party_id: f.party_id, flock_id: null, age_from_days: from, age_to_days: to,
+                    diff: parseFloat(f.diff) || 0, pct_less: pct, remarks: f.remarks || null }
+      // Two tiers covering the same age for one vendor would make the price
+      // depend on which row happened to be read first, so block the overlap.
+      const clash = (tiers as any[]).find((t: any) => t.party_id === f.party_id && t.id !== editId &&
+        from <= (t.age_to_days ?? 9e9) && (to ?? 9e9) >= t.age_from_days)
+      if (clash) throw new Error(`That age range overlaps an existing tier (${daysToWd(clash.age_from_days)} to ${clash.age_to_days == null ? 'open' : daysToWd(clash.age_to_days)})`)
+      const q = editId
+        ? await supabase.from('he_vendor_rate_tier').update(row).eq('id', editId)
+        : await supabase.from('he_vendor_rate_tier').insert(row)
+      if (q.error) throw q.error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['he_vendor_rate_tier'] }); setOpen(false); setEditId(null); setF(blank); toast.success('Saved') },
+    onError: (e: any) => toast.error(e.message),
+  })
+  const del = useMutation({
+    mutationFn: async (id: string) => { const { error } = await supabase.from('he_vendor_rate_tier').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['he_vendor_rate_tier'] }); toast.success('Deleted') },
+  })
+
+  const effective = (t: any) => latestRate
+    ? Math.round((Number(latestRate.rate) + Number(t.diff)) * (1 - Number(t.pct_less) / 100) * 100) / 100
+    : null
+
+  return (
+    <div className="space-y-3 pt-4 border-t border-gray-200">
+      <div className="flex justify-between items-center gap-2">
+        <div>
+          <h3 className="font-semibold text-gray-800">Flock-age rate tiers</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            For agreements priced by the age of the flock the eggs came from. The differential is applied
+            first and the percentage second — (Association − 1.50) less 35% on ₹25.75 gives ₹15.76.
+            A tier here overrides the flat differential above for that vendor.
+          </p>
+        </div>
+        <Button icon={<Plus size={14} />} onClick={() => { setEditId(null); setF(blank); setOpen(true) }}>Add Tier</Button>
+      </div>
+      {isLoading ? <Spinner /> : (
+        <Card padding={false}>
+          <Table>
+            <thead><tr>
+              <Th>Vendor</Th><Th>Flock age (week/day)</Th><Th right>Diff vs Association</Th>
+              <Th right>% less</Th><Th right>Effective Rate</Th><Th>Remarks</Th><Th right>Actions</Th>
+            </tr></thead>
+            <tbody>
+              {(tiers as any[]).map((t: any) => (
+                <tr key={t.id} className="hover:bg-gray-50">
+                  <Td className="font-medium">{t.parties?.name ?? '—'}</Td>
+                  <Td>{daysToWd(t.age_from_days)} → {t.age_to_days == null ? 'onward' : daysToWd(t.age_to_days)}
+                    <span className="text-xs text-gray-400 ml-1">({t.age_from_days}–{t.age_to_days ?? '∞'} days)</span></Td>
+                  <Td right className={Number(t.diff) < 0 ? 'text-red-600' : ''}>{Number(t.diff) > 0 ? '+' : ''}{t.diff}</Td>
+                  <Td right>{Number(t.pct_less) > 0 ? `${t.pct_less}%` : '—'}</Td>
+                  <Td right className="font-semibold">{effective(t) != null ? inr(effective(t)!) : '—'}</Td>
+                  <Td>{t.remarks ?? '—'}</Td>
+                  <Td right>
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={() => { setEditId(t.id); setF({ party_id: t.party_id,
+                        from_w: String(Math.floor(t.age_from_days / 7) + 1), from_d: String((t.age_from_days % 7) + 1),
+                        to_w: t.age_to_days == null ? '' : String(Math.floor(t.age_to_days / 7) + 1),
+                        to_d: t.age_to_days == null ? '' : String((t.age_to_days % 7) + 1),
+                        diff: String(t.diff), pct_less: String(t.pct_less), remarks: t.remarks ?? '' }); setOpen(true) }}>
+                        <Pencil size={14} className="text-gray-400 hover:text-brand-600" /></button>
+                      <button onClick={() => confirm('Delete this tier?') && del.mutate(t.id)}>
+                        <Trash2 size={14} className="text-gray-400 hover:text-red-600" /></button>
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+              {tiers.length === 0 && <tr><Td colSpan={7}><EmptyState title="No age-based tiers yet" /></Td></tr>}
+            </tbody>
+          </Table>
+        </Card>
+      )}
+      <Modal open={open} onClose={() => setOpen(false)} title={editId ? 'Edit Age Tier' : 'Add Age Tier'}
+        footer={<Button loading={save.isPending} onClick={() => save.mutate()}>Save</Button>}>
+        <div className="space-y-3">
+          <Select label="Vendor *" value={f.party_id} onChange={e => set('party_id', e.target.value)} placeholder="Select Vendor"
+            options={parties.map((p: any) => ({ value: p.id, label: p.name }))} />
+          <FormRow cols={2}>
+            <Input label="From age — week" type="number" value={f.from_w} onChange={e => set('from_w', e.target.value)} />
+            <Input label="From age — day" type="number" value={f.from_d} onChange={e => set('from_d', e.target.value)} />
+          </FormRow>
+          <FormRow cols={2}>
+            <Input label="To age — week" type="number" value={f.to_w} onChange={e => set('to_w', e.target.value)}
+              hint="Leave blank for 'onward'" />
+            <Input label="To age — day" type="number" value={f.to_d} onChange={e => set('to_d', e.target.value)} />
+          </FormRow>
+          <Input label="Diff vs Association (₹/egg)" type="number" step="0.01" value={f.diff} onChange={e => set('diff', e.target.value)}
+            hint="e.g. -1.5" />
+          <Input label="Then take off (%)" type="number" step="0.01" value={f.pct_less} onChange={e => set('pct_less', e.target.value)}
+            hint="e.g. 35 — applied AFTER the differential. Leave blank for none." />
+          <Input label="Remarks" value={f.remarks} onChange={e => set('remarks', e.target.value)} />
+          <p className="text-xs text-gray-500">
+            Age counts from the placement date, which is week 1 day 1. The eggs are aged on their
+            PRODUCTION date — the same date the Association week is read from — so both halves of the
+            price describe the same eggs.
+          </p>
+        </div>
+      </Modal>
     </div>
   )
 }

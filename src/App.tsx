@@ -22,6 +22,7 @@ import { BulkDailyEntry } from '@/pages/flocks/BulkDailyEntry'
 import { EggConversions } from '@/pages/flocks/EggConversions'
 import { HatchBatches } from '@/pages/flocks/HatchBatches'
 import { HatchAnalysis } from '@/pages/flocks/HatchAnalysis'
+import { CullBirdRatePage } from '@/pages/flocks/CullBirdRatePage'
 import { FeedProduction, FeedTransfer } from '@/pages/feed/FeedPages'
 import { InventoryPage } from '@/pages/inventory/InventoryPages'
 import { FeedMillPage } from '@/pages/feed/FeedMillPages'
@@ -303,6 +304,7 @@ export const App: React.FC = () => {
             <Route path="tasks" element={<TasksPage />} />
             <Route path="generators" element={<GeneratorsPage />} />
             <Route path="flocks/he-rate-register" element={<HERateRegisterPage />} />
+            <Route path="flocks/cull-bird-rate" element={<CullBirdRatePage />} />
             <Route path="bags" element={<BagsPage />} />
             <Route path="admin/users" element={<RequireRole check={can.manageUsers}><UserManagement /></RequireRole>} />
             <Route path="admin/audit" element={<RequireRole check={can.manageUsers}><AuditLogPage /></RequireRole>} />
