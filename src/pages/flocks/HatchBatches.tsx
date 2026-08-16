@@ -441,7 +441,11 @@ export const HatchBatches: React.FC = () => {
     const file = e.target.files?.[0]; if (!file) return
     e.target.value = ''
     const buf = await file.arrayBuffer()
-    const wb = XLSX.read(buf)
+    // cellDates: a real Excel date cell arrives as a serial NUMBER without it,
+    // and the parser below only ever understood DD/MM/YYYY text — so every date
+    // in a normally-typed sheet failed, the setting date fell back to today and
+    // the hatch date was dropped entirely.
+    const wb = XLSX.read(buf, { cellDates: true })
     const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
     if (!rows.length) { toast.error('No data found in file'); return }
 
@@ -449,12 +453,25 @@ export const HatchBatches: React.FC = () => {
     const parsed = rows.map((r: any) => {
       const flockNo = String(r['Flock No'] ?? '').replace(/^F-/i, '').trim()
       const flockId = flockMap[flockNo] ?? null
+      // Three shapes have to be accepted, because a spreadsheet produces all
+      // three: a real date cell, an Excel serial number (older files, or a
+      // sheet read without cellDates), and DD/MM/YYYY text.
+      const iso = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
       const parseDate = (v: any) => {
-        if (!v) return null
-        const s = String(v)
-        const [d, m, y] = s.includes('/') ? s.split('/') : [null, null, null]
+        if (v === null || v === undefined || v === '') return null
+        if (v instanceof Date && !isNaN(v.getTime())) return iso(v)
+        if (typeof v === 'number' && isFinite(v)) {
+          // Excel day 1 is 01/01/1900, and the sheet format wrongly counts 1900
+          // as a leap year — the 25569/86400 offset is the standard correction.
+          const dt = new Date(Math.round((v - 25569) * 86400 * 1000))
+          return isNaN(dt.getTime()) ? null : iso(dt)
+        }
+        const str = String(v).trim()
+        const [d, m, y] = str.includes('/') ? str.split('/') : [null, null, null]
         // Reject non-4-digit years instead of padStart forcing "1" -> "2001"
         if (d && m && y && /^\d{4}$/.test(y)) return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
+        // ISO text, e.g. 2025-09-26
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str
         return null
       }
       // Same rules as the form, not a second copy of them: STD Hatch % owns
@@ -474,6 +491,14 @@ export const HatchBatches: React.FC = () => {
       // Hatchery Name is matched to the master, case- and space-insensitively.
       // An unmatched name is NOT invented as a new hatchery — it stays as text
       // on the row so it is visible and can be corrected.
+      const settingD = parseDate(r['Setting Date (DD/MM/YYYY)'])
+      const rawHatchD = parseDate(r['Hatch Date (DD/MM/YYYY)'])
+      // A hatch date BEFORE the setting date cannot be true — it is the
+      // classic day/month flip, where a sheet typed as 05/10/2025 was read by
+      // Excel as 10 May. Such a date is dropped rather than stored, and the
+      // rows are counted so they can be corrected in the sheet; guessing the
+      // flip would be inventing a date the farm never wrote.
+      const hatchD = rawHatchD && settingD && rawHatchD < settingD ? null : rawHatchD
       const hName = r['Hatchery Name'] ? String(r['Hatchery Name']).trim() : null
       const hMatch = hName
         ? (hatcheries ?? []).find((h: any) => h.name.toLowerCase().trim() === hName.toLowerCase())
@@ -486,8 +511,14 @@ export const HatchBatches: React.FC = () => {
         hatchery_name:  hName,
         setting_no:     r['Setting No'] ? String(r['Setting No']) : null,
         eggs_weight:    parseFloat(r['Eggs Weight']) || null,
-        setting_date:   parseDate(r['Setting Date (DD/MM/YYYY)']) ?? today(),
-        hatch_date:     parseDate(r['Hatch Date (DD/MM/YYYY)']) ?? null,
+        // No silent today(). A row whose setting date cannot be read is
+        // rejected below and counted, instead of every unreadable row landing
+        // on the same made-up date.
+        setting_date:   settingD,
+        hatch_date:     hatchD,
+        // Carried only to count the dropped ones for the message; stripped
+        // before insert, since it is not a column.
+        __rawHatch:     rawHatchD,
         eggs_set:       parseInt(r['Received']) || null,
         broken_transit: parseInt(r['Broken in Transit']) || 0,
         infertile:      parseInt(r['Infertile']) || 0,
@@ -506,8 +537,13 @@ export const HatchBatches: React.FC = () => {
     })
     // Skip rows with no flock match, and rows that duplicate an existing
     // batch — re-importing the same file used to double-book everything.
-    const valid = parsed.filter((r: any) => r.flock_id)
-    const noFlock = parsed.length - valid.length
+    const valid = parsed.filter((r: any) => r.flock_id && r.setting_date)
+    const noFlock = parsed.filter((r: any) => !r.flock_id).length
+    const noDate  = parsed.filter((r: any) => r.flock_id && !r.setting_date).length
+    // Counted here so the message can name them: a hatch date earlier than the
+    // setting date was dropped above.
+    const droppedHatch = parsed.filter((r: any) => r.flock_id && r.setting_date
+      && !r.hatch_date && r['__rawHatch']).length
     const { data: existingBatches } = await supabase.from('hatch_batches')
       .select('flock_id,setting_date,hatchery_name')
       .in('flock_id', [...new Set(valid.map((r: any) => r.flock_id))])
@@ -526,10 +562,14 @@ export const HatchBatches: React.FC = () => {
         || (hatchedEggs != null && hatchedEggs > 0 && r.std_chicks > hatchedEggs))
     }).length
 
-    const { error } = await supabase.from('hatch_batches').insert(fresh)
+    const toInsert = fresh.map(({ __rawHatch, ...row }: any) => row)
+    const { error } = await supabase.from('hatch_batches').insert(toInsert)
     if (error) toast.error(`Import failed: ${error.message}`)
     else {
-      toast.success(`Imported ${fresh.length} batches${dups ? `, ${dups} duplicate(s) skipped` : ''}${noFlock ? `, ${noFlock} unknown-flock row(s) skipped` : ''}`)
+      toast.success(`Imported ${fresh.length} batches${dups ? `, ${dups} duplicate(s) skipped` : ''}${noFlock ? `, ${noFlock} unknown-flock row(s) skipped` : ''}${noDate ? `, ${noDate} row(s) skipped with an unreadable setting date` : ''}`)
+      if (droppedHatch > 0) toast.error(
+        `${droppedHatch} row(s) had a hatch date BEFORE the setting date — usually a day/month flip in the sheet. Those hatch dates were left blank; fix them in Excel and re-import, or edit the batches.`,
+        { duration: 10000 })
       if (impossible > 0) toast.error(
         `${impossible} imported row(s) have a Std higher than the eggs that hatched — check their STD Hatch %.`,
         { duration: 8000 })
