@@ -139,6 +139,9 @@ export const HatchBatches: React.FC = () => {
   const [flockFilter, setFlockFilter] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [hatcheryFilter, setHatcheryFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [belowOnly, setBelowOnly] = useState(false)
   const [tab, setTab]               = useState<'batches'|'pipeline'|'hatchery'>('batches')
   const [sel, setSel]               = useState<Set<string>>(new Set())
   const [delConfirm, setDelConfirm] = useState(false)
@@ -597,6 +600,19 @@ export const HatchBatches: React.FC = () => {
   // ── display state ─────────────────────────────────────────────────────────────
   const flockOptions    = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
   const hatcheryOptions = (hatcheries ?? []).map((h: any) => ({ value: h.id, label: h.name }))
+  // The FILTER list is built from the batches, not from the hatchery master, so
+  // that batches carrying only a typed hatchery name — entered before the
+  // dropdown existed, or imported with a name that matched nothing — can still
+  // be filtered to. A hatchery you cannot select is a hatchery you cannot check.
+  const hatcheryFilterOptions = (() => {
+    const m = new Map<string, string>()
+    for (const b of (batches ?? [])) {
+      const key = b.hatchery_id ?? `text:${b.hatchery_name ?? '(not set)'}`
+      const label = b.hatcheries?.name ?? b.hatchery_name ?? '(not set)'
+      if (!m.has(key)) m.set(key, b.hatchery_id ? label : `${label} (typed)`)
+    }
+    return [...m].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label))
+  })()
   // The link dropdown puts the LIKELY dispatches first: same flock as the form,
   // dispatched in the three weeks before the setting date — eggs cannot be set
   // before they are laid. Each carries its production-date range, which is the
@@ -639,9 +655,34 @@ export const HatchBatches: React.FC = () => {
   // read from these two, so a filtered figure can never sit next to an
   // unfiltered one. Filtered on setting date, the date the table is sorted by.
   // Blank ends are open: a From with no To runs to the newest batch.
-  const inRange = (batches ?? []).filter((b: any) =>
-    (!fromDate || (b.setting_date && b.setting_date >= fromDate)) &&
-    (!toDate   || (b.setting_date && b.setting_date <= toDate)))
+  //
+  // Hatchery is matched on the LINKED hatchery where there is one and on the
+  // typed name where there is not, because batches entered before the dropdown
+  // existed carry only text — filtering on hatchery_id alone would hide them.
+  //
+  // Search covers setting no, invoice and DC together: those are the three
+  // numbers a hatchery quotes when it rings up about a batch, and hunting for
+  // one of them through 394 rows was the reason this box exists.
+  const q = search.trim().toLowerCase()
+  const inRange = (batches ?? []).filter((b: any) => {
+    if (fromDate && !(b.setting_date && b.setting_date >= fromDate)) return false
+    if (toDate   && !(b.setting_date && b.setting_date <= toDate)) return false
+    if (hatcheryFilter) {
+      const key = b.hatchery_id ?? `text:${b.hatchery_name ?? '(not set)'}`
+      if (key !== hatcheryFilter) return false
+    }
+    if (q) {
+      const hay = `${b.setting_no ?? ''} ${b.invoice_no ?? ''} ${b.dc_no ?? ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    // Below-standard only: hatched short of what the STD Hatch % expected.
+    // Batches with no hatch report yet cannot be judged, so they drop out.
+    if (belowOnly) {
+      if (b.hatched_chicks == null) return false
+      if ((b.hatched_chicks ?? 0) >= (b.std_chicks ?? 0)) return false
+    }
+    return true
+  })
 
   // null/undefined = awaiting hatch; a recorded 0 is a total-failure batch
   // that IS completed (it used to be stuck in "pipeline" forever)
@@ -723,6 +764,8 @@ export const HatchBatches: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Hatch Batches"
         subtitle={`${displayed.length.toLocaleString('en-IN')} batch(es)${flockFilter ? ' in this flock' : ''}${
+          hatcheryFilter ? ' at this hatchery' : ''}${belowOnly ? ', below standard only' : ''}${
+          q ? ` matching "${search.trim()}"` : ''}${
           fromDate || toDate ? ` set ${fromDate ? fmtDate(fromDate) : 'the beginning'} to ${toDate ? fmtDate(toDate) : 'now'}` : ''
         } — every figure on this page, and the Excel export, covers exactly these${
           displayed.length !== (batches ?? []).length ? ` (${(batches ?? []).length.toLocaleString('en-IN')} in total)` : ''}`}
@@ -757,11 +800,20 @@ export const HatchBatches: React.FC = () => {
       <div className="flex gap-3 items-end">
         <SearchableSelect placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
+        <SearchableSelect placeholder="All Hatcheries" options={hatcheryFilterOptions}
+          value={hatcheryFilter} onChange={v => setHatcheryFilter(v)} className="w-48" />
         <DateInput label="From (setting date)" value={fromDate} onChange={e => setFromDate(e.target.value)} />
         <DateInput label="To" value={toDate} onChange={e => setToDate(e.target.value)} />
-        {(flockFilter || fromDate || toDate) && (
+        <Input label="Search setting / invoice / DC" placeholder="e.g. 22-110-525"
+          value={search} onChange={e => setSearch(e.target.value)} className="w-52" />
+        <label className="flex items-center gap-2 text-sm text-gray-600 pb-2 whitespace-nowrap">
+          <input type="checkbox" checked={belowOnly} onChange={e => setBelowOnly(e.target.checked)}
+            className="rounded border-gray-300"/>
+          Below standard only
+        </label>
+        {(flockFilter || hatcheryFilter || fromDate || toDate || search || belowOnly) && (
           <Button variant="ghost" size="sm"
-            onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>
+            onClick={() => { setFlockFilter(''); setHatcheryFilter(''); setFromDate(''); setToDate(''); setSearch(''); setBelowOnly(false) }}>Clear</Button>
         )}
       </div>
 

@@ -94,6 +94,7 @@ export const HatchAnalysis: React.FC = () => {
   // ranking mixes up "this hatchery is worse" with "this hatchery happened to
   // get the weaker flock's eggs", which on the current data is most of the gap.
   const [lflFlock, setLflFlock] = useState('')
+  const [hatcheryFilter, setHatcheryFilter] = useState('')
   const [rateInput, setRateInput] = useState('')
 
   const { data: batches, isLoading } = useQuery({
@@ -134,9 +135,10 @@ export const HatchAnalysis: React.FC = () => {
   const rows = useMemo(() => (batches ?? []).filter((b: any) =>
     b.hatched_chicks != null &&
     (!flockFilter || b.flock_id === flockFilter) &&
+    (!hatcheryFilter || (b.hatchery_id ?? `text:${b.hatchery_name ?? '(not set)'}`) === hatcheryFilter) &&
     (!fromDate || (b.setting_date && b.setting_date >= fromDate)) &&
     (!toDate   || (b.setting_date && b.setting_date <= toDate))
-  ), [batches, flockFilter, fromDate, toDate])
+  ), [batches, flockFilter, hatcheryFilter, fromDate, toDate])
 
   const total = useMemo(() => rollup(rows), [rows])
 
@@ -147,6 +149,16 @@ export const HatchAnalysis: React.FC = () => {
   }, [batches])
 
   const hName = (b: any) => b.hatcheries?.name ?? b.hatchery_name ?? '(not set)'
+
+  // Built from the batches so typed-name hatcheries can be selected too.
+  const hatcheryOptions = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const b of (batches ?? [])) {
+      const key = b.hatchery_id ?? `text:${b.hatchery_name ?? '(not set)'}`
+      if (!m.has(key)) m.set(key, hName(b))
+    }
+    return [...m].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label))
+  }, [batches])
 
   const groupBy = (list: any[], key: (b: any) => string) => {
     const m: Record<string, any[]> = {}
@@ -301,7 +313,7 @@ export const HatchAnalysis: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Hatch Analysis"
         subtitle={`${rows.length.toLocaleString('en-IN')} completed batch(es)${
-          flockFilter ? ' in this flock' : ''}${
+          flockFilter ? ' in this flock' : ''}${hatcheryFilter ? ' at this hatchery' : ''}${
           fromDate || toDate ? ` set ${fromDate ? fmtDate(fromDate) : 'the beginning'} to ${toDate ? fmtDate(toDate) : 'now'}` : ''
         } — every figure below is computed from the summed counts of exactly these`}/>
 
@@ -318,8 +330,16 @@ export const HatchAnalysis: React.FC = () => {
       <div className="flex gap-3 items-end flex-wrap">
         <SearchableSelect placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44"/>
+        <SearchableSelect placeholder="All Hatcheries" options={hatcheryOptions}
+          value={hatcheryFilter} onChange={v => setHatcheryFilter(v)} className="w-48"/>
         <DateInput label="From (setting date)" value={fromDate} onChange={e => setFromDate(e.target.value)}/>
         <DateInput label="To" value={toDate} onChange={e => setToDate(e.target.value)}/>
+        {(flockFilter || hatcheryFilter || fromDate || toDate) && (
+          <button className="text-sm text-gray-500 hover:text-gray-700 underline pb-2"
+            onClick={() => { setFlockFilter(''); setHatcheryFilter(''); setFromDate(''); setToDate('') }}>
+            Clear
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
