@@ -62,7 +62,11 @@ function rowCalc(b: any) {
     unhatchPct: pct2(unhatch, setting),
     rejectPct:  pct2(reject, setting),
     hatchPct,   stdHatchPct, stdPct, stdBySetting,
-    stdMinusSale: std - saleChk,
+    // Sale Chk − Std: chicks actually received against what the STD Hatch %
+    // expected. Negative = short received, positive = more than expected. It
+    // used to be the other way round (Std − Sale), which showed a shortfall as
+    // a positive number.
+    stdMinusSale: saleChk - std,
   }
 }
 
@@ -98,7 +102,7 @@ function exportExcel(rows: any[]) {
       'Reject':         r.reject,
       'Reject%':        r.rejectPct,
       'Setting×STD%':   r.stdBySetting,
-      'STD-Sale Chicks': r.stdMinusSale,
+      'Sale−STD Chicks': r.stdMinusSale,
       'Remarks':        b.remarks ?? '',
     }
   })
@@ -635,7 +639,7 @@ export const HatchBatches: React.FC = () => {
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Reject</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Reject%</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Stg×STD%</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">STD-Sale</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Sale−STD</th>
                   <th className="px-3 py-2 w-16"></th>
                 </tr>
               </thead>
@@ -703,7 +707,9 @@ export const HatchBatches: React.FC = () => {
                       <td className="px-3 py-2 text-xs text-right">{r.reject > 0 ? r.reject : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right text-red-500">{r.reject > 0 ? pctCell(r.rejectPct) : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right">{r.stdBySetting > 0 ? r.stdBySetting.toLocaleString('en-IN') : '—'}</td>
-                      <td className="px-3 py-2 text-xs text-right">{r.std > 0 ? r.stdMinusSale.toLocaleString('en-IN') : '—'}</td>
+                      <td className={`px-3 py-2 text-xs text-right ${r.stdMinusSale < 0 ? 'text-red-600 font-semibold' : ''}`}>
+                        {r.std > 0 ? r.stdMinusSale.toLocaleString('en-IN') : '—'}
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
                           <button onClick={() => openForm(b)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600">
