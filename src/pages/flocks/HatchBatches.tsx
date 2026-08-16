@@ -49,10 +49,12 @@ function rowCalc(b: any) {
   // STD Hatch % is NOT calculated — it is typed in from the hatchery report.
   const stdHatchPct = b.std_hatch_pct ?? null
   const stdPct   = pct2(std, setting)
-  // Setting × STD% uses the entered STD Hatch % when there is one — that is the
-  // figure off the hatchery report, and Std itself is derived from it — falling
-  // back to the calculated Std ÷ Setting on older batches that have no entry.
-  const stdBySetting = p2(setting * (stdHatchPct ?? stdPct) / 100)
+  // Actual Std — the chicks the hatchery's own report accounts for, hatched
+  // less culled less rejected. This column used to be Setting × STD%, which
+  // became a duplicate of Std the moment STD Hatch % started driving Std
+  // (both were setting × the same percentage). The gap between the two is the
+  // figure worth seeing on the row.
+  const actualStd = hatched > 0 ? Math.max(0, hatched - (b.culled_chicks ?? 0) - reject) : null
   return {
     received, broken, setting, inf, fertile,
     blst, hatched, std, unhatch, reject, saleChk,
@@ -61,7 +63,7 @@ function rowCalc(b: any) {
     blstPct:    pct2(blst, setting),
     unhatchPct: pct2(unhatch, setting),
     rejectPct:  pct2(reject, setting),
-    hatchPct,   stdHatchPct, stdPct, stdBySetting,
+    hatchPct,   stdHatchPct, stdPct, actualStd,
     // Sale Chk − Std: chicks actually received against what the STD Hatch %
     // expected. Negative = short received, positive = more than expected. It
     // used to be the other way round (Std − Sale), which showed a shortfall as
@@ -101,7 +103,7 @@ function exportExcel(rows: any[]) {
       'Unhatch%':       r.unhatchPct,
       'Reject':         r.reject,
       'Reject%':        r.rejectPct,
-      'Setting×STD%':   r.stdBySetting,
+      'Actual Std':     r.actualStd ?? '',
       'Sale−STD Chicks': r.stdMinusSale,
       'Remarks':        b.remarks ?? '',
     }
@@ -307,6 +309,22 @@ export const HatchBatches: React.FC = () => {
   const fHatchEggs = fSetting - fInf - fBlst  // eggs that should hatch
   const autoStd    = fHatched > 0 ? fHatched - fCulled - fRejects : 0
 
+  // Std cannot exceed the eggs that actually became chicks. The Paridhi batch
+  // is why this exists: 570 infertile + 307 blasters + 1,474 unhatched leaves
+  // 7,620 eggs hatched out of 9,971 set, yet an entered 85.5% produced a Std of
+  // 8,525 — 905 chicks that never existed. The percentage was on some base
+  // other than setting eggs, and nothing on the screen said so.
+  const eggsHatched = fUnhatch > 0 ? fHatchEggs - fUnhatch
+    : (fHatched > 0 ? fHatched : null)
+  const stdWarning: string | null = (() => {
+    if (fStd <= 0) return null
+    if (fHatchEggs > 0 && fStd > fHatchEggs)
+      return `Std Chicks (${fStd.toLocaleString('en-IN')}) is more than the hatchable eggs (${fHatchEggs.toLocaleString('en-IN')} = setting − infertile − blasters).`
+    if (eggsHatched != null && eggsHatched > 0 && fStd > eggsHatched)
+      return `Std Chicks (${fStd.toLocaleString('en-IN')}) is more than the eggs that actually hatched (${eggsHatched.toLocaleString('en-IN')}), so ${(fStd - eggsHatched).toLocaleString('en-IN')} chicks cannot exist. Check whether STD Hatch % is a percentage of SETTING eggs — on this batch, setting basis would be ${fSetting > 0 && eggsHatched > 0 ? pct2(eggsHatched - fRejects, fSetting).toFixed(2) : '—'}%.`
+    return null
+  })()
+
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.setting_date) throw new Error('Setting date required')
@@ -480,9 +498,25 @@ export const HatchBatches: React.FC = () => {
     const fresh = valid.filter((r: any) => !isDup(r))
     const dups = valid.length - fresh.length
     if (!fresh.length) { toast.error(`Nothing imported — ${dups} duplicate(s), ${noFlock} row(s) with unknown flock`); return }
+    // The same impossible-Std check the form makes. An import cannot stop and
+    // ask, so the rows are still brought in — but the count is reported rather
+    // than left to be discovered in the table weeks later.
+    const impossible = fresh.filter((r: any) => {
+      const hatchable = (r.eggs_set ?? 0) - (r.broken_transit ?? 0) - (r.infertile ?? 0) - (r.blasters ?? 0)
+      const hatchedEggs = r.unhatched ? hatchable - r.unhatched : (r.hatched_chicks ?? null)
+      return (r.std_chicks ?? 0) > 0 && ((hatchable > 0 && r.std_chicks > hatchable)
+        || (hatchedEggs != null && hatchedEggs > 0 && r.std_chicks > hatchedEggs))
+    }).length
+
     const { error } = await supabase.from('hatch_batches').insert(fresh)
     if (error) toast.error(`Import failed: ${error.message}`)
-    else { toast.success(`Imported ${fresh.length} batches${dups ? `, ${dups} duplicate(s) skipped` : ''}${noFlock ? `, ${noFlock} unknown-flock row(s) skipped` : ''}`); qc.invalidateQueries({ queryKey: ['hatch_batches'] }) }
+    else {
+      toast.success(`Imported ${fresh.length} batches${dups ? `, ${dups} duplicate(s) skipped` : ''}${noFlock ? `, ${noFlock} unknown-flock row(s) skipped` : ''}`)
+      if (impossible > 0) toast.error(
+        `${impossible} imported row(s) have a Std higher than the eggs that hatched — check their STD Hatch %.`,
+        { duration: 8000 })
+      qc.invalidateQueries({ queryKey: ['hatch_batches'] })
+    }
   }
 
   // ── display state ─────────────────────────────────────────────────────────────
@@ -638,7 +672,7 @@ export const HatchBatches: React.FC = () => {
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Unhatch%</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Reject</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Reject%</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Stg×STD%</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Actual Std</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Sale−STD</th>
                   <th className="px-3 py-2 w-16"></th>
                 </tr>
@@ -706,7 +740,12 @@ export const HatchBatches: React.FC = () => {
                       <td className="px-3 py-2 text-xs text-right text-orange-600">{r.unhatch > 0 ? pctCell(r.unhatchPct) : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right">{r.reject > 0 ? r.reject : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right text-red-500">{r.reject > 0 ? pctCell(r.rejectPct) : '—'}</td>
-                      <td className="px-3 py-2 text-xs text-right">{r.stdBySetting > 0 ? r.stdBySetting.toLocaleString('en-IN') : '—'}</td>
+                      {/* Hatched − culled − rejects, straight off the report.
+                          Red when it falls short of the Std the entered
+                          STD Hatch % implies. */}
+                      <td className={`px-3 py-2 text-xs text-right ${r.actualStd != null && r.std > 0 && r.actualStd < r.std ? 'text-red-600 font-semibold' : ''}`}>
+                        {r.actualStd != null ? r.actualStd.toLocaleString('en-IN') : '—'}
+                      </td>
                       <td className={`px-3 py-2 text-xs text-right ${r.stdMinusSale < 0 ? 'text-red-600 font-semibold' : ''}`}>
                         {r.std > 0 ? r.stdMinusSale.toLocaleString('en-IN') : '—'}
                       </td>
@@ -917,7 +956,13 @@ export const HatchBatches: React.FC = () => {
         title={editing ? 'Edit Hatch Batch' : 'New Hatch Batch'} size="xl"
         footer={
           <><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
-          <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>
+          <Button loading={mut.isPending} onClick={() => {
+            // Warn, never block: the hatchery's own sheet sometimes disagrees
+            // with itself, and refusing the save would just move the figure
+            // into someone's notebook.
+            if (stdWarning && !window.confirm(`${stdWarning}\n\nSave anyway?`)) return
+            mut.mutate()
+          }}>{editing ? 'Update' : 'Save'}</Button></>
         }>
         <div className="space-y-4">
           <FormRow cols={3}>
@@ -1055,6 +1100,15 @@ export const HatchBatches: React.FC = () => {
               hint={form.chicks_sold && form.chick_rate ? `Revenue: ₹${(N(form.chicks_sold)*F(form.chick_rate)).toLocaleString('en-IN')}` : ''} />
             <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
           </FormRow>
+
+          {stdWarning && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+              <strong>Check this before saving.</strong> {stdWarning}
+              <span className="block text-xs mt-1 text-red-600">
+                You can still save — it will ask you to confirm.
+              </span>
+            </div>
+          )}
 
           {fSetting > 0 && (
             <div className="bg-blue-50 rounded-lg px-4 py-2 text-sm text-blue-700 flex gap-6 flex-wrap">
