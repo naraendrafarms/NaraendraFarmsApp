@@ -676,27 +676,25 @@ export const HatchBatches: React.FC = () => {
   })()
 
   // Every headline figure is recomputed from the summed counts, the same way
-  // the TOTAL row and the Hatchery Comparison already work. Fertility and
-  // Hatchability used to be egg-weighted averages of the stored fertility_pct /
-  // hatchability_pct columns, which only the entry form ever fills — so all 394
-  // imported batches carried nulls and both cards read 0.0%. Reading the counts
-  // means a figure can never depend on whether a row was typed or imported.
+  // the TOTAL row and the Hatchery Comparison already work. Hatchability used to
+  // be an egg-weighted average of the stored hatchability_pct column, which only
+  // the entry form ever fills — so all 394 imported batches carried nulls and
+  // the card read 0.0%. Reading the counts means a figure can never depend on
+  // whether a row was typed or imported.
   const tot = completed.reduce((a: any, b: any) => {
     const r = rowCalc(b)
-    a.received += r.received; a.setting += r.setting
-    a.inf += r.inf; a.blst += r.blst
+    a.received += r.received
     a.hatched += r.hatched; a.std += r.std
     return a
-  }, { received: 0, setting: 0, inf: 0, blst: 0, hatched: 0, std: 0 })
+  }, { received: 0, hatched: 0, std: 0 })
 
   const totalEggsSet = tot.received
   const totalStd     = tot.std        // the standard expectation, not chicks
   const totalHatched = tot.hatched    // chicks the hatchery actually hatched
-  // Fertility = fertile eggs ÷ setting eggs.
-  const avgFertility = tot.setting > 0 ? (tot.setting - tot.inf) / tot.setting * 100 : 0
-  // Hatchability = chicks hatched ÷ eggs that could have hatched.
-  const hatchableEggs = tot.setting - tot.inf - tot.blst
-  const avgHatch = hatchableEggs > 0 ? tot.hatched / hatchableEggs * 100 : 0
+  // Hatchability on the farm's definition: chicks hatched ÷ TOTAL eggs set,
+  // breakage included. Not hatched ÷ fertile eggs (which measures the incubator
+  // alone and reads several points higher).
+  const avgHatch = tot.received > 0 ? tot.hatched / tot.received * 100 : 0
 
   const allSel = displayed.length > 0 && displayed.every((b: any) => sel.has(b.id))
   const toggleAll = () => {
@@ -746,7 +744,7 @@ export const HatchBatches: React.FC = () => {
       </div>
 
       {completed.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Total Eggs Set" value={totalEggsSet.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-brand-600"/>
           {/* Two separate figures. Std is what the typed STD Hatch % expects;
               Chicks Hatched is what the hatchery reported. The single card used
@@ -754,7 +752,6 @@ export const HatchBatches: React.FC = () => {
               showing the first. */}
           <StatCard title="Std Chicks (Standard)" value={totalStd.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-gray-600"/>
           <StatCard title="Chicks Hatched" value={totalHatched.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-green-600"/>
-          <StatCard title="Avg Fertility" value={`${avgFertility.toFixed(1)}%`} icon={<Egg size={18}/>} color={avgFertility > 90 ? 'text-green-600' : 'text-orange-500'}/>
           <StatCard title="Avg Hatchability" value={`${avgHatch.toFixed(1)}%`} icon={<Egg size={18}/>} color={avgHatch > 80 ? 'text-green-600' : 'text-orange-500'}/>
         </div>
       )}
