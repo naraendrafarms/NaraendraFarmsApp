@@ -49,7 +49,10 @@ function rowCalc(b: any) {
   // STD Hatch % is NOT calculated — it is typed in from the hatchery report.
   const stdHatchPct = b.std_hatch_pct ?? null
   const stdPct   = pct2(std, setting)
-  const stdBySetting = p2(setting * stdPct / 100)
+  // Setting × STD% uses the entered STD Hatch % when there is one — that is the
+  // figure off the hatchery report, and Std itself is derived from it — falling
+  // back to the calculated Std ÷ Setting on older batches that have no entry.
+  const stdBySetting = p2(setting * (stdHatchPct ?? stdPct) / 100)
   return {
     received, broken, setting, inf, fertile,
     blst, hatched, std, unhatch, reject, saleChk,
@@ -107,10 +110,14 @@ function exportExcel(rows: any[]) {
 
 // ── template download ─────────────────────────────────────────────────────────
 function downloadTemplate() {
+  // 'Hatchery Name' must match a name in Masters → Hatcheries to be linked;
+  // 'STD Hatch %' is the figure off the hatchery report and sets Std Chicks
+  // (setting eggs × the percentage). Leave it blank and Std falls back to
+  // Hatched − Culled − Rejects.
   const headers = [['Flock No','Invoice No','DC No','Hatchery Name','Setting No',
     'Setting Date (DD/MM/YYYY)','Hatch Date (DD/MM/YYYY)','Eggs Weight',
     'Received','Broken in Transit','Infertile','Blasters','Hatched Chicks',
-    'Culled Chicks','Unhatched','Rejects','Chicks Sold','Chick Rate','Remarks']]
+    'Culled Chicks','STD Hatch %','Unhatched','Rejects','Chicks Sold','Chick Rate','Remarks']]
   const ws = XLSX.utils.aoa_to_sheet(headers)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Template')
@@ -234,7 +241,17 @@ export const HatchBatches: React.FC = () => {
   // recomputed it on every keystroke in Hatched / Culled / Rejects, so a figure
   // taken off the hatchery's report was silently replaced by a subtraction.
   const [stdTouched, setStdTouched] = useState(false)
-  const setStdAuto = (v: number) => { if (!stdTouched && v >= 0) s('std_chicks', v.toString()) }
+  // STD Hatch % OWNS Std Chicks: Std = Setting × STD Hatch % ÷ 100, on the
+  // setting-eggs base. So the subtraction (Hatched − Culled − Rejects) only
+  // fills the box while STD Hatch % is blank — otherwise the two would fight
+  // and whichever was typed last would win, which is how the old form lost
+  // figures taken off the hatchery report.
+  const setStdAuto = (v: number) => {
+    if (form.std_hatch_pct.trim() !== '') return
+    if (!stdTouched && v >= 0) s('std_chicks', v.toString())
+  }
+  const stdFromPct = (pctStr: string, setting: number) =>
+    pctStr.trim() !== '' && setting > 0 ? Math.round(setting * F(pctStr) / 100) : null
 
   const openForm = (row?: any) => {
     setStdTouched(!!row?.std_chicks)
@@ -400,10 +417,33 @@ export const HatchBatches: React.FC = () => {
         if (d && m && y && /^\d{4}$/.test(y)) return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
         return null
       }
+      // Same rules as the form, not a second copy of them: STD Hatch % owns
+      // Std Chicks (setting × pct), and the subtraction is used only when the
+      // sheet has no percentage. An import used to write a different Std from
+      // the same numbers, which is how two screens quietly disagree.
+      const received  = parseInt(r['Received']) || 0
+      const brokenT   = parseInt(r['Broken in Transit']) || 0
+      const setting   = received - brokenT
+      const rawPct    = r['STD Hatch %']
+      const stdPctVal = rawPct !== undefined && rawPct !== null && String(rawPct).trim() !== ''
+        ? parseFloat(rawPct) : null
+      const stdFromPctVal = stdPctVal != null && setting > 0
+        ? Math.round(setting * stdPctVal / 100) : null
+      const stdBySub = Math.max(0, (parseInt(r['Hatched Chicks']) || 0)
+        - (parseInt(r['Culled Chicks']) || 0) - (parseInt(r['Rejects']) || 0))
+      // Hatchery Name is matched to the master, case- and space-insensitively.
+      // An unmatched name is NOT invented as a new hatchery — it stays as text
+      // on the row so it is visible and can be corrected.
+      const hName = r['Hatchery Name'] ? String(r['Hatchery Name']).trim() : null
+      const hMatch = hName
+        ? (hatcheries ?? []).find((h: any) => h.name.toLowerCase().trim() === hName.toLowerCase())
+        : null
       return {
         flock_id:       flockId,
         invoice_no:     r['Invoice No'] ? String(r['Invoice No']) : null,
-        hatchery_name:  r['Hatchery Name'] ? String(r['Hatchery Name']) : null,
+        hatchery_id:    hMatch?.id ?? null,
+        std_hatch_pct:  stdPctVal,
+        hatchery_name:  hName,
         setting_no:     r['Setting No'] ? String(r['Setting No']) : null,
         eggs_weight:    parseFloat(r['Eggs Weight']) || null,
         setting_date:   parseDate(r['Setting Date (DD/MM/YYYY)']) ?? today(),
@@ -414,9 +454,9 @@ export const HatchBatches: React.FC = () => {
         blasters:       parseInt(r['Blasters']) || 0,
         hatched_chicks: parseInt(r['Hatched Chicks']) || null,
         culled_chicks:  parseInt(r['Culled Chicks']) || 0,
-        // std_chicks derived = hatched − culled − rejects, clamped at 0 so a
-        // blank Hatched with nonzero culls can't produce a negative figure
-        std_chicks:     Math.max(0, (parseInt(r['Hatched Chicks']) || 0) - (parseInt(r['Culled Chicks']) || 0) - (parseInt(r['Rejects']) || 0)) || null,
+        // STD Hatch % first; otherwise hatched − culled − rejects, clamped at 0
+        // so a blank Hatched with nonzero culls can't produce a negative figure
+        std_chicks:     stdFromPctVal ?? (stdBySub || null),
         unhatched:      parseInt(r['Unhatched']) || null,
         rejects:        parseInt(r['Rejects']) || 0,
         chicks_sold:    parseInt(r['Chicks Sold']) || null,
@@ -911,10 +951,20 @@ export const HatchBatches: React.FC = () => {
 
           <Divider label="Setting Details" />
           <FormRow cols={3}>
+            {/* Setting is the base of STD Hatch %, so changing either of these
+                re-derives Std Chicks rather than leaving a stale count. */}
             <Input label="Received (Total from Farm)" type="number" value={form.eggs_set}
-              onChange={e => s('eggs_set', e.target.value)} />
+              onChange={e => {
+                s('eggs_set', e.target.value)
+                const d = stdFromPct(form.std_hatch_pct, (parseInt(e.target.value) || 0) - fBroken)
+                if (d != null) s('std_chicks', d.toString())
+              }} />
             <Input label="Broken in Transit" type="number" value={form.broken_transit}
-              onChange={e => s('broken_transit', e.target.value)} />
+              onChange={e => {
+                s('broken_transit', e.target.value)
+                const d = stdFromPct(form.std_hatch_pct, fReceived - (parseInt(e.target.value) || 0))
+                if (d != null) s('std_chicks', d.toString())
+              }} />
             <div className="flex items-end pb-1">
               {fSetting > 0 && (
                 <p className="text-sm bg-blue-50 text-blue-700 rounded px-3 py-2 w-full">
@@ -947,11 +997,25 @@ export const HatchBatches: React.FC = () => {
           <FormRow cols={4}>
             <Input label="Std Chicks" type="number" value={form.std_chicks}
               onChange={e => { setStdTouched(true); s('std_chicks', e.target.value) }}
-              hint={autoStd > 0
-                ? (stdTouched && N(form.std_chicks) !== autoStd
+              hint={(() => {
+                const fromPct = stdFromPct(form.std_hatch_pct, fSetting)
+                // Cross-check, never a silent overwrite: if the report's own
+                // Hatched − Culled − Rejects disagrees with its percentage, you
+                // see both instead of one quietly winning.
+                if (fromPct != null) {
+                  const typed = N(form.std_chicks)
+                  if (typed !== fromPct) return `From STD Hatch %: ${fromPct.toLocaleString('en-IN')} — your figure is kept`
+                  return autoStd > 0 && autoStd !== fromPct
+                    ? `From STD Hatch %. Hatched − culled − rejects = ${autoStd.toLocaleString('en-IN')}`
+                    : 'From STD Hatch % × setting eggs'
+                }
+                if (autoStd > 0) {
+                  return stdTouched && N(form.std_chicks) !== autoStd
                     ? `Your figure is kept. Calculated would be ${autoStd.toLocaleString('en-IN')}`
-                    : `Calculated: ${autoStd.toLocaleString('en-IN')}`)
-                : ''} />
+                    : `Calculated: ${autoStd.toLocaleString('en-IN')}`
+                }
+                return ''
+              })()} />
             <Input label="Unhatched" type="number" value={form.unhatched}
               onChange={e => s('unhatched', e.target.value)}
               hint={fSetting > 0 && N(form.unhatched) > 0 ? `${pct2(N(form.unhatched), fSetting).toFixed(1)}%` : ''} />
@@ -964,8 +1028,16 @@ export const HatchBatches: React.FC = () => {
             {/* Typed in from the hatchery's report — the app never calculates
                 this one. Hatch % below IS calculated: chicks sold ÷ setting. */}
             <Input label="STD Hatch % (from report)" type="number" step="0.01" value={form.std_hatch_pct}
-              onChange={e => s('std_hatch_pct', e.target.value)}
-              hint="Entered from the hatchery report" />
+              onChange={e => {
+                s('std_hatch_pct', e.target.value)
+                // Your percentage drives the chick count, so it takes the box
+                // back from any earlier manual entry.
+                const derived = stdFromPct(e.target.value, fSetting)
+                if (derived != null) { setStdTouched(false); s('std_chicks', derived.toString()) }
+              }}
+              hint={fSetting > 0 && form.std_hatch_pct.trim() !== ''
+                ? `Std = ${fSetting.toLocaleString('en-IN')} setting × ${F(form.std_hatch_pct)}%`
+                : 'Entered from the hatchery report — it sets Std Chicks'} />
           </FormRow>
 
           <Divider label="Chick Sales" />
