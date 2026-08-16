@@ -287,3 +287,49 @@ export function nheEggsLeavingStock(sale: NheStockSale): { sale_type: string; qu
     quantity: (Number(sale.quantity) || 0) + (Number(sale.free_qty) || 0),
   }]
 }
+
+// ── Flock age band and season ────────────────────────────────────────────────
+// Flock age at setting is measured from the flock's PLACEMENT date, the only
+// date in the app that says when those birds started. A batch whose flock has
+// no placement date cannot be aged, so it drops out while an age band is
+// selected rather than being quietly parked in the first band.
+export const AGE_BANDS = [
+  { value: 'u30', label: 'Under 30 weeks', min: 0,  max: 29.999 },
+  { value: '30',  label: '30-39 weeks',    min: 30, max: 39.999 },
+  { value: '40',  label: '40-49 weeks',    min: 40, max: 49.999 },
+  { value: '50',  label: '50-59 weeks',    min: 50, max: 59.999 },
+  { value: '60',  label: '60 weeks +',     min: 60, max: 9999 },
+]
+
+export function flockAgeWeeksAt(placementDate?: string | null, onDate?: string | null): number | null {
+  if (!placementDate || !onDate) return null
+  const d = (new Date(onDate + 'T00:00:00').getTime() - new Date(placementDate + 'T00:00:00').getTime()) / 86400000
+  return d >= 0 ? d / 7 : null
+}
+
+export function inAgeBand(band: string, weeks: number | null): boolean {
+  if (!band) return true
+  if (weeks == null) return false
+  const b = AGE_BANDS.find(x => x.value === band)
+  return !!b && weeks >= b.min && weeks <= b.max
+}
+
+// Season of the SETTING month, not of the flock. flocks.laying_season is a
+// property of the flock (F-19 Summer, F-20 Winter) used to pick the Venco
+// standard curve — with two flocks, filtering on it would just repeat the flock
+// filter. What moves hatchability is the weather the eggs were set in, so the
+// season here is derived from the setting month, and every label names its
+// months so there is no guessing about where the lines fall.
+export const SEASONS = [
+  { value: 'summer',  label: 'Summer (Mar-Jun)',  months: [3, 4, 5, 6] },
+  { value: 'monsoon', label: 'Monsoon (Jul-Oct)', months: [7, 8, 9, 10] },
+  { value: 'winter',  label: 'Winter (Nov-Feb)',  months: [11, 12, 1, 2] },
+]
+
+export function inSeason(season: string, isoDate?: string | null): boolean {
+  if (!season) return true
+  if (!isoDate) return false
+  const m = parseInt(isoDate.slice(5, 7), 10)
+  const s = SEASONS.find(x => x.value === season)
+  return !!s && s.months.includes(m)
+}

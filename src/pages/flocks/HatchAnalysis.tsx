@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate, fetchAllPages } from '@/lib/utils'
+import { inr, fmtDate, fetchAllPages, AGE_BANDS, SEASONS, flockAgeWeeksAt, inAgeBand, inSeason } from '@/lib/utils'
 import {
   Card, SectionHeader, Spinner, StatCard, SearchableSelect, DateInput, Input, Badge
 } from '@/components/ui'
@@ -95,6 +95,8 @@ export const HatchAnalysis: React.FC = () => {
   // get the weaker flock's eggs", which on the current data is most of the gap.
   const [lflFlock, setLflFlock] = useState('')
   const [hatcheryFilter, setHatcheryFilter] = useState('')
+  const [ageBand, setAgeBand] = useState('')
+  const [season, setSeason] = useState('')
   const [rateInput, setRateInput] = useState('')
 
   const { data: batches, isLoading } = useQuery({
@@ -137,8 +139,10 @@ export const HatchAnalysis: React.FC = () => {
     (!flockFilter || b.flock_id === flockFilter) &&
     (!hatcheryFilter || (b.hatchery_id ?? `text:${b.hatchery_name ?? '(not set)'}`) === hatcheryFilter) &&
     (!fromDate || (b.setting_date && b.setting_date >= fromDate)) &&
-    (!toDate   || (b.setting_date && b.setting_date <= toDate))
-  ), [batches, flockFilter, hatcheryFilter, fromDate, toDate])
+    (!toDate   || (b.setting_date && b.setting_date <= toDate)) &&
+    inAgeBand(ageBand, flockAgeWeeksAt(b.flocks?.placement_date, b.setting_date)) &&
+    inSeason(season, b.setting_date)
+  ), [batches, flockFilter, hatcheryFilter, fromDate, toDate, ageBand, season])
 
   const total = useMemo(() => rollup(rows), [rows])
 
@@ -314,6 +318,8 @@ export const HatchAnalysis: React.FC = () => {
       <SectionHeader title="Hatch Analysis"
         subtitle={`${rows.length.toLocaleString('en-IN')} completed batch(es)${
           flockFilter ? ' in this flock' : ''}${hatcheryFilter ? ' at this hatchery' : ''}${
+          ageBand ? `, flock ${AGE_BANDS.find(x => x.value === ageBand)?.label.toLowerCase()} at setting` : ''}${
+          season ? `, set in ${SEASONS.find(x => x.value === season)?.label}` : ''}${
           fromDate || toDate ? ` set ${fromDate ? fmtDate(fromDate) : 'the beginning'} to ${toDate ? fmtDate(toDate) : 'now'}` : ''
         } — every figure below is computed from the summed counts of exactly these`}/>
 
@@ -334,9 +340,13 @@ export const HatchAnalysis: React.FC = () => {
           value={hatcheryFilter} onChange={v => setHatcheryFilter(v)} className="w-48"/>
         <DateInput label="From (setting date)" value={fromDate} onChange={e => setFromDate(e.target.value)}/>
         <DateInput label="To" value={toDate} onChange={e => setToDate(e.target.value)}/>
-        {(flockFilter || hatcheryFilter || fromDate || toDate) && (
+        <SearchableSelect placeholder="Any flock age" options={AGE_BANDS.map(b => ({ value: b.value, label: b.label }))}
+          value={ageBand} onChange={v => setAgeBand(v)} className="w-40"/>
+        <SearchableSelect placeholder="Any season" options={SEASONS.map(x => ({ value: x.value, label: x.label }))}
+          value={season} onChange={v => setSeason(v)} className="w-44"/>
+        {(flockFilter || hatcheryFilter || fromDate || toDate || ageBand || season) && (
           <button className="text-sm text-gray-500 hover:text-gray-700 underline pb-2"
-            onClick={() => { setFlockFilter(''); setHatcheryFilter(''); setFromDate(''); setToDate('') }}>
+            onClick={() => { setFlockFilter(''); setHatcheryFilter(''); setFromDate(''); setToDate(''); setAgeBand(''); setSeason('') }}>
             Clear
           </button>
         )}

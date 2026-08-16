@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, today, pct, fetchAllPages } from '@/lib/utils'
+import { fmtDate, today, pct, fetchAllPages, AGE_BANDS, SEASONS, flockAgeWeeksAt, inAgeBand, inSeason } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
@@ -142,6 +142,8 @@ export const HatchBatches: React.FC = () => {
   const [hatcheryFilter, setHatcheryFilter] = useState('')
   const [search, setSearch] = useState('')
   const [belowOnly, setBelowOnly] = useState(false)
+  const [ageBand, setAgeBand] = useState('')
+  const [season, setSeason] = useState('')
   const [tab, setTab]               = useState<'batches'|'pipeline'|'hatchery'>('batches')
   const [sel, setSel]               = useState<Set<string>>(new Set())
   const [delConfirm, setDelConfirm] = useState(false)
@@ -681,6 +683,10 @@ export const HatchBatches: React.FC = () => {
       if (b.hatched_chicks == null) return false
       if ((b.hatched_chicks ?? 0) >= (b.std_chicks ?? 0)) return false
     }
+    // Flock age at setting, measured from the flock's placement date.
+    if (ageBand && !inAgeBand(ageBand, flockAgeWeeksAt(b.flocks?.placement_date, b.setting_date))) return false
+    // Season the eggs were SET in -- see the note on SEASONS in lib/utils.
+    if (season && !inSeason(season, b.setting_date)) return false
     return true
   })
 
@@ -765,6 +771,8 @@ export const HatchBatches: React.FC = () => {
       <SectionHeader title="Hatch Batches"
         subtitle={`${displayed.length.toLocaleString('en-IN')} batch(es)${flockFilter ? ' in this flock' : ''}${
           hatcheryFilter ? ' at this hatchery' : ''}${belowOnly ? ', below standard only' : ''}${
+          ageBand ? `, flock ${AGE_BANDS.find(x => x.value === ageBand)?.label.toLowerCase()} at setting` : ''}${
+          season ? `, set in ${SEASONS.find(x => x.value === season)?.label}` : ''}${
           q ? ` matching "${search.trim()}"` : ''}${
           fromDate || toDate ? ` set ${fromDate ? fmtDate(fromDate) : 'the beginning'} to ${toDate ? fmtDate(toDate) : 'now'}` : ''
         } — every figure on this page, and the Excel export, covers exactly these${
@@ -806,14 +814,18 @@ export const HatchBatches: React.FC = () => {
         <DateInput label="To" value={toDate} onChange={e => setToDate(e.target.value)} />
         <Input label="Search setting / invoice / DC" placeholder="e.g. 22-110-525"
           value={search} onChange={e => setSearch(e.target.value)} className="w-52" />
+        <SearchableSelect placeholder="Any flock age" options={AGE_BANDS.map(b => ({ value: b.value, label: b.label }))}
+          value={ageBand} onChange={v => setAgeBand(v)} className="w-40" />
+        <SearchableSelect placeholder="Any season" options={SEASONS.map(x => ({ value: x.value, label: x.label }))}
+          value={season} onChange={v => setSeason(v)} className="w-44" />
         <label className="flex items-center gap-2 text-sm text-gray-600 pb-2 whitespace-nowrap">
           <input type="checkbox" checked={belowOnly} onChange={e => setBelowOnly(e.target.checked)}
             className="rounded border-gray-300"/>
           Below standard only
         </label>
-        {(flockFilter || hatcheryFilter || fromDate || toDate || search || belowOnly) && (
+        {(flockFilter || hatcheryFilter || fromDate || toDate || search || belowOnly || ageBand || season) && (
           <Button variant="ghost" size="sm"
-            onClick={() => { setFlockFilter(''); setHatcheryFilter(''); setFromDate(''); setToDate(''); setSearch(''); setBelowOnly(false) }}>Clear</Button>
+            onClick={() => { setFlockFilter(''); setHatcheryFilter(''); setFromDate(''); setToDate(''); setSearch(''); setBelowOnly(false); setAgeBand(''); setSeason('') }}>Clear</Button>
         )}
       </div>
 
