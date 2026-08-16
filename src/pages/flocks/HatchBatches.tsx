@@ -137,6 +137,8 @@ export const HatchBatches: React.FC = () => {
   const [showForm, setShowForm]     = useState(false)
   const [editing, setEditing]       = useState<any>(null)
   const [flockFilter, setFlockFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [tab, setTab]               = useState<'batches'|'pipeline'|'hatchery'>('batches')
   const [sel, setSel]               = useState<Set<string>>(new Set())
   const [delConfirm, setDelConfirm] = useState(false)
@@ -632,10 +634,19 @@ export const HatchBatches: React.FC = () => {
     return hits.length === 1 ? hits[0] : null
   })()
 
+  // The date range narrows EVERYTHING that describes the batches — the table,
+  // the TOTAL row, the tiles, the Hatchery Comparison and the Excel export all
+  // read from these two, so a filtered figure can never sit next to an
+  // unfiltered one. Filtered on setting date, the date the table is sorted by.
+  // Blank ends are open: a From with no To runs to the newest batch.
+  const inRange = (batches ?? []).filter((b: any) =>
+    (!fromDate || (b.setting_date && b.setting_date >= fromDate)) &&
+    (!toDate   || (b.setting_date && b.setting_date <= toDate)))
+
   // null/undefined = awaiting hatch; a recorded 0 is a total-failure batch
   // that IS completed (it used to be stuck in "pipeline" forever)
-  const completed = (batches ?? []).filter((b: any) => b.hatched_chicks != null)
-  const displayed = (batches ?? [])
+  const completed = inRange.filter((b: any) => b.hatched_chicks != null)
+  const displayed = inRange
 
   // ── the pipeline, rebuilt ────────────────────────────────────────────────────
   // It used to list hatch_batches rows with no hatch report, which meant eggs
@@ -695,6 +706,9 @@ export const HatchBatches: React.FC = () => {
   // breakage included. Not hatched ÷ fertile eggs (which measures the incubator
   // alone and reads several points higher).
   const avgHatch = tot.received > 0 ? tot.hatched / tot.received * 100 : 0
+  // Avg Std on the SAME base, so the two tiles can be read against each other:
+  // the standard those eggs were expected to deliver, against what they did.
+  const avgStd   = tot.received > 0 ? tot.std / tot.received * 100 : 0
 
   const allSel = displayed.length > 0 && displayed.every((b: any) => sel.has(b.id))
   const toggleAll = () => {
@@ -708,7 +722,10 @@ export const HatchBatches: React.FC = () => {
   return (
     <div className="space-y-5">
       <SectionHeader title="Hatch Batches"
-        subtitle={`${(batches ?? []).length.toLocaleString('en-IN')} batch(es)${flockFilter ? ' in this flock' : ''} — every figure on this page covers all of them`}
+        subtitle={`${displayed.length.toLocaleString('en-IN')} batch(es)${flockFilter ? ' in this flock' : ''}${
+          fromDate || toDate ? ` set ${fromDate ? fmtDate(fromDate) : 'the beginning'} to ${toDate ? fmtDate(toDate) : 'now'}` : ''
+        } — every figure on this page, and the Excel export, covers exactly these${
+          displayed.length !== (batches ?? []).length ? ` (${(batches ?? []).length.toLocaleString('en-IN')} in total)` : ''}`}
         action={
           <div className="flex gap-2">
             {sel.size > 0 && (
@@ -740,11 +757,16 @@ export const HatchBatches: React.FC = () => {
       <div className="flex gap-3 items-end">
         <SearchableSelect placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
-        {flockFilter && <Button variant="ghost" size="sm" onClick={() => setFlockFilter('')}>Clear</Button>}
+        <DateInput label="From (setting date)" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+        <DateInput label="To" value={toDate} onChange={e => setToDate(e.target.value)} />
+        {(flockFilter || fromDate || toDate) && (
+          <Button variant="ghost" size="sm"
+            onClick={() => { setFlockFilter(''); setFromDate(''); setToDate('') }}>Clear</Button>
+        )}
       </div>
 
       {completed.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <StatCard title="Total Eggs Set" value={totalEggsSet.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-brand-600"/>
           {/* Two separate figures. Std is what the typed STD Hatch % expects;
               Chicks Hatched is what the hatchery reported. The single card used
@@ -752,7 +774,12 @@ export const HatchBatches: React.FC = () => {
               showing the first. */}
           <StatCard title="Std Chicks (Standard)" value={totalStd.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-gray-600"/>
           <StatCard title="Chicks Hatched" value={totalHatched.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-green-600"/>
-          <StatCard title="Avg Hatchability" value={`${avgHatch.toFixed(1)}%`} icon={<Egg size={18}/>} color={avgHatch > 80 ? 'text-green-600' : 'text-orange-500'}/>
+          {/* Avg Std and Avg Hatchability share the total-eggs-set base on
+              purpose — expected against achieved, directly comparable, and the
+              gap between them is the shortfall against standard. */}
+          <StatCard title="Avg Std" value={`${avgStd.toFixed(1)}%`} icon={<Egg size={18}/>} color="text-gray-600"/>
+          <StatCard title="Avg Hatchability" value={`${avgHatch.toFixed(1)}%`} icon={<Egg size={18}/>}
+            color={avgHatch >= avgStd ? 'text-green-600' : 'text-orange-500'}/>
         </div>
       )}
 
