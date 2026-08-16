@@ -344,14 +344,20 @@ export const HatchBatches: React.FC = () => {
   // other than setting eggs, and nothing on the screen said so.
   const eggsHatched = fUnhatch > 0 ? fHatchEggs - fUnhatch
     : (fHatched > 0 ? fHatched : null)
+  // Std sitting above the chicks that hatched is NOT an error — Std is the
+  // standard the batch was measured against, so falling short of it is ordinary
+  // performance (372 of the 394 imported batches do). Only a Std above the
+  // hatchable eggs is genuinely impossible; that is the one worth stopping on.
+  // Short-of-standard gets a plain, non-alarming note instead.
   const stdWarning: string | null = (() => {
     if (fStd <= 0) return null
     if (fHatchEggs > 0 && fStd > fHatchEggs)
-      return `Std Chicks (${fStd.toLocaleString('en-IN')}) is more than the hatchable eggs (${fHatchEggs.toLocaleString('en-IN')} = setting − infertile − blasters).`
-    if (eggsHatched != null && eggsHatched > 0 && fStd > eggsHatched)
-      return `Std Chicks (${fStd.toLocaleString('en-IN')}) is more than the eggs that actually hatched (${eggsHatched.toLocaleString('en-IN')}), so ${(fStd - eggsHatched).toLocaleString('en-IN')} chicks cannot exist. Check whether STD Hatch % is a percentage of SETTING eggs — on this batch, setting basis would be ${fSetting > 0 && eggsHatched > 0 ? pct2(eggsHatched - fRejects, fSetting).toFixed(2) : '—'}%.`
+      return `Std Chicks (${fStd.toLocaleString('en-IN')}) is more than the hatchable eggs (${fHatchEggs.toLocaleString('en-IN')} = setting − infertile − blasters), which cannot happen. Check the STD Hatch %.`
     return null
   })()
+  const belowStd: string | null = (!stdWarning && fStd > 0 && eggsHatched != null && eggsHatched > 0 && fStd > eggsHatched)
+    ? `Below standard by ${(fStd - eggsHatched).toLocaleString('en-IN')} chicks — ${eggsHatched.toLocaleString('en-IN')} hatched against a standard of ${fStd.toLocaleString('en-IN')}.`
+    : null
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -563,14 +569,12 @@ export const HatchBatches: React.FC = () => {
     const fresh = valid.filter((r: any) => !isDup(r))
     const dups = valid.length - fresh.length
     if (!fresh.length) { toast.error(`Nothing imported — ${dups} duplicate(s), ${noFlock} row(s) with unknown flock`); return }
-    // The same impossible-Std check the form makes. An import cannot stop and
-    // ask, so the rows are still brought in — but the count is reported rather
-    // than left to be discovered in the table weeks later.
+    // Only a Std above the hatchable eggs is impossible. Std above the chicks
+    // that hatched just means the batch came in under its standard, which is
+    // normal — flagging that fired on 372 of 394 rows and buried the real fault.
     const impossible = fresh.filter((r: any) => {
       const hatchable = (r.eggs_set ?? 0) - (r.broken_transit ?? 0) - (r.infertile ?? 0) - (r.blasters ?? 0)
-      const hatchedEggs = r.unhatched ? hatchable - r.unhatched : (r.hatched_chicks ?? null)
-      return (r.std_chicks ?? 0) > 0 && ((hatchable > 0 && r.std_chicks > hatchable)
-        || (hatchedEggs != null && hatchedEggs > 0 && r.std_chicks > hatchedEggs))
+      return (r.std_chicks ?? 0) > 0 && hatchable > 0 && r.std_chicks > hatchable
     }).length
 
     const toInsert = fresh.map(({ __rawHatch, ...row }: any) => row)
@@ -582,7 +586,7 @@ export const HatchBatches: React.FC = () => {
         `${droppedHatch} row(s) had a hatch date BEFORE the setting date — usually a day/month flip in the sheet. Those hatch dates were left blank; fix them in Excel and re-import, or edit the batches.`,
         { duration: 10000 })
       if (impossible > 0) toast.error(
-        `${impossible} imported row(s) have a Std higher than the eggs that hatched — check their STD Hatch %.`,
+        `${impossible} imported row(s) have a Std higher than the hatchable eggs, which cannot happen — check their STD Hatch %.`,
         { duration: 8000 })
       qc.invalidateQueries({ queryKey: ['hatch_batches'] })
     }
@@ -671,16 +675,28 @@ export const HatchBatches: React.FC = () => {
     return Object.values(m).sort((a: any, b: any) => b.setting - a.setting)
   })()
 
-  const totalEggsSet    = completed.reduce((s: number, b: any) => s + (b.eggs_set ?? 0), 0)
-  const totalHatched    = completed.reduce((s: number, b: any) => s + (b.std_chicks ?? (b.hatched_chicks ?? 0)), 0)
-  // Egg-weighted averages — a tiny batch used to skew the herd average as
-  // much as a huge one under the old unweighted mean of percentages
-  const fertWeight = completed.reduce((s: number, b: any) => s + (b.fertility_pct != null ? (b.eggs_set ?? 0) : 0), 0)
-  const avgFertility = fertWeight
-    ? completed.reduce((s: number, b: any) => s + (b.fertility_pct != null ? b.fertility_pct * (b.eggs_set ?? 0) : 0), 0) / fertWeight : 0
-  const hatchWeight = completed.reduce((s: number, b: any) => s + (b.hatchability_pct != null ? (b.eggs_set ?? 0) : 0), 0)
-  const avgHatch = hatchWeight
-    ? completed.reduce((s: number, b: any) => s + (b.hatchability_pct != null ? b.hatchability_pct * (b.eggs_set ?? 0) : 0), 0) / hatchWeight : 0
+  // Every headline figure is recomputed from the summed counts, the same way
+  // the TOTAL row and the Hatchery Comparison already work. Fertility and
+  // Hatchability used to be egg-weighted averages of the stored fertility_pct /
+  // hatchability_pct columns, which only the entry form ever fills — so all 394
+  // imported batches carried nulls and both cards read 0.0%. Reading the counts
+  // means a figure can never depend on whether a row was typed or imported.
+  const tot = completed.reduce((a: any, b: any) => {
+    const r = rowCalc(b)
+    a.received += r.received; a.setting += r.setting
+    a.inf += r.inf; a.blst += r.blst
+    a.hatched += r.hatched; a.std += r.std
+    return a
+  }, { received: 0, setting: 0, inf: 0, blst: 0, hatched: 0, std: 0 })
+
+  const totalEggsSet = tot.received
+  const totalStd     = tot.std        // the standard expectation, not chicks
+  const totalHatched = tot.hatched    // chicks the hatchery actually hatched
+  // Fertility = fertile eggs ÷ setting eggs.
+  const avgFertility = tot.setting > 0 ? (tot.setting - tot.inf) / tot.setting * 100 : 0
+  // Hatchability = chicks hatched ÷ eggs that could have hatched.
+  const hatchableEggs = tot.setting - tot.inf - tot.blst
+  const avgHatch = hatchableEggs > 0 ? tot.hatched / hatchableEggs * 100 : 0
 
   const allSel = displayed.length > 0 && displayed.every((b: any) => sel.has(b.id))
   const toggleAll = () => {
@@ -730,9 +746,14 @@ export const HatchBatches: React.FC = () => {
       </div>
 
       {completed.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <StatCard title="Total Eggs Set" value={totalEggsSet.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-brand-600"/>
-          <StatCard title="Std Chicks Hatched" value={totalHatched.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-green-600"/>
+          {/* Two separate figures. Std is what the typed STD Hatch % expects;
+              Chicks Hatched is what the hatchery reported. The single card used
+              to be labelled "Std Chicks Hatched", which read as the second while
+              showing the first. */}
+          <StatCard title="Std Chicks (Standard)" value={totalStd.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-gray-600"/>
+          <StatCard title="Chicks Hatched" value={totalHatched.toLocaleString('en-IN')} icon={<Egg size={18}/>} color="text-green-600"/>
           <StatCard title="Avg Fertility" value={`${avgFertility.toFixed(1)}%`} icon={<Egg size={18}/>} color={avgFertility > 90 ? 'text-green-600' : 'text-orange-500'}/>
           <StatCard title="Avg Hatchability" value={`${avgHatch.toFixed(1)}%`} icon={<Egg size={18}/>} color={avgHatch > 80 ? 'text-green-600' : 'text-orange-500'}/>
         </div>
@@ -1220,6 +1241,12 @@ export const HatchBatches: React.FC = () => {
               <span className="block text-xs mt-1 text-red-600">
                 You can still save — it will ask you to confirm.
               </span>
+            </div>
+          )}
+
+          {belowStd && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-600">
+              {belowStd}
             </div>
           )}
 
