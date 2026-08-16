@@ -1199,7 +1199,7 @@ export const HatcheriesMaster: React.FC = () => {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
-  const [form, setForm] = useState({name:'',type:'Hitech',location:'',city:'',contact:''})
+  const [form, setForm] = useState({name:'',type:'Hitech',location:'',city:'',contact:'',provides_hatch_report:false})
   const [deleteRow, setDeleteRow] = useState<any>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
@@ -1212,14 +1212,16 @@ export const HatcheriesMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
-    setForm(row?{name:row.name,type:row.type,location:row.location??'',city:row.city??'',contact:row.contact??''}:{name:'',type:'Hitech',location:'',city:'',contact:''})
+    setForm(row?{name:row.name,type:row.type,location:row.location??'',city:row.city??'',contact:row.contact??'',provides_hatch_report:!!row.provides_hatch_report}
+                :{name:'',type:'Hitech',location:'',city:'',contact:'',provides_hatch_report:false})
     setShowForm(true)
   }
 
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.name)throw new Error('Name required')
-      const p={name:form.name,type:form.type,location:form.location||null,city:form.city||null,contact:form.contact||null}
+      const p={name:form.name,type:form.type,location:form.location||null,city:form.city||null,contact:form.contact||null,
+               provides_hatch_report:form.provides_hatch_report}
       if(editing){const{error}=await supabase.from('hatcheries').update(p).eq('id',editing.id);if(error)throw error}
       else{
         const dup=(data??[]).find((h:any)=>h.name.toLowerCase().trim()===form.name.toLowerCase().trim())
@@ -1323,13 +1325,14 @@ export const HatcheriesMaster: React.FC = () => {
             <Table>
               <thead><tr>
                 <Th><CB checked={allSel} indeterminate={someSel&&!allSel} onChange={toggleAll}/></Th>
-                <Th>Name</Th><Th>Type</Th><Th>Location</Th><Th>City</Th><Th>Contact</Th><Th>Status</Th><Th></Th>
+                <Th>Name</Th><Th>Type</Th><Th>Sends Report</Th><Th>Location</Th><Th>City</Th><Th>Contact</Th><Th>Status</Th><Th></Th>
               </tr></thead>
               <tbody>{rows.map((r:any)=>(
                 <tr key={r.id} className={`hover:bg-gray-50 ${sel.has(r.id)?'bg-blue-50':''}`}>
                   <Td><CB checked={sel.has(r.id)} onChange={()=>toggle(r.id)}/></Td>
                   <Td><span className="font-medium">{r.name}</span></Td>
                   <Td><Badge color={r.type==='Hitech'?'green':r.type==='VHL'?'blue':'gray'}>{r.type}</Badge></Td>
+                  <Td>{r.provides_hatch_report?<Badge color="green">Yes</Badge>:<span className="text-gray-400 text-xs">No</span>}</Td>
                   <Td>{r.location??'—'}</Td>
                   <Td>{r.city??'—'}</Td>
                   <Td>{r.contact??'—'}</Td>
@@ -1405,6 +1408,20 @@ export const HatcheriesMaster: React.FC = () => {
             <Input label="Location / Address" value={form.location} onChange={e=>s('location',e.target.value)}/>
             <Input label="Contact" value={form.contact} onChange={e=>s('contact',e.target.value)}/>
           </FormRow>
+          {/* Drives the Hatch Batches pipeline. Only hatcheries ticked here are
+              chased for a hatch report — no hatchery is named in the code. */}
+          <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 cursor-pointer hover:border-gray-300">
+            <input type="checkbox" className="mt-0.5 w-4 h-4 rounded text-brand-600"
+              checked={form.provides_hatch_report}
+              onChange={e=>setForm(f=>({...f,provides_hatch_report:e.target.checked}))}/>
+            <div>
+              <p className="text-sm font-medium text-gray-900">Sends hatchability report</p>
+              <p className="text-xs text-gray-500">
+                Tick only for hatcheries that send you a hatch report. Eggs dispatched to them
+                appear in <strong>Hatch Batches → Pipeline</strong> until the report is entered.
+              </p>
+            </div>
+          </label>
         </div>
       </Modal>
     </>

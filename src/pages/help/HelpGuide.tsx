@@ -6,10 +6,14 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-08-13'
+const LAST_UPDATED = '2026-08-16'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-08-16', tag: 'Fix', text: 'Hatch Batches → Pipeline was empty even though eggs had gone out, and it was not a display fault: the tab listed HATCH BATCHES with no hatch report, so eggs only appeared once somebody had created a batch by hand, and nobody had. Measured before changing anything — 26 dispatches, 16,40,109 eggs between 01/06/2026 and 15/08/2026, not one of them with a hatch batch, and only ONE hatch batch in the whole database. The Pipeline now starts from the HE DISPATCH, so eggs appear the moment they leave the farm. It has two groups: "Awaiting hatch report", which lists dispatches to a hatchery ticked as sending reports, with days since dispatch going red past 25 days; and "Hatchery not assigned", because at loading time nobody yet knows which hatchery the lorry is going to — you set it from the row when you know, and until then the eggs are visible rather than lost. "Enter Report" opens the batch form already linked to that dispatch, with flock, invoice, eggs and date carried across.' },
+  { date: '2026-08-16', tag: 'New', text: 'Hatch Batches: Hatchery is now a DROPDOWN reading Masters → Hatcheries, not a free-text box, on both the batch form and the pipeline. Typed text made two spellings into two hatcheries and made any comparison meaningless — the one existing batch reads "Paridhi Hatchery Dankuni", typed by hand. The old text is kept on existing rows and shown under the dropdown so nothing is lost. Masters → Hatcheries gains a "Sends hatchability report" tick box: only hatcheries ticked there are chased in the Pipeline, since reports come from one company only. No hatchery is named anywhere in the code — if that ever changes you tick a different row, and adding a new hatchery never starts chasing a report by accident.' },
+  { date: '2026-08-16', tag: 'New', text: 'Hatch Batches → Hatchery Comparison, a new tab: one line per hatchery with batches, received, setting, broken%, inf%, blst%, chicks sold, Hatch%, STD Hatch%, Std, reject% and unhatch%. Percentages are recomputed from the summed counts rather than averaged across batches, so a 5,000-egg batch cannot weigh as much as a 50,000-egg one, and STD Hatch% is the egg-weighted average of the figures you entered. Batches entered before the dropdown existed are still listed, marked "typed, not linked" — edit the batch and pick the hatchery to fold them in.' },
+  { date: '2026-08-16', tag: 'Fix', text: 'Hatch Batches: Std Chicks stopped overwriting what you type, and Hatch % now uses the right formula. The Std field was recalculated as Hatched − Culled − Rejects on EVERY keystroke in those three boxes, so a figure taken off the hatchery report was silently replaced the moment you corrected anything above it; and on saving, a Std of 0 — a total failure, a real figure — was treated as blank and replaced by the calculation. Now the calculation only fills the box until you type in it yourself; after that your figure is kept, with "Calculated would be N" shown underneath so a typo is still visible. Hatch % is now Chicks Sold ÷ Setting Eggs, the farm\'s own definition; it used to be Std ÷ (Setting − Infertile − Blasters), a different figure that never matched the hatchery\'s sheet. STD Hatch % is a NEW separate column that you type in from the report — the app never calculates it — and it appears in the table, the totals line and the Excel export.' },
   { date: '2026-08-13', tag: 'New', text: 'Inventory — date ranges added where they were missing. Stock Balance had only a single \u0022Stock as on\u0022 date, so Received and Used were running totals since the beginning with no way to ask what moved in a period; it now has a \u0022Movements from\u0022 date beside it, and with both set the row reads as a stock statement — Opening (everything before the From date, netted) · Received · Used · Adjust · Closing — instead of a lifetime total with a date applied to part of it. Leave \u0022Movements from\u0022 blank and the tab behaves exactly as before. Adjustments had NO date filter at all — every adjustment ever made, with no way to check what was adjusted last month when a stock figure looks wrong — and now has From and To. The other three tabs already had what they need and are unchanged: Stock Ledger and Consumption Report already had From/To, and Closing Stock Report is an as-on-a-date report by nature, where a range does not apply. The Stock Balance export filename now carries the period too.' },
   { date: '2026-08-13', tag: 'New', text: 'Feed Mill → Raw Materials Stock: added a From/To date range, so you can finally ask how much of an ingredient was RECEIVED and CONSUMED in a period instead of only seeing lifetime totals. Set the dates and the row becomes a proper stock statement — Opening (the stock before the period) · Received · Used · Closing (opening + received − used) — rather than a lifetime figure with dates applied to part of it, which would not have added up. Leave the dates blank and the page reads exactly as before. Two details worth knowing: the rate used for stock value is still taken from the most recent purchase even if that purchase was BEFORE your From date, otherwise an ingredient last bought in June would value at zero in a July view; and there is now a TOTAL line under the table with opening, received, used, closing and total value for the ingredients on screen. The Excel export carries the same columns and its filename carries the date range, so a period sheet cannot be mistaken for the full one.' },
   { date: '2026-08-13', tag: 'New', text: 'Employees → Salary Register: added an ESI / PF / PT filter, individually and in combination. The options are ESI, PF, PT on their own; ESI + PF, PF + PT, ESI + PT; all three together; any one or more; and — the useful one when reconciling a challan — NONE, showing everyone with no statutory deduction at all. It works on what was ACTUALLY DEDUCTED that month, not on who is registered: an enrolled employee with no paid days has nothing deducted and correctly does not appear, which is exactly the difference you want to see when a challan total does not tie out. Like the search and account filters it is applied in one place above everything, so the table, the TOTAL line, the Excel export and the printout always describe the same set of people, and the printout carries the filter name in its heading so a filtered sheet is never mistaken for the full register.' },
@@ -588,7 +592,7 @@ const SECTIONS: Section[] = [
         path: 'Flock Management → Hatch Batches → Add Batch',
         steps: [
           { text: 'Flock — select the flock whose eggs were sent.' },
-          { text: 'Hatchery Name — the hatchery where eggs were set (e.g. Hitech Hatch Fresh Pvt Ltd).' },
+          { text: 'Hatchery — pick from the list. Hatcheries are added under Masters → Hatcheries; the batch is linked to that record, not to typed text, which is what makes the Hatchery Comparison tab possible.', note: 'If the list is empty, add your hatcheries under Masters → Hatcheries first.' },
           { text: 'Setting No — hatchery\'s own batch/setting number (e.g. S-2026-01).', note: 'Useful for matching with hatchery reports later.' },
           { text: 'Link Dispatch Invoice — select the HE dispatch this batch came from. Auto-fills Flock, Invoice No, and Received qty.' },
           { text: 'Setting Date (when eggs were placed in incubator). Hatch Date (when chicks emerged).', note: 'Egg Age column is auto-calculated as Setting Date minus average production date from the linked dispatch.' },
@@ -604,11 +608,33 @@ const SECTIONS: Section[] = [
           { text: 'Blasters — blood-ring / early-dead eggs at candling.' },
           { text: 'Hatched (Total) — total chicks that emerged.' },
           { text: 'Culled Chicks — weak/deformed chicks culled at hatchery.' },
-          { text: 'Std Chicks — auto-fills as Hatched − Culled − Rejects. Can be overridden.', note: 'Std = Standard/saleable chicks.' },
+          { text: 'Std Chicks — fills in as Hatched − Culled − Rejects until you type your own figure. Once you type it, nothing overwrites it, and the calculated figure is shown underneath so you can see the difference.', note: 'Std = Standard/saleable chicks. A Std of 0 that you typed is kept as 0.' },
+          { text: 'STD Hatch % — typed in from the hatchery report. The app never calculates this one.', note: 'Different from Hatch %, which the app works out itself as Chicks Sold ÷ Setting Eggs.' },
           { text: 'Unhatched — eggs that did not hatch.' },
           { text: 'Rejects — rejected chicks (wrong sex, deformed).' },
           { text: 'Chicks Sold — how many chicks were sold from this batch. Chick Rate (₹/chick). Revenue auto-calculates.' },
           { text: 'Save. All % columns (Broken%, Inf%, Blst%, Hatch%, Unhatch%, Reject%) are computed automatically in the table.' },
+        ]
+      },
+      {
+        title: 'Pipeline — eggs sent but no hatch report yet',
+        path: 'Flock Management → Hatch Batches → Pipeline (Awaiting Hatch)',
+        steps: [
+          { text: 'The Pipeline starts from the HE DISPATCH, so eggs appear the moment they leave the farm — you no longer have to create a batch by hand for them to be visible.' },
+          { text: 'Awaiting hatch report — dispatches to a hatchery ticked "Sends hatchability report" in the master, with no report entered yet. Days Since turns red past 25 days.' },
+          { text: 'Hatchery not assigned — where the load went has not been recorded yet. Set the hatchery from the dropdown on the row as soon as you know; nothing is lost while it is unassigned.' },
+          { text: 'Enter Report — opens the batch form already linked to that dispatch, with flock, invoice, eggs and date filled in.' },
+          { text: 'Hatcheries that do not send reports are deliberately NOT chased here — they appear only under "Hatchery not assigned" until you set their hatchery, then they drop out.' },
+        ]
+      },
+      {
+        title: 'Hatchery Comparison',
+        path: 'Flock Management → Hatch Batches → Hatchery Comparison',
+        steps: [
+          { text: 'One line per hatchery: batches, received, setting, broken%, inf%, blst%, chicks sold, Hatch%, STD Hatch%, Std, reject%, unhatch%.' },
+          { text: 'Percentages are recomputed from the summed counts, not averaged across batches, so a small batch cannot outweigh a large one.' },
+          { text: 'STD Hatch% is the egg-weighted average of the figures you entered from the hatchery reports.' },
+          { text: 'Batches entered before the hatchery dropdown existed still appear, marked "typed, not linked" — edit the batch and pick the hatchery to fold them in.' },
         ]
       },
       {

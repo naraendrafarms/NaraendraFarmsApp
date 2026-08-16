@@ -42,7 +42,12 @@ function rowCalc(b: any) {
   const unhatch  = b.unhatched ?? 0
   const reject   = b.rejects ?? 0
   const saleChk  = b.chicks_sold ?? 0
-  const hatchPct = pct2(std, setting - inf - blst)  // hatch % on hatching-egg basis
+  // Hatch % is chicks sold ÷ setting eggs — the farm's own definition. It used
+  // to be std ÷ (setting − infertile − blasters), which is a different figure
+  // and never matched the hatchery's sheet.
+  const hatchPct = pct2(saleChk, setting)
+  // STD Hatch % is NOT calculated — it is typed in from the hatchery report.
+  const stdHatchPct = b.std_hatch_pct ?? null
   const stdPct   = pct2(std, setting)
   const stdBySetting = p2(setting * stdPct / 100)
   return {
@@ -53,7 +58,7 @@ function rowCalc(b: any) {
     blstPct:    pct2(blst, setting),
     unhatchPct: pct2(unhatch, setting),
     rejectPct:  pct2(reject, setting),
-    hatchPct,   stdPct, stdBySetting,
+    hatchPct,   stdHatchPct, stdPct, stdBySetting,
     stdMinusSale: std - saleChk,
   }
 }
@@ -65,7 +70,7 @@ function exportExcel(rows: any[]) {
     return {
       'Flock':          `F-${b.flocks?.flock_no ?? b.he_dispatch?.flocks?.flock_no ?? ''}`,
       'Invoice/DC':     b.invoice_no ?? b.he_dispatch?.invoice_no ?? (b.he_dispatch?.dc_no ? `DC-${b.he_dispatch.dc_no}` : ''),
-      'Hatchery':       b.hatchery_name ?? '',
+      'Hatchery':       b.hatcheries?.name ?? b.hatchery_name ?? '',
       'Setting Date':   fmtDate(b.setting_date),
       'Hatch Date':     b.hatch_date ? fmtDate(b.hatch_date) : '',
       'Setting No':     b.setting_no ?? '',
@@ -83,6 +88,7 @@ function exportExcel(rows: any[]) {
       'Blst%':          r.blstPct,
       'Sale Chk':       r.saleChk,
       'Hatch%':         r.hatchPct,
+      'STD Hatch%':     r.stdHatchPct ?? '',
       'Std':            r.std,
       'Unhatch':        r.unhatch,
       'Unhatch%':       r.unhatchPct,
@@ -118,7 +124,7 @@ export const HatchBatches: React.FC = () => {
   const [showForm, setShowForm]     = useState(false)
   const [editing, setEditing]       = useState<any>(null)
   const [flockFilter, setFlockFilter] = useState('')
-  const [tab, setTab]               = useState<'batches'|'pipeline'>('batches')
+  const [tab, setTab]               = useState<'batches'|'pipeline'|'hatchery'>('batches')
   const [sel, setSel]               = useState<Set<string>>(new Set())
   const [delConfirm, setDelConfirm] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -132,22 +138,49 @@ export const HatchBatches: React.FC = () => {
     }
   })
 
+  // The hatchery master. Every hatchery dropdown on this page reads this table —
+  // no hatchery is named anywhere in the code, including Hitech. Add them under
+  // Masters → Hatcheries.
+  const { data: hatcheries } = useQuery({
+    queryKey: ['hatcheries'],
+    queryFn: async () => {
+      const { data } = await supabase.from('hatcheries')
+        .select('id,name,provides_hatch_report').order('name')
+      return data ?? []
+    }
+  })
+
   const { data: dispatches } = useQuery({
     queryKey: ['he_dispatch_for_hatch', flockFilter],
     queryFn: async () => {
       let q = supabase.from('he_dispatch')
-        .select('id,dispatch_date,invoice_no,dc_no,total_dispatched,flock_id,flocks(flock_no)')
+        .select('id,dispatch_date,invoice_no,dc_no,total_dispatched,flock_id,hatchery_id,flocks(flock_no),hatcheries(name,provides_hatch_report)')
         .order('dispatch_date', { ascending: false }).limit(300)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       const { data } = await q; return data ?? []
     }
   })
 
+  // Assign the hatchery to a dispatch after the fact. At loading time nobody
+  // knows where the lorry is going, so this is set later — from here.
+  const assignHatchery = useMutation({
+    mutationFn: async ({ id, hatchery_id }: { id: string; hatchery_id: string }) => {
+      const { error } = await supabase.from('he_dispatch')
+        .update({ hatchery_id: hatchery_id || null }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('Hatchery updated')
+      qc.invalidateQueries({ queryKey: ['he_dispatch_for_hatch'] })
+    },
+    onError: (e: any) => toast.error(e.message)
+  })
+
   const { data: batches, isLoading } = useQuery({
     queryKey: ['hatch_batches', flockFilter],
     queryFn: async () => {
       let q = supabase.from('hatch_batches')
-        .select('*, he_dispatch(dispatch_date,invoice_no,dc_no,total_dispatched,flocks(flock_no,placement_date)), flocks(flock_no,placement_date)')
+        .select('*, hatcheries(name), he_dispatch(dispatch_date,invoice_no,dc_no,total_dispatched,flocks(flock_no,placement_date)), flocks(flock_no,placement_date)')
         .order('setting_date', { ascending: false }).limit(200)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
       const { data } = await q; return data ?? []
@@ -187,6 +220,7 @@ export const HatchBatches: React.FC = () => {
   // ── form state ───────────────────────────────────────────────────────────────
   const emptyForm = {
     dispatch_id: '', flock_id: flockFilter, invoice_no: '',
+    hatchery_id: '', std_hatch_pct: '',
     hatchery_name: '', setting_no: '', eggs_weight: '',
     setting_date: today(), hatch_date: '',
     eggs_set: '', broken_transit: '0', infertile: '0',
@@ -196,14 +230,22 @@ export const HatchBatches: React.FC = () => {
   }
   const [form, setForm] = useState(emptyForm)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  // Once Std Chicks is typed in by hand, nothing may overwrite it. The old form
+  // recomputed it on every keystroke in Hatched / Culled / Rejects, so a figure
+  // taken off the hatchery's report was silently replaced by a subtraction.
+  const [stdTouched, setStdTouched] = useState(false)
+  const setStdAuto = (v: number) => { if (!stdTouched && v >= 0) s('std_chicks', v.toString()) }
 
   const openForm = (row?: any) => {
+    setStdTouched(!!row?.std_chicks)
     if (row) {
       setEditing(row)
       setForm({
         dispatch_id:    row.dispatch_id ?? '',
         flock_id:       row.flock_id ?? '',
         invoice_no:     row.invoice_no ?? '',
+        hatchery_id:    row.hatchery_id ?? '',
+        std_hatch_pct:  row.std_hatch_pct?.toString() ?? '',
         hatchery_name:  row.hatchery_name ?? '',
         setting_no:     row.setting_no ?? '',
         eggs_weight:    row.eggs_weight?.toString() ?? '',
@@ -260,11 +302,15 @@ export const HatchBatches: React.FC = () => {
       }
       const settingVal = fSetting
       const fertileVal = fFertile || null
-      const stdVal     = N(form.std_chicks) || autoStd || null
+      // An entered Std of 0 is a real figure (a total failure), so an empty box
+      // is the only thing that falls back to the calculation.
+      const stdVal     = form.std_chicks.trim() !== '' ? N(form.std_chicks) : (autoStd || null)
       const payload = {
         dispatch_id:      form.dispatch_id || null,
         flock_id:         flockId || null,
         invoice_no:       form.invoice_no || null,
+        hatchery_id:      form.hatchery_id || null,
+        std_hatch_pct:    form.std_hatch_pct.trim() !== '' ? F(form.std_hatch_pct) : null,
         hatchery_name:    form.hatchery_name || null,
         setting_no:       form.setting_no || null,
         eggs_weight:      F(form.eggs_weight) || null,
@@ -397,6 +443,7 @@ export const HatchBatches: React.FC = () => {
 
   // ── display state ─────────────────────────────────────────────────────────────
   const flockOptions    = flocks?.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` })) ?? []
+  const hatcheryOptions = (hatcheries ?? []).map((h: any) => ({ value: h.id, label: h.name }))
   const dispatchOptions = (dispatches ?? []).map((d: any) => ({
     value: d.id,
     label: `${d.invoice_no ? d.invoice_no + ' — ' : d.dc_no ? 'DC-' + d.dc_no + ' — ' : ''}${fmtDate(d.dispatch_date)} (${d.total_dispatched?.toLocaleString('en-IN')} eggs) F-${d.flocks?.flock_no}`
@@ -404,9 +451,46 @@ export const HatchBatches: React.FC = () => {
 
   // null/undefined = awaiting hatch; a recorded 0 is a total-failure batch
   // that IS completed (it used to be stuck in "pipeline" forever)
-  const pipeline  = (batches ?? []).filter((b: any) => b.hatched_chicks == null && b.setting_date)
   const completed = (batches ?? []).filter((b: any) => b.hatched_chicks != null)
-  const displayed = tab === 'pipeline' ? pipeline : (batches ?? [])
+  const displayed = (batches ?? [])
+
+  // ── the pipeline, rebuilt ────────────────────────────────────────────────────
+  // It used to list hatch_batches rows with no hatch report, which meant eggs
+  // were invisible until somebody remembered to create a batch by hand — and
+  // nobody had: 26 dispatches and 16.4 lakh eggs were nowhere on this page.
+  // It now starts from the DISPATCH, so eggs appear the moment they leave.
+  const batchedDispatchIds = new Set((batches ?? []).map((b: any) => b.dispatch_id).filter(Boolean))
+  const openDispatches = (dispatches ?? []).filter((d: any) => !batchedDispatchIds.has(d.id))
+  // Only hatcheries ticked "sends hatchability report" in the master are chased.
+  // Nothing here tests for a hatchery by name.
+  const awaitingReport = openDispatches.filter((d: any) => d.hatcheries?.provides_hatch_report)
+  // Where the lorry went is decided after loading, so these are not errors —
+  // they are simply not assigned yet, and must not disappear meanwhile.
+  const unassigned     = openDispatches.filter((d: any) => !d.hatchery_id)
+  const pipeline       = [...awaitingReport, ...unassigned]
+
+  const daysSince = (d: string) => Math.round((Date.now() - new Date(d).getTime()) / 86400000)
+
+  // ── hatchery-wise comparison ─────────────────────────────────────────────────
+  // Grouped on hatchery_id where present, falling back to the old typed name so
+  // batches entered before the dropdown existed still appear.
+  const byHatchery = (() => {
+    const m: Record<string, any> = {}
+    for (const b of completed) {
+      const key = b.hatchery_id ?? `text:${b.hatchery_name ?? '(not set)'}`
+      const name = b.hatcheries?.name ?? b.hatchery_name ?? '(not set)'
+      const r = rowCalc(b)
+      if (!m[key]) m[key] = { name, batches: 0, received: 0, setting: 0, broken: 0, inf: 0,
+                              blst: 0, std: 0, saleChk: 0, reject: 0, unhatch: 0,
+                              stdHatchSum: 0, stdHatchWeight: 0, typedOnly: !b.hatchery_id }
+      const g = m[key]
+      g.batches++; g.received += r.received; g.setting += r.setting; g.broken += r.broken
+      g.inf += r.inf; g.blst += r.blst; g.std += r.std; g.saleChk += r.saleChk
+      g.reject += r.reject; g.unhatch += r.unhatch
+      if (r.stdHatchPct != null) { g.stdHatchSum += r.stdHatchPct * (r.setting || 1); g.stdHatchWeight += (r.setting || 1) }
+    }
+    return Object.values(m).sort((a: any, b: any) => b.setting - a.setting)
+  })()
 
   const totalEggsSet    = completed.reduce((s: number, b: any) => s + (b.eggs_set ?? 0), 0)
   const totalHatched    = completed.reduce((s: number, b: any) => s + (b.std_chicks ?? (b.hatched_chicks ?? 0)), 0)
@@ -452,7 +536,7 @@ export const HatchBatches: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {([['batches','All Batches'],['pipeline','Pipeline (Awaiting Hatch)']] as const).map(([t, label]) => (
+        {([['batches','All Batches'],['pipeline','Pipeline (Awaiting Hatch)'],['hatchery','Hatchery Comparison']] as const).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab===t?'border-brand-600 text-brand-600':'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {label}{t==='pipeline' && pipeline.length > 0 && <span className="ml-1.5 bg-orange-100 text-orange-700 text-xs px-1.5 rounded-full">{pipeline.length}</span>}
@@ -475,7 +559,7 @@ export const HatchBatches: React.FC = () => {
         </div>
       )}
 
-      {isLoading ? <Spinner /> : (
+      {tab === 'batches' && (isLoading ? <Spinner /> : (
         <Card padding={false}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm" style={{ minWidth: '2100px' }}>
@@ -504,6 +588,7 @@ export const HatchBatches: React.FC = () => {
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Blst%</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Sale Chk</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Hatch%</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">STD Hatch%</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Std</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Unhatch</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600 whitespace-nowrap">Unhatch%</th>
@@ -547,7 +632,7 @@ export const HatchBatches: React.FC = () => {
                             ? <span className="font-medium text-blue-700">{b.he_dispatch.invoice_no}</span>
                             : b.he_dispatch?.dc_no ? `DC-${b.he_dispatch.dc_no}` : '—'}
                       </td>
-                      <td className="px-3 py-2 text-xs whitespace-nowrap">{b.hatchery_name ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap">{b.hatcheries?.name ?? b.hatchery_name ?? '—'}</td>
                       <td className="px-3 py-2 text-xs whitespace-nowrap">{fmtDate(b.setting_date)}</td>
                       <td className="px-3 py-2 text-xs whitespace-nowrap">
                         {b.hatch_date ? fmtDate(b.hatch_date) : <span className="text-orange-400">Awaiting</span>}
@@ -568,6 +653,9 @@ export const HatchBatches: React.FC = () => {
                       <td className="px-3 py-2 text-xs text-right">{r.saleChk > 0 ? r.saleChk.toLocaleString('en-IN') : '—'}</td>
                       <td className={`px-3 py-2 text-xs text-right font-semibold ${r.hatchPct >= 80 ? 'text-green-600' : r.hatchPct > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
                         {r.hatchPct > 0 ? pctCell(r.hatchPct) : '—'}
+                      </td>
+                      <td className={`px-3 py-2 text-xs text-right font-semibold ${(r.stdHatchPct ?? 0) >= 80 ? 'text-green-600' : r.stdHatchPct != null ? 'text-orange-500' : 'text-gray-400'}`}>
+                        {r.stdHatchPct != null ? `${r.stdHatchPct}%` : '—'}
                       </td>
                       <td className="px-3 py-2 text-xs text-right font-medium text-green-700">{r.std > 0 ? r.std.toLocaleString('en-IN') : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right">{r.unhatch > 0 ? r.unhatch : '—'}</td>
@@ -599,8 +687,13 @@ export const HatchBatches: React.FC = () => {
                   s.received += r.received; s.setting += r.setting; s.broken += r.broken
                   s.inf += r.inf; s.blst += r.blst; s.saleChk += r.saleChk
                   s.std += r.std; s.unhatch += r.unhatch; s.reject += r.reject
+                  if (r.stdHatchPct != null) {
+                    s.stdHatchSum += r.stdHatchPct * (r.setting || 1)
+                    s.stdHatchWeight += (r.setting || 1)
+                  }
                   return s
-                }, { received: 0, setting: 0, broken: 0, inf: 0, blst: 0, saleChk: 0, std: 0, unhatch: 0, reject: 0 })
+                }, { received: 0, setting: 0, broken: 0, inf: 0, blst: 0, saleChk: 0, std: 0, unhatch: 0, reject: 0,
+                     stdHatchSum: 0, stdHatchWeight: 0 })
                 return (
                   <tfoot>
                     <tr className="border-t-2 border-gray-300 bg-gray-50 font-bold">
@@ -614,7 +707,13 @@ export const HatchBatches: React.FC = () => {
                       <td className="px-3 py-2 text-xs text-right">{t.blst.toLocaleString('en-IN')}</td>
                       <td className="px-3 py-2 text-xs text-right text-orange-600">{pctCell(pct2(t.blst, t.setting))}</td>
                       <td className="px-3 py-2 text-xs text-right">{t.saleChk.toLocaleString('en-IN')}</td>
-                      <td className="px-3 py-2 text-xs text-right">{pctCell(pct2(t.std, t.setting - t.inf - t.blst))}</td>
+                      {/* chicks sold ÷ setting, same basis as each row */}
+                      <td className="px-3 py-2 text-xs text-right">{pctCell(pct2(t.saleChk, t.setting))}</td>
+                      {/* STD Hatch % is entered per batch, so the total is the
+                          egg-weighted average of the ones that carry it — a
+                          plain mean would let a 5,000-egg batch outweigh a
+                          50,000-egg one. */}
+                      <td className="px-3 py-2 text-xs text-right">{t.stdHatchWeight > 0 ? `${p2(t.stdHatchSum / t.stdHatchWeight)}%` : '—'}</td>
                       <td className="px-3 py-2 text-xs text-right text-green-700">{t.std.toLocaleString('en-IN')}</td>
                       <td className="px-3 py-2 text-xs text-right">{t.unhatch.toLocaleString('en-IN')}</td>
                       <td className="px-3 py-2 text-xs text-right text-orange-600">{pctCell(pct2(t.unhatch, t.setting))}</td>
@@ -628,9 +727,130 @@ export const HatchBatches: React.FC = () => {
             </table>
           </div>
           {displayed.length === 0 && (
-            <EmptyState icon={<Egg size={32}/>} title={tab === 'pipeline' ? 'No batches awaiting hatch' : 'No hatch batches yet'}
+            <EmptyState icon={<Egg size={32}/>} title="No hatch batches yet"
               action={<Button onClick={() => openForm()} icon={<Plus size={16}/>}>Add Batch</Button>}
             />
+          )}
+        </Card>
+      ))}
+
+      {/* ── Pipeline: driven by dispatches, not by hatch batches ─────────────── */}
+      {tab === 'pipeline' && (
+        <div className="space-y-4">
+          {hatcheryOptions.length === 0 && (
+            <Card>
+              <p className="text-sm text-orange-700 bg-orange-50 rounded px-3 py-2">
+                No hatcheries in the master yet. Add them under <strong>Masters → Hatcheries</strong>,
+                and tick <strong>“Sends hatchability report”</strong> on the one that sends you reports —
+                only those are chased here.
+              </p>
+            </Card>
+          )}
+          {([['Awaiting hatch report', awaitingReport, 'These went to a hatchery that sends a report, and no report has been entered yet.'],
+             ['Hatchery not assigned', unassigned, 'Dispatched, but where they went has not been recorded yet. Set the hatchery here as soon as you know.']] as const)
+            .map(([title, rows, note]) => (
+            <Card key={title} padding={false}>
+              <div className="px-4 py-3 border-b border-gray-200">
+                <h3 className="font-semibold text-sm text-gray-800">{title} ({rows.length})</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{note}</p>
+              </div>
+              {rows.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-gray-400 text-center">Nothing here.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <thead><tr>
+                      <Th>Flock</Th><Th>Dispatch Date</Th><Th>Invoice / DC</Th>
+                      <Th>Eggs</Th><Th>Days Since</Th><Th>Hatchery</Th><Th></Th>
+                    </tr></thead>
+                    <tbody>
+                      {rows.map((d: any) => (
+                        <tr key={d.id} className="hover:bg-gray-50">
+                          <Td><Badge color="green">F-{d.flocks?.flock_no}</Badge></Td>
+                          <Td>{fmtDate(d.dispatch_date)}</Td>
+                          <Td className="text-xs">{d.invoice_no ?? (d.dc_no ? `DC-${d.dc_no}` : '—')}</Td>
+                          <Td right>{d.total_dispatched?.toLocaleString('en-IN') ?? '—'}</Td>
+                          <Td right>
+                            <span className={daysSince(d.dispatch_date) > 25 ? 'text-red-600 font-semibold' : ''}>
+                              {daysSince(d.dispatch_date)}d
+                            </span>
+                          </Td>
+                          <Td>
+                            <Select className="w-48" placeholder="— Not assigned —"
+                              options={hatcheryOptions} value={d.hatchery_id ?? ''}
+                              onChange={e => assignHatchery.mutate({ id: d.id, hatchery_id: e.target.value })} />
+                          </Td>
+                          <Td>
+                            <Button size="sm" variant="outline" onClick={() => {
+                              // Open the batch form already linked to this
+                              // dispatch, so nothing is re-typed.
+                              setStdTouched(false); setEditing(null)
+                              setForm({
+                                ...emptyForm,
+                                dispatch_id: d.id,
+                                flock_id: d.flock_id ?? '',
+                                invoice_no: d.invoice_no ?? '',
+                                hatchery_id: d.hatchery_id ?? '',
+                                eggs_set: d.total_dispatched?.toString() ?? '',
+                                setting_date: d.dispatch_date,
+                              })
+                              setShowForm(true)
+                            }}>Enter Report</Button>
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* ── Hatchery comparison ──────────────────────────────────────────────── */}
+      {tab === 'hatchery' && (
+        <Card padding={false}>
+          {byHatchery.length === 0 ? (
+            <EmptyState icon={<Egg size={32}/>} title="No completed hatch reports yet"
+              action={<Button onClick={() => setTab('pipeline')}>Go to Pipeline</Button>} />
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <thead><tr>
+                  <Th>Hatchery</Th><Th>Batches</Th><Th>Received</Th><Th>Setting</Th>
+                  <Th>Broken%</Th><Th>Inf%</Th><Th>Blst%</Th><Th>Sale Chk</Th>
+                  <Th>Hatch%</Th><Th>STD Hatch%</Th><Th>Std</Th><Th>Reject%</Th><Th>Unhatch%</Th>
+                </tr></thead>
+                <tbody>
+                  {byHatchery.map((g: any) => (
+                    <tr key={g.name} className="hover:bg-gray-50">
+                      <Td>
+                        <span className="font-medium">{g.name}</span>
+                        {g.typedOnly && <span className="ml-2 text-xs text-orange-500">typed, not linked</span>}
+                      </Td>
+                      <Td right>{g.batches}</Td>
+                      <Td right>{g.received.toLocaleString('en-IN')}</Td>
+                      <Td right>{g.setting.toLocaleString('en-IN')}</Td>
+                      <Td right>{pctCell(pct2(g.broken, g.received))}</Td>
+                      <Td right>{pctCell(pct2(g.inf, g.setting))}</Td>
+                      <Td right>{pctCell(pct2(g.blst, g.setting))}</Td>
+                      <Td right>{g.saleChk.toLocaleString('en-IN')}</Td>
+                      <Td right><strong>{pctCell(pct2(g.saleChk, g.setting))}</strong></Td>
+                      <Td right><strong>{g.stdHatchWeight > 0 ? `${p2(g.stdHatchSum / g.stdHatchWeight)}%` : '—'}</strong></Td>
+                      <Td right>{g.std.toLocaleString('en-IN')}</Td>
+                      <Td right>{pctCell(pct2(g.reject, g.setting))}</Td>
+                      <Td right>{pctCell(pct2(g.unhatch, g.setting))}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+              <p className="px-4 py-3 text-xs text-gray-500 border-t border-gray-100">
+                Percentages are recomputed from the summed counts, not averaged across batches,
+                so a small batch cannot outweigh a large one. STD Hatch % is the egg-weighted
+                average of the figures you entered.
+              </p>
+            </div>
           )}
         </Card>
       )}
@@ -657,8 +877,11 @@ export const HatchBatches: React.FC = () => {
           <FormRow cols={3}>
             <SearchableSelect label="Flock" placeholder="— Select or auto from invoice —" options={flockOptions}
               value={form.flock_id} onChange={v => s('flock_id', v)} />
-            <Input label="Hatchery Name" placeholder="e.g. Hitech Hatch Fresh Pvt Ltd"
-              value={form.hatchery_name} onChange={e => s('hatchery_name', e.target.value)} />
+            <SearchableSelect label="Hatchery" placeholder="— Select hatchery —"
+              options={hatcheryOptions} value={form.hatchery_id} onChange={v => s('hatchery_id', v)}
+              hint={hatcheryOptions.length === 0
+                ? 'No hatcheries yet — add them under Masters → Hatcheries'
+                : (!form.hatchery_id && form.hatchery_name ? `Was typed as: ${form.hatchery_name}` : '')} />
             <Input label="Setting No" placeholder="e.g. S-2026-01"
               value={form.setting_no} onChange={e => s('setting_no', e.target.value)} />
           </FormRow>
@@ -713,34 +936,36 @@ export const HatchBatches: React.FC = () => {
             <Input label="Hatched (Total)" type="number" value={form.hatched_chicks}
               onChange={e => {
                 s('hatched_chicks', e.target.value)
-                const h = parseInt(e.target.value) || 0
-                const autoS = h - fCulled - fRejects
-                if (autoS >= 0) s('std_chicks', autoS.toString())
+                setStdAuto((parseInt(e.target.value) || 0) - fCulled - fRejects)
               }} />
             <Input label="Culled Chicks" type="number" value={form.culled_chicks}
               onChange={e => {
                 s('culled_chicks', e.target.value)
-                const c = parseInt(e.target.value) || 0
-                const autoS = fHatched - c - fRejects
-                if (autoS >= 0) s('std_chicks', autoS.toString())
+                setStdAuto(fHatched - (parseInt(e.target.value) || 0) - fRejects)
               }} />
           </FormRow>
           <FormRow cols={4}>
-            <Input label="Std Chicks (auto)" type="number" value={form.std_chicks}
-              onChange={e => s('std_chicks', e.target.value)}
-              hint={autoStd > 0 && !form.std_chicks ? `Auto: ${autoStd}` : ''} />
+            <Input label="Std Chicks" type="number" value={form.std_chicks}
+              onChange={e => { setStdTouched(true); s('std_chicks', e.target.value) }}
+              hint={autoStd > 0
+                ? (stdTouched && N(form.std_chicks) !== autoStd
+                    ? `Your figure is kept. Calculated would be ${autoStd.toLocaleString('en-IN')}`
+                    : `Calculated: ${autoStd.toLocaleString('en-IN')}`)
+                : ''} />
             <Input label="Unhatched" type="number" value={form.unhatched}
               onChange={e => s('unhatched', e.target.value)}
               hint={fSetting > 0 && N(form.unhatched) > 0 ? `${pct2(N(form.unhatched), fSetting).toFixed(1)}%` : ''} />
             <Input label="Rejects" type="number" value={form.rejects}
               onChange={e => {
                 s('rejects', e.target.value)
-                const r = parseInt(e.target.value) || 0
-                const autoS = fHatched - fCulled - r
-                if (autoS >= 0) s('std_chicks', autoS.toString())
+                setStdAuto(fHatched - fCulled - (parseInt(e.target.value) || 0))
               }}
               hint={fSetting > 0 && fRejects > 0 ? `${pct2(fRejects, fSetting).toFixed(1)}%` : ''} />
-            <div />
+            {/* Typed in from the hatchery's report — the app never calculates
+                this one. Hatch % below IS calculated: chicks sold ÷ setting. */}
+            <Input label="STD Hatch % (from report)" type="number" step="0.01" value={form.std_hatch_pct}
+              onChange={e => s('std_hatch_pct', e.target.value)}
+              hint="Entered from the hatchery report" />
           </FormRow>
 
           <Divider label="Chick Sales" />
@@ -760,7 +985,9 @@ export const HatchBatches: React.FC = () => {
               {fHatched > 0 && (
                 <>
                   <span>Std: <strong>{fStd.toLocaleString('en-IN')}</strong></span>
-                  {fHatchEggs > 0 && <span>Hatch%: <strong>{pct2(fStd, fHatchEggs).toFixed(1)}%</strong></span>}
+                  {/* chicks sold ÷ setting eggs */}
+                  {N(form.chicks_sold) > 0 && <span>Hatch%: <strong>{pct2(N(form.chicks_sold), fSetting).toFixed(1)}%</strong></span>}
+                  {form.std_hatch_pct.trim() !== '' && <span>STD Hatch%: <strong>{F(form.std_hatch_pct).toFixed(2)}%</strong></span>}
                   {N(form.unhatched) > 0 && <span>Unhatch%: <strong>{pct2(N(form.unhatched), fSetting).toFixed(1)}%</strong></span>}
                 </>
               )}
