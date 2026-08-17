@@ -21,11 +21,15 @@ import toast from 'react-hot-toast'
 //
 // Feed is NOT entered here. It is already recorded daily in daily_feed, and a
 // second copy would give two answers to one question.
+// Column order follows the farm's own weekly body weight register: actual
+// average, then the spread (min and max), which is what that book records
+// instead of a uniformity percentage.
 const TEMPLATE_HEADERS = [
   'Flock No', 'Sex', 'Age (weeks)', 'Week Ending (DD/MM/YYYY)',
-  'Avg Body Weight (g)', 'Birds Weighed', 'Uniformity %', 'CV %', 'Remarks',
+  'Avg Body Weight (g)', 'Min Body Weight (g)', 'Max Body Weight (g)',
+  'Birds Weighed', 'Uniformity %', 'CV %', 'Remarks',
 ]
-const TEMPLATE_EXAMPLE = ['19', 'Female', 30, '05/04/2026', 3450, 100, 82, 8.5, '']
+const TEMPLATE_EXAMPLE = ['23', 'Female', 1, '13/08/2026', 151, 99, 212, '', '', '', 'Full feed (1st week)']
 
 export const FlockWeeklyPerformance: React.FC = () => {
   const qc = useQueryClient()
@@ -35,7 +39,8 @@ export const FlockWeeklyPerformance: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const blank = { flock_id: '', sex: 'Female', week_of_age: '', week_ending: '',
-                  avg_body_weight_g: '', birds_weighed: '', uniformity_pct: '', cv_pct: '', remarks: '' }
+                  avg_body_weight_g: '', min_body_weight_g: '', max_body_weight_g: '',
+                  birds_weighed: '', uniformity_pct: '', cv_pct: '', remarks: '' }
   const [form, setForm] = useState(blank)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
@@ -81,8 +86,15 @@ export const FlockWeeklyPerformance: React.FC = () => {
       const st = stdFor(r.sex, season, r.week_of_age)
       const actual = r.avg_body_weight_g == null ? null : Number(r.avg_body_weight_g)
       const target = st?.body_weight_g == null ? null : Number(st.body_weight_g)
+      // Gain is the difference between this week and the previous week
+      // RECORDED for the same flock and sex — not stored as its own figure,
+      // which would let the two disagree. Week 1 has no previous week here, so
+      // its gain shows a dash until a week 0 (placement weight) is entered.
+      const prev = rows.find((p: any) => p.flock_id === r.flock_id && p.sex === r.sex
+        && p.week_of_age === r.week_of_age - 1 && p.avg_body_weight_g != null)
+      const gain = actual != null && prev ? actual - Number(prev.avg_body_weight_g) : null
       return {
-        ...r, season, target,
+        ...r, season, target, gain, stdGain: st?.weekly_gain_g ?? null,
         diff: actual != null && target != null ? actual - target : null,
         pctOfStd: actual != null && target ? Math.round(actual / target * 1000) / 10 : null,
         stdFeed: st?.feed_g_per_day ?? null,
@@ -110,6 +122,8 @@ export const FlockWeeklyPerformance: React.FC = () => {
         flock_id: form.flock_id, sex: form.sex, week_of_age: wk,
         week_ending: form.week_ending || null,
         avg_body_weight_g: form.avg_body_weight_g === '' ? null : Number(form.avg_body_weight_g),
+        min_body_weight_g: form.min_body_weight_g === '' ? null : Number(form.min_body_weight_g),
+        max_body_weight_g: form.max_body_weight_g === '' ? null : Number(form.max_body_weight_g),
         birds_weighed: form.birds_weighed === '' ? null : parseInt(form.birds_weighed),
         uniformity_pct: form.uniformity_pct === '' ? null : Number(form.uniformity_pct),
         cv_pct: form.cv_pct === '' ? null : Number(form.cv_pct),
@@ -140,7 +154,13 @@ export const FlockWeeklyPerformance: React.FC = () => {
       const { headers, rows: raw } = await parseFile(file)
       const idx = (name: string) => headers.findIndex(h => h.includes(name))
       const iFlock = idx('flock'), iSex = idx('sex'), iWk = idx('age'), iEnd = idx('week ending')
-      const iBw = idx('body weight'), iN = idx('birds'), iU = idx('uniformity'), iCv = idx('cv'), iRem = idx('remarks')
+      // "avg/min/max body weight" all contain "body weight", so each is matched
+      // on its own prefix first and only then on the generic name.
+      const iBw = headers.findIndex(h => h.includes('avg body weight')) >= 0
+        ? headers.findIndex(h => h.includes('avg body weight')) : idx('body weight')
+      const iMin = headers.findIndex(h => h.includes('min body weight'))
+      const iMax = headers.findIndex(h => h.includes('max body weight'))
+      const iN = idx('birds'), iU = idx('uniformity'), iCv = idx('cv'), iRem = idx('remarks')
       if (iFlock < 0 || iWk < 0) throw new Error('The sheet needs at least a Flock No and an Age (weeks) column')
 
       // Flock is matched on flock_no, with or without an "F-" prefix, because
@@ -174,7 +194,8 @@ export const FlockWeeklyPerformance: React.FC = () => {
         const sex = String(r[iSex] ?? 'Female').trim().toLowerCase().startsWith('m') ? 'Male' : 'Female'
         toSave.push({
           flock_id: fid, sex, week_of_age: wk, week_ending: weekEnd,
-          avg_body_weight_g: num(iBw), birds_weighed: num(iN),
+          avg_body_weight_g: num(iBw), min_body_weight_g: num(iMin), max_body_weight_g: num(iMax),
+          birds_weighed: num(iN),
           uniformity_pct: num(iU), cv_pct: num(iCv),
           remarks: iRem >= 0 ? (String(r[iRem] ?? '').trim() || null) : null,
         })
@@ -197,6 +218,8 @@ export const FlockWeeklyPerformance: React.FC = () => {
       flock_id: r.flock_id, sex: r.sex, week_of_age: String(r.week_of_age),
       week_ending: r.week_ending ?? '',
       avg_body_weight_g: r.avg_body_weight_g?.toString() ?? '',
+      min_body_weight_g: r.min_body_weight_g?.toString() ?? '',
+      max_body_weight_g: r.max_body_weight_g?.toString() ?? '',
       birds_weighed: r.birds_weighed?.toString() ?? '',
       uniformity_pct: r.uniformity_pct?.toString() ?? '',
       cv_pct: r.cv_pct?.toString() ?? '',
@@ -230,8 +253,8 @@ export const FlockWeeklyPerformance: React.FC = () => {
           be sent again.
         </p>
         <p className="text-xs text-gray-500 mt-1">
-          Columns: Flock No · Sex · Age (weeks) · Week Ending · Avg Body Weight (g) · Birds Weighed ·
-          Uniformity % · CV % · Remarks. Only Flock No and Age are required — leave the rest blank
+          Columns: Flock No · Sex · Age (weeks) · Week Ending · Avg / Min / Max Body Weight (g) ·
+          Birds Weighed · Uniformity % · CV % · Remarks. Only Flock No and Age are required — leave the rest blank
           and they stay blank rather than becoming zero. Flock numbers match with or without "F-".
           Feed is not entered here: it is already recorded daily under Daily Entry.
         </p>
@@ -276,7 +299,7 @@ export const FlockWeeklyPerformance: React.FC = () => {
           )}
           <Card padding={false}>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm" style={{ minWidth: '1000px' }}>
+              <table className="w-full text-sm" style={{ minWidth: '1240px' }}>
                 <thead className="bg-gray-50 text-xs text-gray-500">
                   <tr>
                     <th className="px-3 py-2 text-left">Flock</th>
@@ -286,6 +309,10 @@ export const FlockWeeklyPerformance: React.FC = () => {
                     <th className="px-3 py-2 text-right">Standard (g)</th>
                     <th className="px-3 py-2 text-right">Diff</th>
                     <th className="px-3 py-2 text-right">% of Std</th>
+                    <th className="px-3 py-2 text-right">Min</th>
+                    <th className="px-3 py-2 text-right">Max</th>
+                    <th className="px-3 py-2 text-right">Gain</th>
+                    <th className="px-3 py-2 text-right">Std Gain</th>
                     <th className="px-3 py-2 text-right">Birds</th>
                     <th className="px-3 py-2 text-right">Uniformity</th>
                     <th className="px-3 py-2 text-left">Std feed</th>
@@ -304,6 +331,12 @@ export const FlockWeeklyPerformance: React.FC = () => {
                         {r.diff == null ? '—' : `${r.diff > 0 ? '+' : ''}${Math.round(r.diff)}`}
                       </td>
                       <td className="px-3 py-2 text-right">{r.pctOfStd == null ? '—' : `${r.pctOfStd}%`}</td>
+                      <td className="px-3 py-2 text-right text-gray-500">{r.min_body_weight_g ?? '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-500">{r.max_body_weight_g ?? '—'}</td>
+                      <td className={`px-3 py-2 text-right ${r.gain == null ? 'text-gray-400' : r.stdGain != null && r.gain < r.stdGain ? 'text-red-600' : 'text-green-600'}`}>
+                        {r.gain == null ? '—' : `+${Math.round(r.gain)}`}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-500">{r.stdGain ?? '—'}</td>
                       <td className="px-3 py-2 text-right text-gray-500">{r.birds_weighed ?? '—'}</td>
                       <td className="px-3 py-2 text-right">{r.uniformity_pct == null ? '—' : `${r.uniformity_pct}%`}</td>
                       <td className="px-3 py-2 text-gray-500">
@@ -341,6 +374,8 @@ export const FlockWeeklyPerformance: React.FC = () => {
           <Input label="Age (weeks) *" type="number" value={form.week_of_age} onChange={e => s('week_of_age', e.target.value)} />
           <DateInput label="Week ending" value={form.week_ending} onChange={e => s('week_ending', e.target.value)} />
           <Input label="Avg body weight (g)" type="number" step="1" value={form.avg_body_weight_g} onChange={e => s('avg_body_weight_g', e.target.value)} />
+          <Input label="Min body weight (g)" type="number" value={form.min_body_weight_g} onChange={e => s('min_body_weight_g', e.target.value)} />
+          <Input label="Max body weight (g)" type="number" value={form.max_body_weight_g} onChange={e => s('max_body_weight_g', e.target.value)} />
           <Input label="Birds weighed" type="number" value={form.birds_weighed} onChange={e => s('birds_weighed', e.target.value)}
             hint="An average from 20 birds is not the same as one from 200 — recording the count keeps that visible" />
           <Input label="Uniformity %" type="number" step="0.1" value={form.uniformity_pct} onChange={e => s('uniformity_pct', e.target.value)} />
