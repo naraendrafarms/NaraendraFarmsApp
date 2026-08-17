@@ -25,6 +25,10 @@ export const PaymentPlanningPage: React.FC = () => {
   const [rowDisc, setRowDisc] = useState<Record<string, string>>({})
   const [savePlanOpen, setSavePlanOpen] = useState(false)
   const [planTitle, setPlanTitle] = useState('')
+  // A saved plan opened for viewing/printing. Its lines are fetched on demand
+  // rather than with the list — twenty plans' worth of lines is a lot to carry
+  // for a table that only shows dates and totals.
+  const [openPlan, setOpenPlan] = useState<any>(null)
 
   const { data: bankAccountsList } = useQuery({
     queryKey: ['bank_accounts_list'],
@@ -265,6 +269,53 @@ export const PaymentPlanningPage: React.FC = () => {
       return data ?? []
     }
   })
+
+  const { data: openPlanLines = [] } = useQuery({
+    queryKey: ['payment_plan_line', openPlan?.id],
+    enabled: !!openPlan?.id,
+    queryFn: async () => {
+      const { data } = await supabase.from('payment_plan_line')
+        .select('*').eq('plan_id', openPlan.id).order('vendor_name')
+      return data ?? []
+    }
+  })
+
+  // Print a SAVED plan exactly as it was saved. The figures come from the plan's
+  // own lines, not from today's balances — a plan printed a week later must show
+  // what was decided then, otherwise it is not a record of anything.
+  const printSavedPlan = () => {
+    if (!openPlan) return
+    const rows = (openPlanLines as any[]).map((l: any, i: number) => ({
+      sno: i + 1,
+      vendor_name: l.vendor_name ?? '—',
+      credit_limit_days: 0,
+      invoice_amount: l.balance_due ?? 0,
+      payable_amount: l.planned_amount ?? 0,
+      balance_due: l.balance_due ?? 0,
+      still_owed: Math.max(0, (l.balance_due ?? 0) - (l.planned_amount ?? 0)),
+      disc_tds: Math.max(0, (l.balance_due ?? 0) - (l.planned_amount ?? 0)),
+      grn_date: null,
+      invoice_date: null,
+      days: '',
+    }))
+    const plannedTotal = rows.reduce((sum: number, r: any) => sum + r.payable_amount, 0)
+    const owedTotal = rows.reduce((sum: number, r: any) => sum + r.still_owed, 0)
+    printPaymentPlanning({
+      planDate: openPlan.plan_date,
+      rows,
+      totals: {
+        invoice: rows.reduce((sum: number, r: any) => sum + r.invoice_amount, 0),
+        payable: plannedTotal,
+        discTds: owedTotal,
+        stillOwed: owedTotal,
+      },
+      // Bank figures are today's, not the plan's — the plan never stored them,
+      // and inventing a historical balance would be worse than showing none.
+      bankBalance: kotakBalance?.balance ?? 0,
+      bankBalanceAfter: (kotakBalance?.balance ?? 0) - plannedTotal,
+      needToReceive: 0,
+    })
+  }
 
   const toggleSelect = (id: string) => {
     setSelected(prev => {
@@ -660,13 +711,14 @@ export const PaymentPlanningPage: React.FC = () => {
             <h3 className="font-semibold text-gray-800 text-sm">Saved plans</h3>
           </div>
           <Table>
-            <thead><tr><Th>Date</Th><Th>Title</Th><Th right>Total planned</Th></tr></thead>
+            <thead><tr><Th>Date</Th><Th>Title</Th><Th right>Total planned</Th><Th right>Open</Th></tr></thead>
             <tbody>
               {(savedPlans ?? []).map((pl: any) => (
-                <tr key={pl.id} className="hover:bg-gray-50">
+                <tr key={pl.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setOpenPlan(pl)}>
                   <Td>{fmtDate(pl.plan_date)}</Td>
                   <Td>{pl.title ?? '—'}</Td>
                   <Td right className="font-semibold">{inr(pl.total_planned)}</Td>
+                  <Td right><span className="text-brand-600 text-xs underline">View / Print</span></Td>
                 </tr>
               ))}
             </tbody>
@@ -892,6 +944,44 @@ export const PaymentPlanningPage: React.FC = () => {
           </div>
         )}
       </Card>
+      <Modal open={!!openPlan} onClose={() => setOpenPlan(null)}
+        title={openPlan ? `Plan — ${fmtDate(openPlan.plan_date)}${openPlan.title ? ` · ${openPlan.title}` : ''}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setOpenPlan(null)}>Close</Button>
+          <Button icon={<Printer size={14}/>} onClick={printSavedPlan} disabled={!openPlanLines.length}>Print</Button>
+        </>}>
+        <div className="space-y-3 text-sm">
+          {!openPlanLines.length ? (
+            <p className="text-gray-500">Loading the plan's bills…</p>
+          ) : (
+            <>
+              <Table>
+                <thead><tr><Th>Vendor</Th><Th>Invoice</Th><Th right>Balance due</Th><Th right>Planned</Th><Th right>Still owed</Th></tr></thead>
+                <tbody>
+                  {(openPlanLines as any[]).map((l: any) => {
+                    const owed = Math.max(0, (l.balance_due ?? 0) - (l.planned_amount ?? 0))
+                    return (
+                      <tr key={l.id}>
+                        <Td className="font-medium">{l.vendor_name ?? '—'}</Td>
+                        <Td className="text-xs">{l.invoice_no ?? '—'}</Td>
+                        <Td right className="text-gray-500">{inr(l.balance_due ?? 0)}</Td>
+                        <Td right className="font-semibold">{inr(l.planned_amount ?? 0)}</Td>
+                        <Td right className={owed > 0.5 ? 'text-orange-600' : 'text-gray-400'}>{owed > 0.5 ? inr(owed) : '—'}</Td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </Table>
+              <p className="text-xs text-gray-500">
+                These are the figures as they were SAVED on {openPlan ? fmtDate(openPlan.plan_date) : ''} — not
+                today's balances. A bill paid since then still shows what was planned, which is the point of
+                keeping the plan.
+              </p>
+            </>
+          )}
+        </div>
+      </Modal>
+
       <Modal open={savePlanOpen} onClose={() => setSavePlanOpen(false)} title="Save this plan" size="sm"
         footer={<>
           <Button variant="secondary" onClick={() => setSavePlanOpen(false)}>Cancel</Button>
