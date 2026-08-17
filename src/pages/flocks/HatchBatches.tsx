@@ -365,6 +365,20 @@ export const HatchBatches: React.FC = () => {
     return row?.hatchability_pct != null ? { pct: Number(row.hatchability_pct), wk, season: fl.laying_season } : null
   })()
 
+  // On a NEW batch, fill STD Hatch % from the standard as soon as the flock and
+  // setting date are known. Only ever when the box is empty and only when
+  // adding: editing an existing batch leaves its figure exactly as saved, so
+  // none of the 394 already entered can be rewritten by this.
+  React.useEffect(() => {
+    if (!showForm || editing) return
+    if (form.std_hatch_pct.trim() !== '') return
+    if (!stdHatchForForm) return
+    s('std_hatch_pct', String(stdHatchForForm.pct))
+    const derived = stdFromPct(String(stdHatchForForm.pct), fSetting)
+    if (derived != null) { setStdTouched(false); s('std_chicks', derived.toString()) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm, editing, form.flock_id, form.setting_date, stdHatchForForm?.pct, fSetting])
+
   const fStd       = N(form.std_chicks) || (fHatched - fCulled - fRejects)
   const fUnhatch   = N(form.unhatched)
   const fHatchEggs = fSetting - fInf - fBlst  // eggs that should hatch
