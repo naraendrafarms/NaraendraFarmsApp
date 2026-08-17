@@ -54,12 +54,23 @@ export const FlockWeeklyPerformance: React.FC = () => {
     }
   })
 
-  const { data: rows = [], isLoading } = useQuery({
+  // Plain select, with the flock joined in JS below. Embedding flocks(...) needs
+  // a foreign key from flock_weekly_performance.flock_id to flocks.id; without
+  // one PostgREST rejects the whole request and the page shows "nothing
+  // recorded" even though the rows are there — which is exactly what happened
+  // when this page first shipped. The flock list is already loaded above, so
+  // there is nothing to gain from making the database do the join.
+  const { data: rawRows = [], isLoading } = useQuery({
     queryKey: ['flock_weekly_performance'],
     queryFn: async () => fetchAllPages<any>((from, to) => supabase
-      .from('flock_weekly_performance').select('*, flocks(flock_no,laying_season)')
+      .from('flock_weekly_performance').select('*')
       .order('week_of_age').range(from, to), 'Weekly performance')
   })
+
+  const rows = useMemo(() => {
+    const byId = new Map((flocks as any[]).map((f: any) => [f.id, f]))
+    return (rawRows as any[]).map((r: any) => ({ ...r, flocks: byId.get(r.flock_id) ?? null }))
+  }, [rawRows, flocks])
 
   // The standard for the same weeks. Male standards are filed under season
   // 'Both' — the book gives one male curve for winter and summer alike.
