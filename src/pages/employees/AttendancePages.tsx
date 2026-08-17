@@ -1339,6 +1339,33 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
 
   const monthLabel = `${MONTH_NAMES_FULL[mn - 1]} ${yr}`
 
+  // Month-wide totals, the same six figures Daily Attendance shows for a day.
+  // Future days are excluded from "Not marked" — a day that has not happened
+  // yet is not an omission, and counting it would put a permanent red number on
+  // every month in progress.
+  const monthCounts = useMemo(() => {
+    const c: Record<string, number> = { P: 0, A: 0, H: 0, WO: 0, OT: 0, '': 0 }
+    for (const emp of (employees as any[])) {
+      for (const d of days) {
+        if (isFutureDay(d)) continue
+        const st = grid[`${emp.id}_${d}`] ?? ''
+        c[st] = (c[st] ?? 0) + 1
+      }
+    }
+    return c
+  }, [grid, employees, days, todayDateStr])
+
+  // Helpers on this site, split male and female. Taken from the designation
+  // and gender on the employee record — the same fields the Daily Attendance
+  // export prints — so nothing here is a second, separate list to maintain.
+  const helperCounts = useMemo(() => {
+    const isHelper = (e: any) => (e.designation ?? '').toLowerCase().includes('helper')
+    const list = (employees as any[]).filter(isHelper)
+    const male = list.filter((e: any) => (e.gender ?? '').toLowerCase().startsWith('m')).length
+    const female = list.filter((e: any) => (e.gender ?? '').toLowerCase().startsWith('f')).length
+    return { male, female, unknown: list.length - male - female, total: list.length }
+  }, [employees])
+
   return (
     <div className="p-3 space-y-3">
       <SectionHeader
@@ -1378,6 +1405,45 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
           <SearchableSelect options={farmOptions} value={farmId} onChange={v => setFarmId(v)}/>
         </div>
       </div>
+
+      {/* Month summary — the same six figures Daily Attendance shows, for the
+          whole month rather than one day. */}
+      {(employees as any[]).length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {(['P','A','H','WO','OT'] as const).map(st => (
+            <span key={st} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${STATUS_COLORS[st] ?? ''}`}>
+              {STATUS_LABELS[st]}: {monthCounts[st] ?? 0}
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-yellow-50 text-yellow-700 border-yellow-200">
+            Not marked: {monthCounts[''] ?? 0}
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-gray-50 text-gray-600 border-gray-200">
+            {(employees as any[]).length} employee(s) × {days.filter(d => !isFutureDay(d)).length} day(s) so far
+          </span>
+        </div>
+      )}
+
+      {/* Helpers on this site, male and female. */}
+      {helperCounts.total > 0 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-blue-50 text-blue-700 border-blue-200">
+            Male Helper: {helperCounts.male}
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-pink-50 text-pink-700 border-pink-200">
+            Female Helper: {helperCounts.female}
+          </span>
+          {helperCounts.unknown > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-yellow-50 text-yellow-700 border-yellow-200">
+              Helper, gender not set: {helperCounts.unknown}
+            </span>
+          )}
+          <span className="text-xs text-gray-400">
+            counted from designation and gender on the employee record — these are how many there ARE,
+            not how many are required
+          </span>
+        </div>
+      )}
 
       {/* Legend */}
       <div className="flex gap-3 flex-wrap text-xs">
