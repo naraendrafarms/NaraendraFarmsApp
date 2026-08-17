@@ -70,7 +70,9 @@ export const DailyAttendancePage: React.FC = () => {
       const { data } = await q.order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     },
-    enabled: !!farmId
+    // No farm chosen means ALL sites, not "wait" — the day's presence across
+    // every site is a question worth asking, and the query already leaves the
+    // farm filter off when none is set.
   })
 
   // Client-side search + gender filter
@@ -230,14 +232,14 @@ export const DailyAttendancePage: React.FC = () => {
       <SectionHeader title="Daily Attendance" subtitle="Mark attendance site-wise for a date" />
 
       <div className="flex flex-wrap gap-3 items-end">
-        <SearchableSelect label="Site" required placeholder="— Select Site —" options={farmOptions}
+        <SearchableSelect label="Site" placeholder="All Sites" options={farmOptions}
           value={farmId} onChange={v => setFarmId(v)} className="w-56" />
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
           <DateInput value={date} onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
         </div>
-        {farmId && <>
+        <>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Search</label>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name, ID…"
@@ -247,10 +249,10 @@ export const DailyAttendancePage: React.FC = () => {
             value={genderFilter} onChange={e=>setGenderFilter(e.target.value)} className="w-32" />
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={exportAttendance}>Export</Button>
           <Button variant="outline" size="sm" icon={<Printer size={14}/>} onClick={printAttendance}>Print</Button>
-        </>}
+        </>
       </div>
 
-      {farmId && employees && employees.length > 0 && (
+      {employees && employees.length > 0 && (
         <>
           {/* Summary bar */}
           <div className="flex flex-wrap gap-2">
@@ -1112,8 +1114,11 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
       // month for someone who has since left silently dropped their row
       // (and real attendance_daily/salary data with it) even though it's
       // still in the database.
+      // gender is selected here on purpose: without it every helper fell into
+      // "gender not set" on the summary, which is what made 206 helpers look
+      // ungendered when the records were fine all along.
       let q = supabase.from('employees')
-        .select('id,emp_id,name,designation,farm_id,farms(name),is_active,joining_date,leaving_date')
+        .select('id,emp_id,name,designation,farm_id,gender,farms(name),is_active,joining_date,leaving_date')
         .or(`is_active.eq.true,and(joining_date.lte.${end},or(leaving_date.is.null,leaving_date.gte.${start}))`)
         .order('emp_id', { ascending: true, nullsFirst: false })
       if (farmId) q = q.eq('farm_id', farmId)
