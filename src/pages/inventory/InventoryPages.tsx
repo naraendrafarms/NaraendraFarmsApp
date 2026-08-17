@@ -9,7 +9,7 @@ import {
   Badge, StatCard, EmptyState, DateInput, SearchableSelect,
 } from '@/components/ui'
 import {
-  Boxes, Package, SlidersHorizontal,
+  Boxes, Package, SlidersHorizontal, ClipboardCheck, Check, RotateCcw,
   ListTree, Plus, Pencil, Trash2, Download, Upload, AlertTriangle, Search, BarChart3,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -57,7 +57,7 @@ const cleanNum = (v: any): number | null => {
   return isNaN(n) ? null : n
 }
 
-type Tab = 'Stock Balance' | 'Adjustments' | 'Stock Ledger' | 'Closing Stock Report' | 'Consumption Report'
+type Tab = 'Stock Balance' | 'Physical Audit' | 'Adjustments' | 'Stock Ledger' | 'Closing Stock Report' | 'Consumption Report'
 
 // ════════════════════════════════════════════════════════════════════
 // SHARED DATA HOOKS
@@ -124,6 +124,7 @@ export const InventoryPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>('Stock Balance')
   const TABS: { id: Tab; icon: any }[] = [
     { id: 'Stock Balance',        icon: <Boxes size={14}/> },
+    { id: 'Physical Audit',       icon: <ClipboardCheck size={14}/> },
     { id: 'Adjustments',          icon: <SlidersHorizontal size={14}/> },
     { id: 'Stock Ledger',         icon: <ListTree size={14}/> },
     { id: 'Closing Stock Report', icon: <BarChart3 size={14}/> },
@@ -142,6 +143,7 @@ export const InventoryPage: React.FC = () => {
         ))}
       </div>
       {tab === 'Stock Balance'        && <StockStatusTab />}
+      {tab === 'Physical Audit'       && <PhysicalAuditTab />}
       {tab === 'Adjustments'          && <AdjustmentsTab />}
       {tab === 'Stock Ledger'         && <LedgerTab />}
       {tab === 'Closing Stock Report' && <ClosingStockReportTab />}
@@ -215,6 +217,7 @@ function useStockRows(asOf: string, from?: string) {
         reorder_level: Number(item.reorder_level ?? 0),
         is_active: item.is_active,
         opening: 0, received: 0, used: 0, adjusted: 0, rate: 0, lastDate: '',
+        wQty: 0, wVal: 0,
       }
     }
 
@@ -238,6 +241,7 @@ function useStockRows(asOf: string, from?: string) {
           key, item_name: r.item_name, item_code: '', category: '',
           unit: r.unit ?? '', reorder_level: 0, is_active: true,
           opening: 0, received: 0, used: 0, adjusted: 0, rate: 0, lastDate: '',
+          wQty: 0, wVal: 0,
         }
       }
       const row = m[key]
@@ -260,6 +264,13 @@ function useStockRows(asOf: string, from?: string) {
       if (!OUT_TYPES.has(r.txn_type) && r.unit_price != null && (r.txn_date ?? '') >= row.lastDate) {
         row.rate = Number(r.unit_price ?? 0); row.lastDate = r.txn_date ?? ''
       }
+      // Weighted average of everything that came IN up to asOf — what the
+      // Physical Stock Audit values a shortage at. The latest rate above can
+      // be one odd purchase; a shortage built up over months is not worth
+      // whatever the last lorry happened to cost.
+      if (!OUT_TYPES.has(r.txn_type) && r.unit_price != null && qty > 0) {
+        row.wQty += qty; row.wVal += qty * Number(r.unit_price)
+      }
       // Prefer items master unit; fall back to ledger unit
       if (!row.unit && r.unit) row.unit = r.unit
     }
@@ -270,7 +281,9 @@ function useStockRows(asOf: string, from?: string) {
     return Object.values(m).map((r: any) => {
       const closing = r.opening + r.received + r.adjusted - r.used
       const searchText = `${r.item_name} ${(aliasMap[r.key] ?? []).join(' ')}`.toLowerCase()
-      return { ...r, closing, value: closing * (r.rate || 0), searchText }
+      // Falls back to the latest rate when nothing inward carried a price.
+      const wavg = r.wQty > 0 ? r.wVal / r.wQty : (r.rate || 0)
+      return { ...r, closing, wavg, value: closing * (r.rate || 0), searchText }
     }).sort((a, b) => (a.category || 'zzz').localeCompare(b.category || 'zzz') || a.item_name.localeCompare(b.item_name))
   }, [itemsMaster, slData, aliases, asOf, from])
 
@@ -395,7 +408,433 @@ const StockStatusTab: React.FC = () => {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// TAB 2: ADJUSTMENTS (Opening Stock + manual corrections)
+// TAB 2: PHYSICAL AUDIT (count the stock, post the difference)
+// ════════════════════════════════════════════════════════════════════
+//
+// Adjustments (the next tab) asks for the DIFFERENCE, against today. That is
+// the wrong question to put to somebody who has just walked the store with a
+// weighing scale: they know what they COUNTED, on the day they counted it, and
+// the book figure to compare it against is the one that stood on that date —
+// not the one that stands now, after another fortnight of production.
+//
+// So this tab asks for the counted quantity, works the difference out itself
+// against book stock as on the audit date, values it at the weighted average
+// rate of everything that came in up to that date, and on posting carries a
+// shortage onto the flocks in proportion to the feed each of them received
+// during the period. Works for every category, not only feed ingredients.
+const PhysicalAuditTab: React.FC = () => {
+  const qc = useQueryClient()
+  const { profile } = useAuth()
+  const canEdit = can.enterData(profile?.role)
+  const canDel  = can.delete(profile?.role)
+  const CATEGORIES = useCategoryList()
+
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [showNew, setShowNew] = useState(false)
+  const blank = { audit_date: today(), period_from: '', category: '', title: '', remarks: '' }
+  const [form, setForm] = useState(blank)
+  const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const [counts, setCounts] = useState<Record<string, string>>({})
+  const [search, setSearch] = useState('')
+  const [onlyCounted, setOnlyCounted] = useState(false)
+
+  const { data: audits = [], isLoading } = useQuery({
+    queryKey: ['stock_audits'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('stock_audits').select('*').order('audit_date', { ascending: false })
+      if (error) throw error
+      return data ?? []
+    },
+  })
+
+  const openAudit: any = (audits as any[]).find((a: any) => a.id === openId) ?? null
+  const posted = openAudit?.status === 'posted'
+
+  const { data: lines = [] } = useQuery({
+    queryKey: ['stock_audit_lines', openId],
+    enabled: !!openId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('stock_audit_lines').select('*').eq('audit_id', openId).order('item_name')
+      if (error) throw error
+      return data ?? []
+    },
+  })
+
+  // Book stock as on the audit date — the whole point of the screen.
+  const { rows: stockRows, isLoading: stockLoading } = useStockRows(openAudit?.audit_date ?? today())
+
+  // Typed counts start from whatever was saved last time the audit was opened.
+  React.useEffect(() => {
+    const m: Record<string, string> = {}
+    for (const l of lines as any[]) m[l.item_id ?? norm(l.item_name)] = String(l.counted_qty ?? '')
+    setCounts(m)
+  }, [openId, lines])
+
+  // A posted audit shows what was saved, not a fresh calculation: the book
+  // figure it was posted against must not move afterwards or the record stops
+  // agreeing with the correction it produced.
+  const gridRows = useMemo(() => {
+    if (posted) {
+      return (lines as any[]).map((l: any) => ({
+        key: l.item_id ?? norm(l.item_name), item_name: l.item_name, category: l.category ?? '',
+        unit: l.unit ?? '', book: Number(l.book_qty ?? 0), counted: Number(l.counted_qty ?? 0),
+        diff: Number(l.diff_qty ?? 0), rate: Number(l.rate ?? 0), value: Number(l.diff_value ?? 0),
+        counted_entered: true,
+      }))
+    }
+    const cat = openAudit?.category
+    return (stockRows as any[])
+      .filter((r: any) => !cat || r.category === cat)
+      .filter((r: any) => r.is_active !== false)
+      .map((r: any) => {
+        const raw = counts[r.key]
+        const entered = raw !== undefined && raw !== ''
+        const counted = entered ? Number(raw) : 0
+        const book = Number(r.closing ?? 0)
+        const diff = entered ? counted - book : 0
+        const rate = Number(r.wavg ?? 0)
+        return { key: r.key, item_name: r.item_name, category: r.category, unit: r.unit,
+                 book, counted, diff, rate, value: diff * rate, counted_entered: entered,
+                 searchText: r.searchText }
+      })
+  }, [posted, lines, stockRows, counts, openAudit])
+
+  const shownRows = useMemo(() => gridRows
+    .filter((r: any) => !onlyCounted || r.counted_entered)
+    .filter((r: any) => !search || (r.searchText ?? r.item_name.toLowerCase()).includes(search.toLowerCase())),
+    [gridRows, onlyCounted, search])
+
+  const shortValue  = gridRows.filter((r: any) => r.diff < 0).reduce((a: number, r: any) => a - r.value, 0)
+  const excessValue = gridRows.filter((r: any) => r.diff > 0).reduce((a: number, r: any) => a + r.value, 0)
+  const diffCount   = gridRows.filter((r: any) => r.counted_entered && r.diff !== 0).length
+
+  const createMut = useMutation({
+    mutationFn: async () => {
+      if (!form.audit_date) throw new Error('Pick the date the stock was counted')
+      const { data, error } = await supabase.from('stock_audits').insert({
+        audit_date: form.audit_date,
+        period_from: form.period_from || null,
+        category: form.category || null,
+        title: form.title || null,
+        remarks: form.remarks || null,
+      }).select('id').single()
+      if (error) throw error
+      return data.id as string
+    },
+    onSuccess: (id) => { qc.invalidateQueries({ queryKey: ['stock_audits'] }); setShowNew(false); setForm(blank); setOpenId(id); toast.success('Audit started — now enter what you counted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  // Saved as a replace, not a merge: an item whose count was cleared must lose
+  // its line, or the audit keeps claiming a difference nobody counted.
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      if (!openAudit) return
+      const payload = gridRows.filter((r: any) => r.counted_entered).map((r: any) => ({
+        audit_id: openAudit.id,
+        item_id: /^[0-9a-f-]{36}$/i.test(r.key) ? r.key : null,
+        item_name: r.item_name, category: r.category || null, unit: r.unit || null,
+        book_qty: r.book, counted_qty: r.counted, diff_qty: r.diff,
+        rate: r.rate, diff_value: r.value,
+      }))
+      const del = await supabase.from('stock_audit_lines').delete().eq('audit_id', openAudit.id)
+      if (del.error) throw del.error
+      if (payload.length) {
+        const ins = await supabase.from('stock_audit_lines').insert(payload)
+        if (ins.error) throw ins.error
+      }
+      const upd = await supabase.from('stock_audits').update({ short_value: shortValue, excess_value: excessValue }).eq('id', openAudit.id)
+      if (upd.error) throw upd.error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['stock_audit_lines', openId] }); qc.invalidateQueries({ queryKey: ['stock_audits'] }); toast.success('Count saved') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const postMut = useMutation({
+    mutationFn: async () => {
+      if (!openAudit) throw new Error('No audit open')
+      // Post from the saved lines, never from what is on screen — the count on
+      // screen may have been typed and not saved.
+      const { data: saved, error: le } = await supabase.from('stock_audit_lines').select('*').eq('audit_id', openAudit.id)
+      if (le) throw le
+      const diffs = (saved ?? []).filter((l: any) => Number(l.diff_qty ?? 0) !== 0)
+      if (!diffs.length) throw new Error('Nothing to post — no counted item differs from book stock')
+
+      // 1. Stock correction. trg_adj_stock_ledger turns each of these into an
+      //    adjustment_in / adjustment_out in the stock ledger on the audit date.
+      for (const l of diffs) {
+        const { data: adj, error } = await supabase.from('feed_stock_adjustments').insert({
+          adjustment_date: openAudit.audit_date,
+          ingredient_name: l.item_name,
+          adjustment_kg: Number(l.diff_qty),
+          adjustment_type: 'Audit Correction',
+          unit: l.unit, rate: l.rate, category: l.category,
+          remarks: `Physical stock audit ${fmtDate(openAudit.audit_date)} — counted ${l.counted_qty} against book ${l.book_qty}`,
+        }).select('id').single()
+        if (error) throw error
+        const u = await supabase.from('stock_audit_lines').update({ adj_id: adj.id }).eq('id', l.id)
+        if (u.error) throw u.error
+      }
+
+      // 2. Shortage value onto the flocks, shared by the feed each received in
+      //    the audit period. Excess is left as a stock correction only — it is
+      //    not an expense, and writing a negative one would flatter the flock.
+      const shortage = diffs.filter((l: any) => Number(l.diff_qty) < 0)
+        .reduce((a: number, l: any) => a - Number(l.diff_value ?? 0), 0)
+      if (shortage > 0) {
+        let q = supabase.from('feed_transfers').select('flock_id,to_farm_id,quantity_kg,transfer_date')
+          .lte('transfer_date', openAudit.audit_date).not('flock_id', 'is', null)
+        if (openAudit.period_from) q = q.gte('transfer_date', openAudit.period_from)
+        const { data: tr, error: te } = await q
+        if (te) throw te
+        const byFlock: Record<string, { kg: number; farm_id: string | null }> = {}
+        for (const t of tr ?? []) {
+          const e = (byFlock[t.flock_id] ??= { kg: 0, farm_id: t.to_farm_id ?? null })
+          e.kg += Number(t.quantity_kg ?? 0)
+        }
+        const totalKg = Object.values(byFlock).reduce((a, e) => a + e.kg, 0)
+        const desc = `Physical stock audit shortage — ${fmtDate(openAudit.audit_date)}`
+        const rows: any[] = totalKg > 0
+          ? Object.entries(byFlock).map(([flock_id, e]) => ({
+              expense_date: openAudit.audit_date, farm_id: e.farm_id, flock_id,
+              category: 'other', description: desc, amount: Math.round(shortage * e.kg / totalKg * 100) / 100,
+              stock_audit_id: openAudit.id,
+              remarks: `Share of ${inr(shortage)} by feed received (${Math.round(e.kg).toLocaleString('en-IN')} kg of ${Math.round(totalKg).toLocaleString('en-IN')} kg)`,
+            })).filter(r => r.amount > 0)
+          // No feed moved in the period, so there is no share to work from —
+          // the shortage stays at farm level rather than being guessed onto a flock.
+          : [{ expense_date: openAudit.audit_date, farm_id: openAudit.farm_id ?? null, flock_id: null,
+               category: 'other', description: desc, amount: shortage, stock_audit_id: openAudit.id,
+               remarks: 'No feed transfers in the audit period — held at farm level, not allocated to a flock' }]
+        const { error: ee } = await supabase.from('farm_expenses').insert(rows)
+        if (ee) throw ee
+      }
+
+      const { error: he } = await supabase.from('stock_audits').update({
+        status: 'posted', posted_at: new Date().toISOString(),
+        short_value: shortage,
+        excess_value: diffs.filter((l: any) => Number(l.diff_qty) > 0).reduce((a: number, l: any) => a + Number(l.diff_value ?? 0), 0),
+      }).eq('id', openAudit.id)
+      if (he) throw he
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['stock_audits'] }); qc.invalidateQueries({ queryKey: ['stock_audit_lines', openId] })
+      qc.invalidateQueries({ queryKey: ['sl_all'] }); qc.invalidateQueries({ queryKey: ['inv_adjustments'] })
+      toast.success('Posted — stock corrected and the shortage charged to the flocks')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const unpostMut = useMutation({
+    mutationFn: async () => {
+      if (!openAudit) return
+      const { data: saved } = await supabase.from('stock_audit_lines').select('id,adj_id').eq('audit_id', openAudit.id)
+      const adjIds = (saved ?? []).map((l: any) => l.adj_id).filter(Boolean)
+      if (adjIds.length) {
+        const { error } = await supabase.from('feed_stock_adjustments').delete().in('id', adjIds)
+        if (error) throw error
+      }
+      const e1 = await supabase.from('farm_expenses').delete().eq('stock_audit_id', openAudit.id)
+      if (e1.error) throw e1.error
+      const e2 = await supabase.from('stock_audit_lines').update({ adj_id: null }).eq('audit_id', openAudit.id)
+      if (e2.error) throw e2.error
+      const e3 = await supabase.from('stock_audits').update({ status: 'draft', posted_at: null }).eq('id', openAudit.id)
+      if (e3.error) throw e3.error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['stock_audits'] }); qc.invalidateQueries({ queryKey: ['stock_audit_lines', openId] })
+      qc.invalidateQueries({ queryKey: ['sl_all'] }); qc.invalidateQueries({ queryKey: ['inv_adjustments'] })
+      toast.success('Unposted — corrections and expenses removed')
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => { const { error } = await supabase.from('stock_audits').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['stock_audits'] }); setOpenId(null); qc.invalidateQueries({ queryKey: ['sl_all'] }); toast.success('Audit deleted') },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const exportCount = () => {
+    const ws = XLSX.utils.json_to_sheet(shownRows.map((r: any) => ({
+      Item: r.item_name, Category: r.category, Unit: r.unit,
+      'Book Stock': r.book, 'Counted': r.counted_entered ? r.counted : '',
+      Difference: r.counted_entered ? r.diff : '', Rate: r.rate,
+      Value: r.counted_entered ? r.value : '',
+    })))
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Audit')
+    XLSX.writeFile(wb, `stock_audit_${openAudit?.audit_date ?? today()}.xlsx`)
+  }
+
+  // ── list view ──
+  if (!openAudit) {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center gap-3 flex-wrap">
+          <p className="text-sm text-gray-500">
+            Count the stock, enter what you saw, and the app works out the difference against book stock
+            <b> as on the date you counted</b> — valued at the weighted average rate. Posting corrects the
+            stock ledger and charges any shortage to the flocks by feed share.
+          </p>
+          {canEdit && <Button icon={<Plus size={16} />} onClick={() => { setForm(blank); setShowNew(true) }}>New Audit</Button>}
+        </div>
+        {isLoading ? <Spinner /> : audits.length === 0 ? (
+          <Card><EmptyState title="No stock audits yet" subtitle="Start one after your next physical count" /></Card>
+        ) : (
+          <Card padding={false}>
+            <Table>
+              <thead><tr>
+                <Th>Audit Date</Th><Th>Period From</Th><Th>Category</Th><Th>Title</Th>
+                <Th right>Shortage</Th><Th right>Excess</Th><Th>Status</Th><Th right>Actions</Th>
+              </tr></thead>
+              <tbody>
+                {(audits as any[]).map((a: any) => (
+                  <tr key={a.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setOpenId(a.id)}>
+                    <Td className="font-medium">{fmtDate(a.audit_date)}</Td>
+                    <Td className="text-xs">{a.period_from ? fmtDate(a.period_from) : 'All time'}</Td>
+                    <Td className="text-xs">{a.category ? <Badge color="blue">{a.category}</Badge> : 'All categories'}</Td>
+                    <Td className="text-xs text-gray-500">{a.title ?? '—'}</Td>
+                    <Td right className="text-red-600">{a.short_value ? inr(a.short_value) : '—'}</Td>
+                    <Td right className="text-green-600">{a.excess_value ? inr(a.excess_value) : '—'}</Td>
+                    <Td><Badge color={a.status === 'posted' ? 'green' : 'yellow'}>{a.status === 'posted' ? 'Posted' : 'Draft'}</Badge></Td>
+                    <Td right>
+                      <div className="flex gap-2 justify-end" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                        <button onClick={() => setOpenId(a.id)}><Search size={14} className="text-gray-400 hover:text-brand-600" /></button>
+                        {canDel && (
+                          <button onClick={() => confirm(`Delete the audit of ${fmtDate(a.audit_date)}? Its stock corrections and expense entries are removed too.`) && delMut.mutate(a.id)}>
+                            <Trash2 size={14} className="text-gray-400 hover:text-red-600" /></button>
+                        )}
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </Card>
+        )}
+
+        <Modal open={showNew} onClose={() => setShowNew(false)} title="New Physical Stock Audit"
+          footer={<Button loading={createMut.isPending} onClick={() => createMut.mutate()}>Start Audit</Button>}>
+          <div className="space-y-3">
+            <DateInput label="Date counted *" value={form.audit_date} onChange={v => s('audit_date', v)} />
+            <DateInput label="Period from" value={form.period_from} onChange={v => s('period_from', v)} />
+            <p className="text-xs text-gray-500 -mt-2">
+              Period From decides which flocks share the shortage — feed sent between that date and the audit
+              date. Leave it blank to share across every flock that has ever been fed.
+            </p>
+            <Select label="Category" value={form.category} onChange={e => s('category', e.target.value)}
+              options={[{ value: '', label: 'All categories' }, ...CATEGORIES.map(c => ({ value: c, label: c }))]} />
+            <Input label="Title" value={form.title} onChange={e => s('title', e.target.value)} placeholder="e.g. Half-yearly count — feed mill store" />
+            <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
+          </div>
+        </Modal>
+      </div>
+    )
+  }
+
+  // ── one audit ──
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-start gap-3 flex-wrap">
+        <div>
+          <button className="text-xs text-brand-600 hover:underline" onClick={() => setOpenId(null)}>← All audits</button>
+          <h3 className="text-lg font-semibold mt-1">
+            {openAudit.title || 'Physical Stock Audit'} — {fmtDate(openAudit.audit_date)}
+          </h3>
+          <p className="text-xs text-gray-500">
+            {openAudit.category ?? 'All categories'} · book stock as on {fmtDate(openAudit.audit_date)} ·
+            rate = weighted average of everything received up to that date
+          </p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="secondary" size="sm" icon={<Download size={14} />} onClick={exportCount}>Excel</Button>
+          {canEdit && !posted && <Button size="sm" loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save Count</Button>}
+          {canEdit && !posted && (
+            <Button size="sm" icon={<Check size={14} />} loading={postMut.isPending}
+              onClick={() => confirm('Post this audit? Stock is corrected on the audit date and the shortage is charged to the flocks.') && postMut.mutate()}>
+              Post
+            </Button>
+          )}
+          {canEdit && posted && (
+            <Button variant="secondary" size="sm" icon={<RotateCcw size={14} />} loading={unpostMut.isPending}
+              onClick={() => confirm('Unpost this audit? Its stock corrections and expense entries are removed.') && unpostMut.mutate()}>
+              Unpost
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard title="Items counted" value={String(gridRows.filter((r: any) => r.counted_entered).length)} color="text-gray-700" />
+        <StatCard title="Items differing" value={String(diffCount)} color="text-orange-600" />
+        <StatCard title="Shortage value" value={inr(shortValue)} color="text-red-600" />
+        <StatCard title="Excess value" value={inr(excessValue)} color="text-green-600" />
+      </div>
+
+      {!posted && (
+        <div className="flex gap-3 items-center flex-wrap">
+          <Input placeholder="Search item…" value={search} onChange={e => setSearch(e.target.value)} className="w-64" />
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={onlyCounted} onChange={e => setOnlyCounted(e.target.checked)} />
+            Only items I have counted
+          </label>
+          <span className="text-xs text-gray-400">Leave an item blank if you did not count it — blanks are ignored.</span>
+        </div>
+      )}
+
+      {stockLoading && !posted ? <Spinner /> : (
+        <Card padding={false}>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr>
+                <Th>Item</Th><Th>Category</Th><Th>Unit</Th>
+                <Th right>Book Stock</Th><Th right>Counted</Th><Th right>Difference</Th>
+                <Th right>Rate</Th><Th right>Value</Th>
+              </tr></thead>
+              <tbody>
+                {shownRows.map((r: any) => (
+                  <tr key={r.key} className={`hover:bg-gray-50 ${r.counted_entered && r.diff !== 0 ? 'bg-amber-50/40' : ''}`}>
+                    <Td className="font-medium">{r.item_name}</Td>
+                    <Td className="text-xs">{r.category ? <Badge color="blue">{r.category}</Badge> : '—'}</Td>
+                    <Td className="text-xs">{r.unit}</Td>
+                    <Td right>{formatQty(r.book, r.unit)}</Td>
+                    <Td right>
+                      {posted ? formatQty(r.counted, r.unit) : (
+                        <input type="number" step="any" value={counts[r.key] ?? ''}
+                          onChange={e => setCounts(c => ({ ...c, [r.key]: e.target.value }))}
+                          disabled={!canEdit}
+                          className="w-28 text-right border border-gray-300 rounded px-2 py-1 text-sm" />
+                      )}
+                    </Td>
+                    <Td right className={!r.counted_entered ? 'text-gray-300' : r.diff < 0 ? 'text-red-600 font-medium' : r.diff > 0 ? 'text-green-600 font-medium' : 'text-gray-400'}>
+                      {r.counted_entered ? formatQty(r.diff, r.unit) : '—'}
+                    </Td>
+                    <Td right className="text-xs text-gray-500">{r.rate ? r.rate.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'}</Td>
+                    <Td right className={!r.counted_entered ? 'text-gray-300' : r.value < 0 ? 'text-red-600' : 'text-green-600'}>
+                      {r.counted_entered ? inr(r.value) : '—'}
+                    </Td>
+                  </tr>
+                ))}
+                {shownRows.length === 0 && (
+                  <tr><Td colSpan={8} className="text-center text-gray-400 py-6">No items match</Td></tr>
+                )}
+              </tbody>
+            </Table>
+          </div>
+          <p className="text-xs text-gray-500 px-3 py-2">
+            Posting writes one stock adjustment per differing item, dated {fmtDate(openAudit.audit_date)}, and
+            raises a farm expense for the shortage — split across flocks in proportion to the feed each received
+            {openAudit.period_from ? ` from ${fmtDate(openAudit.period_from)}` : ''} up to the audit date. Excess
+            stock corrects the ledger only; it is not written back as a credit to any flock.
+          </p>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TAB 3: ADJUSTMENTS (Opening Stock + manual corrections)
 // ════════════════════════════════════════════════════════════════════
 const AdjustmentsTab: React.FC = () => {
   const UNITS    = useUnitList()
