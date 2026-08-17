@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, today, currentFY, fyRange, fetchAllPages } from '@/lib/utils'
 import { Card, CardHeader, Button, DateInput, Input, Modal, Spinner, Table, Th, Td, Badge, StatCard, Select } from '@/components/ui'
-import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle, Printer, Plus, Trash2 } from 'lucide-react'
+import { Download, IndianRupee, TrendingUp, TrendingDown, Clock, CheckCircle, Printer, Plus, Trash2, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import { printPaymentPlanning } from '@/lib/invoicePrint'
@@ -268,6 +268,29 @@ export const PaymentPlanningPage: React.FC = () => {
       const { data } = await supabase.from('payment_plan').select('*').order('plan_date', { ascending: false }).limit(20)
       return data ?? []
     }
+  })
+
+  // Editing a saved plan means renaming it or removing it. The BILLS in a plan
+  // are deliberately not editable after saving: the plan is a record of what was
+  // decided on a date, and a record you can quietly rewrite is not a record.
+  // To plan differently, make a new plan.
+  const renamePlanMut = useMutation({
+    mutationFn: async ({ id, title }: { id: string; title: string }) => {
+      const { error } = await supabase.from('payment_plan').update({ title: title.trim() || null }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Renamed'); qc.invalidateQueries({ queryKey: ['payment_plans'] }) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const deletePlanMut = useMutation({
+    mutationFn: async (id: string) => {
+      // The lines go with it — payment_plan_line cascades on the plan id.
+      const { error } = await supabase.from('payment_plan').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { toast.success('Plan deleted'); setOpenPlan(null); qc.invalidateQueries({ queryKey: ['payment_plans'] }) },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const { data: openPlanLines = [] } = useQuery({
@@ -718,7 +741,22 @@ export const PaymentPlanningPage: React.FC = () => {
                   <Td>{fmtDate(pl.plan_date)}</Td>
                   <Td>{pl.title ?? '—'}</Td>
                   <Td right className="font-semibold">{inr(pl.total_planned)}</Td>
-                  <Td right><span className="text-brand-600 text-xs underline">View / Print</span></Td>
+                  <Td right>
+                    <div className="flex gap-3 justify-end items-center">
+                      <span className="text-brand-600 text-xs underline">View / Print</span>
+                      <button className="text-gray-400 hover:text-brand-600"
+                        onClick={e => {
+                          e.stopPropagation()
+                          const t = prompt('Plan title', pl.title ?? '')
+                          if (t !== null) renamePlanMut.mutate({ id: pl.id, title: t })
+                        }}><Pencil size={14} /></button>
+                      <button className="text-gray-400 hover:text-red-600"
+                        onClick={e => {
+                          e.stopPropagation()
+                          if (confirm(`Delete the plan of ${fmtDate(pl.plan_date)}? The bills themselves are not touched.`)) deletePlanMut.mutate(pl.id)
+                        }}><Trash2 size={14} /></button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -948,6 +986,10 @@ export const PaymentPlanningPage: React.FC = () => {
         title={openPlan ? `Plan — ${fmtDate(openPlan.plan_date)}${openPlan.title ? ` · ${openPlan.title}` : ''}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setOpenPlan(null)}>Close</Button>
+          <Button variant="danger" icon={<Trash2 size={14}/>} loading={deletePlanMut.isPending}
+            onClick={() => openPlan && confirm(`Delete the plan of ${fmtDate(openPlan.plan_date)}? The bills themselves are not touched.`) && deletePlanMut.mutate(openPlan.id)}>
+            Delete
+          </Button>
           <Button icon={<Printer size={14}/>} onClick={printSavedPlan} disabled={!openPlanLines.length}>Print</Button>
         </>}>
         <div className="space-y-3 text-sm">
