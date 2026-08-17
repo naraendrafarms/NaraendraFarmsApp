@@ -83,10 +83,41 @@ export const FlockWeeklyPerformance: React.FC = () => {
     }
   })
 
-  const stdFor = (sex: string, season: string | null, wk: number) =>
-    (std as any[]).find((r: any) =>
-      r.sex === sex && r.week_of_age === wk &&
-      (sex === 'Male' ? r.season === 'Both' : r.season === season)) ?? null
+  // Which season's table applies depends on the PHASE, and the two are not the
+  // same season:
+  //
+  //   weeks 1-24 (brooding/growing) -> the season the chicks were BROODED in,
+  //     which the book defines by month: Summer Feb-Jul, Winter Aug-Jan. That
+  //     is knowable from the placement date, so no one has to type it.
+  //   weeks 24+ (laying) -> the flock's LAYING season, set on the flock master.
+  //
+  // Getting this wrong is how the standard came back empty for flock 23 week 1:
+  // the page asked for a laying season on a one-week-old chick, found none, and
+  // showed a dash as though the book had no figure.
+  const broodingSeason = (placement?: string | null) => {
+    if (!placement) return null
+    const m = parseInt(placement.slice(5, 7), 10)
+    return (m >= 2 && m <= 7) ? 'Summer' : 'Winter'
+  }
+
+  const stdFor = (sex: string, wk: number, flock: any) => {
+    const rows = (std as any[]).filter((r: any) => r.sex === sex && r.week_of_age === wk)
+    if (!rows.length) return null
+    if (sex === 'Male') return rows.find((r: any) => r.season === 'Both') ?? null
+    const laying = rows.filter((r: any) => r.phase === 'Laying')
+    const growing = rows.filter((r: any) => r.phase === 'Growing')
+    // Week 24 appears in both books; a flock with a laying season set is read as
+    // laying, otherwise as the last growing week.
+    if (wk > 24 || (wk === 24 && flock?.laying_season)) {
+      return laying.find((r: any) => r.season === flock?.laying_season) ?? null
+    }
+    const bs = broodingSeason(flock?.placement_date)
+    if (bs) return growing.find((r: any) => r.season === bs) ?? null
+    // No placement date: only answer if both seasons agree for that week, so a
+    // guess is never presented as the standard.
+    const distinct = [...new Set(growing.map((r: any) => Number(r.body_weight_g)))]
+    return distinct.length === 1 ? growing[0] : null
+  }
 
   const flockOptions = flocks.map((f: any) => ({ value: f.id, label: `Flock ${f.flock_no}` }))
 
@@ -94,7 +125,7 @@ export const FlockWeeklyPerformance: React.FC = () => {
     .filter((r: any) => (!flockFilter || r.flock_id === flockFilter) && (!sexFilter || r.sex === sexFilter))
     .map((r: any) => {
       const season = r.flocks?.laying_season ?? null
-      const st = stdFor(r.sex, season, r.week_of_age)
+      const st = stdFor(r.sex, r.week_of_age, r.flocks)
       const actual = r.avg_body_weight_g == null ? null : Number(r.avg_body_weight_g)
       const target = st?.body_weight_g == null ? null : Number(st.body_weight_g)
       // Gain is the difference between this week and the previous week
@@ -366,9 +397,12 @@ export const FlockWeeklyPerformance: React.FC = () => {
               </table>
             </div>
             <p className="text-xs text-gray-500 px-3 py-2">
-              Standard is the Vencobb430 figure for that age — Summer or Winter by the flock's laying
-              season, and the single male curve for males. A dash under Standard means the book has no
-              figure for that age, not that the target is zero.
+              Standard is the Vencobb430 figure for that age. For weeks 1-24 the season comes from
+              when the chicks were BROODED — the book's own definition, Summer Feb-Jul and Winter
+              Aug-Jan, worked out from the placement date. From week 24 it comes from the flock's
+              LAYING season, set on the flock master. Males use the single male curve, which the book
+              says applies to both seasons. A dash under Standard means the book has no figure for
+              that age, or the flock has no laying season set yet.
             </p>
           </Card>
         </>
