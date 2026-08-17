@@ -117,11 +117,17 @@ export const PendingPaymentsPage: React.FC = () => {
   // net for anything created before the fix, or by a route nobody has thought
   // of yet. Computed from rows already loaded — no extra query.
   const duplicateGroups = useMemo(() => {
+    // Keys are UPPERCASED. Three real duplicates hid for weeks because a
+    // supplier rename left one bill as "HEALERS ASSOCIATES" and its twin as
+    // "Healers Associates" — same supplier, same invoice, same GRN, but exact
+    // text matching treated them as unrelated and the unpaid one sat Pending
+    // for ever. Case is not a difference between vendors.
+    const norm = (v: any) => String(v ?? '').trim().toUpperCase()
     const groups: Record<string, any[]> = {}
     for (const r of (records ?? []) as any[]) {
       const key = r.grn_no
-        ? `grn:${r.vendor_name}|${r.grn_no}`
-        : (r.invoice_no ? `inv:${r.vendor_name}|${r.invoice_no}|${r.invoice_amount}` : '')
+        ? `grn:${norm(r.vendor_name)}|${norm(r.grn_no)}`
+        : (r.invoice_no ? `inv:${norm(r.vendor_name)}|${norm(r.invoice_no)}|${r.invoice_amount}` : '')
       if (!key) continue
       ;(groups[key] ??= []).push(r)
     }
