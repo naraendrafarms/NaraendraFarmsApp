@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { today, fetchAllPages } from '@/lib/utils'
+import { today, fetchAllPages, inr } from '@/lib/utils'
 import {
   Card, SectionHeader, Spinner, Badge, Select, DateInput, SearchableSelect
 } from '@/components/ui'
@@ -106,6 +106,46 @@ export const PendingPaymentsPage: React.FC = () => {
       .order('grn_date', { ascending: false })
       .range(from, to), 'Pending Payments', toast.error)
   })
+
+  // Duplicate bills: the same vendor with more than one row for one GRN, or for
+  // one invoice+amount under different GRN numbers. Both shapes come from the
+  // same cause — editing a GRN's number or vendor after it was saved used to
+  // create a SECOND bill rather than moving the first, leaving a phantom that
+  // inflates what the farm appears to owe.
+  //
+  // The trigger no longer does that (migration 691), so this panel is a safety
+  // net for anything created before the fix, or by a route nobody has thought
+  // of yet. Computed from rows already loaded — no extra query.
+  const duplicateGroups = useMemo(() => {
+    const groups: Record<string, any[]> = {}
+    for (const r of (records ?? []) as any[]) {
+      const key = r.grn_no
+        ? `grn:${r.vendor_name}|${r.grn_no}`
+        : (r.invoice_no ? `inv:${r.vendor_name}|${r.invoice_no}|${r.invoice_amount}` : '')
+      if (!key) continue
+      ;(groups[key] ??= []).push(r)
+    }
+    return Object.entries(groups)
+      .filter(([, rows]) => rows.length > 1)
+      .map(([key, rows]) => {
+        const settled = (x: any) => (x.paid_amount ?? 0) + (x.advance_adjusted ?? 0)
+        // Safe to remove only when this row carries no money AND a sibling does.
+        const anySettled = rows.some((x: any) => settled(x) > 0)
+        return {
+          key,
+          label: `${rows[0].vendor_name} — ${rows[0].grn_no ? `GRN ${rows[0].grn_no}` : `Inv ${rows[0].invoice_no}`}`,
+          rows: rows.map((x: any) => ({ ...x, settled: settled(x), removable: anySettled && settled(x) === 0 })),
+        }
+      })
+  }, [records])
+
+  const deleteDuplicate = async (id: string) => {
+    const { error } = await supabase.from('pending_payments').delete().eq('id', id)
+    if (error) { toast.error(error.message); return }
+    toast.success('Duplicate bill removed')
+    qc.invalidateQueries({ queryKey: ['pending_payments_page'] })
+    qc.invalidateQueries({ queryKey: ['pending_payments_plan'] })
+  }
 
   const { data: bankAccounts } = useQuery({
     queryKey: ['bank_accounts_list'],
@@ -702,6 +742,59 @@ export const PendingPaymentsPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
+      {duplicateGroups.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+          <div>
+            <h3 className="font-semibold text-amber-900 text-sm">
+              {duplicateGroups.length} duplicate bill{duplicateGroups.length > 1 ? 's' : ''} found
+            </h3>
+            <p className="text-xs text-amber-800 mt-0.5">
+              The same vendor has more than one bill for one GRN or invoice. Keep the row that carries the
+              payment; remove the empty one. A row holding money can never be removed here.
+            </p>
+          </div>
+          {duplicateGroups.map(g => (
+            <div key={g.key} className="bg-white border border-amber-200 rounded-lg p-3">
+              <p className="font-medium text-sm text-gray-800 mb-2">{g.label}</p>
+              <table className="w-full text-xs">
+                <thead className="text-gray-500">
+                  <tr>
+                    <th className="text-left py-1">Invoice</th>
+                    <th className="text-right py-1">Amount</th>
+                    <th className="text-right py-1">Settled</th>
+                    <th className="text-left py-1 pl-3">Status</th>
+                    <th className="text-right py-1"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.rows.map((r: any) => (
+                    <tr key={r.id} className="border-t border-gray-100">
+                      <td className="py-1">{r.invoice_no ?? '—'}</td>
+                      <td className="py-1 text-right">{inr(r.invoice_amount ?? 0)}</td>
+                      <td className={`py-1 text-right ${r.settled > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}`}>
+                        {r.settled > 0 ? inr(r.settled) : '—'}
+                      </td>
+                      <td className="py-1 pl-3">{r.payment_status ?? '—'}</td>
+                      <td className="py-1 text-right">
+                        {r.removable ? (
+                          <button
+                            onClick={() => confirm(`Remove the empty duplicate for ${r.vendor_name}? The paid row is kept.`) && deleteDuplicate(r.id)}
+                            className="text-red-600 underline">Remove this one</button>
+                        ) : r.settled > 0 ? (
+                          <span className="text-green-700">keep — holds the payment</span>
+                        ) : (
+                          <span className="text-gray-400">neither row is paid — check before deleting</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+
       <SectionHeader
         title="Pending Payments"
         subtitle="Vendor bills received (GRN done) — outstanding amounts to pay. Reconciling against your real bank statement now happens in Bank Ledger → Link to Bills."
