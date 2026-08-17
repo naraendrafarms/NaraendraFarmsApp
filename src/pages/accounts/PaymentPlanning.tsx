@@ -18,6 +18,13 @@ export const PaymentPlanningPage: React.FC = () => {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [markPaidOpen, setMarkPaidOpen] = useState(false)
   const [markPaidForm, setMarkPaidForm] = useState({ paid_date: today(), utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online', bank_account_id: '' })
+  // Plan amount and discount PER BILL, keyed by payment id. Planning ₹10,00,000
+  // against a ₹10,07,800 balance leaves ₹7,800 still owed — the bill goes to
+  // Partial, it does not get written off. Blank means "the whole balance".
+  const [planAmt, setPlanAmt] = useState<Record<string, string>>({})
+  const [rowDisc, setRowDisc] = useState<Record<string, string>>({})
+  const [savePlanOpen, setSavePlanOpen] = useState(false)
+  const [planTitle, setPlanTitle] = useState('')
 
   const { data: bankAccountsList } = useQuery({
     queryKey: ['bank_accounts_list'],
@@ -134,7 +141,9 @@ export const PaymentPlanningPage: React.FC = () => {
       const { data } = await supabase
         .from('pending_payments')
         .select('*')
-        .or('payment_status.in.(Pending,HOLD),payment_status.is.null')
+        // Partial belongs here: a bill part-paid yesterday still has a balance
+        // to plan today, and leaving it out would hide money still owed.
+        .or('payment_status.in.(Pending,HOLD,Partial),payment_status.is.null')
         .order('pay_before_date', { ascending: true })
       return data ?? []
     }
@@ -159,7 +168,12 @@ export const PaymentPlanningPage: React.FC = () => {
   // month, etc.). Deliberately NOT wired into Salary/Advances' own tested
   // paid/unpaid flows — just a visibility placeholder here until the real
   // entry is made properly, at which point you delete the manual row.
-  const [manualForm, setManualForm] = useState({ label: '', amount: '', direction: 'payable', due_date: today() })
+  // Gross, deduction and the net that results. `amount` still holds the NET, so
+  // every total that already reads it keeps working; the two new fields explain
+  // where the net came from instead of leaving it as a number typed from
+  // somebody's mental arithmetic.
+  const [manualForm, setManualForm] = useState({ label: '', gross: '', deduction: '', deduction_reason: '', direction: 'payable', due_date: today() })
+  const manualNet = Math.max(0, (parseFloat(manualForm.gross) || 0) - (parseFloat(manualForm.deduction) || 0))
   const { data: manualItems } = useQuery({
     queryKey: ['payment_plan_manual_items'],
     queryFn: async () => {
@@ -190,16 +204,22 @@ export const PaymentPlanningPage: React.FC = () => {
   const addManualMut = useMutation({
     mutationFn: async () => {
       if (!manualForm.label.trim()) throw new Error('Label is required')
-      const amt = parseFloat(manualForm.amount)
-      if (!(amt > 0)) throw new Error('Enter an amount greater than 0')
+      const gross = parseFloat(manualForm.gross)
+      if (!(gross > 0)) throw new Error('Enter a gross amount greater than 0')
+      const ded = parseFloat(manualForm.deduction) || 0
+      if (ded > gross) throw new Error('The deduction is more than the gross amount')
       const { error } = await supabase.from('payment_plan_manual_items').insert({
-        label: manualForm.label.trim(), amount: amt, direction: manualForm.direction, due_date: manualForm.due_date || null,
+        label: manualForm.label.trim(),
+        gross_amount: gross, deduction_amount: ded,
+        deduction_reason: manualForm.deduction_reason.trim() || null,
+        amount: gross - ded,
+        direction: manualForm.direction, due_date: manualForm.due_date || null,
       })
       if (error) throw error
     },
     onSuccess: () => {
       toast.success('Added')
-      setManualForm({ label: '', amount: '', direction: 'payable', due_date: today() })
+      setManualForm({ label: '', gross: '', deduction: '', deduction_reason: '', direction: 'payable', due_date: today() })
       qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] })
     },
     onError: (e: any) => toast.error(e.message),
@@ -211,6 +231,39 @@ export const PaymentPlanningPage: React.FC = () => {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['payment_plan_manual_items'] }),
     onError: (e: any) => toast.error(e.message),
+  })
+
+  // Save the plan as it stands, so "what we intended to pay on this date"
+  // survives closing the page and can be set against what actually went out.
+  const savePlanMut = useMutation({
+    mutationFn: async () => {
+      if (!selectedPayments.length) throw new Error('Select the bills to plan first')
+      const { data: plan, error } = await supabase.from('payment_plan').insert({
+        plan_date: planDate,
+        title: planTitle.trim() || null,
+        total_planned: Math.round(totalSelected * 100) / 100,
+      }).select('id').single()
+      if (error) throw error
+      const lines = (selectedPayments as any[]).map((p: any) => ({
+        plan_id: plan.id, payment_id: p.id,
+        vendor_name: p.vendor_name, invoice_no: p.invoice_no ?? null,
+        balance_due: netPayable(p),
+        planned_amount: cashFor(p),
+      }))
+      const { error: e2 } = await supabase.from('payment_plan_line').insert(lines)
+      if (e2) throw e2
+    },
+    onSuccess: () => { toast.success('Plan saved'); setSavePlanOpen(false); setPlanTitle('')
+      qc.invalidateQueries({ queryKey: ['payment_plans'] }) },
+    onError: (e: any) => toast.error(e.message),
+  })
+
+  const { data: savedPlans } = useQuery({
+    queryKey: ['payment_plans'],
+    queryFn: async () => {
+      const { data } = await supabase.from('payment_plan').select('*').order('plan_date', { ascending: false }).limit(20)
+      return data ?? []
+    }
   })
 
   const toggleSelect = (id: string) => {
@@ -240,8 +293,37 @@ export const PaymentPlanningPage: React.FC = () => {
   const netPayable = (p: any) =>
     Math.max(0, (p.net_payable ?? (p.invoice_amount ?? 0)) - (p.discount_amount ?? 0) - (p.paid_amount ?? 0) - (p.advance_adjusted ?? 0))
 
-  const totalSelected = selectedPayments.reduce((s: number, p: any) =>
-    s + netPayable(p), 0)
+  // What this bill is planned to be paid: the typed figure, clamped to the
+  // balance so a slip of the keyboard cannot pay more than is owed, and the
+  // full balance when nothing is typed.
+  const plannedFor = (p: any) => {
+    const bal = netPayable(p)
+    const typed = parseFloat(planAmt[p.id] ?? '')
+    if (!isFinite(typed) || typed <= 0) return bal
+    return Math.min(typed, bal)
+  }
+  const discFor = (p: any) => {
+    const d = parseFloat(rowDisc[p.id] ?? '')
+    return isFinite(d) && d > 0 ? Math.min(d, netPayable(p)) : 0
+  }
+  // Cash actually leaving for this bill = planned less its own discount.
+  const cashFor = (p: any) => Math.max(0, plannedFor(p) - discFor(p))
+  // What remains owed after this payment settles.
+  const remainingFor = (p: any) => Math.max(0, netPayable(p) - plannedFor(p) - discFor(p))
+
+  const totalSelected = selectedPayments.reduce((s: number, p: any) => s + cashFor(p), 0)
+  const totalRemaining = selectedPayments.reduce((s: number, p: any) => s + remainingFor(p), 0)
+
+  // Vendor subtotals for the selection — several bills for one vendor is the
+  // normal case, and adding them up by eye is where mistakes happen.
+  const vendorTotals = useMemo(() => {
+    const m: Record<string, { cash: number; bills: number; due: number }> = {}
+    for (const p of selectedPayments as any[]) {
+      const e = (m[p.vendor_name] ??= { cash: 0, bills: 0, due: 0 })
+      e.cash += cashFor(p); e.bills++; e.due += netPayable(p)
+    }
+    return Object.entries(m).sort((a, b) => b[1].cash - a[1].cash)
+  }, [selectedPayments, planAmt, rowDisc])
 
   const totalReceivable = (receivables ?? []).reduce((s, r) => s + r.amount, 0)
 
@@ -252,29 +334,37 @@ export const PaymentPlanningPage: React.FC = () => {
       if (!isCash && !markPaidForm.bank_account_id) {
         throw new Error('Select which bank account this is paid from, or it won\'t be recorded in any ledger')
       }
-      const totalDisc = parseFloat(markPaidForm.discount_amount) || 0
-      // Previously the FULL discount was written to every selected row
-      // ("applied equally" was only a UI hint, not the actual behavior) —
-      // split it evenly across the rows instead.
-      const discPerRow = ids.length > 0 ? totalDisc / ids.length : 0
+      // Discount is now entered PER BILL. The old single figure split evenly
+      // across the selection put a discount on rows it never belonged to; it is
+      // kept only as a fallback for anyone who still types in that one box.
+      const fallbackDisc = parseFloat(markPaidForm.discount_amount) || 0
+      const fallbackPerRow = ids.length > 0 ? fallbackDisc / ids.length : 0
       const cbMode = isCash ? 'cash' : markPaidForm.account_type.toLowerCase() === 'upi' ? 'upi'
         : ['neft','rtgs','imps'].includes(markPaidForm.account_type.toLowerCase()) ? markPaidForm.account_type.toLowerCase() : 'cheque'
 
       for (const id of ids) {
         const row = (selectedPayments as any[]).find(p => p.id === id)
-        // Consistent with Export CMS's payable figure — start from the same
-        // already-settled-aware balance, then apply this modal's own discount.
-        const netAmt = Math.max(0, (row ? netPayable(row) : 0) - discPerRow)
+        if (!row) continue
+        const balance = netPayable(row)
+        const thisDisc = discFor(row) || fallbackPerRow
+        const planned = plannedFor(row)
+        // Cash going out for this bill, and what is still owed afterwards.
+        const netAmt = Math.max(0, planned - thisDisc)
+        const stillOwed = Math.max(0, balance - planned - thisDisc)
+        // Part payment leaves the bill PARTIAL with the remainder owed — it is
+        // not written off. Paying ₹10,00,000 of ₹10,07,800 leaves ₹7,800 due.
         const { error } = await supabase.from('pending_payments').update({
-          payment_status: 'Paid',
+          payment_status: stillOwed > 0.005 ? 'Partial' : 'Paid',
           // Record the settled amount too — flipping only the status flag
           // left the Paid column blank and a stale Balance on the list
-          paid_amount: netAmt,
+          // Accumulate: a bill part-paid twice must show the total settled, not
+          // only the latest instalment.
+          paid_amount: Math.round(((row.paid_amount ?? 0) + netAmt) * 100) / 100,
           paid_date: markPaidForm.paid_date,
           utr_no: markPaidForm.utr_no || null,
           account_type: markPaidForm.account_type,
           bank_account_id: isCash ? null : markPaidForm.bank_account_id,
-          discount_amount: discPerRow > 0 ? discPerRow : null,
+          discount_amount: thisDisc > 0 ? Math.round(((row.discount_amount ?? 0) + thisDisc) * 100) / 100 : (row.discount_amount ?? null),
           discount_reason: markPaidForm.discount_reason || null,
         }).eq('id', id)
         if (error) throw error
@@ -464,6 +554,11 @@ export const PaymentPlanningPage: React.FC = () => {
           <div className="flex items-center gap-3">
             <DateInput value={planDate} onChange={e => setPlanDate(e.target.value)} />
             {selected.size > 0 && (
+              <Button variant="secondary" icon={<Plus size={16} />} onClick={() => setSavePlanOpen(true)}>
+                Save Plan
+              </Button>
+            )}
+            {selected.size > 0 && (
               <Button variant="secondary" icon={<CheckCircle size={16} />} onClick={() => { setMarkPaidForm({ paid_date: planDate, utr_no: '', discount_amount: '0', discount_reason: '', account_type: 'Online', bank_account_id: '' }); setMarkPaidOpen(true) }}>
                 Mark Paid ({selected.size})
               </Button>
@@ -512,6 +607,56 @@ export const PaymentPlanningPage: React.FC = () => {
         />
       </div>
 
+      {/* Per-vendor subtotals for the current selection. Several bills for one
+          vendor is the normal case, and adding them up by eye before making a
+          transfer is exactly where a wrong figure creeps in. */}
+      {vendorTotals.length > 0 && (
+        <Card padding={false}>
+          <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
+            <h3 className="font-semibold text-gray-800 text-sm">Selected — by vendor</h3>
+            <span className="text-sm">Cash going out: <strong className="text-green-700">{inr(totalSelected)}</strong>
+              {totalRemaining > 0 && <span className="text-orange-600 ml-3">Still owed after: {inr(totalRemaining)}</span>}
+            </span>
+          </div>
+          <Table>
+            <thead><tr><Th>Vendor</Th><Th right>Bills</Th><Th right>Balance due</Th><Th right>Planned</Th><Th right>Still owed</Th></tr></thead>
+            <tbody>
+              {vendorTotals.map(([name, t]: any) => (
+                <tr key={name} className="hover:bg-gray-50">
+                  <Td className="font-medium">{name}</Td>
+                  <Td right>{t.bills}</Td>
+                  <Td right className="text-gray-500">{inr(t.due)}</Td>
+                  <Td right className="font-semibold">{inr(t.cash)}</Td>
+                  <Td right className={t.due - t.cash > 0.5 ? 'text-orange-600' : 'text-gray-400'}>{inr(Math.max(0, t.due - t.cash))}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card>
+      )}
+
+      {/* Saved plans — what was intended to be paid on a day, kept so it can be
+          set against what actually went out. */}
+      {(savedPlans?.length ?? 0) > 0 && (
+        <Card padding={false}>
+          <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+            <h3 className="font-semibold text-gray-800 text-sm">Saved plans</h3>
+          </div>
+          <Table>
+            <thead><tr><Th>Date</Th><Th>Title</Th><Th right>Total planned</Th></tr></thead>
+            <tbody>
+              {(savedPlans ?? []).map((pl: any) => (
+                <tr key={pl.id} className="hover:bg-gray-50">
+                  <Td>{fmtDate(pl.plan_date)}</Td>
+                  <Td>{pl.title ?? '—'}</Td>
+                  <Td right className="font-semibold">{inr(pl.total_planned)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card>
+      )}
+
       {/* Manual Items — ad-hoc payables/receivables with no bill yet */}
       <Card padding={false}>
         <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
@@ -523,7 +668,19 @@ export const PaymentPlanningPage: React.FC = () => {
             <Input label="Label" value={manualForm.label} onChange={e => setManualForm(f => ({ ...f, label: e.target.value }))} placeholder="e.g. June salary — Ramesh" />
           </div>
           <div className="w-32">
-            <Input label="Amount" type="number" value={manualForm.amount} onChange={e => setManualForm(f => ({ ...f, amount: e.target.value }))} placeholder="0.00" />
+            <Input label="Gross Amount" type="number" value={manualForm.gross} onChange={e => setManualForm(f => ({ ...f, gross: e.target.value }))} placeholder="0.00" />
+          </div>
+          <div className="w-28">
+            <Input label="Deduction" type="number" value={manualForm.deduction} onChange={e => setManualForm(f => ({ ...f, deduction: e.target.value }))} placeholder="0.00" />
+          </div>
+          <div className="w-40">
+            <Input label="Deduction Reason" value={manualForm.deduction_reason} onChange={e => setManualForm(f => ({ ...f, deduction_reason: e.target.value }))} placeholder="Rate diff, TDS, advance" />
+          </div>
+          {/* The arithmetic on screen, so the net is never a number worked out
+              in somebody's head before typing. */}
+          <div className="w-36 pb-2 text-sm">
+            <span className="block text-xs text-gray-500">Net planned</span>
+            <strong className={manualNet > 0 ? 'text-gray-800' : 'text-gray-400'}>{inr(manualNet)}</strong>
           </div>
           <div className="w-36">
             <Select label="Type" value={manualForm.direction} onChange={e => setManualForm(f => ({ ...f, direction: (e.target as HTMLSelectElement).value }))}
@@ -544,7 +701,7 @@ export const PaymentPlanningPage: React.FC = () => {
             <div className="overflow-x-auto">
               <Table>
                 <thead><tr>
-                  <Th></Th><Th>Label</Th><Th>Type</Th><Th>Due Date</Th><Th right>Amount</Th><Th></Th>
+                  <Th></Th><Th>Label</Th><Th>Type</Th><Th>Due Date</Th><Th right>Gross</Th><Th right>Deduction</Th><Th right>Net</Th><Th></Th>
                 </tr></thead>
                 <tbody>
                   {(manualItems ?? []).map((m: any) => (
@@ -560,6 +717,11 @@ export const PaymentPlanningPage: React.FC = () => {
                       <Td>{m.label}</Td>
                       <Td><Badge color={m.direction === 'payable' ? 'red' : 'green'}>{m.direction === 'payable' ? 'Payable' : 'Receivable'}</Badge></Td>
                       <Td className="text-xs">{m.due_date ? fmtDate(m.due_date) : '—'}</Td>
+                      <Td right className="text-gray-500">{m.gross_amount != null ? inr(m.gross_amount) : inr(m.amount)}</Td>
+                      <Td right className="text-orange-600">
+                        {(m.deduction_amount ?? 0) > 0 ? inr(m.deduction_amount) : '—'}
+                        {m.deduction_reason && <span className="block text-xs text-gray-400">{m.deduction_reason}</span>}
+                      </Td>
                       <Td right className={m.direction === 'payable' ? 'text-red-600 font-medium' : 'text-green-700 font-medium'}>{inr(m.amount)}</Td>
                       <Td>
                         <button onClick={e => { e.stopPropagation(); deleteManualMut.mutate(m.id) }} className="text-gray-400 hover:text-red-600">
@@ -644,6 +806,9 @@ export const PaymentPlanningPage: React.FC = () => {
                 <Th right>Invoice Amt</Th>
                 <Th right>TDS</Th>
                 <Th right>Net Payable</Th>
+                <Th right>Plan ₹</Th>
+                <Th right>Disc</Th>
+                <Th right>Still Owed</Th>
                 <Th>Due Date</Th>
                 <Th>Status</Th>
               </tr></thead>
@@ -673,6 +838,25 @@ export const PaymentPlanningPage: React.FC = () => {
                       <Td right>{p.invoice_amount ? inr(p.invoice_amount) : '—'}</Td>
                       <Td right className="text-xs text-orange-600">{(p.tds_amount ?? 0) > 0 ? inr(p.tds_amount) : '—'}</Td>
                       <Td right className="font-semibold">{inr(netPayable(p))}</Td>
+                      <Td right>
+                        {isSelected ? (
+                          <input type="number" value={planAmt[p.id] ?? ''} placeholder={String(Math.round(netPayable(p)))}
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => setPlanAmt(m => ({ ...m, [p.id]: e.target.value }))}
+                            className="w-28 border border-gray-300 rounded px-2 py-1 text-sm text-right" />
+                        ) : <span className="text-gray-300">—</span>}
+                      </Td>
+                      <Td right>
+                        {isSelected ? (
+                          <input type="number" value={rowDisc[p.id] ?? ''} placeholder="0"
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => setRowDisc(m => ({ ...m, [p.id]: e.target.value }))}
+                            className="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-right" />
+                        ) : <span className="text-gray-300">—</span>}
+                      </Td>
+                      <Td right className={remainingFor(p) > 0 && isSelected ? 'text-orange-600 font-medium' : 'text-gray-400'}>
+                        {isSelected ? inr(remainingFor(p)) : '—'}
+                      </Td>
                       <Td>
                         <span className={`text-xs font-medium ${isOD ? 'text-red-600' : isDue ? 'text-amber-600' : 'text-gray-500'}`}>
                           {p.pay_before_date ? fmtDate(p.pay_before_date) : '—'}
@@ -684,20 +868,40 @@ export const PaymentPlanningPage: React.FC = () => {
                   )
                 })}
                 {!(payments?.length) && (
-                  <tr><td colSpan={11} className="text-center py-8 text-gray-400 text-sm">No pending payments</td></tr>
+                  <tr><td colSpan={14} className="text-center py-8 text-gray-400 text-sm">No pending payments</td></tr>
                 )}
               </tbody>
             </Table>
           </div>
         )}
       </Card>
+      <Modal open={savePlanOpen} onClose={() => setSavePlanOpen(false)} title="Save this plan" size="sm"
+        footer={<>
+          <Button variant="secondary" onClick={() => setSavePlanOpen(false)}>Cancel</Button>
+          <Button loading={savePlanMut.isPending} onClick={() => savePlanMut.mutate()}>Save Plan</Button>
+        </>}>
+        <div className="space-y-3 text-sm">
+          <p className="text-gray-600">
+            Saving records {selected.size} bill(s) and <strong>{inr(totalSelected)}</strong> planned for{' '}
+            {fmtDate(planDate)}. It does not pay anything — Mark Paid still does that.
+          </p>
+          <Input label="Title" value={planTitle} onChange={e => setPlanTitle(e.target.value)} placeholder="e.g. Monday transfers" />
+        </div>
+      </Modal>
+
       <Modal open={markPaidOpen} onClose={() => setMarkPaidOpen(false)} title={`Mark ${selected.size} Payment(s) as Paid`} size="sm"
         footer={<>
           <Button variant="secondary" onClick={() => setMarkPaidOpen(false)}>Cancel</Button>
           <Button icon={<CheckCircle size={14}/>} loading={markPaidMut.isPending} onClick={() => markPaidMut.mutate()}>Confirm Payment</Button>
         </>}>
         <div className="space-y-3 text-sm">
-          <p className="text-gray-600">Total being marked paid: <strong className="text-green-700">{inr(totalSelected)}</strong></p>
+          <p className="text-gray-600">Cash going out: <strong className="text-green-700">{inr(totalSelected)}</strong></p>
+          {totalRemaining > 0 && (
+            <p className="text-orange-700 bg-orange-50 border border-orange-200 rounded px-3 py-2">
+              <strong>{inr(totalRemaining)}</strong> stays owed after this payment — those bills become
+              Partial and keep their balance. Nothing is written off.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <DateInput label="Paid Date" value={markPaidForm.paid_date} onChange={(e: any) => setMarkPaidForm(f => ({ ...f, paid_date: e.target.value }))} />
             <div>
@@ -722,7 +926,8 @@ export const PaymentPlanningPage: React.FC = () => {
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Discount / Deduction (₹)" type="number" value={markPaidForm.discount_amount} onChange={e => setMarkPaidForm(f => ({ ...f, discount_amount: e.target.value }))} hint={`Split evenly across the ${selected.size} selected`} />
+            <Input label="Discount / Deduction (₹)" type="number" value={markPaidForm.discount_amount} onChange={e => setMarkPaidForm(f => ({ ...f, discount_amount: e.target.value }))}
+              hint={`Only used for bills with no Disc typed in the list. Enter it per bill there instead — split evenly across ${selected.size} is rarely where the discount belonged.`} />
             <Input label="Discount Reason" value={markPaidForm.discount_reason} onChange={e => setMarkPaidForm(f => ({ ...f, discount_reason: e.target.value }))} placeholder="Rate diff, short wt, etc." />
           </div>
         </div>
