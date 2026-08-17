@@ -6,7 +6,7 @@ import { Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, SectionHead
 import { Plus, Trash2, TrendingUp, Pencil, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const TABS = ['Weekly Rates', 'Vendor Rates', 'STD Production Curve'] as const
+const TABS = ['Weekly Rates', 'Vendor Rates', 'STD Production Curve', 'Breed Standards'] as const
 
 // Sunday of the week containing `d`
 function weekStartOf(d: Date) {
@@ -35,6 +35,7 @@ export const HERateRegisterPage: React.FC = () => {
       {tab === 'Weekly Rates' && <WeeklyRatesTab />}
       {tab === 'Vendor Rates' && <VendorRatesTab />}
       {tab === 'STD Production Curve' && <StdCurveTab />}
+      {tab === 'Breed Standards' && <BreedStandardsTab />}
     </div>
   )
 }
@@ -547,6 +548,107 @@ const StdCurveTab: React.FC = () => {
           ))}
         </div>
       </Modal>
+    </div>
+  )
+}
+
+
+// ── Breed Standards ──────────────────────────────────────────────────────────
+// The Vencobb430 book, Tables 1-6 and 9-10: body weight, gain, feed, nutrients
+// for growing and laying birds, plus egg weight, chick weight, fertility,
+// hatchability and hatch-of-fertile for laying females.
+//
+// Production performance (Tables 7 and 8) is NOT here -- it lives in the STD
+// Production Curve tab, where it already was. One figure, one home.
+//
+// Male rows are stored once under season "Both": the book states the same male
+// body weight standards apply to winter and summer, so duplicating them would
+// invite the two copies to drift apart.
+const BS_COLS: { key: string; label: string; laying?: boolean }[] = [
+  { key: 'week_of_age',          label: 'Age (wk)' },
+  { key: 'body_weight_g',        label: 'Body Wt (g)' },
+  { key: 'weekly_gain_g',        label: 'Gain (g)' },
+  { key: 'feed_g_per_day',       label: 'Feed /bird/day (g)' },
+  { key: 'feed_increment_g',     label: 'Increment (g)' },
+  { key: 'feed_type',            label: 'Feed Type' },
+  { key: 'me_kcal',              label: 'ME (Kcal)' },
+  { key: 'protein_g',            label: 'Protein (g)' },
+  { key: 'dig_lysine_mg',        label: 'Dig Lysine (mg)' },
+  { key: 'egg_weight_g',         label: 'Egg Wt (g)', laying: true },
+  { key: 'egg_mass_g',           label: 'Egg mass (g)', laying: true },
+  { key: 'chick_weight_g',       label: 'Chick Wt (g)', laying: true },
+  { key: 'fertility_pct',        label: 'Fertility %', laying: true },
+  { key: 'hatchability_pct',     label: 'Hatchability %', laying: true },
+  { key: 'hatch_of_fertile_pct', label: 'Hatch of Fertile %', laying: true },
+]
+
+const BreedStandardsTab: React.FC = () => {
+  const [season, setSeason] = useState('Summer')
+  const [sex, setSex] = useState('Female')
+  const [phase, setPhase] = useState('Laying')
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['breed_standard', season, sex, phase],
+    queryFn: async () => {
+      // Male standards are filed under season "Both", so a male view must not
+      // be filtered to Summer or Winter -- it would come back empty.
+      let q = supabase.from('breed_standard').select('*').eq('sex', sex).eq('phase', phase)
+      q = sex === 'Male' ? q.eq('season', 'Both') : q.eq('season', season)
+      const { data } = await q.order('week_of_age')
+      return data ?? []
+    }
+  })
+
+  // Egg and hatch columns exist only for laying females; hiding them elsewhere
+  // keeps the table from being a wall of dashes.
+  const cols = BS_COLS.filter(c => !c.laying || (phase === 'Laying' && sex === 'Female'))
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm text-blue-800">
+        Vencobb430 breeder standards, as published by Venco. Read-only —
+        these are the book's figures, and the app compares your actual results against them.
+      </div>
+      <div className="flex gap-3 flex-wrap">
+        <Select label="Sex" value={sex} onChange={e => setSex(e.target.value)}
+          options={[{ value: 'Female', label: 'Female' }, { value: 'Male', label: 'Male' }]} />
+        <Select label="Phase" value={phase} onChange={e => setPhase(e.target.value)}
+          options={[{ value: 'Growing', label: 'Brooding / Growing (wk 1-24)' },
+                    { value: 'Laying', label: 'Laying (wk 24-66)' }]} />
+        <Select label="Season" value={sex === 'Male' ? 'Both' : season} onChange={e => setSeason(e.target.value)}
+          disabled={sex === 'Male'}
+          options={sex === 'Male'
+            ? [{ value: 'Both', label: 'Both (same for male)' }]
+            : [{ value: 'Summer', label: 'Summer (Feb-Jul)' }, { value: 'Winter', label: 'Winter (Aug-Jan)' }]} />
+      </div>
+      {isLoading ? <Spinner /> : rows.length === 0 ? (
+        <Card><EmptyState title="No standard rows for this selection" /></Card>
+      ) : (
+        <Card padding={false}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ minWidth: `${cols.length * 110}px` }}>
+              <thead className="bg-gray-50 text-xs text-gray-500">
+                <tr>{cols.map(c => <th key={c.key} className="px-3 py-2 text-right whitespace-nowrap">{c.label}</th>)}</tr>
+              </thead>
+              <tbody>
+                {rows.map((r: any) => (
+                  <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    {cols.map(c => (
+                      <td key={c.key} className={`px-3 py-2 text-right ${c.key === 'week_of_age' ? 'font-medium' : ''}`}>
+                        {r[c.key] == null ? '—' : r[c.key]}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500 px-3 py-2">
+            {rows.length} week(s). A dash is a blank in the source book, not a zero — week 24 of the
+            laying tables has no chick or hatch figures because laying has barely started.
+          </p>
+        </Card>
+      )}
     </div>
   )
 }
