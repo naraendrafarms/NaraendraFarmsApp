@@ -493,28 +493,41 @@ export const PaymentPlanningPage: React.FC = () => {
       const invoice = p.invoice_amount ?? 0
       const payable = netPayable(p)
       acc.invoice += invoice
-      acc.discTds += invoice - payable
-      acc.payable += payable
+      // Discount/TDS on the printed sheet is what is NOT being paid against
+      // this invoice today — the bill's own TDS and discount, plus anything
+      // held back by planning less than the balance.
+      acc.discTds += invoice - cashFor(p)
+      acc.payable += cashFor(p)
+      acc.stillOwed += remainingFor(p)
       return acc
-    }, { invoice: 0, discTds: 0, payable: 0 })
+    }, { invoice: 0, discTds: 0, payable: 0, stillOwed: 0 })
     // Selected Manual Items (payable ones) are folded into the printed
     // totals/balance too — receivable manual items instead fold into Need to
     // Receive below, not this payable total.
-    totals.invoice += selectedManualPayable
+    const manualGross = selectedManualItems
+      .filter((m: any) => m.direction === 'payable')
+      .reduce((sum: number, m: any) => sum + (m.gross_amount ?? m.amount ?? 0), 0)
+    totals.invoice += manualGross
     totals.payable += selectedManualPayable
+    totals.discTds += manualGross - selectedManualPayable
 
     const rows = selectedPayments.map((p: any, i: number) => {
       const party = partiesMap?.[p.vendor_name] ?? {}
       const code = party.account_no ? String(party.account_no).slice(-4) : ''
       const invoice = p.invoice_amount ?? 0
-      const payable = netPayable(p)
+      // The sheet is what will actually be transferred, so a part payment must
+      // print its planned figure — printing the full balance beside a smaller
+      // transfer is how a payment gets made twice.
+      const paying = cashFor(p)
       return {
         sno: i + 1,
         vendor_name: `${p.vendor_name}${code ? ' - ' + code : ''}`,
         credit_limit_days: p.credit_limit ?? 0,
         invoice_amount: invoice,
-        payable_amount: payable,
-        disc_tds: invoice - payable,
+        payable_amount: paying,
+        balance_due: netPayable(p),
+        still_owed: remainingFor(p),
+        disc_tds: invoice - paying,
         grn_date: p.grn_date ?? null,
         invoice_date: p.invoice_date ?? null,
         days: p.grn_date ? daysBetween(p.grn_date, planDate) : '',
@@ -524,9 +537,13 @@ export const PaymentPlanningPage: React.FC = () => {
       sno: rows.length + i + 1,
       vendor_name: `${m.label} (manual)`,
       credit_limit_days: 0,
-      invoice_amount: m.amount ?? 0,
+      // Manual items now carry gross and deduction, so the sheet shows the same
+      // arithmetic as the screen instead of one unexplained figure.
+      invoice_amount: m.gross_amount ?? m.amount ?? 0,
       payable_amount: m.amount ?? 0,
-      disc_tds: 0,
+      balance_due: m.amount ?? 0,
+      still_owed: 0,
+      disc_tds: (m.gross_amount ?? m.amount ?? 0) - (m.amount ?? 0),
       grn_date: null,
       invoice_date: null,
       days: '',

@@ -1240,7 +1240,9 @@ export interface PaymentPlanningRow {
   vendor_name: string
   credit_limit_days: number | null
   invoice_amount: number
-  payable_amount: number
+  payable_amount: number      // what is being paid now
+  balance_due?: number        // what was owed before this payment
+  still_owed?: number         // what remains after it
   disc_tds: number
   grn_date: string | null
   invoice_date: string | null
@@ -1250,19 +1252,25 @@ export interface PaymentPlanningRow {
 export function printPaymentPlanning(opts: {
   planDate: string
   rows: PaymentPlanningRow[]
-  totals: { invoice: number; payable: number; discTds: number }
+  totals: { invoice: number; payable: number; discTds: number; stillOwed?: number }
   bankBalance: number
   bankBalanceAfter: number
   needToReceive: number
 }) {
   const { planDate, rows, totals, bankBalance, bankBalanceAfter, needToReceive } = opts
 
-  const bodyRows = rows.map(r => `<tr>
+  // Balance Due and Still Owed print alongside what is being paid, because a
+  // part payment must not look like a full settlement on a sheet somebody signs:
+  // "Paying Now" is the transfer, "Still Owed" is what remains against the bill.
+  const anyPartial = rows.some((r: any) => (r.still_owed ?? 0) > 0.5)
+  const bodyRows = rows.map((r: any) => `<tr>
     <td class="tc">${r.sno}</td>
     <td>${r.vendor_name}</td>
     <td class="tc">${r.credit_limit_days ?? 0}</td>
     <td class="tr">${inr(r.invoice_amount)}</td>
+    <td class="tr">${inr(r.balance_due ?? r.payable_amount)}</td>
     <td class="tr">${inr(r.payable_amount)}</td>
+    ${anyPartial ? `<td class="tr" style="color:#b45309">${(r.still_owed ?? 0) > 0.5 ? inr(r.still_owed) : '—'}</td>` : ''}
     <td class="tr" style="color:#c00">${inr(r.disc_tds)}</td>
     <td class="tc">${r.grn_date ? fmt(r.grn_date) : '—'}</td>
     <td class="tc">${r.invoice_date ? fmt(r.invoice_date) : '—'}</td>
@@ -1292,7 +1300,9 @@ export function printPaymentPlanning(opts: {
     <table>
       <thead><tr>
         <th>S.No</th><th>Vendor Name</th><th>Credit Limit</th>
-        <th>Invoice Amount</th><th>Payable Amount</th><th>Discount / TDS</th>
+        <th>Invoice Amount</th><th>Balance Due</th><th>Paying Now</th>
+        ${anyPartial ? '<th>Still Owed</th>' : ''}
+        <th>Discount / TDS</th>
         <th>GRN Date</th><th>Invoice Date</th><th>No.Of days</th>
       </tr></thead>
       <tbody>
@@ -1300,7 +1310,9 @@ export function printPaymentPlanning(opts: {
         <tr class="total-row">
           <td colspan="3" class="tr">Total Payments</td>
           <td class="tr">${inr(totals.invoice)}</td>
+          <td class="tr">${inr(rows.reduce((s: number, r: any) => s + (r.balance_due ?? r.payable_amount ?? 0), 0))}</td>
           <td class="tr">${inr(totals.payable)}</td>
+          ${anyPartial ? `<td class="tr" style="color:#b45309">${inr(totals.stillOwed ?? 0)}</td>` : ''}
           <td class="tr">${inr(totals.discTds)}</td>
           <td colspan="3"></td>
         </tr>
@@ -1313,6 +1325,7 @@ export function printPaymentPlanning(opts: {
       <tr><td class="bold">Bank Balance</td><td class="tr bold">${inr(bankBalance)}</td></tr>
       <tr><td class="bold">Bank Balance After Payments</td><td class="tr bold">${inr(bankBalanceAfter)}</td></tr>
       <tr><td class="bold">Need to Receive Amount</td><td class="tr bold">${inr(needToReceive)}</td></tr>
+      ${(totals.stillOwed ?? 0) > 0.5 ? `<tr><td class="bold">Still Owed After These Payments</td><td class="tr bold" style="color:#b45309">${inr(totals.stillOwed ?? 0)}</td></tr>` : ''}
     </table>
   </div>
 
