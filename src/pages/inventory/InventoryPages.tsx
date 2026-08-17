@@ -768,7 +768,14 @@ const LedgerTab: React.FC = () => {
   const { data: allItems, isLoading: loadingItems } = useQuery({
     queryKey: ['sl_items'],
     queryFn: async () => {
-      const { data } = await supabase.from('stock_ledger').select('item_id,item_name').order('item_name')
+      // Paged. This builds the "Search & Select Item" list by reading every
+      // ledger row and collecting the distinct items — so a bare select capped
+      // at 1,000 rows silently dropped every item that only appears later in
+      // the ledger. With 2,645 rows, items were simply missing from the
+      // dropdown and could not be looked at at all.
+      const data = await fetchAllPages<any>((from, to) => supabase
+        .from('stock_ledger').select('item_id,item_name')
+        .order('item_name').range(from, to), 'Ledger item list')
       const seen = new Set<string>()
       const out: { id: string; name: string }[] = []
       for (const r of data ?? []) {

@@ -130,16 +130,38 @@ export const PendingPaymentsPage: React.FC = () => {
         : (r.invoice_no ? `inv:${norm(r.vendor_name)}|${norm(r.invoice_no)}|${r.invoice_amount}` : '')
       if (!key) continue
       ;(groups[key] ??= []).push(r)
+
+      // Widened case: same vendor and same AMOUNT with no invoice number on the
+      // row at all. The Venco pair hid here — two bills for ₹39,975 under GRN
+      // 2086 and a placeholder GRN 0000, neither carrying an invoice, so
+      // nothing textual tied them together and the paid twin was invisible.
+      // This can flag two genuine purchases of equal value, so the panel says
+      // "same amount, no invoice — check" rather than calling it a duplicate.
+      if (!r.invoice_no) {
+        const amtKey = `amt:${norm(r.vendor_name)}|${r.invoice_amount}`
+        ;(groups[amtKey] ??= []).push(r)
+      }
     }
+    const seenSets = new Set<string>()
     return Object.entries(groups)
       .filter(([, rows]) => rows.length > 1)
+      // A pair can match on both GRN and amount; show it once.
+      .filter(([, rows]) => {
+        const sig = rows.map((r: any) => r.id).sort().join('|')
+        if (seenSets.has(sig)) return false
+        seenSets.add(sig)
+        return true
+      })
       .map(([key, rows]) => {
         const settled = (x: any) => (x.paid_amount ?? 0) + (x.advance_adjusted ?? 0)
         // Safe to remove only when this row carries no money AND a sibling does.
         const anySettled = rows.some((x: any) => settled(x) > 0)
         return {
           key,
-          label: `${rows[0].vendor_name} — ${rows[0].grn_no ? `GRN ${rows[0].grn_no}` : `Inv ${rows[0].invoice_no}`}`,
+          weak: key.startsWith('amt:'),
+          label: key.startsWith('amt:')
+            ? `${rows[0].vendor_name} — ${inr(rows[0].invoice_amount ?? 0)}, no invoice number on either (check)`
+            : `${rows[0].vendor_name} — ${rows[0].grn_no ? `GRN ${rows[0].grn_no}` : `Inv ${rows[0].invoice_no}`}`,
           rows: rows.map((x: any) => ({ ...x, settled: settled(x), removable: anySettled && settled(x) === 0 })),
         }
       })
@@ -761,7 +783,12 @@ export const PendingPaymentsPage: React.FC = () => {
           </div>
           {duplicateGroups.map(g => (
             <div key={g.key} className="bg-white border border-amber-200 rounded-lg p-3">
-              <p className="font-medium text-sm text-gray-800 mb-2">{g.label}</p>
+              <p className="font-medium text-sm text-gray-800 mb-2">
+                {g.label}
+                {g.weak && <span className="ml-2 text-xs font-normal text-amber-700">
+                  matched on amount only — two real purchases of the same value would look like this too
+                </span>}
+              </p>
               <table className="w-full text-xs">
                 <thead className="text-gray-500">
                   <tr>

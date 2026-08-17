@@ -62,11 +62,14 @@ const FinishedFeedStockTab: React.FC = () => {
   const { byTypeId } = useFeedRates()
   const { data: productions = [] } = useQuery({
     queryKey: ['feed_production_log_finished'],
-    queryFn: async () => { const { data } = await supabase.from('feed_production_log').select('quantity_kg, feed_formulas(feed_type_id)'); return data ?? [] }
+    // Summed into finished-feed stock, so it must be every row, not the first 1,000.
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('feed_production_log')
+      .select('quantity_kg, feed_formulas(feed_type_id)').range(from, to), 'Feed produced')
   })
   const { data: dispatches = [] } = useQuery({
     queryKey: ['feed_transfers'],
-    queryFn: async () => { const { data } = await supabase.from('feed_transfers').select('feed_type_id,quantity_kg'); return data ?? [] }
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('feed_transfers')
+      .select('feed_type_id,quantity_kg').range(from, to), 'Feed transferred')
   })
   const { data: adjustments = [] } = useQuery({
     queryKey: ['finished_feed_adjustments'],
@@ -981,13 +984,18 @@ const ProductionTab: React.FC = () => {
   const { data: logs = [], isLoading } = useQuery({
     queryKey:['feed_production_log', fFrom, fTo, fFarm],
     queryFn: async () => {
-      let q = supabase.from('feed_production_log')
-        .select('*, feed_formulas(formula_code,formula_name), farms(name,code), feed_production_ingredients(*)')
-        .order('production_date', {ascending:false})
-      if (fFrom) q = q.gte('production_date', fFrom)
-      if (fTo)   q = q.lte('production_date', fTo)
-      if (fFarm) q = q.eq('farm_id', fFarm)
-      const {data} = await q
+      // Paged: a season's production easily passes the server's 1,000-row cap,
+      // and this list feeds the batch totals — a silent truncation would
+      // understate how much feed was made.
+      const data = await fetchAllPages<any>((from, to) => {
+        let q = supabase.from('feed_production_log')
+          .select('*, feed_formulas(formula_code,formula_name), farms(name,code), feed_production_ingredients(*)')
+          .order('production_date', {ascending:false}).range(from, to)
+        if (fFrom) q = q.gte('production_date', fFrom)
+        if (fTo)   q = q.lte('production_date', fTo)
+        if (fFarm) q = q.eq('farm_id', fFarm)
+        return q
+      }, 'Feed production log')
       return data??[]
     }
   })
