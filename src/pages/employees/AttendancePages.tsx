@@ -1360,6 +1360,25 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     return c
   }, [grid, employees, days, todayDateStr])
 
+  // Required manpower for the selected site, from the Manpower Requirement
+  // master. Nothing is assumed when a site has no requirement set: the chips
+  // then show only how many there ARE, rather than implying a target of zero.
+  const { data: requirements = [] } = useQuery({
+    queryKey: ['mr_for_attendance'],
+    queryFn: async () => {
+      const { data } = await supabase.from('manpower_requirement').select('*')
+      return data ?? []
+    }
+  })
+
+  const helperRequired = useMemo(() => {
+    const rows = (requirements as any[]).filter((r: any) =>
+      (!farmId || r.farm_id === farmId) && (r.designation ?? '').toLowerCase().includes('helper'))
+    const sum = (g: string) => rows.filter((r: any) => r.gender === g)
+      .reduce((a: number, r: any) => a + (r.required_count ?? 0), 0)
+    return { male: sum('Male'), female: sum('Female'), any: rows.some((r: any) => !r.gender) }
+  }, [requirements, farmId])
+
   // Helpers on this site, split male and female. Taken from the designation
   // and gender on the employee record — the same fields the Daily Attendance
   // export prints — so nothing here is a second, separate list to maintain.
@@ -1434,9 +1453,21 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
         <div className="flex flex-wrap gap-2 items-center">
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-blue-50 text-blue-700 border-blue-200">
             Male Helper: {helperCounts.male}
+            {helperRequired.male > 0 && (
+              <span className={helperCounts.male < helperRequired.male ? 'text-red-600' : 'text-green-700'}>
+                {' '}/ {helperRequired.male} required
+                {helperCounts.male < helperRequired.male ? ` — ${helperRequired.male - helperCounts.male} short` : ''}
+              </span>
+            )}
           </span>
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-pink-50 text-pink-700 border-pink-200">
             Female Helper: {helperCounts.female}
+            {helperRequired.female > 0 && (
+              <span className={helperCounts.female < helperRequired.female ? 'text-red-600' : 'text-green-700'}>
+                {' '}/ {helperRequired.female} required
+                {helperCounts.female < helperRequired.female ? ` — ${helperRequired.female - helperCounts.female} short` : ''}
+              </span>
+            )}
           </span>
           {helperCounts.unknown > 0 && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-yellow-50 text-yellow-700 border-yellow-200">
@@ -1444,8 +1475,9 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
             </span>
           )}
           <span className="text-xs text-gray-400">
-            counted from designation and gender on the employee record — these are how many there ARE,
-            not how many are required
+            {helperRequired.male > 0 || helperRequired.female > 0
+              ? 'required figures come from Employees → Manpower Requirement'
+              : 'how many there ARE — set targets in Employees → Manpower Requirement to see short/over'}
           </span>
         </div>
       )}

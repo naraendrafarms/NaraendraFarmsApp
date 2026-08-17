@@ -93,6 +93,7 @@ const NAV: NavItem[] = [
       { label: 'Payroll Summary', to: '/employees/payroll-summary' },
       { label: 'Monthly Attendance',    to: '/employees/monthly-attendance' },
       { label: 'Daily Attendance',     to: '/employees/attendance-daily' },
+      { label: 'Manpower Requirement', to: '/employees/manpower-requirement' },
       { label: 'Month Attendance',     to: '/employees/attendance-month' },
       { label: 'Attendance Register',  to: '/employees/attendance' },
       { label: 'Advances',             to: '/employees/advances' },
