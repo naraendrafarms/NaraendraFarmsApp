@@ -171,6 +171,9 @@ BEGIN
   -- source rules that can catch a PAGE reading wrongly.
   PERFORM public.fn_health_round2(v_run);
 
+  -- An invoice cannot have more eggs set against it than it carried.
+  PERFORM public.fn_check_dispatch_allocation(v_run);
+
   -- A task on the Development list whenever anything critical fails, so it
   -- lands where the outstanding work already is instead of waiting to be seen.
   SELECT count(*) INTO v_failed

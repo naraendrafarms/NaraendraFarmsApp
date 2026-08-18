@@ -233,6 +233,24 @@ export const HatchBatches: React.FC = () => {
     }
   })
 
+  // How much of each dispatch is already set. Read across ALL batches, not the
+  // filtered list, because how many eggs are left in an invoice cannot depend on
+  // which flock the page happens to be showing.
+  const { data: allocRows = [] } = useQuery({
+    queryKey: ['hatch_alloc_all'],
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('hatch_batches')
+      .select('id,dispatch_id,eggs_set').not('dispatch_id', 'is', null)
+      .order('id').range(from, to), 'Hatch batch allocation'),
+  })
+  const usedByDispatch = React.useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const b of (allocRows as any[])) {
+      if (!b.dispatch_id) continue
+      m[b.dispatch_id] = (m[b.dispatch_id] ?? 0) + (Number(b.eggs_set) || 0)
+    }
+    return m
+  }, [allocRows])
+
   // Dispatch lines are needed for two things now: the egg age / flock-age-at-
   // production of batches that ARE linked, and the production-date range shown
   // against each candidate in the link dropdown, so choosing the right dispatch
@@ -415,6 +433,22 @@ export const HatchBatches: React.FC = () => {
         throw new Error('Hatched + culled + rejects cannot exceed hatchable eggs (setting − infertile − blasters)')
       if (form.hatch_date && form.hatch_date < form.setting_date)
         throw new Error('Hatch date cannot be before setting date')
+      // A dispatch can feed several settings, but not more eggs than it carried.
+      // Without this, linking the same invoice to two full batches records twice
+      // the eggs that ever left the farm, and every hatch % after it is measured
+      // against eggs that did not exist.
+      const linkId = form.dispatch_id || autoLinkMatch?.id || null
+      if (linkId) {
+        const d = (dispatches ?? []).find((x: any) => x.id === linkId)
+        if (d) {
+          const { total, used } = remainingOf(d)
+          if (total > 0 && N(form.eggs_set) > total - used) {
+            throw new Error(
+              `This invoice carried ${total.toLocaleString('en-IN')} eggs and ${used.toLocaleString('en-IN')} are already set against it — `
+              + `${Math.max(0, total - used).toLocaleString('en-IN')} remain. Reduce Eggs Set, or correct the invoice quantity.`)
+          }
+        }
+      }
       let flockId = form.flock_id
       if (!flockId && form.dispatch_id) {
         const d = dispatches?.find((d: any) => d.id === form.dispatch_id)
@@ -670,12 +704,39 @@ export const HatchBatches: React.FC = () => {
     if (!form.setting_date || d.dispatch_date > form.setting_date) return false
     return (new Date(form.setting_date).getTime() - new Date(d.dispatch_date).getTime()) / 86400000 <= 21
   }
+  // Eggs of a dispatch not yet set. A dispatch legitimately feeds more than one
+  // batch — a lakh eggs get split across hatcheries and settings — so it stays
+  // in the list while any remain. Once it is fully set it drops OUT: with a
+  // hundred invoices, a list that keeps everything ever sent is a list nobody
+  // can read, and every spent invoice in it is one more chance to link the
+  // wrong one twice.
+  const remainingOf = (d: any) => {
+    const total = Number(d.total_dispatched) || 0
+    let used = usedByDispatch[d.id] ?? 0
+    // The batch being edited must not count against itself, or reopening it
+    // would show its own eggs as already spent.
+    if (editing?.id) {
+      const own = (allocRows as any[]).find((b: any) => b.id === editing.id && b.dispatch_id === d.id)
+      if (own) used -= Number(own.eggs_set) || 0
+    }
+    return { total, used, left: total - used }
+  }
+  const withRemaining = (d: any) => {
+    const { total, used, left } = remainingOf(d)
+    const base = dispatchOptionLabel(d)
+    if (used <= 0 || total <= 0) return base
+    return `${base} · ${used.toLocaleString('en-IN')} set, ${Math.max(0, left).toLocaleString('en-IN')} left`
+  }
+  // Fully set dispatches are hidden — except the one this batch is already
+  // linked to, which must stay selectable or an edit would silently unlink it.
+  const selectable = (dispatches ?? []).filter((d: any) =>
+    d.id === form.dispatch_id || remainingOf(d).left > 0)
   const dispatchOptions = [
-    ...(dispatches ?? []).filter(isCandidate).map((d: any) => ({
-      value: d.id, label: `★ ${dispatchOptionLabel(d)}`
+    ...selectable.filter(isCandidate).map((d: any) => ({
+      value: d.id, label: `★ ${withRemaining(d)}`
     })),
-    ...(dispatches ?? []).filter((d: any) => !isCandidate(d)).map((d: any) => ({
-      value: d.id, label: dispatchOptionLabel(d)
+    ...selectable.filter((d: any) => !isCandidate(d)).map((d: any) => ({
+      value: d.id, label: withRemaining(d)
     })),
   ]
 
@@ -1244,11 +1305,21 @@ export const HatchBatches: React.FC = () => {
                 }
               }}
               hint={form.dispatch_id
-                ? ''
+                ? (() => {
+                    // Editing an existing batch: say what it is linked to and
+                    // that the link can be changed or cleared here, since a
+                    // wrong link is corrected on this screen and nowhere else.
+                    const d = (dispatches ?? []).find((x: any) => x.id === form.dispatch_id)
+                    if (!d) return 'Linked. Choose another invoice to move this batch, or the blank option to unlink it.'
+                    const { total, used, left } = remainingOf(d)
+                    return `Linked to ${d.invoice_no ?? 'DC-' + d.dc_no} — ${total.toLocaleString('en-IN')} eggs`
+                      + (used > 0 ? `, ${used.toLocaleString('en-IN')} already set, ${Math.max(0, left).toLocaleString('en-IN')} left` : '')
+                      + '. Choose another invoice to move this batch, or the blank option to unlink it.'
+                  })()
                 : autoLinkMatch
                   ? `Will link automatically to ${autoLinkMatch.invoice_no ?? 'DC-' + autoLinkMatch.dc_no} — same flock, ${autoLinkMatch.total_dispatched?.toLocaleString('en-IN')} eggs on ${fmtDate(autoLinkMatch.dispatch_date)}`
                   : (dispatchOptions.some(o => o.label.startsWith('★'))
-                      ? '★ marks this flock\u2019s dispatches in the 3 weeks before the setting date. Without a link, Age@Prod and Egg Age stay blank.'
+                      ? '★ marks this flock\u2019s dispatches in the 3 weeks before the setting date. Fully set invoices are not listed. Without a link, Age@Prod and Egg Age stay blank.'
                       : 'Without a link, Age@Prod and Egg Age stay blank — the app cannot know when these eggs were laid.')} />
             <Input label="Invoice No (override)" placeholder="INV-2026-001"
               value={form.invoice_no} onChange={e => s('invoice_no', e.target.value)} />
