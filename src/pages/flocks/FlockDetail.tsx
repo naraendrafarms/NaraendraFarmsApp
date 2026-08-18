@@ -362,6 +362,44 @@ export const FlockDetail: React.FC = () => {
     }
   }
 
+  // Undo everything a transfer did: the source shed's daily-record deduction
+  // and the birds' move between the two sheds' allocations. Delete uses it on
+  // its own; EDIT uses it to take the OLD figures back out before putting the
+  // new ones in — otherwise correcting a bird count leaves both sheds carrying
+  // the original number with nothing on screen to say so.
+  const undoTransferEffects = async (t: any) => {
+    const trF = t.female_count || 0, trM = t.male_count || 0
+    if (trF || trM) {
+      let drQuery = supabase.from('daily_records')
+        .select('id,transfer_female,transfer_male,trcull_female,trcull_male,opening_female,opening_male,cull_female,cull_male,mortality_female,mortality_male')
+        .eq('flock_id', id!).eq('record_date', t.transfer_date)
+      drQuery = t.from_shed_id ? drQuery.eq('shed_id', t.from_shed_id) : drQuery.is('shed_id', null)
+      drQuery = t.from_farm_id ? drQuery.eq('farm_id', t.from_farm_id) : drQuery.is('farm_id', null)
+      const { data: dr } = await drQuery.maybeSingle()
+      if (dr) {
+        const newTrF = Math.max(0, (dr.transfer_female ?? 0) - trF)
+        const newTrM = Math.max(0, (dr.transfer_male ?? 0) - trM)
+        // trcull was incremented alongside transfer when the transfer was
+        // added (trcull = transfer + cull) — must be reversed by the same
+        // amount, or it stays permanently overstated.
+        const newTrcullF = Math.max(0, (dr.trcull_female ?? 0) - trF)
+        const newTrcullM = Math.max(0, (dr.trcull_male ?? 0) - trM)
+        const closingF = Math.max(0, (dr.opening_female ?? 0) - newTrF - (dr.cull_female ?? 0) - (dr.mortality_female ?? 0))
+        const closingM = Math.max(0, (dr.opening_male ?? 0) - newTrM - (dr.cull_male ?? 0) - (dr.mortality_male ?? 0))
+        await supabase.from('daily_records').update({
+          transfer_female: newTrF, transfer_male: newTrM,
+          trcull_female: newTrcullF, trcull_male: newTrcullM,
+          ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
+        }).eq('id', dr.id)
+      }
+    }
+    await moveShedAllocation({
+      flockId: id!, date: t.transfer_date, trF, trM,
+      fromShedId: t.from_shed_id ?? null, fromFarmId: t.from_farm_id ?? null,
+      toShedId: t.to_shed_id ?? null, toFarmId: t.to_farm_id ?? null,
+    }, -1)
+  }
+
   const addTransferMut = useMutation({
     mutationFn: async () => {
       if (!transferForm.to_farm_id) throw new Error('To Farm is required')
@@ -446,12 +484,48 @@ export const FlockDetail: React.FC = () => {
         is_final_transfer: transferForm.is_final_transfer,
         notes: transferForm.notes || null,
       }
+      // Read the transfer as it stands BEFORE saving — its old figures are what
+      // has to come back out of the daily record and the shed allocations.
+      const { data: old, error: oe } = await supabase.from('flock_transfers')
+        .select('*').eq('id', editTransferId).single()
+      if (oe) throw oe
+
+      await undoTransferEffects(old)
+
       const { error } = await supabase.from('flock_transfers').update(payload).eq('id', editTransferId)
       if (error) throw error
+
+      // …and the new figures go in exactly as a fresh transfer would put them.
+      const trF = payload.female_count, trM = payload.male_count
+      await deductFromSourceShed({
+        flockId: id!, date: payload.transfer_date,
+        farmId: payload.from_farm_id, shedId: payload.from_shed_id, trF, trM,
+      })
+      await moveShedAllocation({
+        flockId: id!, date: payload.transfer_date, trF, trM,
+        fromShedId: payload.from_shed_id, fromFarmId: payload.from_farm_id,
+        toShedId: payload.to_shed_id, toFarmId: payload.to_farm_id,
+      }, 1)
+
+      // Ticking "Final Transfer" on an edit did nothing before — the flock kept
+      // its old status and laying farm, so the tick box lied.
+      if (payload.is_final_transfer && !old.is_final_transfer) {
+        const { error: fe } = await supabase.from('flocks').update({
+          status: 'laying',
+          laying_farm_id: payload.to_farm_id,
+          laying_start_date: payload.transfer_date,
+        }).eq('id', id!)
+        if (fe) throw fe
+      }
     },
     onSuccess: () => {
       toast.success('Transfer updated')
       qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
+      qc.invalidateQueries({ queryKey: ['flock_daily', id] })
+      qc.invalidateQueries({ queryKey: ['daily_records'] })
+      qc.invalidateQueries({ queryKey: ['flock', id] })
+      qc.invalidateQueries({ queryKey: ['shed_allocations', id] })
+      qc.invalidateQueries({ queryKey: ['flock_sheds_full'] })
       setShowTransferForm(false); setEditTransferId(null)
       setTransferForm(blankTransfer())
     },
@@ -462,41 +536,7 @@ export const FlockDetail: React.FC = () => {
     mutationFn: async (t: any) => {
       const { error } = await supabase.from('flock_transfers').delete().eq('id', t.id)
       if (error) throw error
-      // reverse the daily-record deduction that the transfer made — must match
-      // the SOURCE shed's row specifically (same fix as addTransferMut), or
-      // this can reverse the deduction on the wrong shed entirely.
-      const trF = t.female_count || 0, trM = t.male_count || 0
-      if (trF || trM) {
-        let drQuery = supabase.from('daily_records')
-          .select('id,transfer_female,transfer_male,trcull_female,trcull_male,opening_female,opening_male,cull_female,cull_male,mortality_female,mortality_male')
-          .eq('flock_id', id!).eq('record_date', t.transfer_date)
-        drQuery = t.from_shed_id ? drQuery.eq('shed_id', t.from_shed_id) : drQuery.is('shed_id', null)
-        drQuery = t.from_farm_id ? drQuery.eq('farm_id', t.from_farm_id) : drQuery.is('farm_id', null)
-        const { data: dr } = await drQuery.maybeSingle()
-        if (dr) {
-          const newTrF = Math.max(0, (dr.transfer_female ?? 0) - trF)
-          const newTrM = Math.max(0, (dr.transfer_male ?? 0) - trM)
-          // trcull was incremented alongside transfer when the transfer was
-          // added (trcull = transfer + cull) — must be reversed by the same
-          // amount, or it stays permanently overstated after the delete.
-          const newTrcullF = Math.max(0, (dr.trcull_female ?? 0) - trF)
-          const newTrcullM = Math.max(0, (dr.trcull_male ?? 0) - trM)
-          const closingF = Math.max(0, (dr.opening_female ?? 0) - newTrF - (dr.cull_female ?? 0) - (dr.mortality_female ?? 0))
-          const closingM = Math.max(0, (dr.opening_male ?? 0) - newTrM - (dr.cull_male ?? 0) - (dr.mortality_male ?? 0))
-          await supabase.from('daily_records').update({
-            transfer_female: newTrF, transfer_male: newTrM,
-            trcull_female: newTrcullF, trcull_male: newTrcullM,
-            ...(dr.opening_female ? { closing_female: closingF, closing_male: closingM } : {})
-          }).eq('id', dr.id)
-        }
-      }
-      // and put the birds back where they were — the destination loses them,
-      // the source gets them again.
-      await moveShedAllocation({
-        flockId: id!, date: t.transfer_date, trF, trM,
-        fromShedId: t.from_shed_id ?? null, fromFarmId: t.from_farm_id ?? null,
-        toShedId: t.to_shed_id ?? null, toFarmId: t.to_farm_id ?? null,
-      }, -1)
+      await undoTransferEffects(t)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
