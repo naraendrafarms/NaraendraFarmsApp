@@ -1,7 +1,7 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr, fmtDate } from '@/lib/utils'
+import { inr, fmtDate, fetchAllPages } from '@/lib/utils'
 import {
   Card, Badge, Table, Th, Td, SectionHeader, Spinner
 } from '@/components/ui'
@@ -108,10 +108,13 @@ function useFlockDailyAgg(flockId: string) {
   return useQuery({
     queryKey: ['compare_daily', flockId],
     queryFn: async (): Promise<FlockAgg> => {
-      const { data } = await supabase
+      // Paged: this compares whole flock LIFETIMES, and the oldest flock is
+      // exactly the one that passes 1,000 rows first — so the flock with the
+      // most history was the one being judged on part of it.
+      const data = await fetchAllPages<any>((from, to) => supabase
         .from('daily_records')
         .select('mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,opening_female')
-        .eq('flock_id', flockId)
+        .eq('flock_id', flockId).range(from, to), 'Flock comparison')
       const rows = (data ?? []) as any[]
       const totalMortF = rows.reduce((s, r) => s + (r.mortality_female ?? 0), 0)
       const totalMortM = rows.reduce((s, r) => s + (r.mortality_male ?? 0), 0)

@@ -1741,10 +1741,11 @@ export const VHLEggStockRegisterPage: React.FC = () => {
   const { data: production } = useQuery({
     queryKey: ['vhl_egg_register_prod', flockId, toDate],
     queryFn: async () => {
-      const { data } = await supabase.from('vhl_daily_entry')
+      // Paged — vhl_daily_entry holds 1,583 rows and this asks for a flock's
+      // whole history up to the date.
+      return await fetchAllPages<any>((from, to) => supabase.from('vhl_daily_entry')
         .select('record_date,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,wastage_he,wastage_je,wastage_te,wastage_be')
-        .eq('flock_id', flockId).lte('record_date', toDate)
-      return data ?? []
+        .eq('flock_id', flockId).lte('record_date', toDate).range(from, to), 'VHL egg register')
     },
     enabled: !!flockId
   })

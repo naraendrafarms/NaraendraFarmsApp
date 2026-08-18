@@ -2195,7 +2195,12 @@ const ReconciliationTab: React.FC = () => {
   })
   const { data: dailyFeed = [] } = useQuery({
     queryKey: ['recon_daily_records'],
-    queryFn: async () => { const { data } = await supabase.from('daily_records').select('flock_id,feed_type_f,feed_female_kg,feed_type_m,feed_male_kg'); return data ?? [] }
+    // Whole table, no filter — 3,097 rows against a 1,000-row reply. This
+    // reconciles feed SENT against feed RECORDED, so a short read makes the
+    // farms look like they used less than they did.
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('daily_records')
+      .select('flock_id,feed_type_f,feed_female_kg,feed_type_m,feed_male_kg')
+      .range(from, to), 'Feed reconciliation — daily records')
   })
 
   // map feed_type code -> feed_type_id

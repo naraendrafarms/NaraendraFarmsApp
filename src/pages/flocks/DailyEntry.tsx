@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { today } from '@/lib/utils'
+import { today, fetchAllPages } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
 import { useFeedRates } from '@/hooks/useFeedRates'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
@@ -450,8 +450,11 @@ export const DailyEntry: React.FC = () => {
 
   const handleExport = async () => {
     if (!selectedFlock) { toast.error('Select a flock first'); return }
-    const { data } = await supabase.from('daily_records')
-      .select('*').eq('flock_id', selectedFlock).order('record_date')
+    // Paged: Flock 19 alone has 1,681 daily rows, so an export described as
+    // "all records" was handing over the first 1,000 and stopping.
+    const data = await fetchAllPages<any>((from, to) => supabase.from('daily_records')
+      .select('*').eq('flock_id', selectedFlock).order('record_date').range(from, to),
+      'Daily records export', toast.error)
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`daily_${selectedFlockData?.flock_no}_records.csv`,
       DAILY_HEADERS,

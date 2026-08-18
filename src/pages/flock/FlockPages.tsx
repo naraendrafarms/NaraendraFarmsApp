@@ -1423,11 +1423,12 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const { data: feedData, isLoading } = useQuery({
     queryKey: ['flock_feed_from_records', flockId],
     queryFn: async () => {
-      const { data } = await supabase
+      // Paged — one flock can hold more than 1,000 daily rows on its own.
+      const data = await fetchAllPages<any>((from, to) => supabase
         .from('daily_records')
         .select('id,record_date,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m')
         .eq('flock_id', flockId)
-        .order('record_date', { ascending: false })
+        .order('record_date', { ascending: false }).range(from, to), 'Flock feed records')
       const rows: any[] = []
       for (const r of (data ?? [])) {
         if ((r.feed_female_kg ?? 0) > 0)
@@ -1623,12 +1624,11 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const { data: usages, isLoading } = useQuery({
     queryKey: ['flock_medicine', flockId],
     queryFn: async () => {
-      const { data } = await supabase
+      return await fetchAllPages<any>((from, to) => supabase
         .from('medicine_usage')
         .select('*, medicines_master(name,type,item_id)')
         .eq('flock_id', flockId)
-        .order('usage_date', { ascending: false })
-      return data ?? []
+        .order('usage_date', { ascending: false }).range(from, to), 'Flock medicine usage')
     }
   })
 

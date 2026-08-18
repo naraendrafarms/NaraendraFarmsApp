@@ -1288,17 +1288,22 @@ const LedgerTab: React.FC = () => {
       // rows recorded under any of its names but never linked to it. Merging
       // in the browser keeps names containing commas or brackets out of a
       // filter string that would misread them.
+      // Paged, like everything else that reads this table: Maize alone could
+      // pass 1,000 movements in a season, and the ledger is the one screen
+      // where a missing row is invisible by definition.
       const byId = entry?.id
-        ? await applyDates(supabase.from('stock_ledger').select(cols).eq('item_id', entry.id))
-        : { data: [], error: null }
-      if (byId.error) throw byId.error
+        ? await fetchAllPages<any>((f, t) => applyDates(
+            supabase.from('stock_ledger').select(cols).eq('item_id', entry.id)).range(f, t),
+            'Stock ledger movements')
+        : []
       const byName = names.length
-        ? await applyDates(supabase.from('stock_ledger').select(cols).is('item_id', null).in('item_name', names))
-        : { data: [], error: null }
-      if (byName.error) throw byName.error
+        ? await fetchAllPages<any>((f, t) => applyDates(
+            supabase.from('stock_ledger').select(cols).is('item_id', null).in('item_name', names)).range(f, t),
+            'Stock ledger movements by name')
+        : []
 
       const seenRow = new Set<string>()
-      const merged = [...(byId.data ?? []), ...(byName.data ?? [])].filter((r: any) => {
+      const merged = [...byId, ...byName].filter((r: any) => {
         if (seenRow.has(r.id)) return false
         seenRow.add(r.id); return true
       }).sort((a: any, b: any) => String(a.txn_date).localeCompare(String(b.txn_date)))

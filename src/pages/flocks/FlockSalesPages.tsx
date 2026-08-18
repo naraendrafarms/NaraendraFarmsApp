@@ -3571,7 +3571,10 @@ export const MedicineEntry: React.FC = () => {
   })
   const { data: allUsage } = useQuery({
     queryKey: ['medicine_usage_all'],
-    queryFn: async () => { const { data } = await supabase.from('medicine_usage').select('flock_id,medicine_id,quantity'); return data ?? [] }
+    // Paged: this is the whole table, and it feeds the medicine BALANCE — a
+    // short read overstates what is left in stock.
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('medicine_usage')
+      .select('flock_id,medicine_id,quantity').range(from, to), 'Medicine usage totals')
   })
   const balanceRows = React.useMemo(() => {
     const m: Record<string, { flockNo: any; medName: string; unit: string; allocated: number; used: number }> = {}
