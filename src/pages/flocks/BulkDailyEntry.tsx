@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { today } from '@/lib/utils'
+import { today, fmtDate } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput, SearchableSelect, Modal } from '@/components/ui'
 import { QuickAddMedicine } from '@/components/ui/QuickAdd'
 import { Save, Download, Upload, FileSpreadsheet, CalendarClock } from 'lucide-react'
@@ -344,6 +344,34 @@ export const BulkDailyEntry: React.FC = () => {
     }
     setFlockRows(newRows)
   }, [visibleFlocks.length, drRows, existingMed, selectedFlock, date, rowsEpoch])
+
+  // Bird sales recorded in NHE for this flock and date. They deduct birds as
+  // CULLS on the daily record, but where a sale carries no shed the culls land
+  // on a flock-level row — which this grid, being one row per shed, cannot show
+  // at all. Flock 19 had 36,080 female culls sitting exactly there, invisible.
+  // Shown here so what has already been deducted is visible either way.
+  const { data: birdSales = [] } = useQuery({
+    queryKey: ['bulk_bird_sales', selectedFlock, date],
+    enabled: !!selectedFlock && !!date && date.length === 10,
+    queryFn: async () => {
+      const { data } = await supabase.from('nhe_sales')
+        .select('id,sale_type,bird_sex,quantity,female_qty,male_qty,shed_id,dc_no,sheds:shed_id(shed_no)')
+        .eq('flock_id', selectedFlock).eq('sale_date', date)
+        .in('sale_type', ['bird_sale','bird_cull','bird_lame','bird_weak','bird_sex_error'])
+      return data ?? []
+    },
+  })
+  const birdSaleTotals = useMemo(() => {
+    let f = 0, m = 0, shedless = 0
+    for (const s of (birdSales as any[])) {
+      const q = Number(s.quantity) || 0
+      if (s.bird_sex === 'mixed') { f += Number(s.female_qty) || 0; m += Number(s.male_qty) || 0 }
+      else if (s.bird_sex === 'male') m += q
+      else f += q
+      if (!s.shed_id) shedless++
+    }
+    return { f, m, shedless, count: (birdSales as any[]).length }
+  }, [birdSales])
 
   // ── Init shed rows ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1307,6 +1335,28 @@ export const BulkDailyEntry: React.FC = () => {
       )}
 
       {existingFetching && <div className="text-center py-2 text-xs text-gray-400">Loading records for {date}…</div>}
+
+      {birdSaleTotals.count > 0 && (
+        <Card>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            <span className="font-semibold text-orange-700">NHE bird sales on {fmtDate(date)}</span>
+            <span>{birdSaleTotals.count} sale{birdSaleTotals.count > 1 ? 's' : ''}</span>
+            <span className="font-medium">♀ {birdSaleTotals.f.toLocaleString('en-IN')}</span>
+            <span className="font-medium">♂ {birdSaleTotals.m.toLocaleString('en-IN')}</span>
+            <span className="text-xs text-gray-500">
+              {(birdSales as any[]).map((s: any) => s.sheds?.shed_no ? `Shed ${s.sheds.shed_no}` : 'no shed').join(', ')}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            Already deducted as culls — do not enter these birds in the Cull columns again.
+            {birdSaleTotals.shedless > 0 && (
+              <> <b className="text-amber-700">{birdSaleTotals.shedless} of them carry no shed</b>, so they sit on a
+              flock-level record and are not counted against any shed's closing balance. Set the shed on those sales
+              to attribute them.</>
+            )}
+          </p>
+        </Card>
+      )}
 
       {/* ── SHED MODE ── */}
       {isSheedMode && (

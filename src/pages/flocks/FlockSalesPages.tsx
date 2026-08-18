@@ -2031,7 +2031,7 @@ const BIRD_CAT_OPTS = [
 ]
 
 const EMPTY_NHE_FORM = {
-  flock_id: '', sale_date: today(), sale_type: 'je',
+  flock_id: '', shed_id: '', sale_date: today(), sale_type: 'je',
   party_id: '', dc_no: '', vehicle_no: '', invoice_no: '', gst_pct: '0',
   quantity: '', unit: 'nos', rate: '', amount: '',
   bird_sex: 'female', bird_category: 'cull',
@@ -2354,6 +2354,32 @@ export const NHESales: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  // Sheds this flock is in — its links, its allocations, and anywhere it has
+  // been transferred into, the same three sources Bulk Daily Entry combines.
+  const { data: saleSheds = [] } = useQuery({
+    queryKey: ['sale_form_sheds', form.flock_id],
+    enabled: !!form.flock_id,
+    queryFn: async () => {
+      const seen = new Set<string>(); const out: any[] = []
+      const add = (sh: any) => { if (sh && !seen.has(sh.id)) { seen.add(sh.id); out.push(sh) } }
+      const COLS = 'sheds(id,shed_no,shed_name)'
+      const [fs, sa, tr] = await Promise.all([
+        supabase.from('flock_sheds').select(`shed_id,${COLS}`).eq('flock_id', form.flock_id),
+        supabase.from('shed_allocations').select(`shed_id,${COLS}`).eq('flock_id', form.flock_id),
+        supabase.from('flock_transfers').select('to_shed_id,sheds:to_shed_id(id,shed_no,shed_name)')
+          .eq('flock_id', form.flock_id).not('to_shed_id', 'is', null),
+      ])
+      for (const r of (fs.data ?? [])) add((r as any).sheds)
+      for (const r of (sa.data ?? [])) add((r as any).sheds)
+      for (const r of (tr.data ?? [])) add((r as any).sheds)
+      return out
+    },
+  })
+  const saleShedOptions = React.useMemo(() => [...(saleSheds as any[])]
+    .sort((a, b) => (parseInt(a.shed_no) || 0) - (parseInt(b.shed_no) || 0))
+    .map((sh: any) => ({ value: sh.id, label: `Shed ${sh.shed_no}${sh.shed_name ? ' — ' + sh.shed_name : ''}` })),
+    [saleSheds])
+
   const saveMut = useMutation({
     mutationFn: async () => {
       const egg = isEggSale(form.sale_type)
@@ -2397,6 +2423,10 @@ export const NHESales: React.FC = () => {
         : 'je'
       const payload: any = {
         flock_id: form.flock_id, sale_date: form.sale_date,
+        // Which shed the birds left. Without it the culls land on whichever
+        // daily record happens to be first for that date — or on a record with
+        // no shed at all — and no shed's closing count reflects the sale.
+        shed_id: bird ? (form.shed_id || null) : null,
         sale_type: bird ? 'bird_sale' : (egg ? dominantEggType : form.sale_type),
         party_id: form.party_id || null, dc_no: form.dc_no || null,
         invoice_no: finalInvoiceNo,
@@ -2579,11 +2609,18 @@ export const NHESales: React.FC = () => {
 
         // Fetch all bird sales for this flock+date AFTER the current save
         // (the current sale is already saved at this point in the mutation flow)
-        const { data: allSales } = await supabase.from('nhe_sales')
+        // Only the sales for the SAME shed are totalled together — with a shed
+        // recorded, each shed's culls belong on its own daily record. Sales
+        // entered before the shed existed on this form carry no shed, and are
+        // kept together as before so their totals do not change.
+        const shedId = bird ? (form.shed_id || null) : null
+        let salesQ = supabase.from('nhe_sales')
           .select('quantity,bird_sex,female_qty,male_qty')
           .eq('flock_id', flockId).eq('sale_date', saleDate)
           .in('sale_type', ['bird_sale','bird_cull','bird_lame','bird_weak','bird_sex_error'])
           .gt('quantity', 0)
+        salesQ = shedId ? salesQ.eq('shed_id', shedId) : salesQ.is('shed_id', null)
+        const { data: allSales } = await salesQ
 
         const totalF = (allSales ?? []).reduce((s, x) =>
           s + (x.bird_sex === 'mixed' ? (parseFloat(x.female_qty) || 0)
@@ -2592,12 +2629,17 @@ export const NHESales: React.FC = () => {
           s + (x.bird_sex === 'mixed' ? (parseFloat(x.male_qty) || 0)
              : x.bird_sex === 'male' ? (parseFloat(x.quantity) || 0) : 0), 0)
 
-        const { data: drRows } = await supabase.from('daily_records')
+        // With a shed on the sale, go straight to that shed's record. Without
+        // one, fall back to the old behaviour: the first record for the date.
+        let drQ = supabase.from('daily_records')
           .select('id,cull_female,cull_male,transfer_female,transfer_male,opening_female,opening_male,mortality_female,mortality_male')
           .eq('flock_id', flockId).eq('record_date', saleDate).order('id')
+        if (shedId) drQ = drQ.eq('shed_id', shedId)
+        const { data: drRows } = await drQ
 
         if (drRows && drRows.length > 0) {
-          // Write cull to first shed record, zero cull on all others (avoid double-counting)
+          // Write cull to the shed's record (or, with no shed, the first one)
+          // and zero it on the others so nothing is counted twice.
           const dr = drRows[0]
           const trcullF = (dr.transfer_female ?? 0) + totalF
           const trcullM = (dr.transfer_male ?? 0) + totalM
@@ -2624,8 +2666,11 @@ export const NHESales: React.FC = () => {
             }
           }
         } else {
+          // No record for that day yet — create one ON THE SHED where possible.
+          // A shed-less row is invisible in Bulk Daily Entry, which is exactly
+          // how Flock 19's 36,080 culls came to be unreachable there.
           await supabase.from('daily_records').insert({
-            flock_id: flockId, record_date: saleDate,
+            flock_id: flockId, record_date: saleDate, shed_id: shedId,
             cull_female: totalF, cull_male: totalM,
             trcull_female: totalF, trcull_male: totalM,
             transfer_female: 0, transfer_male: 0,
@@ -2656,7 +2701,7 @@ export const NHESales: React.FC = () => {
   const openEdit = (row: any) => {
     setEditing(row)
     setForm({
-      flock_id: row.flock_id, sale_date: row.sale_date,
+      flock_id: row.flock_id, shed_id: row.shed_id ?? '', sale_date: row.sale_date,
       sale_type: isBirdSale(row.sale_type) ? 'bird_sale' : row.sale_type,
       party_id: row.party_id ?? '', dc_no: row.dc_no ?? '',
       vehicle_no: row.vehicle_no ?? '',
@@ -3233,6 +3278,12 @@ export const NHESales: React.FC = () => {
                     value={form.bird_sex} onChange={e => sv('bird_sex', e.target.value)} />
                   <Select label="Category" options={BIRD_CAT_OPTS}
                     value={form.bird_category} onChange={e => sv('bird_category', e.target.value)} />
+                  {/* The shed the birds left. The culls are written onto THAT
+                      shed's daily record, so Bulk Daily Entry shows them and the
+                      shed's closing count is right. Left blank they behave as
+                      before — flock level, and not attributable to any shed. */}
+                  <SearchableSelect label="Shed (birds sold from)" placeholder="— Flock level —"
+                    options={saleShedOptions} value={form.shed_id} onChange={v => sv('shed_id', v)} />
                 </FormRow>
                 <FormRow cols={3}>
                   <Input label="Female Qty" type="number"
