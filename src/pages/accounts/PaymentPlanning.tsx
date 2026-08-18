@@ -111,12 +111,12 @@ export const PaymentPlanningPage: React.FC = () => {
           .or('payment_status.eq.Pending,payment_status.eq.Partial,payment_status.is.null')
           .or('is_employee_sale.is.null,is_employee_sale.eq.false')
           .order('sale_date', { ascending: false })
-          .range(from, to), 'NHE receivables').then(data => ({ data })),
+          .order('id').range(from, to), 'NHE receivables').then(data => ({ data })),
         fetchAllPages<any>((from, to) => supabase.from('he_dispatch')
           .select('id,dispatch_date,amount,tds_amount,amount_received,parties(name),flocks(flock_no)')
           .or('payment_status.eq.Pending,payment_status.eq.Partial,payment_status.is.null')
           .order('dispatch_date', { ascending: false })
-          .range(from, to), 'HE receivables').then(data => ({ data })),
+          .order('id').range(from, to), 'HE receivables').then(data => ({ data })),
       ])
       // Receivable = invoice amount, less TDS deducted at source (HE
       // Dispatch/NHE Sale show this as "Net receivable" on the receipt

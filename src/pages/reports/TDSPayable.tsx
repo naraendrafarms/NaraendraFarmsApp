@@ -233,7 +233,7 @@ export const TDSPayable: React.FC = () => {
         .select('id,month,tds,earned_salary,net_salary,is_paid,tds_section,tds_interest,tds_deposited,tds_deposit_date,tds_challan_id,employees!employee_id(name,emp_id,pan_no,farms(name))')
         .gt('tds', 0)
         .order('month', { ascending: false })
-        .range(from, to)
+        .order('id').range(from, to)
       if (dateFrom) q = q.gte('month', dateFrom)
       if (dateTo) q = q.lte('month', dateTo)
       return q
@@ -254,7 +254,7 @@ export const TDSPayable: React.FC = () => {
         .select('id,advance_date,amount,reference_no,tds_pct,tds_amount,tds_section,tds_interest,tds_deposited,tds_deposit_date,tds_challan_id,parties:party_id(name,pan_no,deductee_type)')
         .gt('tds_amount', 0)
         .order('advance_date', { ascending: false })
-        .range(from, to)
+        .order('id').range(from, to)
       if (dateFrom) q = q.gte('advance_date', dateFrom)
       if (dateTo) q = q.lte('advance_date', dateTo)
       return q

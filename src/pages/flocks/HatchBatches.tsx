@@ -179,7 +179,7 @@ export const HatchBatches: React.FC = () => {
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('he_dispatch')
           .select('id,dispatch_date,invoice_no,dc_no,total_dispatched,flock_id,hatchery_id,flocks(flock_no),hatcheries(name,provides_hatch_report)')
-          .order('dispatch_date', { ascending: false }).range(from, to)
+          .order('dispatch_date', { ascending: false }).order('id').range(from, to)
         if (flockFilter) q = q.eq('flock_id', flockFilter)
         return q
       }, 'HE dispatches for hatch batches', (m) => toast.error(m))
@@ -226,7 +226,7 @@ export const HatchBatches: React.FC = () => {
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('hatch_batches')
           .select('*, hatcheries(name), he_dispatch(dispatch_date,invoice_no,dc_no,total_dispatched,flocks(flock_no,placement_date)), flocks(flock_no,placement_date)')
-          .order('setting_date', { ascending: false }).range(from, to)
+          .order('setting_date', { ascending: false }).order('id').range(from, to)
         if (flockFilter) q = q.eq('flock_id', flockFilter)
         return q
       }, 'Hatch batches', (m) => toast.error(m))

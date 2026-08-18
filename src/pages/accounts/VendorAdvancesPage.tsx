@@ -74,7 +74,7 @@ export const VendorAdvancesPage: React.FC = () => {
         .from('vendor_advances')
         .select('id,advance_date,party_id,amount,amount_used,payment_mode,reference_no,remarks,tds_pct,tds_amount,tds_section,tds_interest,tds_deposited,tds_deposit_date,tds_challan_id,parties(name)')
         .order('advance_date', { ascending: false })
-        .range(from, to)
+        .order('id').range(from, to)
       if (filterParty) q = q.eq('party_id', filterParty)
       return q
     }, 'Vendor Advances', toast.error)

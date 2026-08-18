@@ -453,7 +453,7 @@ export const DailyEntry: React.FC = () => {
     // Paged: Flock 19 alone has 1,681 daily rows, so an export described as
     // "all records" was handing over the first 1,000 and stopping.
     const data = await fetchAllPages<any>((from, to) => supabase.from('daily_records')
-      .select('*').eq('flock_id', selectedFlock).order('record_date').range(from, to),
+      .select('*').eq('flock_id', selectedFlock).order('record_date').order('id').range(from, to),
       'Daily records export', toast.error)
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`daily_${selectedFlockData?.flock_no}_records.csv`,

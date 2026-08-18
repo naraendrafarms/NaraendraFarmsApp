@@ -104,7 +104,7 @@ export const HatchAnalysis: React.FC = () => {
     queryFn: async () => fetchAllPages<any>((from, to) => supabase
       .from('hatch_batches')
       .select('*, hatcheries(name), flocks(flock_no,placement_date)')
-      .order('setting_date', { ascending: false }).range(from, to), 'Hatch analysis')
+      .order('setting_date', { ascending: false }).order('id').range(from, to), 'Hatch analysis')
   })
 
   // Egg age needs the PRODUCTION date, which lives on the dispatch lines — not

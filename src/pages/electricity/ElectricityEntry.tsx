@@ -84,7 +84,7 @@ const BillsTab: React.FC = () => {
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('electricity_bills')
           .select('*, electricity_meters(meter_name,usc_no,service_no,farms(name,code))')
-          .order('bill_month', { ascending: false }).range(from, to)
+          .order('bill_month', { ascending: false }).order('id').range(from, to)
         if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
         if (filterMeter) q = q.eq('meter_id', filterMeter)
         return q
@@ -657,7 +657,7 @@ const AllocationTab: React.FC = () => {
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('electricity_bills')
           .select('*, electricity_meters(meter_name,usc_no,farms(name,code))')
-          .order('bill_month', { ascending: false }).range(from, to)
+          .order('bill_month', { ascending: false }).order('id').range(from, to)
         if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
         return q
       }, 'Electricity bills')
@@ -799,7 +799,7 @@ const HistoryTab: React.FC = () => {
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('electricity_bills')
           .select('*, electricity_meters!inner(meter_name,usc_no,farm_id,farms(name,code))')
-          .order('bill_month', { ascending: false }).range(from, to)
+          .order('bill_month', { ascending: false }).order('id').range(from, to)
         if (filterMeter) q = q.eq('meter_id', filterMeter)
         if (filterFarm) q = q.eq('electricity_meters.farm_id', filterFarm)
         return q

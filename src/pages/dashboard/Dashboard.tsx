@@ -155,7 +155,7 @@ export const Dashboard: React.FC = () => {
         .from('daily_records')
         .select('record_date, total_eggs, he_eggs, mortality_female, mortality_male, flock_id, flocks(flock_no)')
         .gte('record_date', start).lte('record_date', today)
-        .order('record_date', { ascending: false }).range(from, to), 'Dashboard chart')
+        .order('record_date', { ascending: false }).order('id').range(from, to), 'Dashboard chart')
     }
   })
 

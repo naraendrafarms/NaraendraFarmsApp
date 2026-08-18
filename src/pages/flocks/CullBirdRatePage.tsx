@@ -33,7 +33,7 @@ export const CullBirdRatePage: React.FC = () => {
     queryKey: ['cull_bird_rate'],
     queryFn: async () => fetchAllPages<any>((from, to) => supabase
       .from('cull_bird_rate').select('*')
-      .order('rate_date', { ascending: false }).range(from, to), 'Cull bird rates')
+      .order('rate_date', { ascending: false }).order('id').range(from, to), 'Cull bird rates')
   })
 
   const filtered = rates.filter((r: any) => {

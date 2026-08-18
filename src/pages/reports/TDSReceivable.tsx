@@ -36,7 +36,7 @@ export const TDSReceivable: React.FC = () => {
         .select('id,dispatch_date,invoice_no,dc_no,amount,tds_amount,tds_pct,payment_status,parties(name),flocks(flock_no)')
         .gt('tds_amount', 0)
         .order('dispatch_date', { ascending: false })
-        .range(from, to)
+        .order('id').range(from, to)
       if (dateFrom) q = q.gte('dispatch_date', dateFrom)
       if (dateTo) q = q.lte('dispatch_date', dateTo)
       return q

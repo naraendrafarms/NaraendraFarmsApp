@@ -71,7 +71,7 @@ const DebtorsTab: React.FC = () => {
         .select('id,dispatch_date,invoice_no,dc_no,amount,total_dispatched,free_eggs,party_id,flock_id,parties(name),flocks(flock_no),amount_received,payment_status,payment_mode,bank_account_id,received_date,utr_ref')
         .gt('amount', 0)
         .order('dispatch_date', { ascending: false })
-        .range(from, to)
+        .order('id').range(from, to)
       if (dateFrom) q = q.gte('dispatch_date', dateFrom)
       if (dateTo)   q = q.lte('dispatch_date', dateTo)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
@@ -87,7 +87,7 @@ const DebtorsTab: React.FC = () => {
         .gt('amount', 0)
         .in('sale_type', ['je','te','be'])
         .order('sale_date', { ascending: false })
-        .range(from, to)
+        .order('id').range(from, to)
       if (dateFrom) q = q.gte('sale_date', dateFrom)
       if (dateTo)   q = q.lte('sale_date', dateTo)
       if (flockFilter) q = q.eq('flock_id', flockFilter)
@@ -312,7 +312,7 @@ const CreditorsTab: React.FC = () => {
       (from, to) => supabase.from('pending_payments')
         .select('*')
         .order('invoice_date', { ascending: false })
-        .range(from, to),
+        .order('id').range(from, to),
       'Pending payments (creditors)'
     )
   })

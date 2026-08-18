@@ -990,7 +990,7 @@ const ProductionTab: React.FC = () => {
       const data = await fetchAllPages<any>((from, to) => {
         let q = supabase.from('feed_production_log')
           .select('*, feed_formulas(formula_code,formula_name), farms(name,code), feed_production_ingredients(*)')
-          .order('production_date', {ascending:false}).range(from, to)
+          .order('production_date', {ascending:false}).order('id').range(from, to)
         if (fFrom) q = q.gte('production_date', fFrom)
         if (fTo)   q = q.lte('production_date', fTo)
         if (fFarm) q = q.eq('farm_id', fFarm)

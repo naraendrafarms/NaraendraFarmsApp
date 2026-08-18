@@ -49,7 +49,7 @@ export const OpeningBalancesPage: React.FC = () => {
     queryKey: ['opening_balances', fy],
     queryFn: () => fetchAllPages<any>((from, to) => supabase.from('opening_balances')
       .select('id,fy,as_of_date,party_id,partner_id,amount,dr_cr,remarks,parties(name),partners(name)')
-      .eq('fy', fy).order('as_of_date').range(from, to), 'Opening Balances', toast.error)
+      .eq('fy', fy).order('as_of_date').order('id').range(from, to), 'Opening Balances', toast.error)
   })
 
   const inv = () => {

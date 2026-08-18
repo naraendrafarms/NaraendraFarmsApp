@@ -68,7 +68,7 @@ export const BuyerAdvancesPage: React.FC = () => {
         .from('party_advances')
         .select('id,advance_date,party_id,amount,amount_used,payment_mode,reference_no,remarks,parties(name)')
         .order('advance_date', { ascending: false })
-        .range(from, to)
+        .order('id').range(from, to)
       if (filterParty) q = q.eq('party_id', filterParty)
       return q
     }, 'Buyer Advances', toast.error)

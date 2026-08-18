@@ -1247,7 +1247,7 @@ const AgingReportTab: React.FC = () => {
     queryFn: async () => {
       let all: any[]=[], from=0
       while (true) {
-        const { data } = await supabase.from('pending_payments').select('*').order('invoice_date',{ascending:false}).range(from,from+999)
+        const { data } = await supabase.from('pending_payments').select('*').order('invoice_date',{ascending:false}).order('id').range(from,from+999)
         if (!data||data.length===0) break; all=all.concat(data); if(data.length<1000)break; from+=1000
       }
       return all
@@ -1467,7 +1467,7 @@ const RateAnalysisTab: React.FC = () => {
         .select('po_no,po_date,fiscal_year,vendor_name,item_name,material_type,quantity,unit,rate,gst_pct,total_amount')
         .not('rate', 'is', null)
         .order('po_date', { ascending: true })
-        .range(from, to),
+        .order('id').range(from, to),
       'PO rate analysis'
     )
   })
@@ -1506,7 +1506,7 @@ const RateAnalysisTab: React.FC = () => {
           .select('item_name,category,price_per_unit,other_charges,qty,grn_date,party_id,parties(name)')
           .not('price_per_unit', 'is', null)
           .order('grn_date', { ascending: true })
-          .range(from, to),
+          .order('id').range(from, to),
         'GRN rate trend'
       )
       return data.map((g: any) => {

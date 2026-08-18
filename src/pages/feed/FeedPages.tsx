@@ -113,7 +113,7 @@ export const GRNEntry: React.FC = () => {
         const { data } = await supabase.from('grn')
           .select('*, farms(name,code), parties(name), feed_ingredients(name,code)')
           .order('grn_date', { ascending: false })
-          .range(from, from + PAGE - 1)
+          .order('id').range(from, from + PAGE - 1)
         if (!data || data.length === 0) break
         all = all.concat(data)
         if (data.length < PAGE) break
@@ -703,7 +703,7 @@ export const FeedProduction: React.FC = () => {
     queryKey: ['feed_production'],
     queryFn: async () => {
       return fetchAllPages<any>((from, to) => supabase.from('feed_production').select('*, feed_types(code,name)')
-        .order('production_date', { ascending: false }).range(from, to), 'Feed production')
+        .order('production_date', { ascending: false }).order('id').range(from, to), 'Feed production')
     }
   })
 
@@ -834,7 +834,7 @@ export const FeedTransfer: React.FC = () => {
     queryFn: async () => {
       return fetchAllPages<any>((from, to) => supabase.from('feed_transfers')
         .select('*, from_farm:farms!from_farm_id(name), to_farm:farms!to_farm_id(name), feed_types(code,name), flocks(flock_no)')
-        .order('transfer_date', { ascending: false }).range(from, to), 'Feed transfers')
+        .order('transfer_date', { ascending: false }).order('id').range(from, to), 'Feed transfers')
     }
   })
 
@@ -958,11 +958,11 @@ export const FeedDashboard: React.FC = () => {
   // GRN one was truncating TODAY — .limit(100) against 293 feed-ingredient GRNs,
   // so the purchase figure on this dashboard was built from a third of them.
   const { data: grns } = useQuery({ queryKey: ['grns'], queryFn: async () =>
-    fetchAllPages<any>((from, to) => supabase.from('grn').select('qty,total_amount,grn_date,feed_ingredients(code)').eq('category','Feed Ingredient').order('grn_date',{ascending:false}).range(from, to), 'Feed GRNs') })
+    fetchAllPages<any>((from, to) => supabase.from('grn').select('qty,total_amount,grn_date,feed_ingredients(code)').eq('category','Feed Ingredient').order('grn_date',{ascending:false}).order('id').range(from, to), 'Feed GRNs') })
   const { data: prods } = useQuery({ queryKey: ['feed_production'], queryFn: async () =>
-    fetchAllPages<any>((from, to) => supabase.from('feed_production').select('quantity_kg,production_date,feed_types(code)').order('production_date',{ascending:false}).range(from, to), 'Feed production') })
+    fetchAllPages<any>((from, to) => supabase.from('feed_production').select('quantity_kg,production_date,feed_types(code)').order('production_date',{ascending:false}).order('id').range(from, to), 'Feed production') })
   const { data: transfers } = useQuery({ queryKey: ['feed_transfers'], queryFn: async () =>
-    fetchAllPages<any>((from, to) => supabase.from('feed_transfers').select('quantity_kg,transfer_date').order('transfer_date',{ascending:false}).range(from, to), 'Feed transfers') })
+    fetchAllPages<any>((from, to) => supabase.from('feed_transfers').select('quantity_kg,transfer_date').order('transfer_date',{ascending:false}).order('id').range(from, to), 'Feed transfers') })
 
   // Stock alerts: replicate StockPage logic
   const { data: allIngredients } = useQuery({ queryKey: ['ingredients'], queryFn: async () => { const { data } = await supabase.from('feed_ingredients').select('id,name,short_name,code,unit').eq('is_active',true).order('code'); return data ?? [] } })

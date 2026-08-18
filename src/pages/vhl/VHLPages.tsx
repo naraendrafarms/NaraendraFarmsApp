@@ -77,7 +77,7 @@ export const VHLFlocksPage: React.FC = () => {
       // figures for whichever flocks sorted last. Paged.
       return fetchAllPages<any>((from, to) => supabase.from('vhl_daily_entry')
         .select('flock_id,record_date,opening_female,opening_male,closing_female,closing_male')
-        .order('record_date', { ascending: false }).range(from, to), 'VHL daily entries')
+        .order('record_date', { ascending: false }).order('id').range(from, to), 'VHL daily entries')
     }
   })
   const currentByFlock = React.useMemo(() => {
@@ -347,7 +347,7 @@ export const VHLDailyEntryPage: React.FC = () => {
     // complete and is not.
     const data = await fetchAllPages<any>((from, to) => supabase.from('vhl_daily_entry')
       .select('*').eq('flock_id', flockId).is('shed_id', null)
-      .order('record_date').range(from, to), 'VHL export', toast.error)
+      .order('record_date').order('id').range(from, to), 'VHL export', toast.error)
     if (!data?.length) { toast.error('No records to export'); return }
     exportCSV(`vhl_daily_${flock?.flock_no}_records.csv`, VHL_DAILY_HEADERS,
       data.map((r: any) => [r.record_date,r.opening_female,r.opening_male,r.feed_female_kg,r.feed_type_f,r.feed_male_kg,r.feed_type_m,r.he_eggs,r.je_eggs,r.te_eggs,r.be_eggs,r.le_eggs,r.transfer_female,r.transfer_male,r.cull_female,r.cull_male,r.mortality_female,r.mortality_male,r.lighting_hrs,r.age_weeks,r.remarks]))
@@ -1592,7 +1592,7 @@ export const VHLShedPerformancePage: React.FC = () => {
         const { data, error } = await supabase.from('vhl_daily_entry')
           .select('record_date,shed_id,flock_id,opening_female,closing_female,mortality_female,mortality_male,total_eggs,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,feed_female_kg,feed_male_kg,sheds(shed_no,shed_name),flocks(flock_no)')
           .gte('record_date', fromDate).lte('record_date', toDate)
-          .order('record_date').range(from, from + PAGE - 1)
+          .order('record_date').order('id').range(from, from + PAGE - 1)
         if (error) throw error
         all.push(...(data ?? []))
         if (!data || data.length < PAGE) break

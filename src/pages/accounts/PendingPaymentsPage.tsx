@@ -104,7 +104,7 @@ export const PendingPaymentsPage: React.FC = () => {
       .from('pending_payments')
       .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id,is_opening,advance_adjusted,vendor_advance_id')
       .order('grn_date', { ascending: false })
-      .range(from, to), 'Pending Payments', toast.error)
+      .order('id').range(from, to), 'Pending Payments', toast.error)
   })
 
   // Duplicate bills: the same vendor with more than one row for one GRN, or for

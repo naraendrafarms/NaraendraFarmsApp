@@ -70,7 +70,7 @@ function useGrn() {
       while (true) {
         const { data } = await supabase.from('grn')
           .select('item_name,qty,unit,grn_date,price_per_unit')
-          .order('grn_date', { ascending: true }).range(from, from + 999)
+          .order('grn_date', { ascending: true }).order('id').range(from, from + 999)
         if (!data || !data.length) break
         all = all.concat(data); if (data.length < 1000) break; from += 1000
       }
@@ -1217,7 +1217,7 @@ const LedgerTab: React.FC = () => {
       // dropdown and could not be looked at at all.
       return await fetchAllPages<any>((from, to) => supabase
         .from('stock_ledger').select('item_id,item_name')
-        .order('item_name').range(from, to), 'Ledger item list')
+        .order('item_name').order('id').range(from, to), 'Ledger item list')
     },
     staleTime: 2 * 60 * 1000,
   })
@@ -1564,7 +1564,7 @@ export const ConsumptionReportTab: React.FC<{ lockedCategory?: string }> = ({ lo
         let query = supabase.from('stock_ledger')
           .select('item_id,item_name,txn_type,qty,txn_date')
           .in('txn_type', ['production_out','medicine_out','adjustment_out','transfer_out','dispatch_out'])
-          .order('txn_date').range(from, from + 999)
+          .order('txn_date').order('id').range(from, from + 999)
         if (fromDate) query = query.gte('txn_date', fromDate)
         if (toDate) query = query.lte('txn_date', toDate)
         const { data } = await query

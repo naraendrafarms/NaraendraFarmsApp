@@ -191,7 +191,7 @@ export const GRNPage: React.FC = () => {
       // so this must be every PO, not the newest 500.
       return fetchAllPages<any>((from, to) => supabase.from('purchase_orders')
         .select('id,po_no,item_name,quantity,unit,vendor_name,party_id,dose,material_status')
-        .order('po_date', { ascending: false }).range(from, to), 'Purchase orders')
+        .order('po_date', { ascending: false }).order('id').range(from, to), 'Purchase orders')
     }
   })
 

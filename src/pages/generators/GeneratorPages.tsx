@@ -136,7 +136,7 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
     queryKey: ['generator_usage_log'],
     // 6 rows today; paged because a usage log only ever grows and the page
     // sums diesel and hours off these rows.
-    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('generator_usage_log').select('*, generators(name,code,farms(name))').order('log_date', { ascending: false }).range(from, to), 'Generator usage log')
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('generator_usage_log').select('*, generators(name,code,farms(name))').order('log_date', { ascending: false }).order('id').range(from, to), 'Generator usage log')
   })
 
   const saveMut = useMutation({
@@ -238,7 +238,7 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
 
   const { data: purchases = [], isLoading } = useQuery({
     queryKey: ['generator_diesel_purchases'],
-    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('generator_diesel_purchases').select('*, generators(name), farms(name), bank_accounts(bank_name,account_name)').order('purchase_date', { ascending: false }).range(from, to), 'Diesel purchases')
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('generator_diesel_purchases').select('*, generators(name), farms(name), bank_accounts(bank_name,account_name)').order('purchase_date', { ascending: false }).order('id').range(from, to), 'Diesel purchases')
   })
   const { data: bankAccounts = [] } = useQuery({
     queryKey: ['bank_accounts'],

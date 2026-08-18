@@ -62,7 +62,7 @@ export const ShedPerformancePage: React.FC = () => {
           .gte('record_date', fromDate)
           .lte('record_date', toDate)
           .order('record_date', { ascending: false })
-          .range(from, from + PAGE - 1)
+          .order('id').range(from, from + PAGE - 1)
         if (filterFarm) q = q.eq('farm_id', filterFarm)
         const { data, error } = await q
         if (error) throw error

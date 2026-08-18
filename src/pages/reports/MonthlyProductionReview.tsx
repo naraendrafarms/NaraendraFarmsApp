@@ -140,7 +140,7 @@ export const MonthlyProductionReview: React.FC = () => {
         .in('flock_id', scopeIds)
         .lte('record_date', end)
         .order('record_date')
-        .range(from, to),
+        .order('id').range(from, to),
       'Daily records (Monthly Review)', toast.error),
     staleTime: 60_000,
   })
@@ -255,7 +255,7 @@ export const MonthlyProductionReview: React.FC = () => {
         .in('flock_id', scopeIds)
         .gte('setting_date', start).lte('setting_date', end)
         .order('age_weeks')
-        .range(from, to),
+        .order('id').range(from, to),
       'Hatchability (Monthly Review)', toast.error),
     staleTime: 60_000,
   })
@@ -270,7 +270,7 @@ export const MonthlyProductionReview: React.FC = () => {
         .select('flock_id,sale_date,sale_type,quantity,amount')
         .in('flock_id', scopeIds)
         .order('sale_date')
-        .range(from, to),
+        .order('id').range(from, to),
       'NHE sales (Monthly Review)', toast.error),
     staleTime: 60_000,
   })
@@ -288,7 +288,7 @@ export const MonthlyProductionReview: React.FC = () => {
     queryKey: ['mpr_diesel'],
     queryFn: () => fetchAllPages<any>((from, to) =>
       supabase.from('generator_diesel_purchases')
-        .select('purchase_date,qty_ltr,amount').order('purchase_date').range(from, to),
+        .select('purchase_date,qty_ltr,amount').order('purchase_date').order('id').range(from, to),
       'Diesel purchases', toast.error),
     staleTime: 5 * 60_000,
   })
@@ -305,7 +305,7 @@ export const MonthlyProductionReview: React.FC = () => {
         .in('flock_id', scopeIds)
         .gte('dispatch_date', start).lte('dispatch_date', end)
         .order('dispatch_date')
-        .range(from, to),
+        .order('id').range(from, to),
       'HE dispatch (Monthly Review)', toast.error),
     staleTime: 60_000,
   })

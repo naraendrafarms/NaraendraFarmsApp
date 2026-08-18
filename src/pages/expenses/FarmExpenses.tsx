@@ -85,7 +85,7 @@ export const FarmExpensesPage: React.FC = () => {
         let q = supabase.from('farm_expenses')
           .select('*, farms(name,code), flocks(flock_no)')
           .order('expense_date', { ascending: false })
-          .range(from, to)
+          .order('id').range(from, to)
         if (filterFarm)  q = q.eq('farm_id', filterFarm)
         if (filterFlock) q = q.eq('flock_id', filterFlock)
         if (filterCat)   q = q.eq('category', filterCat)

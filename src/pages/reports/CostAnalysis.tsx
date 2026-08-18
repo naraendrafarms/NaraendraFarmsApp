@@ -178,7 +178,7 @@ export const SalaryCostPage: React.FC = () => {
           .gte('month', startDate)
           .lte('month', endDate)
           .order('month')
-          .range(from, from + 999)
+          .order('id').range(from, from + 999)
         if (!data || data.length === 0) break
         all = all.concat(data)
         if (data.length < 1000) break

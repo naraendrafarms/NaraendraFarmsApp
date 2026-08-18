@@ -64,7 +64,7 @@ export const FlockWeeklyPerformance: React.FC = () => {
     queryKey: ['flock_weekly_performance'],
     queryFn: async () => fetchAllPages<any>((from, to) => supabase
       .from('flock_weekly_performance').select('*')
-      .order('week_of_age').range(from, to), 'Weekly performance')
+      .order('week_of_age').order('id').range(from, to), 'Weekly performance')
   })
 
   const rows = useMemo(() => {

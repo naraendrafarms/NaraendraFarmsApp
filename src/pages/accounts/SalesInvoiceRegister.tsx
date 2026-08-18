@@ -57,7 +57,7 @@ export const SalesInvoiceRegister: React.FC = () => {
           .select('id,dispatch_date,invoice_no,amount,party_id,parties(name),flocks(flock_no)')
           .not('invoice_no', 'is', null)
           .order('dispatch_date', { ascending: false })
-          .range(from, to),
+          .order('id').range(from, to),
         'HE dispatch invoices'
       )
       return data.map((r: any) => ({
@@ -83,7 +83,7 @@ export const SalesInvoiceRegister: React.FC = () => {
           .select('id,sale_date,invoice_no,amount,sale_type,party_id,parties(name),flocks(flock_no)')
           .not('invoice_no', 'is', null)
           .order('sale_date', { ascending: false })
-          .range(from, to),
+          .order('id').range(from, to),
         'NHE sales invoices'
       )
       return data.map((r: any) => ({

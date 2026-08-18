@@ -109,7 +109,7 @@ export const FlockDetail: React.FC = () => {
     queryFn: async () => fetchAllPages<any>(
       (from, to) => supabase.from('daily_records')
         .select('*').eq('flock_id', id!).order('record_date')
-        .range(from, to),
+        .order('id').range(from, to),
       'Flock daily records'
     )
   })
@@ -614,7 +614,7 @@ export const FlockDetail: React.FC = () => {
     queryKey: ['flock_med_usage', id],
     queryFn: async () => fetchAllPages<any>((from, to) => supabase.from('medicine_usage')
       .select('usage_date,quantity,unit,amount,rate,medicine_id,medicines_master(name,type,item_id)')
-      .eq('flock_id', id!).order('usage_date').range(from, to), 'Medicine usage', toast.error),
+      .eq('flock_id', id!).order('usage_date').order('id').range(from, to), 'Medicine usage', toast.error),
   })
 
   // Feed cost: kg from the daily records × recipe cost/kg for the feed type fed
@@ -659,7 +659,7 @@ export const FlockDetail: React.FC = () => {
       // have started dropping the oldest rates out of the rate history.
       return fetchAllPages<any>((from, to) => supabase.from('nhe_sales')
         .select('sale_date,sale_type,rate,qty')
-        .order('sale_date', { ascending: false }).range(from, to), 'NHE rate history')
+        .order('sale_date', { ascending: false }).order('id').range(from, to), 'NHE rate history')
     },
   })
   const [ciFrom, setCiFrom] = useState('')

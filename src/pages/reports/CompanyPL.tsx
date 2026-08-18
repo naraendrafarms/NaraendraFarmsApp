@@ -235,7 +235,7 @@ export const CompanyPL: React.FC = () => {
       let all: any[] = [], from = 0
       while (true) {
         const { data } = await supabase.from('grn')
-          .select('item_name,qty,price_per_unit,grn_date').order('grn_date', { ascending: true }).range(from, from + 999)
+          .select('item_name,qty,price_per_unit,grn_date').order('grn_date', { ascending: true }).order('id').range(from, from + 999)
         if (!data || !data.length) break
         all = all.concat(data); if (data.length < 1000) break; from += 1000
       }

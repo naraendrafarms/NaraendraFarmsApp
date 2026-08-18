@@ -26,7 +26,7 @@ export const ProductionReport: React.FC = () => {
       return fetchAllPages<any>((from, to) => supabase.from('daily_records')
         .select('record_date,total_eggs,he_eggs,mortality_female,mortality_male,opening_female,opening_male,feed_female_kg,feed_male_kg')
         .eq('flock_id', flockId)
-        .order('record_date').range(from, to), 'Production report')
+        .order('record_date').order('id').range(from, to), 'Production report')
     }
   })
 
@@ -443,7 +443,7 @@ export const FeedReport: React.FC = () => {
       // of them fell off the report and its totals without a word.
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('grn').select('*, feed_ingredients(name,short_name,category), farms(name,code), parties(name)')
-          .order('grn_date', { ascending: false }).range(from, to)
+          .order('grn_date', { ascending: false }).order('id').range(from, to)
         if (filterMonth) q = q.gte('grn_date', filterMonth + '-01').lte('grn_date', filterMonth + '-31')
         return q
       }, 'Feed report GRNs')
@@ -458,7 +458,7 @@ export const FeedReport: React.FC = () => {
       // the moment the mill records its 101st batch.
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('feed_production').select('*, feed_types(code,name)')
-          .order('production_date', { ascending: false }).range(from, to)
+          .order('production_date', { ascending: false }).order('id').range(from, to)
         if (filterMonth) q = q.gte('production_date', filterMonth + '-01').lte('production_date', filterMonth + '-31')
         return q
       }, 'Feed production report')

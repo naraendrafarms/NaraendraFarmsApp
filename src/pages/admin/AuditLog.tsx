@@ -79,7 +79,7 @@ export const AuditLogPage: React.FC = () => {
         .from('audit_log')
         .select('*', { count: 'exact' })
         .order('changed_at', { ascending: false })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+        .order('id').range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
 
       if (tableFilter)  q = q.eq('table_name', tableFilter)
       if (actionFilter) q = q.eq('action', actionFilter)

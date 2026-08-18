@@ -104,18 +104,18 @@ function useHatchability() {
           flocks(flock_no)
         `
       const { data, error } = await supabase.from('hatchability').select(FULL)
-        .order('setting_date', { ascending: false }).range(0, 0)
+        .order('setting_date', { ascending: false }).order('id').range(0, 0)
       if (error) {
         // If new columns missing (migration not run yet), retry without them
         return await fetchAllPages<any>((from, to) => supabase
           .from('hatchability')
           .select('id, flock_id, dc_no, setting_date, invoice_date, hatch_date, hatchery, setting_no, age_weeks, eggs_received, eggs_set, broken, infertile, chicks_hatched, hatch_pct, created_at, flocks(flock_no)')
-          .order('setting_date', { ascending: false }).range(from, to),
+          .order('setting_date', { ascending: false }).order('id').range(from, to),
           'Hatchability') as unknown as HatchRow[]
       }
       void data
       return await fetchAllPages<any>((from, to) => supabase.from('hatchability').select(FULL)
-        .order('setting_date', { ascending: false }).range(from, to),
+        .order('setting_date', { ascending: false }).order('id').range(from, to),
         'Hatchability') as unknown as HatchRow[]
     },
     staleTime: 5 * 60 * 1000,

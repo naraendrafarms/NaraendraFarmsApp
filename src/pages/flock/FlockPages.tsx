@@ -220,7 +220,7 @@ export const FlockDashboard: React.FC = () => {
         .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
         .gt('he_eggs_a', 0)
         .order('record_date', { ascending: true })
-        .range(from, to),
+        .order('id').range(from, to),
       // Also try he_eggs_b, he_eggs_c — we need rows where any of them > 0
       // Supabase doesn't support OR on gt easily, so fetch all with he_eggs_a>0 first
       // We'll do a broader query below
@@ -238,7 +238,7 @@ export const FlockDashboard: React.FC = () => {
         (from, to) => supabase.from('daily_records')
           .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
           .order('record_date', { ascending: true })
-          .range(from, to),
+          .order('id').range(from, to),
         'First egg (all)'
       )
       return data.filter((r: any) =>
@@ -648,7 +648,7 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
         .select('record_date,opening_female,closing_female,closing_male,mortality_female,mortality_male,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct')
         .eq('flock_id', flock.id)
         .order('record_date', { ascending: false })
-        .range(from, to),
+        .order('id').range(from, to),
       'Flock daily records'
     )
   })
@@ -837,7 +837,7 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           .select('id,record_date,farm_id,shed_id,age_weeks,opening_female,opening_male,transfer_female,transfer_male,cull_female,cull_male,mortality_female,mortality_male,closing_female,closing_male,feed_female_kg,feed_male_kg,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,wastage_eggs,hd_pct,he_pct,farms(name,code),sheds(shed_no,shed_name)')
           .eq('flock_id', flockId)
           .order('record_date', { ascending: false })
-          .range(from, from + CHUNK - 1)
+          .order('id').range(from, from + CHUNK - 1)
         if (!data || data.length === 0) break
         all = all.concat(data)
         if (data.length < CHUNK) break
@@ -1428,7 +1428,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         .from('daily_records')
         .select('id,record_date,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m')
         .eq('flock_id', flockId)
-        .order('record_date', { ascending: false }).range(from, to), 'Flock feed records')
+        .order('record_date', { ascending: false }).order('id').range(from, to), 'Flock feed records')
       const rows: any[] = []
       for (const r of (data ?? [])) {
         if ((r.feed_female_kg ?? 0) > 0)
@@ -1628,7 +1628,7 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         .from('medicine_usage')
         .select('*, medicines_master(name,type,item_id)')
         .eq('flock_id', flockId)
-        .order('usage_date', { ascending: false }).range(from, to), 'Flock medicine usage')
+        .order('usage_date', { ascending: false }).order('id').range(from, to), 'Flock medicine usage')
     }
   })
 

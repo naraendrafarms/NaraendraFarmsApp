@@ -96,7 +96,7 @@ export const WorkforceReviewPage: React.FC = () => {
     queryFn: async () => fetchAllPages<Emp>(
       (from, to) => supabase.from('employees')
         .select('id,emp_id,name,designation,department,farm_id,gender,joining_date,leaving_date,is_active')
-        .order('emp_id').range(from, to),
+        .order('emp_id').order('id').range(from, to),
       'Employees', toast.error),
   })
 
@@ -109,7 +109,7 @@ export const WorkforceReviewPage: React.FC = () => {
       (from, to) => supabase.from('attendance_daily')
         .select('employee_id,farm_id,attendance_date,status,ot_hours')
         .gte('attendance_date', monthStart(pm)).lte('attendance_date', monthEnd(month))
-        .order('attendance_date').range(from, to),
+        .order('attendance_date').order('id').range(from, to),
       'Attendance', toast.error),
   })
 

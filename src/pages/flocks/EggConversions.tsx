@@ -55,7 +55,7 @@ export const EggConversions: React.FC = () => {
         let q = supabase.from('egg_conversions')
           .select('*, flocks(flock_no)')
           .order('conversion_date', { ascending: false })
-          .range(from, to)
+          .order('id').range(from, to)
         if (flockFilter) q = q.eq('flock_id', flockFilter)
         return q
       }, 'Egg conversions')
