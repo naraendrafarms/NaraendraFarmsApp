@@ -1859,6 +1859,15 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const totalAmount = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+
+  // Qty totalled per unit, as on the Cull Sales tab: eggs are counted in nos,
+  // but a unit typed differently on one row should not be silently added into
+  // the same figure.
+  const eggQtyTotals = Object.entries(filtered.reduce((m: Record<string, number>, r: any) => {
+    const u = (r.unit ?? '').trim() || 'nos'
+    m[u] = (m[u] ?? 0) + (Number(r.quantity) || 0)
+    return m
+  }, {} as Record<string, number>)).filter(([, v]) => v !== 0)
   const typeOptions = [...new Set((sales ?? []).map((r: any) => r.sale_type).filter(Boolean))].map(t => ({ value: t as string, label: NHE_TYPE_LABELS[t as string] ?? (t as string) }))
 
   return (
@@ -1900,7 +1909,16 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
             </tbody>
             {filtered.length > 0 && (
               <tfoot><tr className="bg-gray-50 font-semibold">
-                <Td colSpan={6}>TOTAL ({filtered.length})</Td>
+                <Td colSpan={3}>TOTAL ({filtered.length})</Td>
+                <Td right className="text-xs">
+                  {eggQtyTotals.length === 0 ? '—'
+                    : eggQtyTotals.length === 1 ? numFmt(eggQtyTotals[0][1])
+                    : eggQtyTotals.map(([u, v]) => (
+                        <div key={u} className="whitespace-nowrap">{numFmt(v)} <span className="text-gray-400 font-normal">{u}</span></div>
+                      ))}
+                </Td>
+                <Td className="text-xs text-gray-400 font-normal">{eggQtyTotals.length === 1 ? eggQtyTotals[0][0] : ''}</Td>
+                <Td></Td>
                 <Td right>{inr(totalAmount)}</Td>
               </tr></tfoot>
             )}
@@ -1978,6 +1996,18 @@ const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   })
 
   const totalAmount = filtered.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+
+  // Quantity totalled PER UNIT. Birds are counted in nos, litter by the load,
+  // bags by the bag — adding those into one figure would produce a number that
+  // means nothing, which is presumably why the total was left off the Qty
+  // column altogether. Per unit it is both honest and useful.
+  const qtyByUnit = filtered.reduce((m: Record<string, number>, r: any) => {
+    const u = (r.unit ?? '').trim() || 'nos'
+    m[u] = (m[u] ?? 0) + (Number(r.quantity) || 0)
+    return m
+  }, {} as Record<string, number>)
+  const qtyTotals = Object.entries(qtyByUnit).filter(([, v]) => v !== 0)
+
   const saleIds = filtered.map((r: any) => r.id)
   const allSel = saleIds.length > 0 && saleIds.every((id: string) => sel.has(id))
   const someSel = saleIds.some((id: string) => sel.has(id))
@@ -2041,7 +2071,16 @@ const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
               </tbody>
               {filtered.length > 0 && (
                 <tfoot><tr className="bg-gray-50 font-semibold">
-                  <Td colSpan={7}>TOTAL ({filtered.length})</Td>
+                  <Td colSpan={4}>TOTAL ({filtered.length})</Td>
+                  <Td right className="text-xs">
+                    {qtyTotals.length === 0 ? '—'
+                      : qtyTotals.length === 1 ? numFmt(qtyTotals[0][1])
+                      : qtyTotals.map(([u, v]) => (
+                          <div key={u} className="whitespace-nowrap">{numFmt(v)} <span className="text-gray-400 font-normal">{u}</span></div>
+                        ))}
+                  </Td>
+                  <Td className="text-xs text-gray-400 font-normal">{qtyTotals.length === 1 ? qtyTotals[0][0] : ''}</Td>
+                  <Td></Td>
                   <Td right>{inr(totalAmount)}</Td>
                   <Td></Td>
                 </tr></tfoot>
