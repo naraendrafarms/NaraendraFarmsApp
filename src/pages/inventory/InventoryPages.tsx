@@ -716,8 +716,10 @@ const PhysicalAuditTab: React.FC = () => {
         <Modal open={showNew} onClose={() => setShowNew(false)} title="New Physical Stock Audit"
           footer={<Button loading={createMut.isPending} onClick={() => createMut.mutate()}>Start Audit</Button>}>
           <div className="space-y-3">
-            <DateInput label="Date counted *" value={form.audit_date} onChange={v => s('audit_date', v)} />
-            <DateInput label="Period from" value={form.period_from} onChange={v => s('period_from', v)} />
+            {/* DateInput fires a synthetic {target:{value}}, not the string —
+                read e.target.value, as every other screen does. */}
+            <DateInput label="Date counted *" value={form.audit_date} onChange={e => s('audit_date', e.target.value)} />
+            <DateInput label="Period from" value={form.period_from} onChange={e => s('period_from', e.target.value)} />
             <p className="text-xs text-gray-500 -mt-2">
               Period From decides which flocks share the shortage — feed sent between that date and the audit
               date. Leave it blank to share across every flock that has ever been fed.
