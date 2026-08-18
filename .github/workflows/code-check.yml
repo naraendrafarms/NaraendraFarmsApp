@@ -1,0 +1,72 @@
+name: Code Check
+
+# Runs on every push to main, before the site goes live.
+#
+# The health check watches the DATA. This watches the CODE: it type-checks and
+# builds the app, so a screen that would crash, a column that does not exist, or
+# an import that was never written cannot reach the farm. It catches a whole
+# class of fault the database rules never see — the page reading wrongly rather
+# than the records being wrong.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vite.config.*'
+      - '.github/workflows/code-check.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Type-check and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        run: npm run build
+
+      - name: Guard — every paged read must have a unique tie-breaker
+        run: |
+          python3 - << 'PYEOF'
+          import re, pathlib, sys
+          # A page that asks for rows in 1,000-row slices sorted only by a date
+          # can lose a row between slices — silently, and a different row each
+          # time. That is what hid Alkakarb's 5,000 kg receipt. Sorting by id as
+          # well pins the order, so this refuses any new query without it.
+          bad = []
+          for p in sorted(pathlib.Path('src').rglob('*.ts*')):
+              t = p.read_text()
+              for m in re.finditer(r"\.order\('([a-z_]+)'(?:,[^)]*)?\)(\s*\.order\('[a-z_]+'(?:,[^)]*)?\))?\s*\.range\(", t):
+                  col, second = m.group(1), m.group(2)
+                  if second or col == 'id':
+                      continue
+                  before = t[:m.start()]
+                  fm = list(re.finditer(r"\.from\('([a-z_]+)'\)", before))
+                  table = fm[-1].group(1) if fm else '?'
+                  if table.startswith('v_'):   # views have no id to sort by
+                      continue
+                  bad.append(f"{p}:{t[:m.start()].count(chr(10))+1}  {table} ordered by {col} only")
+          if bad:
+              print("Paged reads with no unique tie-breaker — add .order('id'):\n")
+              print("\n".join(bad))
+              sys.exit(1)
+          print("All paged reads carry a unique tie-breaker.")
+          PYEOF
+
+      - name: Done
+        run: echo "Code is sound — types check, build succeeds, paging is stable."

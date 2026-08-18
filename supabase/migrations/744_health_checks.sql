@@ -167,6 +167,10 @@ BEGIN
   VALUES (v_run, 'medicine_usage_unlinked', 'Medicine used but not taken off stock', 'Inventory', 'warning', v_count, v_detail,
           'The medicine was given to the birds but its stock was never reduced, so it reads higher than it is.');
 
+  -- Round two: the modules round one never touched, plus the report-against-
+  -- source rules that can catch a PAGE reading wrongly.
+  PERFORM public.fn_health_round2(v_run);
+
   -- A task on the Development list whenever anything critical fails, so it
   -- lands where the outstanding work already is instead of waiting to be seen.
   SELECT count(*) INTO v_failed
