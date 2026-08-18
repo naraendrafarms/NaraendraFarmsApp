@@ -275,6 +275,66 @@ export const FlockDetail: React.FC = () => {
     }
   }
 
+  // Move the birds between the two sheds' ALLOCATIONS as well as the daily
+  // records. Until now a transfer told the daily record what moved but never
+  // told the flock where it now lives: Flock 23's birds went from shed 10 into
+  // sheds 5, 6 and 12 on 17/08/2026, and Bulk Daily Entry — which builds its
+  // shed list from flock_sheds then shed_allocations — still offered only
+  // sheds 10 and 11, so yesterday's production could not be entered at all.
+  // sign = +1 when recording a transfer, -1 when undoing one.
+  const moveShedAllocation = async (t: {
+    flockId: string; date: string; trF: number; trM: number
+    fromShedId: string | null; fromFarmId: string | null
+    toShedId: string | null; toFarmId: string | null
+  }, sign: 1 | -1) => {
+    const f = (t.trF || 0) * sign, m = (t.trM || 0) * sign
+    if (!f && !m) return
+
+    // Latest allocation for a shed — the row that describes where the flock
+    // stands now, not the first one ever written.
+    const latest = async (shedId: string) => {
+      const { data } = await supabase.from('shed_allocations')
+        .select('id,female_count,male_count')
+        .eq('flock_id', t.flockId).eq('shed_id', shedId)
+        .order('allocated_date', { ascending: false }).limit(1)
+      return (data ?? [])[0] ?? null
+    }
+
+    if (t.toShedId) {
+      const dest = await latest(t.toShedId)
+      if (dest) {
+        const { error } = await supabase.from('shed_allocations').update({
+          female_count: Math.max(0, (dest.female_count ?? 0) + f),
+          male_count:   Math.max(0, (dest.male_count ?? 0) + m),
+        }).eq('id', dest.id)
+        if (error) throw error
+      } else if (sign === 1) {
+        // Nothing to add to, so the shed is new to this flock — give it a row,
+        // otherwise the shed stays invisible to every screen that reads
+        // allocations.
+        const { error } = await supabase.from('shed_allocations').insert({
+          flock_id: t.flockId, shed_id: t.toShedId, farm_id: t.toFarmId,
+          allocated_date: t.date, female_count: Math.max(0, f), male_count: Math.max(0, m),
+          notes: 'Created by a shed transfer',
+        })
+        if (error) throw error
+      }
+    }
+
+    if (t.fromShedId) {
+      const src = await latest(t.fromShedId)
+      // No row to reduce means the source was never allocated in the first
+      // place — leave it alone rather than inventing a negative placement.
+      if (src) {
+        const { error } = await supabase.from('shed_allocations').update({
+          female_count: Math.max(0, (src.female_count ?? 0) - f),
+          male_count:   Math.max(0, (src.male_count ?? 0) - m),
+        }).eq('id', src.id)
+        if (error) throw error
+      }
+    }
+  }
+
   const addTransferMut = useMutation({
     mutationFn: async () => {
       if (!transferForm.to_farm_id) throw new Error('To Farm is required')
@@ -311,6 +371,12 @@ export const FlockDetail: React.FC = () => {
         trF, trM,
       })
 
+      await moveShedAllocation({
+        flockId: id!, date: transferForm.transfer_date, trF, trM,
+        fromShedId: transferForm.from_shed_id || null, fromFarmId: transferForm.from_farm_id || null,
+        toShedId: transferForm.to_shed_id || null, toFarmId: transferForm.to_farm_id || null,
+      }, 1)
+
       // If marked as final transfer, update flock status to laying
       if (transferForm.is_final_transfer) {
         const { error: fe } = await supabase.from('flocks').update({
@@ -326,6 +392,8 @@ export const FlockDetail: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
       qc.invalidateQueries({ queryKey: ['flock_daily', id] })
       qc.invalidateQueries({ queryKey: ['flock', id] })
+      qc.invalidateQueries({ queryKey: ['shed_allocations', id] })
+      qc.invalidateQueries({ queryKey: ['flock_sheds_full'] })
       setShowTransferForm(false)
       setTransferForm(blankTransfer())
     },
@@ -395,8 +463,21 @@ export const FlockDetail: React.FC = () => {
           }).eq('id', dr.id)
         }
       }
+      // and put the birds back where they were — the destination loses them,
+      // the source gets them again.
+      await moveShedAllocation({
+        flockId: id!, date: t.transfer_date, trF, trM,
+        fromShedId: t.from_shed_id ?? null, fromFarmId: t.from_farm_id ?? null,
+        toShedId: t.to_shed_id ?? null, toFarmId: t.to_farm_id ?? null,
+      }, -1)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_transfers', id] }); qc.invalidateQueries({ queryKey: ['daily_records'] }); toast.success('Transfer deleted') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flock_transfers', id] })
+      qc.invalidateQueries({ queryKey: ['daily_records'] })
+      qc.invalidateQueries({ queryKey: ['shed_allocations', id] })
+      qc.invalidateQueries({ queryKey: ['flock_sheds_full'] })
+      toast.success('Transfer deleted')
+    },
     onError: (e: any) => toast.error('Delete failed: ' + (e.message || e.details)),
   })
 

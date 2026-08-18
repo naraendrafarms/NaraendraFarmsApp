@@ -188,29 +188,36 @@ export const BulkDailyEntry: React.FC = () => {
     queryKey: ['flock_sheds_full', selectedFlock, farmIdForFlock],
     enabled: !!selectedFlock,
     queryFn: async () => {
-      // 1. Try flock_sheds link table
-      const { data: fsData } = await supabase
-        .from('flock_sheds')
-        .select('shed_id,sheds(id,shed_no,shed_name,farm_id,capacity_female,capacity_male)')
-        .eq('flock_id', selectedFlock)
-      const fromFS = (fsData ?? []).map((r: any) => r.sheds).filter(Boolean)
-
-      if (fromFS.length > 0) return fromFS
-
-      // 2. Fallback: shed_allocations (distinct sheds ever used by this flock)
-      const { data: saData } = await supabase
-        .from('shed_allocations')
-        .select('shed_id,sheds(id,shed_no,shed_name,farm_id,capacity_female,capacity_male)')
-        .eq('flock_id', selectedFlock)
+      // Everywhere the flock is known to be: its shed links, its allocations,
+      // AND every shed it has been TRANSFERRED INTO. That last one was missing,
+      // and a transfer is exactly how birds arrive in a shed — Flock 23 moved
+      // from shed 10 into 5, 6 and 12 on 17/08/2026 and those three sheds could
+      // not be entered against at all, because only sheds 10 and 11 had ever
+      // been allocated. The three lists are combined rather than tried in turn:
+      // a flock with a link row and a later transfer needs both.
       const seen = new Set<string>()
-      const fromSA: any[] = []
-      for (const r of (saData ?? [])) {
-        const s = r.sheds as any
-        if (s && !seen.has(s.id)) { seen.add(s.id); fromSA.push(s) }
-      }
-      if (fromSA.length > 0) return fromSA
+      const out: any[] = []
+      const add = (s: any) => { if (s && !seen.has(s.id)) { seen.add(s.id); out.push(s) } }
+      const SHED_COLS = 'sheds(id,shed_no,shed_name,farm_id,capacity_female,capacity_male)'
 
-      // 3. Last fallback: all active sheds on the flock's farm
+      const { data: fsData } = await supabase
+        .from('flock_sheds').select(`shed_id,${SHED_COLS}`)
+        .eq('flock_id', selectedFlock)
+      for (const r of (fsData ?? [])) add((r as any).sheds)
+
+      const { data: saData } = await supabase
+        .from('shed_allocations').select(`shed_id,${SHED_COLS}`)
+        .eq('flock_id', selectedFlock)
+      for (const r of (saData ?? [])) add((r as any).sheds)
+
+      const { data: trData } = await supabase
+        .from('flock_transfers').select('to_shed_id,sheds:to_shed_id(id,shed_no,shed_name,farm_id,capacity_female,capacity_male)')
+        .eq('flock_id', selectedFlock).not('to_shed_id', 'is', null)
+      for (const r of (trData ?? [])) add((r as any).sheds)
+
+      if (out.length > 0) return out
+
+      // Last fallback: all active sheds on the flock's farm
       if (farmIdForFlock) {
         const { data: farmSheds } = await supabase
           .from('sheds').select('id,shed_no,shed_name,farm_id,capacity_female,capacity_male')
