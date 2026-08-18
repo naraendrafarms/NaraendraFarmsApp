@@ -127,20 +127,11 @@ BEGIN
   VALUES (v_run, 'cashbook_orphans', 'Cash book entries whose sale was deleted', 'Accounts', 'warning', v_count, v_detail,
           'Money recorded against something that no longer exists — the cash book and the sales register disagree.');
 
-  -- 8. Birds must balance: opening - mortality - culls - transfers = closing.
-  SELECT count(*), COALESCE(string_agg(x.d, ' | '), '')
-    INTO v_count, v_detail FROM (
-      SELECT dr.record_date::text || ' flock ' || COALESCE(f.flock_no::text, '?')
-             || ' out by ' || (dr.opening_female - COALESCE(dr.mortality_female,0) - COALESCE(dr.cull_female,0)
-                               - COALESCE(dr.transfer_female,0) - dr.closing_female)::text AS d
-      FROM public.daily_records dr LEFT JOIN public.flocks f ON f.id = dr.flock_id
-      WHERE COALESCE(dr.opening_female, 0) > 0 AND COALESCE(dr.closing_female, 0) > 0
-        AND (dr.opening_female - COALESCE(dr.mortality_female,0) - COALESCE(dr.cull_female,0)
-             - COALESCE(dr.transfer_female,0)) <> dr.closing_female
-      ORDER BY dr.record_date DESC LIMIT 20) x;
-  INSERT INTO public.health_check_results (run_at, check_key, title, module, severity, failed_count, detail, what_it_means)
-  VALUES (v_run, 'birds_dont_balance', 'Days where the bird count does not add up', 'Flocks', 'critical', v_count, v_detail,
-          'Opening less deaths, culls and transfers does not equal closing, so one of those figures is wrong.');
+  -- 8. Birds must balance: opening + moved in - deaths - culls - moved out
+  --    = closing. Transfers IN are part of it; leaving them out flags every
+  --    day birds arrived in a shed as a fault, which is how this rule first
+  --    reported 12 problems that were not problems.
+  PERFORM public.fn_check_bird_balance(v_run);
 
   -- 9. Bird sales with no shed, for flocks that are recorded shed by shed.
   SELECT count(*), '' INTO v_count, v_detail
