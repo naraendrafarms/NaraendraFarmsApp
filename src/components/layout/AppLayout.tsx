@@ -223,6 +223,7 @@ const NAV: NavItem[] = [
       { label: 'User Management',         to: '/admin/users' },
       { label: 'Access Control',          to: '/admin/access' },
       { label: '🔍 Audit Log',            to: '/admin/audit' },
+      { label: '🩺 Health Check',         to: '/admin/health' },
     ]
   },
 ]

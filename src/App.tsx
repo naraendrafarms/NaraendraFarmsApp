@@ -58,6 +58,7 @@ import { VendorStatement } from '@/pages/purchases/VendorStatement'
 import { UserManagement } from '@/pages/admin/UserManagement'
 import { AdminCentre } from '@/pages/admin/AdminCentre'
 import { AuditLogPage } from '@/pages/admin/AuditLog'
+import { HealthCheckPage } from '@/pages/admin/HealthCheck'
 import { AccessControlPage } from '@/pages/admin/AccessControlPage'
 import { FlockDashboard, FlockDetail as NewFlockDetail } from '@/pages/flock/FlockPages'
 import { FlockComparison } from '@/pages/flock/FlockComparison'
@@ -312,6 +313,9 @@ export const App: React.FC = () => {
             <Route path="bags" element={<BagsPage />} />
             <Route path="admin/users" element={<RequireRole check={can.manageUsers}><UserManagement /></RequireRole>} />
             <Route path="admin/audit" element={<RequireRole check={can.manageUsers}><AuditLogPage /></RequireRole>} />
+            {/* Admin only, and the row policy on health_check_results says the
+                same — hiding a route is not access control on its own. */}
+            <Route path="admin/health" element={<RequireRole check={can.manageUsers}><HealthCheckPage /></RequireRole>} />
             <Route path="admin/access" element={<RequireRole check={can.manageUsers}><AccessControlPage /></RequireRole>} />
             <Route path="admin" element={<RequireRole check={can.manageUsers}><AdminCentre /></RequireRole>} />
             <Route path="planning" element={<RequireRole check={can.viewPlanning}><PlanningPage /></RequireRole>} />
