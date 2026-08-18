@@ -1199,12 +1199,11 @@ const TXN_LABEL: Record<string, string> = {
 const TXN_IS_OUT = new Set(['production_out','medicine_out','adjustment_out','transfer_out','dispatch_out'])
 
 const LedgerTab: React.FC = () => {
-  const [search, setSearch] = useState('')
   const [selectedItem, setSelectedItem] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate]     = useState('')
 
-  const { data: allItems, isLoading: loadingItems } = useQuery({
+  const { data: ledgerItemRows, isLoading: loadingItems } = useQuery({
     queryKey: ['sl_items'],
     queryFn: async () => {
       // Paged. This builds the "Search & Select Item" list by reading every
@@ -1212,16 +1211,9 @@ const LedgerTab: React.FC = () => {
       // at 1,000 rows silently dropped every item that only appears later in
       // the ledger. With 2,645 rows, items were simply missing from the
       // dropdown and could not be looked at at all.
-      const data = await fetchAllPages<any>((from, to) => supabase
+      return await fetchAllPages<any>((from, to) => supabase
         .from('stock_ledger').select('item_id,item_name')
         .order('item_name').range(from, to), 'Ledger item list')
-      const seen = new Set<string>()
-      const out: { id: string; name: string }[] = []
-      for (const r of data ?? []) {
-        const key = r.item_id ?? r.item_name
-        if (!seen.has(key)) { seen.add(key); out.push({ id: r.item_id ?? r.item_name, name: r.item_name }) }
-      }
-      return out.sort((a,b) => a.name.localeCompare(b.name))
     },
     staleTime: 2 * 60 * 1000,
   })
@@ -1232,32 +1224,83 @@ const LedgerTab: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('item_aliases').select('item_id,alias'); return data ?? [] },
     staleTime: 60 * 1000,
   })
+  const { data: itemsMasterLedger } = useQuery({
+    queryKey: ['items_master_inv'],
+    queryFn: async () => {
+      const { data } = await supabase.from('items').select('id,name,code,category,unit,reorder_level,is_active').order('name')
+      return data ?? []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
 
-  const filtered = useMemo(() => {
-    const aliasMap: Record<string, string[]> = {}
-    for (const a of aliasesLedger ?? []) (aliasMap[a.item_id] ??= []).push(a.alias)
-    if (!search) return allItems ?? []
-    const s = search.toLowerCase()
-    return (allItems ?? []).filter(i =>
-      `${i.name} ${(aliasMap[i.id] ?? []).join(' ')}`.toLowerCase().includes(s))
-  }, [allItems, aliasesLedger, search])
+  // One item = one entry. The list used to key on item_id when a row had one
+  // and on the NAME when it did not, so an item recorded both ways — Selvo BH
+  // and Toxfin 360 Dry both are — appeared TWICE under the same wording, each
+  // showing only half its movements. And where one item had been written two
+  // ways, only the first spelling survived and the second could not be found
+  // at all. Rows now fold onto the master item by id, or by name/alias ignoring
+  // spacing and punctuation, exactly as the Stock Balance tab does.
+  const itemIndex = useMemo(() => {
+    const looseKey = (s?: string | null) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const looseNameToId: Record<string, string> = {}
+    for (const it of itemsMasterLedger ?? []) looseNameToId[looseKey(it.name)] = it.id
+    for (const a of aliasesLedger ?? []) if (!looseNameToId[looseKey(a.alias)]) looseNameToId[looseKey(a.alias)] = a.item_id
+
+    const idToName: Record<string, string> = {}
+    for (const it of itemsMasterLedger ?? []) idToName[it.id] = it.name
+
+    const entries: Record<string, { key: string; name: string; id: string | null; names: Set<string> }> = {}
+    for (const r of ledgerItemRows ?? []) {
+      const name = String(r.item_name ?? '')
+      const id: string | null = r.item_id ?? looseNameToId[looseKey(name)] ?? null
+      const key = id ?? norm(name)
+      const e = (entries[key] ??= { key, name: idToName[id ?? ''] ?? name, id, names: new Set<string>() })
+      if (name) e.names.add(name)
+      if (!e.name) e.name = name
+    }
+    // Every name the item is known by, so a movement stored under an old
+    // spelling is still found once the item is picked.
+    for (const it of itemsMasterLedger ?? []) if (entries[it.id]) entries[it.id].names.add(it.name)
+    for (const a of aliasesLedger ?? []) if (entries[a.item_id]) entries[a.item_id].names.add(a.alias)
+    return entries
+  }, [ledgerItemRows, itemsMasterLedger, aliasesLedger])
+
+  const itemOptions = useMemo(() => Object.values(itemIndex)
+    .filter(e => (e.name ?? '').trim() !== '')
+    .map(e => ({ value: e.key, label: e.name, searchText: Array.from(e.names).join(' ') }))
+    .sort((a, b) => a.label.localeCompare(b.label)), [itemIndex])
 
   const { data: moves, isLoading: loadingMoves } = useQuery({
     queryKey: ['sl_moves', selectedItem, fromDate, toDate],
     enabled: !!selectedItem,
     queryFn: async () => {
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selectedItem)
-      let q = supabase.from('stock_ledger')
-        .select('txn_date,txn_type,qty,unit,unit_price,total_value,reference_no,remarks,flock_id')
-        .order('txn_date').order('created_at')
-      if (isUUID) {
-        q = q.or(`item_id.eq.${selectedItem},item_name.eq.${selectedItem}`)
-      } else {
-        q = q.eq('item_name', selectedItem)
+      const entry = itemIndex[selectedItem]
+      const names = entry ? Array.from(entry.names) : [selectedItem]
+      const cols = 'id,txn_date,txn_type,qty,unit,unit_price,total_value,reference_no,remarks,flock_id'
+      const applyDates = (q: any) => {
+        if (fromDate) q = q.gte('txn_date', fromDate)
+        if (toDate)   q = q.lte('txn_date', toDate)
+        return q
       }
-      if (fromDate) q = q.gte('txn_date', fromDate)
-      if (toDate)   q = q.lte('txn_date', toDate)
-      const { data } = await q
+      // Two plain queries rather than one `or(...)`: the item's own rows, and
+      // rows recorded under any of its names but never linked to it. Merging
+      // in the browser keeps names containing commas or brackets out of a
+      // filter string that would misread them.
+      const byId = entry?.id
+        ? await applyDates(supabase.from('stock_ledger').select(cols).eq('item_id', entry.id))
+        : { data: [], error: null }
+      if (byId.error) throw byId.error
+      const byName = names.length
+        ? await applyDates(supabase.from('stock_ledger').select(cols).is('item_id', null).in('item_name', names))
+        : { data: [], error: null }
+      if (byName.error) throw byName.error
+
+      const seenRow = new Set<string>()
+      const merged = [...(byId.data ?? []), ...(byName.data ?? [])].filter((r: any) => {
+        if (seenRow.has(r.id)) return false
+        seenRow.add(r.id); return true
+      }).sort((a: any, b: any) => String(a.txn_date).localeCompare(String(b.txn_date)))
+      const data = merged
       let bal = 0
       return (data ?? []).map(r => {
         const signed = TXN_IS_OUT.has(r.txn_type) ? -Number(r.qty) : Number(r.qty)
@@ -1271,16 +1314,15 @@ const LedgerTab: React.FC = () => {
     <div className="space-y-4">
       <Card>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          {/* The search box and the list used to be two separate controls. On a
+              phone, tapping a name after typing only moved focus into the list
+              — it highlighted the row without registering a choice, so the
+              ledger stayed blank until you tapped a second time. This is the
+              same picker used everywhere else in the app: type, tap, done. */}
           <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Search & Select Item</label>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Type to search…"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-1 focus:ring-1 focus:ring-brand-500" />
-            <select size={4} value={selectedItem} onChange={e => setSelectedItem(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-1 focus:ring-brand-500">
-              {loadingItems ? <option>Loading…</option> : filtered.map(i => (
-                <option key={i.id} value={i.id}>{i.name}</option>
-              ))}
-            </select>
+            <SearchableSelect label="Search & Select Item"
+              placeholder={loadingItems ? 'Loading items…' : 'Type to search…'}
+              options={itemOptions} value={selectedItem} onChange={v => setSelectedItem(v)} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">From</label>
