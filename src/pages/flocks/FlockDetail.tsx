@@ -290,14 +290,35 @@ export const FlockDetail: React.FC = () => {
     const f = (t.trF || 0) * sign, m = (t.trM || 0) * sign
     if (!f && !m) return
 
-    // Latest allocation for a shed — the row that describes where the flock
-    // stands now, not the first one ever written.
-    const latest = async (shedId: string) => {
+    // Every allocation row for a shed, newest first. A shed is often allocated
+    // in more than one go — Flock 23's shed 10 has 22,538 birds on one date and
+    // 1,208 on the next — so a reduction has to work its way BACK through them.
+    // Taking 17,327 birds off the newest row alone floors it at zero and leaves
+    // the older row untouched, which says 22,538 birds are still in a shed that
+    // has been emptied.
+    const rowsFor = async (shedId: string) => {
       const { data } = await supabase.from('shed_allocations')
-        .select('id,female_count,male_count')
+        .select('id,female_count,male_count,allocated_date')
         .eq('flock_id', t.flockId).eq('shed_id', shedId)
-        .order('allocated_date', { ascending: false }).limit(1)
-      return (data ?? [])[0] ?? null
+        .order('allocated_date', { ascending: false })
+      return data ?? []
+    }
+    const latest = async (shedId: string) => (await rowsFor(shedId))[0] ?? null
+
+    // Spread a reduction across the rows, newest first, until it is used up.
+    const reduceAcross = async (shedId: string, needF: number, needM: number) => {
+      for (const r of await rowsFor(shedId)) {
+        if (needF <= 0 && needM <= 0) break
+        const takeF = Math.min(needF, r.female_count ?? 0)
+        const takeM = Math.min(needM, r.male_count ?? 0)
+        if (!takeF && !takeM) continue
+        const { error } = await supabase.from('shed_allocations').update({
+          female_count: (r.female_count ?? 0) - takeF,
+          male_count:   (r.male_count ?? 0) - takeM,
+        }).eq('id', r.id)
+        if (error) throw error
+        needF -= takeF; needM -= takeM
+      }
     }
 
     if (t.toShedId) {
@@ -322,15 +343,21 @@ export const FlockDetail: React.FC = () => {
     }
 
     if (t.fromShedId) {
-      const src = await latest(t.fromShedId)
-      // No row to reduce means the source was never allocated in the first
-      // place — leave it alone rather than inventing a negative placement.
-      if (src) {
-        const { error } = await supabase.from('shed_allocations').update({
-          female_count: Math.max(0, (src.female_count ?? 0) - f),
-          male_count:   Math.max(0, (src.male_count ?? 0) - m),
-        }).eq('id', src.id)
-        if (error) throw error
+      if (sign === 1) {
+        // No rows means the source was never allocated in the first place —
+        // reduceAcross simply finds nothing, rather than inventing a negative
+        // placement.
+        await reduceAcross(t.fromShedId, t.trF || 0, t.trM || 0)
+      } else {
+        // Undoing a transfer: the birds go back on the source's newest row.
+        const src = await latest(t.fromShedId)
+        if (src) {
+          const { error } = await supabase.from('shed_allocations').update({
+            female_count: (src.female_count ?? 0) + (t.trF || 0),
+            male_count:   (src.male_count ?? 0) + (t.trM || 0),
+          }).eq('id', src.id)
+          if (error) throw error
+        }
       }
     }
   }
