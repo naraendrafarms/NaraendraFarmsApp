@@ -6,7 +6,7 @@ import { today } from '@/lib/utils'
 import { Button, Modal, Input, Textarea, Select, DateInput, FormRow, SearchableSelect } from '@/components/ui'
 import { ListPlus } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { TASK_TYPE_OPTIONS, TASK_PRIORITY_OPTIONS, RECURRENCE_PRESETS, type TaskType } from '@/lib/tasks'
+import { taskTypeOptionsFor, TASK_PRIORITY_OPTIONS, RECURRENCE_PRESETS, type TaskType } from '@/lib/tasks'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 
 interface AssignTaskButtonProps {
@@ -115,7 +115,7 @@ export const AssignTaskButton: React.FC<AssignTaskButtonProps> = ({
           <Input label="Title" required value={form.title} onChange={e => s('title', e.target.value)} />
           <Textarea label="Description" value={form.description} onChange={e => s('description', e.target.value)} />
           <FormRow cols={2}>
-            <Select label="Type" options={TASK_TYPE_OPTIONS} value={form.task_type} onChange={e => s('task_type', e.target.value)} />
+            <Select label="Type" options={taskTypeOptionsFor(profile?.role)} value={form.task_type} onChange={e => s('task_type', e.target.value)} />
             <Select label="Priority" options={TASK_PRIORITY_OPTIONS} value={form.priority} onChange={e => s('priority', e.target.value)} />
           </FormRow>
           <FormRow cols={2}>

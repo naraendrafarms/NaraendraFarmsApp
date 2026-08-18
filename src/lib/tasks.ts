@@ -1,7 +1,7 @@
 // Shared helpers for the Tasks module — used by TasksPage, AssignTaskButton
 // and TaskBadge so recurrence math and query keys stay in one place.
 
-export type TaskType = 'daily' | 'compliance' | 'admin'
+export type TaskType = 'daily' | 'compliance' | 'admin' | 'development'
 export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'cancelled'
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
 
@@ -9,7 +9,16 @@ export const TASK_TYPE_OPTIONS: Array<{ value: TaskType; label: string }> = [
   { value: 'daily',      label: 'Daily / Team Task' },
   { value: 'compliance', label: 'Compliance (GST/TDS/PF/ESI)' },
   { value: 'admin',      label: 'Admin' },
+  // App development work — what is still outstanding and who it waits on.
+  // Admin only, enforced by the row policy on the table as well as here, so a
+  // non-admin cannot read one by asking the database directly either.
+  { value: 'development', label: 'Development (admin only)' },
 ]
+
+// The type list a given role may see and use. Everyone else gets the first
+// three; only admin is offered Development.
+export const taskTypeOptionsFor = (role?: string) =>
+  TASK_TYPE_OPTIONS.filter(o => o.value !== 'development' || role === 'admin')
 
 export const TASK_STATUS_OPTIONS: Array<{ value: TaskStatus; label: string }> = [
   { value: 'pending',     label: 'Pending' },

@@ -12,7 +12,7 @@ import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { CheckCircle2, Circle, Clock, XCircle, Trash2, ListTodo, AlertTriangle, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
-  TASK_TYPE_OPTIONS, TASK_STATUS_OPTIONS, TASK_PRIORITY_OPTIONS, RECURRENCE_PRESETS, type TaskStatus, nextDueDate,
+  TASK_TYPE_OPTIONS, taskTypeOptionsFor, TASK_STATUS_OPTIONS, TASK_PRIORITY_OPTIONS, RECURRENCE_PRESETS, type TaskStatus, nextDueDate,
 } from '@/lib/tasks'
 
 const STATUS_BADGE: Record<TaskStatus, { color: any; label: string }> = {
@@ -190,7 +190,7 @@ export const TasksPage: React.FC = () => {
 
       <Card>
         <div className={`grid grid-cols-1 gap-3 mb-4 ${scope === 'all' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
-          <Select label="Type" placeholder="All types" options={TASK_TYPE_OPTIONS} value={filterType} onChange={e => setFilterType(e.target.value)} />
+          <Select label="Type" placeholder="All types" options={taskTypeOptionsFor(profile?.role)} value={filterType} onChange={e => setFilterType(e.target.value)} />
           <Select label="Status" placeholder="All statuses" options={TASK_STATUS_OPTIONS} value={filterStatus} onChange={e => setFilterStatus(e.target.value)} />
           <Select label="Site / Farm" placeholder="All sites"
             options={(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))}
@@ -286,7 +286,7 @@ export const TasksPage: React.FC = () => {
             <Input label="Title" required value={editForm.title} onChange={e => setEditForm((f: any) => ({ ...f, title: e.target.value }))} />
             <Textarea label="Description" value={editForm.description} onChange={e => setEditForm((f: any) => ({ ...f, description: e.target.value }))} />
             <FormRow cols={2}>
-              <Select label="Type" options={TASK_TYPE_OPTIONS} value={editForm.task_type} onChange={e => setEditForm((f: any) => ({ ...f, task_type: e.target.value }))} />
+              <Select label="Type" options={taskTypeOptionsFor(profile?.role)} value={editForm.task_type} onChange={e => setEditForm((f: any) => ({ ...f, task_type: e.target.value }))} />
               <Select label="Priority" options={TASK_PRIORITY_OPTIONS} value={editForm.priority} onChange={e => setEditForm((f: any) => ({ ...f, priority: e.target.value }))} />
             </FormRow>
             <FormRow cols={2}>
