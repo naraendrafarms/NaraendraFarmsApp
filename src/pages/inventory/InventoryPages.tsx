@@ -1008,6 +1008,27 @@ const AdjustmentsTab: React.FC = () => {
                     </Td>
                   </tr>
                 ))}
+                {/* Net of the adjustments listed, per unit — kg and doses are
+                    different things and adding them would say nothing. */}
+                <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                  <Td colSpan={4}>TOTAL ({filtered.length})</Td>
+                  <Td right className="text-xs">
+                    {(() => {
+                      const byUnit: Record<string, number> = {}
+                      for (const r of filtered as any[]) {
+                        const u = (r.unit ?? '').trim() || 'kg'
+                        byUnit[u] = (byUnit[u] ?? 0) + (Number(r.adjustment_kg) || 0)
+                      }
+                      const list = Object.entries(byUnit).filter(([, v]) => v !== 0)
+                      if (!list.length) return '—'
+                      if (list.length === 1) return list[0][1].toLocaleString('en-IN', { maximumFractionDigits: 3 })
+                      return list.map(([u, v]) => (
+                        <div key={u} className="whitespace-nowrap">{v.toLocaleString('en-IN', { maximumFractionDigits: 3 })} <span className="text-gray-400 font-normal">{u}</span></div>
+                      ))
+                    })()}
+                  </Td>
+                  <Td colSpan={4}></Td>
+                </tr>
               </tbody>
             </Table>
           </div>

@@ -1841,6 +1841,28 @@ export const FlockDetail: React.FC = () => {
                   </tr>
               ))}
             </tbody>
+            {monthlyRows.length > 0 && (
+              <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                <Td>TOTAL ({monthlyRows.length} months)</Td>
+                <Td right>{monthlyRows.reduce((s: number, m: any) => s + (m.days ?? 0), 0)}</Td>
+                <Td right>{monthlyRows.reduce((s: number, m: any) => s + (m.eggs ?? 0), 0).toLocaleString('en-IN')}</Td>
+                <Td right>{monthlyRows.reduce((s: number, m: any) => s + (m.he ?? 0), 0).toLocaleString('en-IN')}</Td>
+                <Td right>
+                  {(() => {
+                    const e = monthlyRows.reduce((s: number, m: any) => s + (m.eggs ?? 0), 0)
+                    const h = monthlyRows.reduce((s: number, m: any) => s + (m.he ?? 0), 0)
+                    return e > 0 ? pct(h / e) : '—'
+                  })()}
+                </Td>
+                {/* Average birds is deliberately blank: averaging monthly
+                    averages over months of different lengths gives a figure
+                    that belongs to no month. */}
+                <Td right className="text-gray-400">—</Td>
+                <Td right className="text-red-500">{monthlyRows.reduce((s: number, m: any) => s + (m.mortF ?? 0), 0).toLocaleString('en-IN')}</Td>
+                <Td right>{Math.round(monthlyRows.reduce((s: number, m: any) => s + (m.feedF ?? 0), 0)).toLocaleString('en-IN')}</Td>
+                <Td right>{Math.round(monthlyRows.reduce((s: number, m: any) => s + (m.feedM ?? 0), 0)).toLocaleString('en-IN')}</Td>
+              </tr></tfoot>
+            )}
           </Table>
         </Card>
       )}

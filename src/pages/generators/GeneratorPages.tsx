@@ -318,6 +318,15 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
               ))}
               {purchases.length === 0 && <tr><Td colSpan={8}><EmptyState title="No diesel purchases yet" /></Td></tr>}
             </tbody>
+            {purchases.length > 0 && (
+              <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                <Td colSpan={4}>TOTAL ({purchases.length})</Td>
+                <Td right>{purchases.reduce((s: number, p: any) => s + (Number(p.qty_ltr) || 0), 0).toLocaleString('en-IN')}</Td>
+                <Td></Td>
+                <Td right>{inr(purchases.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0))}</Td>
+                <Td></Td>
+              </tr></tfoot>
+            )}
           </Table>
         </Card>
       )}

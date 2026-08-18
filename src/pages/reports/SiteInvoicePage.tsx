@@ -177,6 +177,15 @@ export const SiteInvoicePage: React.FC = () => {
                     </tr>
                   ))}
                 </tbody>
+                {/* An invoice screen that totals money but not quantity leaves
+                    the party's own check — count against value — half done. */}
+                <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                  <Td colSpan={4}>TOTAL ({rows.length})</Td>
+                  <Td right>{rows.reduce((s: number, r: any) => s + (Number(r.qty) || 0), 0).toLocaleString('en-IN')}</Td>
+                  <Td></Td>
+                  <Td right>{inr(grandTotal)}</Td>
+                  <Td></Td>
+                </tr></tfoot>
               </Table>
             </Card>
 

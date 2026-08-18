@@ -516,6 +516,21 @@ export const FeedReport: React.FC = () => {
                 </tr>
               ))}
             </tbody>
+            {/* A purchase summary without a total answers "how much of each"
+                but not "how much altogether", which is the question it is
+                usually opened for. */}
+            <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+              <Td>TOTAL ({Object.keys(byIngredient).length} ingredients)</Td>
+              <Td right>{Math.round(Object.values(byIngredient).reduce((s: number, r: any) => s + (r.qty ?? 0), 0)).toLocaleString('en-IN')}</Td>
+              <Td right>{inr(Object.values(byIngredient).reduce((s: number, r: any) => s + (r.amount ?? 0), 0))}</Td>
+              <Td right className="text-xs text-gray-500">
+                {(() => {
+                  const q = Object.values(byIngredient).reduce((s: number, r: any) => s + (r.qty ?? 0), 0)
+                  const a = Object.values(byIngredient).reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+                  return q > 0 ? `Rs ${(a / q).toFixed(2)}` : '—'
+                })()}
+              </Td>
+            </tr></tfoot>
           </Table>
         </Card>
       )}
@@ -541,6 +556,14 @@ export const FeedReport: React.FC = () => {
                 </tr>
               ))}
             </tbody>
+            {!!grns?.length && (
+              <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                <Td colSpan={5}>TOTAL ({grns.length} lines)</Td>
+                <Td right>{Math.round((grns ?? []).reduce((s: number, g: any) => s + (Number(g.qty) || 0), 0)).toLocaleString('en-IN')}</Td>
+                <Td></Td>
+                <Td right>{inr((grns ?? []).reduce((s: number, g: any) => s + (Number(g.total_amount) || 0), 0))}</Td>
+              </tr></tfoot>
+            )}
           </Table>
           {!grns?.length && <p className="text-center text-gray-400 text-sm py-8">No GRN records{filterMonth ? ` for ${filterMonth}` : ''}</p>}
         </Card>

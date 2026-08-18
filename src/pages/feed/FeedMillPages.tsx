@@ -1157,6 +1157,13 @@ const ProductionTab: React.FC = () => {
               )
             })}
           </tbody>
+          <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+            <Td colSpan={4}>TOTAL ({logs.length} batches)</Td>
+            <Td>{Math.round(logs.reduce((s: number, l: any) => s + (Number(l.quantity_kg) || 0), 0)).toLocaleString('en-IN')}</Td>
+            <Td></Td>
+            <Td right>{inr(logs.reduce((s: number, l: any) => s + rowCost(l).totCost, 0))}</Td>
+            <Td colSpan={3}></Td>
+          </tr></tfoot>
         </Table>
       )}
 
@@ -1656,6 +1663,16 @@ const StockTab: React.FC = () => {
                   </tr>
                 ))}
               </tbody>
+              <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                <Td colSpan={5}>TOTAL ({(adjData as any[]).length})</Td>
+                <Td className="text-right">
+                  {(() => {
+                    const net = (adjData as any[]).reduce((s: number, a: any) => s + (Number(a.adjustment_kg) || 0), 0)
+                    return (net >= 0 ? '+' : '') + net.toLocaleString('en-IN', { maximumFractionDigits: 3 })
+                  })()}
+                </Td>
+                <Td colSpan={2}></Td>
+              </tr></tfoot>
             </Table>
           )}
         </>

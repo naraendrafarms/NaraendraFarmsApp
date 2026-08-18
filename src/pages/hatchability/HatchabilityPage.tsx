@@ -258,6 +258,24 @@ const EditRecords: React.FC<{ rows: HatchRow[]; flocks: FlockRow[] }> = ({ rows,
               </tr>
             ))}
           </tbody>
+          {rows.length > 0 && (
+            <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+              <Td colSpan={5}>TOTAL ({rows.length} batches)</Td>
+              <Td right className="text-xs">{rows.reduce((s, r: any) => s + (Number(r.eggs_set) || 0), 0).toLocaleString('en-IN')}</Td>
+              <Td right className="text-xs">{rows.reduce((s, r: any) => s + (Number(r.chicks_hatched) || 0), 0).toLocaleString('en-IN')}</Td>
+              {/* Hatch% on the total line is chicks over eggs for the WHOLE set,
+                  not the average of the percentages — averaging percentages of
+                  different batch sizes gives a figure that belongs to no batch. */}
+              <Td right className="text-xs">
+                {(() => {
+                  const e = rows.reduce((s, r: any) => s + (Number(r.eggs_set) || 0), 0)
+                  const c = rows.reduce((s, r: any) => s + (Number(r.chicks_hatched) || 0), 0)
+                  return e > 0 ? pct((c / e) * 100) : '—'
+                })()}
+              </Td>
+              <Td></Td>
+            </tr></tfoot>
+          )}
         </Table>
       </Card>
 
@@ -567,6 +585,20 @@ const Pipeline: React.FC<{ rows: HatchRow[] }> = ({ rows }) => {
             )
           })}
         </tbody>
+        {sorted.length > 0 && (
+          <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+            <Td colSpan={8}>TOTAL ({sorted.length})</Td>
+            <Td right>{sorted.reduce((s, r: any) => s + (Number(r.eggs_set) || 0), 0).toLocaleString('en-IN')}</Td>
+            <Td right>{sorted.reduce((s, r: any) => s + (Number(r.chicks_hatched) || 0), 0).toLocaleString('en-IN')}</Td>
+            <Td right>
+              {(() => {
+                const e = sorted.reduce((s, r: any) => s + (Number(r.eggs_set) || 0), 0)
+                const c = sorted.reduce((s, r: any) => s + (Number(r.chicks_hatched) || 0), 0)
+                return e > 0 ? pct(c / e, 1) : '—'
+              })()}
+            </Td>
+          </tr></tfoot>
+        )}
       </Table>
     </Card>
   )

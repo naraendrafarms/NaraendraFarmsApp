@@ -795,6 +795,16 @@ export const FeedProduction: React.FC = () => {
                 </tr>
               ))}
             </tbody>
+            {!!productions?.length && (
+              <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                <Td colSpan={3}>TOTAL ({productions.length} batches)</Td>
+                <Td right>{Math.round(productions.reduce((s: number, p: any) => s + (Number(p.quantity_kg) || 0), 0)).toLocaleString('en-IN')}</Td>
+                <Td right className="text-xs text-gray-500">
+                  {(productions.reduce((s: number, p: any) => s + (Number(p.quantity_kg) || 0), 0) / 1000).toFixed(2)}
+                </Td>
+                <Td colSpan={2}></Td>
+              </tr></tfoot>
+            )}
           </Table>
           {productions?.length === 0 && <EmptyState icon={<Factory size={32}/>} title="No production records" action={<Button onClick={openAdd} icon={<Plus size={16}/>}>Add Batch</Button>} />}
         </Card>
@@ -920,6 +930,13 @@ export const FeedTransfer: React.FC = () => {
                 </tr>
               ))}
             </tbody>
+            {!!transfers?.length && (
+              <tfoot><tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                <Td colSpan={6}>TOTAL ({transfers.length} transfers)</Td>
+                <Td right>{Math.round(transfers.reduce((s: number, t: any) => s + (Number(t.quantity_kg) || 0), 0)).toLocaleString('en-IN')}</Td>
+                <Td colSpan={2}></Td>
+              </tr></tfoot>
+            )}
           </Table>
           {transfers?.length === 0 && <EmptyState icon={<ArrowRight size={32}/>} title="No transfer records" action={<Button onClick={openAdd} icon={<Plus size={16}/>}>Add Transfer</Button>} />}
         </Card>

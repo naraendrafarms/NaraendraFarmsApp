@@ -1425,6 +1425,18 @@ export const MonthlyProductionReview: React.FC = () => {
                         <Td right className="text-sm">{inr(d.avg)}</Td>
                       </tr>
                     ))}
+                    {dieselByMonth.length > 0 && (
+                      <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
+                        <Td className="text-sm">TOTAL</Td>
+                        <Td right className="text-sm">{dieselByMonth.reduce((a, d) => a + d.qty, 0).toLocaleString('en-IN')}</Td>
+                        <Td right className="text-sm">{inr(dieselByMonth.reduce((a, d) => a + d.amt, 0))}</Td>
+                        <Td right className="text-sm">
+                          {inr(dieselByMonth.reduce((a, d) => a + d.qty, 0) > 0
+                            ? dieselByMonth.reduce((a, d) => a + d.amt, 0) / dieselByMonth.reduce((a, d) => a + d.qty, 0)
+                            : 0)}
+                        </Td>
+                      </tr>
+                    )}
                   </tbody>
                 </Table>
               </Card>
