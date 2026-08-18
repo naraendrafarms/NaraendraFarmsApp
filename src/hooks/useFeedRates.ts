@@ -52,7 +52,7 @@ export function useFeedRates(): FeedRates {
         .from('stock_ledger')
         .select('item_name,unit_price,txn_date,txn_type')
         .in('txn_type', ['opening', 'adjustment_in'])
-        .order('txn_date', { ascending: false }).range(from, to), 'Stock ledger rates')
+        .order('txn_date', { ascending: false }).order('id').range(from, to), 'Stock ledger rates')
       for (const r of (slRates ?? [])) {
         const k = canonName(canon, (r as any).item_name)
         if (k && r.unit_price && !(k in rateByIng)) rateByIng[k] = Number(r.unit_price)

@@ -193,8 +193,10 @@ function useStockRows(asOf: string, from?: string) {
       let all: any[] = [], from = 0
       while (true) {
         let q = supabase.from('stock_ledger')
-          .select('item_id,item_name,txn_type,qty,unit,unit_price,txn_date')
-          .order('txn_date').range(from, from + 999)
+          .select('id,item_id,item_name,txn_type,qty,unit,unit_price,txn_date')
+          // .order('id') is the tie-breaker that makes paging stable — without
+          // it, rows sharing a date can slip between pages and never load.
+          .order('txn_date').order('id').range(from, from + 999)
         if (asOf) q = q.lte('txn_date', asOf)
         const { data } = await q
         if (!data || !data.length) break

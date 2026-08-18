@@ -931,7 +931,7 @@ const ProductionTab: React.FC = () => {
       const sl = await fetchAllPages<any>((from, to) => supabase.from('stock_ledger')
         .select('item_name,unit_price,txn_date,txn_type')
         .in('txn_type', ['opening', 'adjustment_in'])
-        .order('txn_date', { ascending: false }).range(from, to), 'Ingredient rates')
+        .order('txn_date', { ascending: false }).order('id').range(from, to), 'Ingredient rates')
       for (const r of (sl ?? [])) {
         const k = canonName(canon, r.item_name)
         if (!k || !r.unit_price) continue

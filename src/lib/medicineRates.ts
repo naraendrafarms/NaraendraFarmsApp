@@ -22,7 +22,7 @@ export function useMedicineRates() {
       while (true) {
         const { data } = await supabase.from('stock_ledger')
           .select('item_id,item_name,txn_type,unit_price,txn_date')
-          .order('txn_date', { ascending: true }).range(from, from + 999)
+          .order('txn_date', { ascending: true }).order('id').range(from, from + 999)
         if (!data || !data.length) break
         all = all.concat(data); if (data.length < 1000) break; from += 1000
       }

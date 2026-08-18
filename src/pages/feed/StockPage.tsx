@@ -25,8 +25,16 @@ export const StockPage: React.FC<{ feedOnly?: boolean }> = ({ feedOnly = false }
       let all: any[] = [], from = 0
       while (true) {
         const { data } = await supabase.from('stock_ledger')
-          .select('item_id,item_name,txn_type,qty,unit_price,txn_date')
-          .order('txn_date', { ascending: true }).range(from, from + 999)
+          .select('id,item_id,item_name,txn_type,qty,unit_price,txn_date')
+          // The id is a TIE-BREAKER, and it is not optional. Paging asks for
+          // rows 0-999, then 1000-1999, and so on; with only txn_date to sort
+          // by, rows sharing a date have no defined order and the server may
+          // hand back a different arrangement for each page. A row can then
+          // fall in the gap between two pages and never arrive — which is how
+          // Alkakarb's 5,000 kg receipt of 11/06/2026 vanished from this page
+          // while sitting in the ledger all along, and why the same page had
+          // shown it correctly the day before.
+          .order('txn_date', { ascending: true }).order('id').range(from, from + 999)
         if (!data || !data.length) break
         all = all.concat(data); if (data.length < 1000) break; from += 1000
       }

@@ -98,7 +98,7 @@ export const StockStatement: React.FC = () => {
       let all: any[] = [], from = 0
       while (true) {
         const { data, error } = await supabase.from('stock_ledger')
-          .select('item_id,item_name,category,txn_type,qty').order('txn_date').range(from, from + 999)
+          .select('id,item_id,item_name,category,txn_type,qty').order('txn_date').order('id').range(from, from + 999)
         if (error) throw error
         if (!data || !data.length) break
         all = all.concat(data); if (data.length < 1000) break; from += 1000
