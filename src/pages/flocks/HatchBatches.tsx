@@ -1301,7 +1301,18 @@ export const HatchBatches: React.FC = () => {
                 if (d) {
                   if (d.invoice_no) s('invoice_no', d.invoice_no)
                   if (d.flock_id)   s('flock_id', d.flock_id)
-                  if (d.total_dispatched) s('eggs_set', d.total_dispatched.toString())
+                  // Eggs Set is what THIS setting received, which is often part
+                  // of an invoice: NF/HHF/25-26/45 carried 50,400 and one
+                  // setting took 20,160. Filling it with the whole invoice
+                  // overwrote the real figure — on an existing batch it
+                  // destroyed a number somebody had already entered. So it is
+                  // only suggested into an EMPTY box, and what is suggested is
+                  // what remains of the invoice, not its full quantity.
+                  if (!form.eggs_set || form.eggs_set.trim() === '') {
+                    const { total, used } = remainingOf(d)
+                    const left = total - used
+                    if (left > 0) s('eggs_set', String(left))
+                  }
                 }
               }}
               hint={form.dispatch_id
