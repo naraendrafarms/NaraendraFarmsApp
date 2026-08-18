@@ -1089,27 +1089,42 @@ export const HEDispatch: React.FC = () => {
   const { data: stockData } = useQuery({
     queryKey: ['he_stock_register', flockFilter],
     queryFn: async () => {
-      let dq = supabase.from('daily_records')
-        .select('record_date,flock_id,he_grade_a,he_grade_b,he_grade_c,wastage_he,flocks(flock_no)')
-        .order('record_date', { ascending: true })
-      // Use inner join so only lines with a valid dispatch are included (matches EggStock logic)
-      let lq = supabase.from('he_dispatch_lines')
-        .select('flock_id,grade_a,grade_b,grade_c,he_dispatch!inner(dispatch_date,flock_id)')
-        .order('he_dispatch(dispatch_date)', { ascending: true })
-      let oq = supabase.from('egg_opening_stock')
-        .select('flock_id,he_grade_a,he_grade_b,he_grade_c,flocks(flock_no)')
-      // Egg Conversions (e.g. HE Grade C -> TE) previously weren't read here
-      // at all, so converted eggs stayed in HE stock AND became sellable
-      // again as the converted-to type — double-counted.
-      let cq = supabase.from('egg_conversions')
-        .select('flock_id,conversion_date,from_type,from_qty')
-      if (flockFilter) {
-        dq = dq.eq('flock_id', flockFilter)
-        lq = lq.eq('flock_id', flockFilter)
-        oq = oq.eq('flock_id', flockFilter)
-        cq = cq.eq('flock_id', flockFilter)
+      // Every one of these four reads was a bare select, which the server caps
+      // at 1,000 rows without saying so. Flock 19 alone holds 1,681 daily rows
+      // (4 sheds x 350 days): the 1,000th falls on 18/01/2026, which is the
+      // exact day its egg figures stopped appearing here while All Flock Data
+      // carried on to 03/07/2026. 682 rows over 141 days were simply not read.
+      // Each query is rebuilt per page — a Supabase query object cannot be
+      // reused once it has been sent.
+      const build = () => {
+        let dq = supabase.from('daily_records')
+          .select('record_date,flock_id,he_grade_a,he_grade_b,he_grade_c,wastage_he,flocks(flock_no)')
+          .order('record_date', { ascending: true })
+        // Inner join so only lines with a valid dispatch are included (matches EggStock logic)
+        let lq = supabase.from('he_dispatch_lines')
+          .select('flock_id,grade_a,grade_b,grade_c,he_dispatch!inner(dispatch_date,flock_id)')
+          .order('he_dispatch(dispatch_date)', { ascending: true })
+        let oq = supabase.from('egg_opening_stock')
+          .select('flock_id,he_grade_a,he_grade_b,he_grade_c,flocks(flock_no)')
+        // Egg Conversions (e.g. HE Grade C -> TE) previously weren't read here
+        // at all, so converted eggs stayed in HE stock AND became sellable
+        // again as the converted-to type — double-counted.
+        let cq = supabase.from('egg_conversions')
+          .select('flock_id,conversion_date,from_type,from_qty')
+        if (flockFilter) {
+          dq = dq.eq('flock_id', flockFilter)
+          lq = lq.eq('flock_id', flockFilter)
+          oq = oq.eq('flock_id', flockFilter)
+          cq = cq.eq('flock_id', flockFilter)
+        }
+        return { dq, lq, oq, cq }
       }
-      const [{ data: prod }, { data: rawLines }, { data: opening }, { data: conversions }] = await Promise.all([dq, lq, oq, cq])
+      const [prod, rawLines, opening, conversions] = await Promise.all([
+        fetchAllPages<any>((f, t) => build().dq.range(f, t), 'Stock register — production'),
+        fetchAllPages<any>((f, t) => build().lq.range(f, t), 'Stock register — dispatch lines'),
+        fetchAllPages<any>((f, t) => build().oq.range(f, t), 'Stock register — opening stock'),
+        fetchAllPages<any>((f, t) => build().cq.range(f, t), 'Stock register — egg conversions'),
+      ])
 
       // Flatten dispatch lines to use dispatch_date (same as EggStock heDisp)
       const dispLines = (rawLines ?? []).map((l: any) => ({

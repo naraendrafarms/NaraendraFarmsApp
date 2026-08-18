@@ -180,7 +180,13 @@ export const PLReport: React.FC = () => {
   const feedRates = useFeedRates()
   const { data: dailyFeed } = useQuery({
     queryKey: ['pl_feed_records', flockId], enabled,
-    queryFn: async () => { const { data } = await supabase.from('daily_records').select('feed_female_kg,feed_type_f,feed_male_kg,feed_type_m').eq('flock_id', flockId); return data ?? [] }
+    // Paged: this is a MONEY figure. One flock can hold more than 1,000 daily
+    // rows on its own — Flock 19 has 1,681 across 4 sheds — and a bare select
+    // stops at 1,000 silently, which UNDERSTATES the feed cost with no sign
+    // that anything was left out.
+    queryFn: () => fetchAllPages<any>((from, to) => supabase.from('daily_records')
+      .select('feed_female_kg,feed_type_f,feed_male_kg,feed_type_m')
+      .eq('flock_id', flockId).range(from, to), 'Flock feed records')
   })
   // Electricity: bills for flock's farm — electricity_bills has no farm_id
   // column of its own (farm comes via the meter), so the previous query
