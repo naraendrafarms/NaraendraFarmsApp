@@ -27,6 +27,35 @@ happening?" or a bug report). If in doubt, explain first and ask.
 
 ---
 
+## PENDING WORK GOES INTO TASKS, NOT INTO THE CHAT (NEVER CHANGE THIS)
+Anything left outstanding at the end of a piece of work — something waiting on
+the user's data, a fix deferred, a gap found while checking something else, a
+decision not yet made — is written into `public.tasks` as
+`task_type = 'development'` **in the same session**, by a seed migration, before
+the turn ends. Do not leave it in the chat: a transcript ages while the work
+moves on, and the user should never have to scroll old messages to ask "what is
+pending?".
+
+Each task must say, in its description:
+- **WAITING ON YOU** (and exactly what is needed: which sheet, which rate,
+  which decision) or **OPEN** / **NOT BUILT** / **DEFERRED BY YOU** when it is
+  mine to do;
+- what is already built and sitting idle because of it, if anything;
+- any constraint that must change before the data can load.
+
+Rules:
+- Seed with `WHERE NOT EXISTS (... title = ... AND task_type='development')` so
+  re-running never resurrects something already ticked off.
+- Mark an item `status='done'` in the same session it ships — an untrue list is
+  worse than no list.
+- Development tasks are ADMIN ONLY, enforced by the row policies on `tasks`
+  (migration 720). Never widen those policies.
+- Set `team` (Farm Data, Feed, Flocks, Accounts, Inventory, HR, Hatchery,
+  Standards, Housekeeping) and a real `priority` — high only when it blocks
+  work already built.
+
+---
+
 ## NEVER ASSUME — CHECK FIRST, SAY WHAT IT IS, THEN DO IT (NEVER CHANGE THIS)
 Do not guess a column name, a table name, a status/enum value, an existing
 value, or whether something already exists. **Verify it against the real
