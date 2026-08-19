@@ -139,11 +139,16 @@ export const FlockDetail: React.FC = () => {
     queryKey: ['flock_hatch_batches', id],
     enabled: !!id,
     queryFn: async () => {
-      const { data } = await supabase.from('hatch_batches')
+      // An INNER join on the dispatch, filtered on its flock — the same shape
+      // the dispatch-lines query uses. An .or() across an embedded table is
+      // not valid PostgREST: it returned nothing at all, so Eggs Set read as a
+      // dash on every row even where fourteen batches were linked.
+      const { data, error } = await supabase.from('hatch_batches')
         .select('id,dispatch_id,flock_id,setting_date,eggs_set,hatched_chicks,hatchability_pct,' +
-                'he_dispatch:dispatch_id(dispatch_date,flock_id)')
-        .or(`flock_id.eq.${id},he_dispatch.flock_id.eq.${id}`)
+                'he_dispatch!inner(dispatch_date,flock_id)')
+        .eq('he_dispatch.flock_id', id!)
         .order('setting_date')
+      if (error) { console.error('hatch batches', error); return [] }
       return data ?? []
     }
   })
