@@ -213,7 +213,9 @@ export const TasksPage: React.FC = () => {
               <Th>Type</Th>
               <Th>Team / Site</Th>
               <Th>Assigned To</Th>
+              <Th>Created</Th>
               <Th>Due Date</Th>
+              <Th>Completed</Th>
               <Th>Priority</Th>
               <Th>Status</Th>
               <Th>Linked</Th>
@@ -235,8 +237,32 @@ export const TasksPage: React.FC = () => {
                     <Td><Badge color="gray">{TASK_TYPE_OPTIONS.find(o => o.value === t.task_type)?.label ?? t.task_type}</Badge></Td>
                     <Td>{t.farms?.name ?? t.team ?? '—'}</Td>
                     <Td>{t.assignee?.full_name ?? (t.team ? `Team: ${t.team}` : '—')}</Td>
+                    {/* When it was raised, when it was finished, and how long
+                        it sat. A list without those answers cannot say whether
+                        anything is actually moving. */}
+                    <Td className="text-xs text-gray-500">
+                      {t.created_at ? fmtDate(String(t.created_at).slice(0, 10)) : '—'}
+                    </Td>
                     <Td className={overdue ? 'text-red-600 font-medium' : ''}>
                       {t.due_date ? fmtDate(t.due_date) : '—'}{overdue && ' (overdue)'}
+                    </Td>
+                    <Td className="text-xs">
+                      {t.completed_at ? (
+                        <>
+                          <span className="text-green-700">{fmtDate(String(t.completed_at).slice(0, 10))}</span>
+                          {t.created_at && (
+                            <span className="text-gray-400 ml-1">
+                              ({Math.max(0, Math.round(
+                                (new Date(t.completed_at).getTime() - new Date(t.created_at).getTime()) / 86400000
+                              ))}d)
+                            </span>
+                          )}
+                        </>
+                      ) : t.status === 'done'
+                        // Marked done before the app recorded a date, or closed
+                        // by a migration. Saying so beats inventing a date.
+                        ? <span className="text-gray-400" title="Completed before the date was recorded">not recorded</span>
+                        : <span className="text-gray-300">—</span>}
                     </Td>
                     <Td><Badge color={PRIORITY_COLOR[t.priority] ?? 'gray'}>{t.priority}</Badge></Td>
                     <Td><Badge color={STATUS_BADGE[t.status as TaskStatus]?.color}>{STATUS_BADGE[t.status as TaskStatus]?.label ?? t.status}</Badge></Td>
