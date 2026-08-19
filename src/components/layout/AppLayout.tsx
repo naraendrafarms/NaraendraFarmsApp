@@ -37,6 +37,7 @@ const NAV: NavItem[] = [
       { label: 'All Flocks (Data)',  to: '/flocks' },
       { label: 'Compare Flocks',     to: '/flock/compare' },
       { label: 'Chick Receipts',     to: '/flock/chick-receipts' },
+      { label: 'Flock Lifetime (vs Standard)', to: '/flock/lifetime' },
       { label: 'Shed Performance',   to: '/flock/shed-performance' },
       { label: 'Daily Entry',        to: '/flocks/daily' },
       { label: 'Bulk Daily Entry',   to: '/flocks/bulk-daily' },
