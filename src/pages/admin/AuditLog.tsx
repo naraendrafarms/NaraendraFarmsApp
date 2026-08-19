@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { fmtDateTime } from '@/lib/utils'
 import { Card, SectionHeader, Spinner, Badge , DateInput } from '@/components/ui'
 import { Shield, Search, RefreshCw, Download, User, Clock } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 const TABLE_LABELS: Record<string, string> = {
   daily_records:       'Daily Records',
@@ -95,6 +96,36 @@ export const AuditLogPage: React.FC = () => {
 
   const rows = data?.rows ?? []
   const total = data?.total ?? 0
+
+  // Which entry is expanded to show what actually changed. The log holds the
+  // row as it was and as it became, so the difference can be read here instead
+  // of guessed at from a summary line.
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [undoing, setUndoing] = useState<string | null>(null)
+
+  const changedFields = (row: any): { field: string; from: string; to: string }[] => {
+    const oldD = row.old_data ?? {}, newD = row.new_data ?? {}
+    const keys = [...new Set([...Object.keys(oldD), ...Object.keys(newD)])].sort()
+    const skip = new Set(['id', 'created_at', 'updated_at'])
+    const out: { field: string; from: string; to: string }[] = []
+    for (const k of keys) {
+      if (skip.has(k)) continue
+      const a = oldD[k], b = newD[k]
+      if (JSON.stringify(a ?? null) === JSON.stringify(b ?? null)) continue
+      out.push({ field: k, from: a == null ? '—' : String(a), to: b == null ? '—' : String(b) })
+    }
+    return out
+  }
+
+  const undo = async (row: any) => {
+    if (!confirm(`Put this back the way it was?\n\n${row.summary ?? row.table_name}\n${fmtDT(row.changed_at)} by ${row.user_email ?? 'unknown'}`)) return
+    setUndoing(row.id)
+    const { data: msg, error } = await supabase.rpc('fn_undo_audit', { p_audit_id: row.id })
+    setUndoing(null)
+    if (error) { toast.error(error.message); return }
+    toast.success(String(msg ?? 'Undone'))
+    refetch()
+  }
 
   // Client-side search on summary/email
   const filtered = search
@@ -237,11 +268,12 @@ export const AuditLogPage: React.FC = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Action</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Module</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Description</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Undo</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-12 text-center text-gray-400">
+                  <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-400">
                     <Shield size={32} className="mx-auto mb-2 opacity-30"/>
                     No audit records found
                   </td></tr>
@@ -274,10 +306,64 @@ export const AuditLogPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-700">
-                      {row.summary ?? '—'}
+                      <button className="text-left hover:underline"
+                        onClick={() => setOpenId(openId === row.id ? null : row.id)}>
+                        {row.summary ?? '—'}
+                        {(row.old_data || row.new_data) && (
+                          <span className="ml-2 text-brand-600">{openId === row.id ? '▾ hide' : '▸ what changed'}</span>
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {row.undone_at ? (
+                        <span className="text-xs text-gray-400" title={`Undone by ${row.undone_by ?? 'admin'}`}>undone</span>
+                      ) : (row.old_data || row.new_data) ? (
+                        <button onClick={() => undo(row)} disabled={undoing === row.id}
+                          className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-white hover:border-brand-400 hover:text-brand-700 disabled:opacity-40">
+                          {undoing === row.id ? '…' : 'Undo'}
+                        </button>
+                      ) : (
+                        // Entries from before the log kept values cannot be put
+                        // back, and saying so is better than a button that fails.
+                        <span className="text-xs text-gray-300" title="Recorded before the log kept values">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
+                {filtered.map(row => openId === row.id ? (
+                  <tr key={row.id + '-detail'} className="bg-gray-50">
+                    <td colSpan={6} className="px-4 py-3">
+                      {row.action === 'UPDATE' ? (
+                        changedFields(row).length === 0 ? (
+                          <p className="text-xs text-gray-500">Saved with no field actually changing.</p>
+                        ) : (
+                          <table className="text-xs">
+                            <thead><tr className="text-gray-400">
+                              <th className="text-left pr-6 pb-1">Field</th>
+                              <th className="text-left pr-6 pb-1">Was</th>
+                              <th className="text-left pb-1">Became</th>
+                            </tr></thead>
+                            <tbody>
+                              {changedFields(row).map(c => (
+                                <tr key={c.field}>
+                                  <td className="pr-6 py-0.5 font-medium text-gray-600">{c.field}</td>
+                                  <td className="pr-6 py-0.5 text-red-600">{c.from}</td>
+                                  <td className="py-0.5 text-green-700">{c.to}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )
+                      ) : (
+                        <p className="text-xs text-gray-600">
+                          {row.action === 'DELETE'
+                            ? 'The whole record was deleted. Undo puts it back exactly as it was.'
+                            : 'The record was created. Undo removes it again.'}
+                        </p>
+                      )}
+                    </td>
+                  </tr>
+                ) : null)}
               </tbody>
             </table>
           </div>
