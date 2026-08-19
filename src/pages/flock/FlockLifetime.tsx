@@ -14,9 +14,13 @@ import { Download, LineChart as LineIcon } from 'lucide-react'
 // argument for building it: the weekly report a manager assembles by hand in
 // Excel is already sitting in the database, one week apart from being read.
 //
-// Weeks are counted the way the farm's own report counts them — day 1 is the
-// day AFTER placement, so week 1 ends on placement + 7. That was checked
-// against Flock 22, placed 05-May-2026, whose report dates week 1 as 12-May.
+// Weeks are counted the way the farm's own report counts them: week 1 is the
+// placement day and the six days after. That was settled by arithmetic rather
+// than by reading the sheet's headings — counted this way Flock 22's weeks 2
+// to 14 match its weekly report exactly on both mortality and feed, and
+// counted from the day after placement not one of them matches. The sheet
+// DATES week 1 as placement + 7 because that is the day the birds are weighed,
+// which is a different thing from the week it belongs to.
 
 type Flock = {
   id: string; flock_no: string; breed: string | null; status: string
@@ -108,9 +112,15 @@ export const FlockLifetime: React.FC = () => {
   const both = useMemo(() => {
     if (!flock?.placement_date || (daily as any[]).length === 0) return { Female: [] as any[], Male: [] as any[] }
     const placed = new Date(flock.placement_date + 'T00:00:00')
+    // Week 1 is the placement day and the six days after it. That is not a
+    // guess: counted this way, Flock 22's weeks 2 to 14 reproduce its weekly
+    // report EXACTLY, mortality and feed alike, while counting from the day
+    // after placement misses every one of them by a day. (Week 1 still differs
+    // by the transit mortality and cull chicks, which the report keeps out of
+    // depletion and the app records as day-one deaths.)
     const weekOf = (d: string) => {
       const days = Math.floor((new Date(d + 'T00:00:00').getTime() - placed.getTime()) / 86400000)
-      return Math.floor((days - 1) / 7) + 1     // day 1 = the day after placement
+      return Math.floor(days / 7) + 1
     }
 
     type W = {
@@ -431,7 +441,8 @@ export const FlockLifetime: React.FC = () => {
               )}
             </div>
             <p className="text-xs text-gray-500 px-3 py-2">
-              Week 1 is the day after placement to placement + 7, the same as the farm's weekly report. A week with
+              Week 1 is the placement day and the six days after, which is what reproduces the farm's weekly
+              report figure for figure. A week with
               fewer than seven days of entry is shaded — its totals are real but not comparable with a full week.
               Depletion is measured against the birds placed. Feed per bird per day divides the week's feed by the
               birds and the days actually entered. Body weight comes from the weekly weighing, so it is blank in any
