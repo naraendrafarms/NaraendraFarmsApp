@@ -845,6 +845,14 @@ export const BulkDailyEntry: React.FC = () => {
     'Wastage HE','Wastage JE','Wastage TE','Wastage BE',
     'Grade A','Grade B','Grade C','Lighting Hrs','Medicine','Med Qty','Remarks']
 
+  // The multi-day sheet carries two columns the single-day grid never needs.
+  // FARM, because a flock lives at more than one site over its life — reared
+  // at Kethireddypally, laying at Bodjanampet-1 — and both sites have a shed
+  // numbered 1. Matching on the number alone silently puts a day's production
+  // in the wrong shed at the wrong site. RECEIVED F/M, because the first day
+  // of a flock's life is birds ARRIVING, which no other column can express.
+  const MULTIDAY_EXTRA = ['Farm','Received F','Received M']
+
   // NOTE: Grade A/B/C are FLOCK-LEVEL (one set for the whole flock, entered after grading all sheds).
   // In the sheet, put them on the FIRST shed row only — they apply to the flock, not each shed.
   const shedTemplate = () => downloadXlsxTemplate('bulk_flockwise_template.xlsx', SHED_HEADERS,
@@ -970,9 +978,10 @@ export const BulkDailyEntry: React.FC = () => {
   // day, saved date-by-date using the exact same logic as a normal Save All
   // for that day (so it stays correct with Flock P&L/Egg Stock/etc. — no
   // separate write path to drift out of sync).
-  const MULTIDAY_HEADERS = ['Date', ...SHED_HEADERS]
+  const MULTIDAY_HEADERS = ['Date', ...MULTIDAY_EXTRA, ...SHED_HEADERS]
   const multiDayTemplate = () => downloadXlsxTemplate('bulk_multiday_template.xlsx', MULTIDAY_HEADERS,
-    ['23/06/2025', '1', '1000', '100', '120', 'BCM', '30', 'MALE', '0', '0', '0', '0', '2', '1', '500', '40', '20', '10', '5', '', '', '', '', '300', '150', '50', '16', '', '', 'OK'])
+    ['23/06/2025', 'Bodjanampet - 1', '0', '0',
+     '1', '1000', '100', '120', 'BCM', '30', 'MALE', '0', '0', '0', '0', '2', '1', '500', '40', '20', '10', '5', '', '', '', '', '300', '150', '50', '16', '', '', 'OK'])
 
   // Flexible date parsing — the app's own convention is DD/MM/YYYY, but Excel
   // date cells can come back from the parser in several shapes depending on
@@ -1008,12 +1017,33 @@ export const BulkDailyEntry: React.FC = () => {
         whe: col('Wastage HE'), wje: col('Wastage JE'), wte: col('Wastage TE'), wbe: col('Wastage BE'),
         ga: col('Grade A'), gb: col('Grade B'), gc: col('Grade C'),
         lt: col('Lighting Hrs'), med: col('Medicine'), mq: col('Med Qty'), rem: col('Remarks'),
+        farm: col('Farm'), rcf: col('Received F'), rcm: col('Received M'),
       }
       if (ci.date < 0 || ci.shed < 0) { toast.error('File needs "Date" and "Shed No" columns'); return }
       const g = (row: string[], i: number) => i >= 0 ? String(row[i] ?? '').trim() : ''
+      // Shed numbers repeat across sites, so match on farm AND number where the
+      // sheet says which farm, and fall back to the number only when it is
+      // unambiguous for this flock. An ambiguous number with no farm is
+      // REFUSED rather than guessed.
+      const farmName = (id: string | null | undefined) =>
+        String((farms ?? []).find((f: any) => f.id === id)?.name ?? '').trim().toLowerCase()
+      const shedByFarmNo: Record<string, any> = {}
+      const countByNo: Record<string, number> = {}
       const shedByNo: Record<string, any> = {}
-      for (const s of flockSheds) shedByNo[String(s.shed_no).trim()] = s
-
+      for (const s of flockSheds) {
+        const no = String(s.shed_no).trim()
+        shedByFarmNo[`${farmName(s.farm_id)}|${no}`] = s
+        countByNo[no] = (countByNo[no] ?? 0) + 1
+        shedByNo[no] = s
+      }
+      const resolveShed = (row: string[]) => {
+        const no = g(row, ci.shed)
+        if (!no) return null
+        const fm = g(row, ci.farm).trim().toLowerCase()
+        if (fm) return shedByFarmNo[`${fm}|${no}`] ?? null
+        if ((countByNo[no] ?? 0) > 1) return null   // ambiguous — needs a Farm
+        return shedByNo[no] ?? null
+      }
       type RawRow = { shed: any; row: string[] }
       const byDate = new Map<string, RawRow[]>()
       let badDates = 0, badSheds = 0
@@ -1021,7 +1051,7 @@ export const BulkDailyEntry: React.FC = () => {
         if (!row.some((c: any) => (c ?? '').toString().trim() !== '')) continue
         const dateStr = parseFlexDate(g(row, ci.date))
         if (!dateStr) { badDates++; continue }
-        const shed = shedByNo[g(row, ci.shed)]
+        const shed = resolveShed(row)
         if (!shed) { badSheds++; continue }
         const list = byDate.get(dateStr) ?? []
         list.push({ shed, row })
@@ -1069,11 +1099,12 @@ export const BulkDailyEntry: React.FC = () => {
           const ff = parseFloat(g(row, ci.ff)) || 0, fm = parseFloat(g(row, ci.fm)) || 0
           const tf = parseInt(g(row, ci.trf)) || 0, tm = parseInt(g(row, ci.trm)) || 0
           const cf = parseInt(g(row, ci.cf)) || 0, cm = parseInt(g(row, ci.cm)) || 0
-          const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || g(row, ci.lt) || g(row, ci.rem)
+          const hasProductionData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || whe || wje || wte || wbe || g(row, ci.lt) || g(row, ci.rem) || g(row, ci.rcf) || g(row, ci.rcm)
           const existingId = existingMap.get(`${shed.id}_${d}`)
           if (!hasProductionData && !existingId) { skippedRows++; continue }
 
           const openF = parseInt(g(row, ci.of)) || 0, openM = parseInt(g(row, ci.om)) || 0
+          const rcF = parseInt(g(row, ci.rcf)) || 0, rcM = parseInt(g(row, ci.rcm)) || 0
           const payload: any = {
             flock_id: selectedFlock, shed_id: shed.id, farm_id: shed.farm_id ?? farmIdForFlock ?? null,
             record_date: d,
@@ -1087,11 +1118,12 @@ export const BulkDailyEntry: React.FC = () => {
             transfer_female: tf, transfer_male: tm,
             cull_female: cf, cull_male: cm,
             trcull_female: tf + cf, trcull_male: tm + cm,
+            received_female: rcF, received_male: rcM,
             // Closing is auto-calculated the same way as the single-day
             // import (Open − Death − Transfer − Cull) — never read from the
             // file, since it's a derived figure, not a source one.
-            closing_female: openF ? Math.max(0, openF - mf - tf - cf) : null,
-            closing_male: openM ? Math.max(0, openM - mm - tm - cm) : null,
+            closing_female: (openF || rcF) ? Math.max(0, openF + rcF - mf - tf - cf) : null,
+            closing_male: (openM || rcM) ? Math.max(0, openM + rcM - mm - tm - cm) : null,
             lighting_hrs: parseFloat(g(row, ci.lt)) || null,
             remarks: g(row, ci.rem) || null,
           }

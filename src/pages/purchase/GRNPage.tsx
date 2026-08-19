@@ -203,7 +203,7 @@ export const GRNPage: React.FC = () => {
       // chick purchases) — page through the full history instead.
       return fetchAllPages<any>(
         (from, to) => supabase.from('grn')
-          .select('*, farms(name), parties(name,gstin)')
+          .select('*, farms(name), parties(name,gstin), flocks(flock_no)')
           .order('grn_date', { ascending: false })
           .order('grn_no', { ascending: false })
           .range(from, to),
@@ -554,14 +554,24 @@ export const GRNPage: React.FC = () => {
   }
 
   const handleExport = () => {
-    const headers = ['GRN No', 'Date', 'Farm', 'Supplier', 'Category', 'Item', 'Qty', 'Unit', 'Bags', 'Bag Type', 'Rate', 'Basic', 'GST%', 'GST Amt', 'Total', 'Batch', 'Expiry', 'Vehicle', 'Remarks']
+    // The export now carries everything the IMPORT accepts, so a GRN can be
+    // exported, corrected in Excel and put straight back. Free quantity and
+    // the flock were missing entirely, which is exactly what a chick delivery
+    // is made of, and the invoice it came on was missing too.
+    const headers = ['GRN No', 'Date', 'Farm', 'Supplier', 'Category', 'Item', 'Qty', 'Free Qty', 'Unit',
+      'Bags', 'Bag Type', 'Rate', 'Basic', 'GST%', 'GST Amt', 'Other Charges', 'Total',
+      'Invoice No', 'Invoice Date', 'Flock', 'Batch', 'Expiry', 'Vehicle', 'Remarks']
     const rows = filtered.map((g: any) => [
       g.grn_no, fmtDate(g.grn_date), g.farms?.name ?? '', g.parties?.name ?? '',
       g.category ?? '', g.item_name ?? '',
-      g.qty?.toString() ?? '', g.unit ?? '', g.bags?.toString() ?? '', g.bag_type ?? '',
+      g.qty?.toString() ?? '', g.free_qty?.toString() ?? '', g.unit ?? '',
+      g.bags?.toString() ?? '', g.bag_type ?? '',
       g.price_per_unit?.toString() ?? '', g.basic_amount?.toString() ?? '',
       g.gst_pct?.toString() ?? '', g.gst_amount?.toString() ?? '',
-      g.total_amount?.toString() ?? '', g.batch_no ?? '', g.expiry_date ? fmtDate(g.expiry_date) : '',
+      g.other_charges?.toString() ?? '', g.total_amount?.toString() ?? '',
+      g.invoice_no ?? '', g.invoice_date ? fmtDate(g.invoice_date) : '',
+      g.flocks?.flock_no ?? '',
+      g.batch_no ?? '', g.expiry_date ? fmtDate(g.expiry_date) : '',
       g.vehicle_no ?? '', g.remarks ?? ''
     ])
     exportCSV(`GRN-${today()}.csv`, headers, rows)

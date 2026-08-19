@@ -762,7 +762,7 @@ export const HEDispatch: React.FC = () => {
     queryFn: async () => {
       const build = () => {
         let q = supabase.from('he_dispatch')
-          .select('*, flocks(flock_no,placement_date), parties(name,address,contact), hatcheries(name)')
+          .select('*, flocks(flock_no,placement_date), parties(name,address,contact), hatcheries(name), he_dispatch_lines(prod_date,grade_a,grade_b,grade_c,rate)')
           .order('dispatch_date', { ascending: false })
         if (flockFilter) q = q.eq('flock_id', flockFilter)
         if (fromDate) q = q.gte('dispatch_date', fromDate)
@@ -1228,8 +1228,26 @@ export const HEDispatch: React.FC = () => {
 
   // CSV template download
   const handleDownloadTemplate = () => {
-    const headers = 'flock_no,dispatch_date,prod_date,dc_no,grade_a,grade_b,grade_c,free_eggs,rate,party_name,remarks'
-    const blob = new Blob([headers + '\n'], { type: 'text/csv' })
+    // ONE ROW PER PRODUCTION DATE. A dispatch normally carries eggs laid over
+    // several days, each day with its own grades and often its own rate, and
+    // that is exactly how the app stores it (he_dispatch_lines). The old
+    // template allowed a single prod_date and a single rate, so a real
+    // dispatch could not be imported at all without flattening it.
+    //
+    // Rows sharing flock_no + dispatch_date + dc_no become ONE dispatch with
+    // a line per production date.
+    const headers = 'flock_no,dispatch_date,dc_no,invoice_no,party_name,prod_date,grade_a,grade_b,grade_c,free_eggs,rate,remarks'
+    const example = [
+      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-08,12000,800,200,0,5.20,',
+      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-09,11500,900,150,100,5.20,100 free on this day',
+      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-10,12200,700,100,0,5.40,rate revised',
+    ].join('\n')
+    const notes = [
+      '# One row per PRODUCTION DATE. Repeat flock_no, dispatch_date and dc_no on every row of the same dispatch.',
+      '# Each row keeps its own grades and its own rate, so a rate change mid-dispatch is preserved.',
+      '# free_eggs are given away, never billed. Amount = sum of (graded eggs less free) x that row rate.',
+    ].join('\n')
+    const blob = new Blob([notes + '\n' + headers + '\n' + example], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -1246,58 +1264,96 @@ export const HEDispatch: React.FC = () => {
       if (rawRows.length === 0) { toast.error('Empty file'); return }
       const records = rawRows.map(vals => { const obj: any = {}; hdrs.forEach((h,i) => { obj[h] = vals[i]??'' }); return obj })
 
-      const rows = records.map((r: any) => {
+      // Group by dispatch: rows sharing flock + dispatch_date + dc_no are one
+      // dispatch made up of several production-date lines.
+      type Line = { prod_date: string; grade_a: number; grade_b: number; grade_c: number; free: number; rate: number | null }
+      const groups: Record<string, { flock_id: string | null; dispatch_date: string; dc_no: number | null;
+                                     invoice_no: string | null; party_id: string | null; remarks: string | null;
+                                     lines: Line[] }> = {}
+
+      for (const r of records as any[]) {
         const flockMatch = flocks?.find((f: any) => String(f.flock_no) === String(r.flock_no))
         const partyMatch = parties?.find((p: any) => p.name === r.party_name)
-        const gradeA = parseInt(r.grade_a) || 0
-        const gradeB = parseInt(r.grade_b) || 0
-        const gradeC = parseInt(r.grade_c) || 0
-        const totalDispatched = gradeA + gradeB + gradeC
-        const freeEggs = parseInt(r.free_eggs) || 0
-        const rate = parseFloat(r.rate) || null
-        return {
-          flock_id: flockMatch?.id ?? null,
-          dispatch_date: r.dispatch_date || null,
-          prod_date: r.prod_date || null,
-          dc_no: parseInt(r.dc_no) || null,
-          grade_a: gradeA,
-          grade_b: gradeB,
-          grade_c: gradeC,
-          total_dispatched: totalDispatched,
-          free_eggs: freeEggs,
-          invoice_eggs: totalDispatched - freeEggs,
-          rate: rate,
-          // Billed on invoice_eggs (total minus free), matching the manual
-          // entry form — previously billed on total_dispatched, overcharging
-          // the buyer for any free eggs included in the dispatch.
-          amount: rate != null ? (totalDispatched - freeEggs) * rate : null,
-          party_id: partyMatch?.id ?? null,
-          remarks: r.remarks || null,
-        }
-      }).filter((r: any) => r.flock_id && r.dispatch_date)
+        const dispatchDate = r.dispatch_date || null
+        if (!flockMatch?.id || !dispatchDate) continue
+        const dcNo = parseInt(r.dc_no) || null
+        const key = `${flockMatch.id}|${dispatchDate}|${dcNo ?? ''}`
+        const g = (groups[key] ??= {
+          flock_id: flockMatch.id, dispatch_date: dispatchDate, dc_no: dcNo,
+          invoice_no: r.invoice_no || null, party_id: partyMatch?.id ?? null,
+          remarks: r.remarks || null, lines: [],
+        })
+        g.lines.push({
+          prod_date: r.prod_date || dispatchDate,
+          grade_a: parseInt(r.grade_a) || 0,
+          grade_b: parseInt(r.grade_b) || 0,
+          grade_c: parseInt(r.grade_c) || 0,
+          free: parseInt(r.free_eggs) || 0,
+          rate: r.rate !== '' && r.rate != null ? parseFloat(r.rate) : null,
+        })
+      }
 
-      if (rows.length === 0) {
+      const grouped = Object.values(groups)
+      if (grouped.length === 0) {
         toast.error('No valid rows found. Check flock_no values match existing flocks.')
         return
+      }
+
+      const headerOf = (g: typeof grouped[number]) => {
+        const gradeA = g.lines.reduce((s2, l) => s2 + l.grade_a, 0)
+        const gradeB = g.lines.reduce((s2, l) => s2 + l.grade_b, 0)
+        const gradeC = g.lines.reduce((s2, l) => s2 + l.grade_c, 0)
+        const total = gradeA + gradeB + gradeC
+        const free = g.lines.reduce((s2, l) => s2 + l.free, 0)
+        // Each line is billed at ITS OWN rate, so a rate change part way
+        // through a dispatch survives. The header rate is then whatever those
+        // lines actually average out to, rather than the first one seen.
+        const amount = g.lines.reduce((s2, l) => {
+          const billable = (l.grade_a + l.grade_b + l.grade_c) - l.free
+          return s2 + (l.rate != null ? billable * l.rate : 0)
+        }, 0)
+        const invoiceEggs = total - free
+        const anyRate = g.lines.some(l => l.rate != null)
+        return {
+          flock_id: g.flock_id,
+          dispatch_date: g.dispatch_date,
+          prod_date: g.lines[0]?.prod_date ?? g.dispatch_date,
+          dc_no: g.dc_no,
+          invoice_no: g.invoice_no,
+          grade_a: gradeA, grade_b: gradeB, grade_c: gradeC,
+          total_dispatched: total,
+          free_eggs: free,
+          invoice_eggs: invoiceEggs,
+          rate: anyRate && invoiceEggs > 0 ? Number((amount / invoiceEggs).toFixed(4)) : null,
+          amount: anyRate ? amount : null,
+          party_id: g.party_id,
+          remarks: g.remarks,
+        }
       }
 
       // Dedupe against existing dispatches so re-importing the same file
       // doesn't double the records
       const { data: existing } = await supabase.from('he_dispatch')
         .select('flock_id,dispatch_date,dc_no,amount')
-        .in('flock_id', [...new Set(rows.map((r: any) => r.flock_id))])
-        .in('dispatch_date', [...new Set(rows.map((r: any) => r.dispatch_date))])
-      const isDupe = (r: any) => (existing ?? []).some((e: any) =>
-        e.flock_id === r.flock_id && e.dispatch_date === r.dispatch_date &&
-        (r.dc_no != null ? e.dc_no === r.dc_no : e.amount === r.amount))
-      const skippedCount = rows.filter(isDupe).length
-      const freshRows = rows.filter((r: any) => !isDupe(r))
-      if (freshRows.length === 0) {
-        toast.error(`All ${skippedCount} rows already exist — nothing imported`)
+        .in('flock_id', [...new Set(grouped.map(g => g.flock_id))] as string[])
+        .in('dispatch_date', [...new Set(grouped.map(g => g.dispatch_date))])
+      const isDupe = (h: any) => (existing ?? []).some((e: any) =>
+        e.flock_id === h.flock_id && e.dispatch_date === h.dispatch_date &&
+        (h.dc_no != null ? e.dc_no === h.dc_no : e.amount === h.amount))
+
+      // Keep each group beside its header, so the lines can never be matched
+      // to the wrong dispatch — the previous version indexed the inserted rows
+      // against the UNFILTERED list, so one skipped duplicate shifted every
+      // line onto the following dispatch.
+      const fresh = grouped.map(g => ({ group: g, header: headerOf(g) })).filter(x => !isDupe(x.header))
+      const skippedCount = grouped.length - fresh.length
+      if (fresh.length === 0) {
+        toast.error(`All ${skippedCount} dispatches already exist — nothing imported`)
         return
       }
 
-      const { data: inserted, error } = await supabase.from('he_dispatch').insert(freshRows).select('id, grade_a, grade_b, dispatch_date')
+      const { data: inserted, error } = await supabase.from('he_dispatch')
+        .insert(fresh.map(x => x.header)).select('id')
       if (error) {
         if (error.message.includes('duplicate') || error.message.includes('unique')) {
           toast.error('Some records already exist (duplicate dispatch dates). Please check your data.')
@@ -1306,24 +1362,25 @@ export const HEDispatch: React.FC = () => {
         }
         return
       }
-      // Imported dispatches previously only wrote the he_dispatch header row
-      // — the Daily Stock Register reads he_dispatch_lines, so imported
-      // dispatches never reduced egg stock. Mirror one line per dispatch.
-      const rowsByIdx = rows.map((r: any, i: number) => ({ ...r, _idx: i }))
-      const linePayload = (inserted ?? []).map((ins: any, i: number) => ({
-        dispatch_id: ins.id,
-        flock_id: rowsByIdx[i]?.flock_id,
-        prod_date: rowsByIdx[i]?.prod_date || ins.dispatch_date,
-        grade_a: ins.grade_a ?? 0,
-        grade_b: ins.grade_b ?? 0,
-        grade_c: rowsByIdx[i]?.grade_c ?? 0,
-        rate: rowsByIdx[i]?.rate ?? null,
-      }))
+
+      // One line per production date — this is what the Daily Stock Register
+      // reads, so without them an imported dispatch never reduces egg stock.
+      const linePayload = (inserted ?? []).flatMap((ins: any, i: number) =>
+        (fresh[i]?.group.lines ?? []).map(l => ({
+          dispatch_id: ins.id,
+          flock_id: fresh[i].group.flock_id,
+          prod_date: l.prod_date,
+          grade_a: l.grade_a,
+          grade_b: l.grade_b,
+          grade_c: l.grade_c,
+          rate: l.rate,
+        })))
       if (linePayload.length) {
         const { error: lineErr } = await supabase.from('he_dispatch_lines').insert(linePayload)
         if (lineErr) toast.error('Dispatches imported, but stock-register lines failed: ' + lineErr.message)
       }
-      toast.success(`Imported ${rows.length} dispatch records!`)
+      toast.success(`Imported ${fresh.length} dispatch${fresh.length === 1 ? '' : 'es'} with ${linePayload.length} production-date lines` +
+        (skippedCount ? ` (${skippedCount} already existed)` : ''))
       qc.invalidateQueries({ queryKey: ['he_dispatch'] })
     } catch (e: any) {
       toast.error('Import failed: ' + e.message)
@@ -1335,14 +1392,30 @@ export const HEDispatch: React.FC = () => {
 
   const handleExportHE = () => {
     const rows = filtered ?? []
-    const headers = 'Flock,Dispatch Date,Prod Date,DC No,Invoice No,Gr A,Gr B,Gr C,Total,Free,Invoice Eggs,Rate,Amount,Party,Remarks'
-    const lines = rows.map((r: any) => [
-      r.flocks?.flock_no ?? '', r.dispatch_date, prodDateLabel(r),
-      r.dc_no ?? '', r.invoice_no ?? '',
-      r.grade_a ?? 0, r.grade_b ?? 0, r.grade_c ?? 0,
-      r.total_dispatched ?? 0, r.free_eggs ?? 0, r.invoice_eggs ?? 0,
-      r.rate ?? '', r.amount ?? '', r.parties?.name ?? '', r.remarks ?? ''
-    ].join(','))
+    // One row per PRODUCTION DATE, matching the import template, so a dispatch
+    // can be exported, corrected and put back with its day-wise split and its
+    // per-day rates intact. A dispatch with no lines still exports one row.
+    const headers = 'flock_no,dispatch_date,dc_no,invoice_no,party_name,prod_date,grade_a,grade_b,grade_c,free_eggs,rate,remarks'
+    const esc = (v: any) => {
+      const t = String(v ?? '')
+      return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t
+    }
+    const lines = rows.flatMap((r: any) => {
+      const dls = (r.he_dispatch_lines ?? []) as any[]
+      const base = [r.flocks?.flock_no ?? '', r.dispatch_date, r.dc_no ?? '', r.invoice_no ?? '',
+                    r.parties?.name ?? '']
+      if (dls.length === 0) {
+        return [[...base, prodDateLabel(r), r.grade_a ?? 0, r.grade_b ?? 0, r.grade_c ?? 0,
+                 r.free_eggs ?? 0, r.rate ?? '', r.remarks ?? ''].map(esc).join(',')]
+      }
+      // Free eggs sit on the dispatch, not the line, so they are shown against
+      // the first line only — putting them on every line would multiply them.
+      return [...dls]
+        .sort((a, b) => String(a.prod_date).localeCompare(String(b.prod_date)))
+        .map((l, i) => [...base, l.prod_date, l.grade_a ?? 0, l.grade_b ?? 0, l.grade_c ?? 0,
+                        i === 0 ? (r.free_eggs ?? 0) : 0, l.rate ?? r.rate ?? '',
+                        i === 0 ? (r.remarks ?? '') : ''].map(esc).join(','))
+    })
     const blob = new Blob([headers + '\n' + lines.join('\n')], { type: 'text/csv' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
     a.download = `he_dispatch_${new Date().toISOString().slice(0,10)}.csv`; a.click()
@@ -2183,7 +2256,7 @@ export const NHESales: React.FC = () => {
       // single request is capped at 1000 rows by Supabase, so page through it
       // rather than silently stopping at 1000.
       const build = () => {
-        let q = supabase.from('nhe_sales').select('*, flocks(flock_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
+        let q = supabase.from('nhe_sales').select('*, flocks(flock_no), sheds(shed_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
           .order('sale_date', { ascending: false })
         if (flockFilter) q = q.eq('flock_id', flockFilter)
         if (empFilter) q = q.eq('employee_id', empFilter)
@@ -2774,15 +2847,22 @@ export const NHESales: React.FC = () => {
 
   // Download template
   const handleDownloadTemplate = () => {
-    const headers = 'flock_no,sale_date,sale_type,party_name,dc_no,quantity,unit,rate,remarks'
+    // Everything the sale can actually hold. The old template stopped at rate
+    // and remarks, so an imported bird sale could never say which shed the
+    // birds left, whether they were given free, or that an employee bought
+    // them — all of which the form has been recording for months.
+    const headers = 'flock_no,sale_date,sale_type,shed_no,party_name,employee_emp_id,dc_no,invoice_no,quantity,free_qty,unit,rate,remarks'
     const example = [
-      '19,2025-06-01,bird_cull,Party Name,DC001,100,nos,150,Cull birds sale',
-      '19,2025-06-01,je,Party Name,DC002,500,nos,8.5,Jumbo eggs',
+      '19,2025-06-01,bird_cull,4,Party Name,,DC001,,100,0,nos,150,Cull birds sale',
+      '19,2025-06-01,je,,Party Name,,DC002,NHE/25-26/001,500,20,nos,8.5,Jumbo eggs with 20 free',
+      '19,2025-06-02,te,,,BPS4001,,,30,0,nos,6,Sold to employee - deducted from salary',
     ].join('\n')
     const notes = [
       '# sale_type values: je | te | be | bird_cull | bird_lame | bird_weak | bird_sex_error | gas | manure | other',
       '# unit: nos (birds/eggs) | kg | ltrs | bags',
-      '# amount = quantity × rate (auto-calculated on import)',
+      '# amount = quantity x rate (auto-calculated on import). free_qty is given away, never charged.',
+      '# shed_no: for BIRD sales, which shed the birds left. Leave blank only if genuinely unknown.',
+      '# employee_emp_id: fill instead of party_name when an employee bought it. Both blank = outside sale with no party.',
     ].join('\n')
     const blob = new Blob([notes + '\n' + headers + '\n' + example], { type: 'text/csv' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
@@ -2791,13 +2871,21 @@ export const NHESales: React.FC = () => {
 
   const handleExport = () => {
     const rows = filtered ?? []
-    const headers = 'Flock,Date,Type,Party,DC No,Qty,Free,Unit,Rate,Amount,Remarks'
+    // The export carries the same columns the import accepts, so a sale can be
+    // exported, corrected in Excel and put back without losing the shed, the
+    // employee or the free quantity.
+    const headers = 'Flock,Date,Type,Shed,Party,Employee,DC No,Invoice No,Qty,Free,Unit,Rate,Amount,Remarks'
+    const esc = (v: any) => {
+      const t = String(v ?? '')
+      return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t
+    }
     const lines = rows.map((r: any) => [
       r.flocks?.flock_no ?? '', r.sale_date,
       r.sale_type,
-      r.parties?.name ?? '', r.dc_no ?? '',
+      r.sheds?.shed_no ?? '',
+      r.parties?.name ?? '', r.employees?.emp_id ?? '', r.dc_no ?? '', r.invoice_no ?? '',
       r.quantity ?? '', r.free_qty ?? 0, r.unit ?? '', r.rate ?? '', r.amount ?? '', r.remarks ?? ''
-    ].join(','))
+    ].map(esc).join(','))
     const blob = new Blob([headers + '\n' + lines.join('\n')], { type: 'text/csv' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
     a.download = `nhe_sales_${new Date().toISOString().slice(0,10)}.csv`; a.click()
@@ -2815,19 +2903,62 @@ export const NHESales: React.FC = () => {
       flocks?.forEach((f: any) => { flockMap[String(f.flock_no)] = f.id })
       const partyMap: Record<string, string> = {}
       parties?.forEach((p: any) => { partyMap[p.name.toLowerCase()] = p.id })
+      const empMap: Record<string, string> = {}
+      employees?.forEach((e: any) => {
+        if (e.emp_id) empMap[String(e.emp_id).toLowerCase()] = e.id
+        if (e.name) empMap[String(e.name).toLowerCase()] = e.id
+      })
 
-      const records = rows.map(r => ({
-        flock_id: flockMap[r.flock_no] ?? null,
-        sale_date: r.sale_date,
-        sale_type: r.sale_type || 'other',
-        party_id: r.party_name ? (partyMap[r.party_name.toLowerCase()] ?? null) : null,
-        dc_no: r.dc_no || null,
-        quantity: r.quantity !== '' ? Number(r.quantity) : null,
-        unit: r.unit || 'nos',
-        rate: r.rate !== '' ? Number(r.rate) : null,
-        amount: (Number(r.quantity||0) * Number(r.rate||0)) || null,
-        remarks: r.remarks || null,
-      })).filter(r => r.flock_id && r.amount)
+      // shed_no is only meaningful inside a flock — the same number exists at
+      // several sites — so the sheds a flock is actually in are looked up per
+      // flock, from the same three sources the form uses.
+      const shedMap: Record<string, string> = {}
+      const wantedFlockIds = [...new Set(rows.map(r => flockMap[r.flock_no]).filter(Boolean))]
+      if (wantedFlockIds.length > 0 && rows.some(r => String(r.shed_no ?? '').trim())) {
+        const [fs, sa, tr] = await Promise.all([
+          supabase.from('flock_sheds').select('flock_id,sheds(id,shed_no)').in('flock_id', wantedFlockIds),
+          supabase.from('shed_allocations').select('flock_id,sheds(id,shed_no)').in('flock_id', wantedFlockIds),
+          supabase.from('flock_transfers').select('flock_id,sheds:to_shed_id(id,shed_no)')
+            .in('flock_id', wantedFlockIds).not('to_shed_id', 'is', null),
+        ])
+        for (const r of [...(fs.data ?? []), ...(sa.data ?? []), ...(tr.data ?? [])] as any[]) {
+          const sh = r.sheds
+          if (sh?.id) shedMap[`${r.flock_id}|${String(sh.shed_no).trim()}`] = sh.id
+        }
+      }
+
+      let shedMisses = 0
+      const records = rows.map(r => {
+        const flock_id = flockMap[r.flock_no] ?? null
+        const shedNo = String(r.shed_no ?? '').trim()
+        // A shed that cannot be matched is left empty rather than guessed —
+        // a wrong shed moves birds off the wrong closing count.
+        const shed_id = shedNo && flock_id ? (shedMap[`${flock_id}|${shedNo}`] ?? null) : null
+        if (shedNo && !shed_id) shedMisses += 1
+        const empKey = String(r.employee_emp_id ?? '').trim().toLowerCase()
+        const employee_id = empKey ? (empMap[empKey] ?? null) : null
+        return {
+          flock_id,
+          sale_date: r.sale_date,
+          sale_type: r.sale_type || 'other',
+          shed_id,
+          party_id: r.party_name ? (partyMap[r.party_name.toLowerCase()] ?? null) : null,
+          employee_id,
+          is_employee_sale: !!employee_id,
+          dc_no: r.dc_no || null,
+          invoice_no: r.invoice_no || null,
+          quantity: r.quantity !== '' ? Number(r.quantity) : null,
+          free_qty: r.free_qty !== '' && r.free_qty != null ? Number(r.free_qty) : 0,
+          unit: r.unit || 'nos',
+          rate: r.rate !== '' ? Number(r.rate) : null,
+          amount: (Number(r.quantity||0) * Number(r.rate||0)) || null,
+          remarks: r.remarks || null,
+        }
+      }).filter(r => r.flock_id && r.amount)
+      if (shedMisses > 0) {
+        toast(`${shedMisses} row${shedMisses === 1 ? '' : 's'} named a shed the flock is not in — imported without a shed`,
+          { icon: '\u26a0\ufe0f' })
+      }
 
       if (records.length === 0) throw new Error('No valid rows found. Check flock_no and amount columns.')
       // Skip rows that already exist — re-importing the same file used to
