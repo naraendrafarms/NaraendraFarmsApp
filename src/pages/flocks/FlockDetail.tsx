@@ -1399,16 +1399,34 @@ export const FlockDetail: React.FC = () => {
       case 'std':
         return {
           title: `Flock ${flock.flock_no} — Actual vs ${flock.laying_season ?? ''} Standard`,
-          headers: ['Age (wk)','Std Cum Depl%','Actual','Var','Std Hen Wk%','Actual','Var','Std HE%','Actual','Var',
-            'Std Hatch%','Actual','Var','Std Wk Chicks/HH','Actual','Var','Std Cum Chicks/HH','Actual','Var',
+          // COLUMN FOR COLUMN, in the order the table shows them. The export
+          // used to stop after Hatch %, silently dropping TE/HH and HE/HH --
+          // twelve columns that are on screen -- so a printed copy could not be
+          // reconciled against the page it came from.
+          headers: ['Age (wk)',
+            'Std Cum Depl%','Actual','Var',
+            'Std Hen Wk%','Actual','Var',
+            'Std HE%','Actual','Var',
+            'Std Wk TE/HH','Actual','Var',
+            'Std Cum TE/HH','Actual','Var',
+            'Std Wk HE/HH','Actual','Var',
+            'Std Cum HE/HH','Actual','Var',
+            'Std Hatch%','Actual','Var',
+            'Std Wk Chicks/HH','Actual','Var',
+            'Std Cum Chicks/HH','Actual','Var',
             'Deaths+culls wk','Deaths+culls cum','Eggs','HE eggs','Bird-days','Eggs set','Chicks hatched'],
           rightAlignFrom: 1,
           rows: stdExportRows.map((r: any) => {
             const f = (v: number|null, d=1) => v != null ? v.toFixed(d) : '—'
             return [
-              r.s.week_of_age, f(r.s.cum_depletion_pct), f(r.cumDepletion), f(r.vDepletion),
+              r.s.week_of_age,
+              f(r.s.cum_depletion_pct), f(r.cumDepletion), f(r.vDepletion),
               f(r.s.hen_week_pct), f(r.actualHd), f(r.vHd),
               f(r.s.he_pct), f(r.actualHe), f(r.vHe),
+              f(r.s.weekly_te_hh, 2), f(r.weeklyTeHh, 2), f(r.vTeHh, 2),
+              f(r.s.cum_te_hh, 2), f(r.cumTeHh, 2), f(r.vCumTeHh, 2),
+              f(r.s.weekly_he_hh, 2), f(r.weeklyHeHh, 2), f(r.vHeHh, 2),
+              f(r.s.cum_he_hh, 2), f(r.cumHeHh, 2), f(r.vCumHeHh, 2),
               f(r.s.hatch_pct), f(r.actualHatch), f(r.vHatch),
               f(r.s.weekly_chicks_hh, 2), f(r.weeklyChicksHh, 2), f(r.vChicksHh, 2),
               f(r.s.cum_chicks_hh, 2), f(r.cumChicksHh, 2), f(r.vCumChicksHh, 2),
