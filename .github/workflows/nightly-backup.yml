@@ -1,0 +1,120 @@
+name: Nightly Backup
+
+# The free Supabase plan has no point-in-time recovery: there is no "roll the
+# database back to 3pm yesterday". So this is the safety net — every night, the
+# whole of the farm's data is written out as CSV files and kept somewhere other
+# than the database it came from.
+#
+# Two copies, deliberately:
+#   * a workflow ARTIFACT, kept 90 days, holding everything including the
+#     audit trail — the copy to reach for after a bad week;
+#   * a compressed weekly snapshot COMMITTED to the repository, so there is a
+#     permanent, versioned history off Supabase entirely, and small enough not
+#     to bloat the repo (the audit log is excluded from this one — it is by far
+#     the largest table and its loss would not stop the farm running).
+on:
+  schedule:
+    - cron: '0 21 * * *'   # 02:30 IST, after the day's entries and the health check
+  workflow_dispatch:
+
+jobs:
+  backup:
+    name: Export every table
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export
+        run: |
+          python3 - << 'PYEOF'
+          import subprocess, json, os, csv, io, pathlib, datetime, sys
+
+          MGMT = os.environ["SUPABASE_MGMT_TOKEN"]
+          REF  = "kjliulgpipqqwptinrrd"
+          OUT  = pathlib.Path("backup"); OUT.mkdir(exist_ok=True)
+
+          def q(sql):
+              with open("/tmp/q.json", "w") as f:
+                  json.dump({"query": sql}, f)
+              r = subprocess.run(["curl", "-s", "-X", "POST",
+                  f"https://api.supabase.com/v1/projects/{REF}/database/query",
+                  "-H", f"Authorization: Bearer {MGMT}",
+                  "-H", "Content-Type: application/json",
+                  "--data-binary", "@/tmp/q.json"], capture_output=True, text=True)
+              try:
+                  out = json.loads(r.stdout)
+              except Exception:
+                  print("Unreadable reply:", r.stdout[:300]); sys.exit(1)
+              if isinstance(out, dict) and out.get("message"):
+                  print("FAILED:", out["message"]); sys.exit(1)
+              return out
+
+          tables = [t["tablename"] for t in q("""
+            SELECT tablename FROM pg_tables
+            WHERE schemaname = 'public' ORDER BY tablename
+          """)]
+          print(f"{len(tables)} tables to export\n")
+
+          total_rows = 0
+          summary = []
+          for t in tables:
+              # Read in pages: one statement returning a whole table would be
+              # refused, and a truncated backup is worse than none.
+              rows, page, PAGE = [], 0, 5000
+              while True:
+                  batch = q(f'SELECT * FROM public."{t}" ORDER BY 1 LIMIT {PAGE} OFFSET {page * PAGE}')
+                  if not batch: break
+                  rows.extend(batch)
+                  if len(batch) < PAGE: break
+                  page += 1
+              if not rows:
+                  summary.append((t, 0)); continue
+              cols = list({k: None for r in rows for k in r.keys()})
+              with open(OUT / f"{t}.csv", "w", newline="", encoding="utf-8") as f:
+                  w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
+                  w.writeheader()
+                  for r in rows:
+                      w.writerow({k: ("" if r.get(k) is None else
+                                      json.dumps(r[k]) if isinstance(r[k], (dict, list)) else r[k])
+                                  for k in cols})
+              total_rows += len(rows)
+              summary.append((t, len(rows)))
+
+          stamp = datetime.date.today().isoformat()
+          with open(OUT / "MANIFEST.txt", "w") as f:
+              f.write(f"Naraendra Farms — data export {stamp}\n")
+              f.write(f"{len(tables)} tables, {total_rows} rows\n\n")
+              for t, n in sorted(summary, key=lambda x: -x[1]):
+                  f.write(f"{n:>8}  {t}\n")
+          print(f"\nExported {total_rows} rows from {len(tables)} tables")
+          for t, n in sorted(summary, key=lambda x: -x[1])[:15]:
+              print(f"  {n:>8}  {t}")
+          PYEOF
+        env: { SUPABASE_MGMT_TOKEN: "${{ secrets.SUPABASE_MGMT_TOKEN }}" }
+
+      - name: Keep as an artifact (90 days, everything)
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-${{ github.run_id }}
+          path: backup/
+          retention-days: 90
+
+      - name: Commit a weekly snapshot (Sundays, without the audit log)
+        run: |
+          if [ "$(date +%u)" != "7" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "Not Sunday — artifact only."; exit 0
+          fi
+          rm -f backup/audit_log.csv
+          mkdir -p backups
+          STAMP=$(date +%Y-%m-%d)
+          tar -czf "backups/snapshot-$STAMP.tar.gz" -C backup .
+          # Keep the last 12 weekly snapshots; older ones live in the artifacts.
+          ls -1t backups/snapshot-*.tar.gz | tail -n +13 | xargs -r rm -f
+          git config user.name "Naraendra Farms Backup"
+          git config user.email "noreply@naraendrafarms.com"
+          git add backups/
+          git diff --cached --quiet && { echo "Nothing changed."; exit 0; }
+          git commit -m "Weekly data snapshot $STAMP"
+          git push
