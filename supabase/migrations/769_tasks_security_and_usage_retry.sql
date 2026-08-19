@@ -73,7 +73,7 @@ a read-only record, not something the app can put back with one click.
 Not built. Waiting on the retention line you want, 90 days or 180, and on the
 cheaper fix first, which is stopping attendance re-saves from writing an
 audit entry when nothing actually changed. See the audit-log growth task.',
-    'Housekeeping', 'medium'
+    'Housekeeping', 'normal'
   ),
   (
     'Usage panel on the Health Check page',
@@ -89,7 +89,7 @@ Cannot be shown without credentials the app does not have. GitHub Actions
 minutes and artifact storage, and Cloudflare Pages builds and bandwidth, each
 need an API token stored as a secret and a small function to read it. Say
 whether that is wanted and the tokens can be added.',
-    'Housekeeping', 'medium'
+    'Housekeeping', 'normal'
   ),
   (
     'From-To date range for Attendance, Salary and Electricity',
@@ -104,7 +104,7 @@ all take a range. Two areas cannot.
   - Electricity. Bills are per month and Cost Analysis is a financial year.
 
 Adding a From-To to those pages would make the app consistent.',
-    'HR', 'medium'
+    'HR', 'normal'
   )
 ) AS v(title, descr, team, priority)
 WHERE NOT EXISTS (
