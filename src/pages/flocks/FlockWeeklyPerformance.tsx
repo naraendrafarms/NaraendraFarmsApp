@@ -48,7 +48,7 @@ export const FlockWeeklyPerformance: React.FC = () => {
     queryKey: ['fwp_flocks'],
     queryFn: async () => {
       const { data } = await supabase.from('flocks')
-        .select('id,flock_no,placement_date,laying_season')
+        .select('id,flock_no,placement_date,laying_season,rearing_season')
         .eq('is_vhl_contract', false).order('flock_no')
       return data ?? []
     }
@@ -111,7 +111,9 @@ export const FlockWeeklyPerformance: React.FC = () => {
     if (wk > 24 || (wk === 24 && flock?.laying_season)) {
       return laying.find((r: any) => r.season === flock?.laying_season) ?? null
     }
-    const bs = broodingSeason(flock?.placement_date)
+    // A season the farm has RECORDED beats one worked out from the calendar:
+    // the month rule is only a sensible default for flocks nobody has set.
+    const bs = flock?.rearing_season || broodingSeason(flock?.placement_date)
     if (bs) return growing.find((r: any) => r.season === bs) ?? null
     // No placement date: only answer if both seasons agree for that week, so a
     // guess is never presented as the standard.

@@ -31,7 +31,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
     placement_date: '', paid_female: '', paid_male: '',
     free_female: '0', free_male: '0', chick_rate: '',
     laying_start_date: '', supplier: 'Venkateshwara Hatcheries', remarks: '',
-    chick_invoice_no: '', chick_invoice_date: '', laying_season: '',
+    chick_invoice_no: '', chick_invoice_date: '', laying_season: '', rearing_season: '',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -65,6 +65,7 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
         chick_rate:       parseFloat(form.chick_rate) || 320,
         laying_start_date: form.laying_start_date || null,
         laying_season:    form.laying_season || null,
+        rearing_season:   (form as any).rearing_season || null,
         supplier:         form.supplier,
         remarks:          form.remarks,
         chick_invoice_no:   form.chick_invoice_no || null,
@@ -168,6 +169,12 @@ const FlockForm: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ o
           value={form.supplier} onChange={e => set('supplier', e.target.value)} />
       </FormRow>
       <FormRow>
+        {/* Two seasons, because a flock reared through one commonly lays
+            through the other, and the breed standard is published per season
+            for the growing weeks as well as the laying ones. */}
+        <Select label="Rearing Season" placeholder="— From placement month —"
+          value={(form as any).rearing_season ?? ''} onChange={e => set('rearing_season' as any, e.target.value)}
+          options={[{ value: 'Summer', label: 'Summer Rearing' }, { value: 'Winter', label: 'Winter Rearing' }]} />
         <Select label="Laying Season" placeholder="— Not set —"
           value={(form as any).laying_season ?? ''} onChange={e => set('laying_season' as any, e.target.value)}
           options={[{ value: 'Summer', label: 'Summer Laying' }, { value: 'Winter', label: 'Winter Laying' }]} />
@@ -198,7 +205,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
   const [form, setForm] = useState({
     flock_no: '', breed: 'VENCO-430', rearing_farm_id: '', laying_farm_id: '',
     status: 'rearing', placement_date: '', laying_start_date: '',
-    chick_rate: '320', supplier: '', remarks: '', laying_season: '',
+    chick_rate: '320', supplier: '', remarks: '', laying_season: '', rearing_season: '',
     is_vhl_contract: false,
   })
 
@@ -216,6 +223,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
       supplier: flock.supplier ?? '',
       remarks: flock.remarks ?? '',
       laying_season: flock.laying_season ?? '',
+      rearing_season: (flock as any).rearing_season ?? '',
       is_vhl_contract: flock.is_vhl_contract ?? false,
     })
   }, [flock])
@@ -248,6 +256,7 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
         supplier: form.supplier || null,
         remarks: form.remarks || null,
         laying_season: form.laying_season || null,
+        rearing_season: (form as any).rearing_season || null,
         is_vhl_contract: form.is_vhl_contract,
       }).eq('id', flockId)
       if (error) throw error
@@ -285,6 +294,9 @@ const EditFlockForm: React.FC<{ flockId: string; onClose: () => void }> = ({ flo
       </FormRow>
       <FormRow>
         <Input label="Supplier" value={form.supplier} onChange={e=>s('supplier',e.target.value)}/>
+        <Select label="Rearing Season" placeholder="— From placement month —"
+          value={(form as any).rearing_season} onChange={e=>s('rearing_season',e.target.value)}
+          options={[{ value: 'Summer', label: 'Summer Rearing' }, { value: 'Winter', label: 'Winter Rearing' }]} />
         <Select label="Laying Season" placeholder="— Not set —" value={form.laying_season} onChange={e=>s('laying_season',e.target.value)}
           options={[{ value: 'Summer', label: 'Summer Laying' }, { value: 'Winter', label: 'Winter Laying' }]} />
       </FormRow>

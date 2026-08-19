@@ -24,7 +24,7 @@ import { Download, LineChart as LineIcon } from 'lucide-react'
 
 type Flock = {
   id: string; flock_no: string; breed: string | null; status: string
-  placement_date: string | null; laying_season: string | null
+  placement_date: string | null; laying_season: string | null; rearing_season: string | null
   total_placed_f: number | null; total_placed_m: number | null
 }
 
@@ -53,16 +53,29 @@ export const FlockLifetime: React.FC = () => {
     queryKey: ['flocks_lifetime'],
     queryFn: async () => {
       const { data } = await supabase.from('flocks')
-        .select('id,flock_no,breed,status,placement_date,laying_season,total_placed_f,total_placed_m')
+        .select('id,flock_no,breed,status,placement_date,laying_season,rearing_season,total_placed_f,total_placed_m')
         .order('flock_no')
       return (data ?? []) as unknown as Flock[]
     }
   })
 
   const flock = (flocks as Flock[]).find(f => f.id === flockId) ?? null
-  // The standard is published per season. A flock that has not been given one
-  // is read against Summer, and the page says so rather than hiding it.
-  const season = flock?.laying_season && /winter/i.test(flock.laying_season) ? 'Winter' : 'Summer'
+  // A flock has TWO seasons and they are usually different: it is reared through
+  // one and lays through the next. The growing standard (weeks 1-24) must be read
+  // against the REARING season and the laying standard against the LAYING one —
+  // using a single season for both compares half the flock's life against the
+  // wrong curve. Where the rearing season has not been set, the placement month
+  // is the fallback the rest of the app already uses (Feb-Jul Summer).
+  const monthSeason = (d?: string | null) => {
+    if (!d) return null
+    const m = parseInt(d.slice(5, 7), 10)
+    return (m >= 2 && m <= 7) ? 'Summer' : 'Winter'
+  }
+  const rearSeason = (flock?.rearing_season && /winter/i.test(flock.rearing_season) ? 'Winter'
+                      : flock?.rearing_season ? 'Summer'
+                      : monthSeason(flock?.placement_date)) ?? 'Summer'
+  const laySeason = flock?.laying_season && /winter/i.test(flock.laying_season) ? 'Winter'
+                    : flock?.laying_season ? 'Summer' : null
 
   const { data: daily = [], isLoading } = useQuery({
     queryKey: ['lifetime_daily', flockId],
@@ -90,21 +103,21 @@ export const FlockLifetime: React.FC = () => {
   })
 
   const { data: std = [] } = useQuery({
-    queryKey: ['lifetime_std', season],
+    queryKey: ['lifetime_std', rearSeason, laySeason],
     queryFn: async () => {
       const { data } = await supabase.from('breed_standard')
-        .select('week_of_age,sex,phase,body_weight_g,weekly_gain_g,feed_g_per_day,feed_type')
-        .in('season', [season, 'Both']).order('week_of_age')
+        .select('week_of_age,sex,season,phase,body_weight_g,weekly_gain_g,feed_g_per_day,feed_type')
+        .in('season', [...new Set([rearSeason, laySeason ?? rearSeason, 'Both'])]).order('week_of_age')
       return data ?? []
     }
   })
 
   const { data: curve = [] } = useQuery({
-    queryKey: ['lifetime_curve', season],
+    queryKey: ['lifetime_curve', laySeason ?? rearSeason],
     queryFn: async () => {
       const { data } = await supabase.from('std_production_curve')
         .select('week_of_age,cum_depletion_pct,hen_week_pct,he_pct,std_production_pct')
-        .eq('season', season).order('week_of_age')
+        .eq('season', laySeason ?? rearSeason).order('week_of_age')
       return data ?? []
     }
   })
@@ -165,7 +178,19 @@ export const FlockLifetime: React.FC = () => {
     }
 
     const bwOf = (wk: number, sx: string) => (weights as any[]).find(w => w.week_of_age === wk && w.sex === sx)
-    const stdOf = (wk: number, sx: string) => (std as any[]).find(s => s.week_of_age === wk && s.sex === sx)
+    const stdOf = (wk: number, sx: string) => {
+      const rows = (std as any[]).filter(s => s.week_of_age === wk && s.sex === sx)
+      if (!rows.length) return undefined
+      // Males are published once, under season 'Both'.
+      if (sx === 'Male') return rows.find(s => s.season === 'Both') ?? rows[0]
+      // Week 24 appears in both books. It belongs to laying only once the flock
+      // has a laying season, otherwise it is the last growing week.
+      const laying = wk > 24 || (wk === 24 && !!laySeason)
+      const want = laying ? (laySeason ?? rearSeason) : rearSeason
+      const phase = laying ? 'Laying' : 'Growing'
+      return rows.find(s => s.phase === phase && s.season === want)
+          ?? rows.find(s => s.phase === phase)
+    }
     const curveOf = (wk: number) => (curve as any[]).find(c => c.week_of_age === wk)
 
     // Built once per sex. The running totals must restart for each, or the
@@ -221,7 +246,7 @@ export const FlockLifetime: React.FC = () => {
     })
     }
     return { Female: build('Female'), Male: build('Male') }
-  }, [daily, weights, std, curve, flock])
+  }, [daily, weights, std, curve, flock, rearSeason, laySeason])
 
   // Eggs belong to the flock, not to a sex, so in the Both view they are shown
   // once against the females that laid them.
@@ -325,8 +350,10 @@ export const FlockLifetime: React.FC = () => {
             <div className="text-xs text-gray-500 pb-2">
               Placed {flock.placement_date ? fmtDate(flock.placement_date) : '—'} ·
               {' '}{fmt(sex === 'Female' ? flock.total_placed_f : flock.total_placed_m)} birds ·
-              {' '}standard read as <strong>{season}</strong>
-              {!flock.laying_season && <span className="text-amber-600"> (no season set on the flock)</span>}
+              {' '}rearing standard <strong>{rearSeason}</strong>
+              {!flock.rearing_season && <span className="text-amber-600"> (from placement month — not set)</span>}
+              {' '}· laying standard <strong>{laySeason ?? '—'}</strong>
+              {!flock.laying_season && <span className="text-amber-600"> (not set)</span>}
             </div>
           )}
         </div>
