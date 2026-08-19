@@ -114,6 +114,24 @@ export const FlockDetail: React.FC = () => {
     )
   })
 
+  // The hatch results for this flock. he_dispatch.hatch_pct is a leftover from
+  // the app's first schema and is empty on every dispatch the farm has made --
+  // the real figures live on the hatch batch, linked to a dispatch by
+  // dispatch_id. Flock 19 had 14 batches linked, all with a hatchability
+  // figure, while the vs-Standard tab read the empty column and showed
+  // nothing. Reading the batches is the whole fix.
+  const { data: hatchBatches } = useQuery({
+    queryKey: ['flock_hatch_batches', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase.from('hatch_batches')
+        .select('id,dispatch_id,flock_id,setting_date,eggs_set,hatched_chicks,hatchability_pct,' +
+                'he_dispatch:dispatch_id(dispatch_date,flock_id)')
+        .or(`flock_id.eq.${id},he_dispatch.flock_id.eq.${id}`)
+        .order('setting_date')
+      return data ?? []
+    }
+  })
   const { data: heDispatch } = useQuery({
     queryKey: ['flock_he', id],
     queryFn: async () => {
@@ -831,29 +849,48 @@ export const FlockDetail: React.FC = () => {
       row.heEggs += d.he_eggs ?? 0
       row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
     }
-    const hatchWeekly: Record<number, { sum: number; n: number }> = {}
-    for (const h of (heDispatch ?? [])) {
-      if (!h.dispatch_date || h.hatch_pct == null) continue
-      const wk = flockAgeWeeks(flock.placement_date, h.dispatch_date)
+    // Hatch results come from the BATCHES, weighted by eggs set -- a 30,000-egg
+    // batch and a 5,000-egg batch must not count equally, which a plain average
+    // of percentages would do. The week is the flock's age on the DISPATCH date
+    // the batch was set from, since that is when those eggs left the farm.
+    // Where a batch has no dispatch link, its own setting date is used.
+    const hatchWeekly: Record<number, { pctXeggs: number; eggs: number; chicks: number }> = {}
+    for (const b of (hatchBatches ?? []) as any[]) {
+      const when = b.he_dispatch?.dispatch_date ?? b.setting_date
+      if (!when) continue
+      const wk = flockAgeWeeks(flock.placement_date, when)
       if (wk < 0) continue
-      const row = hatchWeekly[wk] ??= { sum: 0, n: 0 }
-      row.sum += h.hatch_pct; row.n++
+      const row = hatchWeekly[wk] ??= { pctXeggs: 0, eggs: 0, chicks: 0 }
+      const eggs = Number(b.eggs_set ?? 0)
+      if (b.hatchability_pct != null && eggs > 0) {
+        row.pctXeggs += Number(b.hatchability_pct) * eggs
+        row.eggs += eggs
+      }
+      row.chicks += Number(b.hatched_chicks ?? 0)
     }
     const variance = (actual: number | null, std: number | null) =>
       actual == null || std == null ? null : actual - std
-    let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0
+    let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0, cumChicksHh = 0, cumDeaths = 0
     return stdCurve.map((s: any) => {
       const w = weekly[s.week_of_age]
       const actualHd = w && w.openFSum > 0 ? (w.totalEggs / w.openFSum) * 100 : null
       const actualHe = w && w.totalEggs > 0 ? (w.heEggs / w.totalEggs) * 100 : null
       const hw = hatchWeekly[s.week_of_age]
-      const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
+      const actualHatch = hw && hw.eggs > 0 ? hw.pctXeggs / hw.eggs : null
+      const weeklyChicksHh = hw && HH > 0 && hw.chicks > 0 ? hw.chicks / HH : null
       const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
       const weeklyHeHh = w && HH > 0 ? w.heEggs / HH : null
       const weeklyDepletionPct = w && HH > 0 ? (w.depletion / HH) * 100 : null
-      if (w) { cumDepletion += weeklyDepletionPct ?? 0; cumTeHh += weeklyTeHh ?? 0; cumHeHh += weeklyHeHh ?? 0 }
+      if (w) { cumDepletion += weeklyDepletionPct ?? 0; cumTeHh += weeklyTeHh ?? 0; cumHeHh += weeklyHeHh ?? 0; cumDeaths += w.depletion }
+      cumChicksHh += weeklyChicksHh ?? 0
       return {
-        s, actualHd, actualHe, actualHatch, weeklyTeHh, weeklyHeHh,
+        s, actualHd, actualHe, actualHatch, weeklyTeHh, weeklyHeHh, weeklyChicksHh,
+        cumChicksHh: cumChicksHh > 0 ? cumChicksHh : null,
+        deaths: w ? w.depletion : null, cumDeaths: w ? cumDeaths : null,
+        eggs: w ? w.totalEggs : null, heEggs: w ? w.heEggs : null, birdDays: w ? w.openFSum : null,
+        eggsSet: hw?.eggs ?? null, chicks: hw?.chicks ?? null,
+        vChicksHh: variance(weeklyChicksHh, s.weekly_chicks_hh),
+        vCumChicksHh: variance(cumChicksHh > 0 ? cumChicksHh : null, s.cum_chicks_hh),
         cumDepletion: w ? cumDepletion : null, cumTeHh: w ? cumTeHh : null, cumHeHh: w ? cumHeHh : null,
         vDepletion: variance(w ? cumDepletion : null, s.cum_depletion_pct),
         vHd: variance(actualHd, s.hen_week_pct), vHe: variance(actualHe, s.he_pct),
@@ -862,7 +899,7 @@ export const FlockDetail: React.FC = () => {
         vHatch: variance(actualHatch, s.hatch_pct),
       }
     })
-  }, [flock?.laying_season, flock?.total_placed_f, flock?.placement_date, stdCurve, daily, heDispatch])
+  }, [flock?.laying_season, flock?.total_placed_f, flock?.placement_date, stdCurve, daily, hatchBatches])
 
   if (isLoading) return <Spinner />
   if (!flock) return <div className="p-8 text-center text-gray-500">Flock not found</div>
@@ -1354,7 +1391,9 @@ export const FlockDetail: React.FC = () => {
       case 'std':
         return {
           title: `Flock ${flock.flock_no} — Actual vs ${flock.laying_season ?? ''} Standard`,
-          headers: ['Age (wk)','Std Cum Depl%','Actual','Var','Std Hen Wk%','Actual','Var','Std HE%','Actual','Var','Std Hatch%','Actual','Var'],
+          headers: ['Age (wk)','Std Cum Depl%','Actual','Var','Std Hen Wk%','Actual','Var','Std HE%','Actual','Var',
+            'Std Hatch%','Actual','Var','Std Wk Chicks/HH','Actual','Var','Std Cum Chicks/HH','Actual','Var',
+            'Deaths+culls wk','Deaths+culls cum','Eggs','HE eggs','Bird-days','Eggs set','Chicks hatched'],
           rightAlignFrom: 1,
           rows: stdExportRows.map((r: any) => {
             const f = (v: number|null, d=1) => v != null ? v.toFixed(d) : '—'
@@ -1363,6 +1402,10 @@ export const FlockDetail: React.FC = () => {
               f(r.s.hen_week_pct), f(r.actualHd), f(r.vHd),
               f(r.s.he_pct), f(r.actualHe), f(r.vHe),
               f(r.s.hatch_pct), f(r.actualHatch), f(r.vHatch),
+              f(r.s.weekly_chicks_hh, 2), f(r.weeklyChicksHh, 2), f(r.vChicksHh, 2),
+              f(r.s.cum_chicks_hh, 2), f(r.cumChicksHh, 2), f(r.vCumChicksHh, 2),
+              r.deaths ?? '', r.cumDeaths ?? '', r.eggs ?? '', r.heEggs ?? '',
+              r.birdDays ?? '', r.eggsSet ?? '', r.chicks ?? '',
             ]
           }),
         }
@@ -2645,28 +2688,38 @@ export const FlockDetail: React.FC = () => {
               row.heEggs += d.he_eggs ?? 0
               row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
             }
-            // Weekly-average actual hatch % from he_dispatch, keyed by week-of-age
-            const hatchWeekly: Record<number, { sum: number; n: number }> = {}
-            for (const h of (heDispatch ?? [])) {
-              if (!h.dispatch_date || h.hatch_pct == null) continue
-              const wk = flockAgeWeeks(flock.placement_date, h.dispatch_date)
+            // Hatch results from the BATCHES, weighted by eggs set. See the
+            // note on the memo above: he_dispatch.hatch_pct is empty on every
+            // dispatch, so reading it showed nothing however many batches were
+            // linked.
+            const hatchWeekly: Record<number, { pctXeggs: number; eggs: number; chicks: number }> = {}
+            for (const b of (hatchBatches ?? []) as any[]) {
+              const when = b.he_dispatch?.dispatch_date ?? b.setting_date
+              if (!when) continue
+              const wk = flockAgeWeeks(flock.placement_date, when)
               if (wk < 0) continue
-              const row = hatchWeekly[wk] ??= { sum: 0, n: 0 }
-              row.sum += h.hatch_pct; row.n++
+              const row = hatchWeekly[wk] ??= { pctXeggs: 0, eggs: 0, chicks: 0 }
+              const eggs = Number(b.eggs_set ?? 0)
+              if (b.hatchability_pct != null && eggs > 0) {
+                row.pctXeggs += Number(b.hatchability_pct) * eggs
+                row.eggs += eggs
+              }
+              row.chicks += Number(b.hatched_chicks ?? 0)
             }
             const variance = (actual: number | null, std: number | null) =>
               actual == null || std == null ? null : actual - std
             const varClass = (v: number | null) => v == null ? '' : v >= 0 ? 'text-green-600' : 'text-red-500'
             const fmt = (v: number | null, d = 1) => v != null ? v.toFixed(d) : '—'
 
-            let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0
+            let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0, cumChicksHh = 0, cumDeaths = 0
 
             const rows = stdCurve.map((s: any) => {
               const w = weekly[s.week_of_age]
               const actualHd = w && w.openFSum > 0 ? (w.totalEggs / w.openFSum) * 100 : null
               const actualHe = w && w.totalEggs > 0 ? (w.heEggs / w.totalEggs) * 100 : null
               const hw = hatchWeekly[s.week_of_age]
-              const actualHatch = hw && hw.n > 0 ? hw.sum / hw.n : null
+              const actualHatch = hw && hw.eggs > 0 ? hw.pctXeggs / hw.eggs : null
+              const weeklyChicksHh = hw && HH > 0 && hw.chicks > 0 ? hw.chicks / HH : null
               const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
               const weeklyHeHh = w && HH > 0 ? w.heEggs / HH : null
               const weeklyDepletionPct = w && HH > 0 ? (w.depletion / HH) * 100 : null
@@ -2674,10 +2727,20 @@ export const FlockDetail: React.FC = () => {
                 cumDepletion += weeklyDepletionPct ?? 0
                 cumTeHh += weeklyTeHh ?? 0
                 cumHeHh += weeklyHeHh ?? 0
+                cumDeaths += w.depletion
               }
+              cumChicksHh += weeklyChicksHh ?? 0
               return {
                 s, actualHd, actualHe, actualHatch, weeklyTeHh, weeklyHeHh, weeklyDepletionPct,
                 cumDepletion: w ? cumDepletion : null, cumTeHh: w ? cumTeHh : null, cumHeHh: w ? cumHeHh : null,
+                weeklyChicksHh, cumChicksHh: cumChicksHh > 0 ? cumChicksHh : null,
+                // The raw figures every percentage is worked out from. A page
+                // that shows only percentages cannot be checked against a
+                // register, and cannot be argued with either.
+                deaths: w ? w.depletion : null, cumDeaths: w ? cumDeaths : null,
+                eggs: w ? w.totalEggs : null, heEggs: w ? w.heEggs : null,
+                birdDays: w ? w.openFSum : null,
+                eggsSet: hw?.eggs ?? null, chicks: hw?.chicks ?? null,
               }
             })
 
@@ -2714,7 +2777,11 @@ export const FlockDetail: React.FC = () => {
                         <Th right>Actual</Th>
                         <Th right>Var</Th>
                         <Th right>Std Weekly Chicks/HH</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
                         <Th right>Std Cum Chicks/HH</Th>
+                        <Th right>Actual</Th>
+                        <Th right>Var</Th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2732,13 +2799,29 @@ export const FlockDetail: React.FC = () => {
                           <tr key={s.week_of_age} className="border-b border-gray-50">
                             <Td>{s.week_of_age}</Td>
                             <Td right>{fmt(s.cum_depletion_pct)}</Td>
-                            <Td right>{fmt(r.cumDepletion)}</Td>
+                            <Td right>
+                              {fmt(r.cumDepletion)}
+                              {r.cumDeaths != null && r.cumDeaths > 0 && (
+                                <div className="text-[10px] text-gray-400">
+                                  {r.cumDeaths.toLocaleString('en-IN')} of {HH.toLocaleString('en-IN')}
+                                  {r.deaths ? ` · +${r.deaths.toLocaleString('en-IN')} this wk` : ''}
+                                </div>
+                              )}
+                            </Td>
                             <Td right className={varClass(vDepletion != null ? -vDepletion : null)}>{fmt(vDepletion)}</Td>
                             <Td right>{fmt(s.hen_week_pct)}</Td>
-                            <Td right>{fmt(r.actualHd)}</Td>
+                            <Td right>
+                              {fmt(r.actualHd)}
+                              {r.eggs ? <div className="text-[10px] text-gray-400">
+                                {r.eggs.toLocaleString('en-IN')} eggs / {r.birdDays?.toLocaleString('en-IN')} bird-days
+                              </div> : null}
+                            </Td>
                             <Td right className={varClass(vHd)}>{fmt(vHd)}</Td>
                             <Td right>{fmt(s.he_pct)}</Td>
-                            <Td right>{fmt(r.actualHe)}</Td>
+                            <Td right>
+                              {fmt(r.actualHe)}
+                              {r.heEggs ? <div className="text-[10px] text-gray-400">{r.heEggs.toLocaleString('en-IN')} HE</div> : null}
+                            </Td>
                             <Td right className={varClass(vHe)}>{fmt(vHe)}</Td>
                             <Td right>{fmt(s.weekly_te_hh)}</Td>
                             <Td right>{fmt(r.weeklyTeHh)}</Td>
@@ -2753,10 +2836,26 @@ export const FlockDetail: React.FC = () => {
                             <Td right>{fmt(r.cumHeHh)}</Td>
                             <Td right className={varClass(vCumHeHh)}>{fmt(vCumHeHh)}</Td>
                             <Td right>{fmt(s.hatch_pct)}</Td>
-                            <Td right>{fmt(r.actualHatch)}</Td>
+                            <Td right>
+                              {fmt(r.actualHatch)}
+                              {r.eggsSet ? <div className="text-[10px] text-gray-400">
+                                {r.eggsSet.toLocaleString('en-IN')} set → {(r.chicks ?? 0).toLocaleString('en-IN')} chicks
+                              </div> : null}
+                            </Td>
                             <Td right className={varClass(vHatch)}>{fmt(vHatch)}</Td>
                             <Td right>{fmt(s.weekly_chicks_hh)}</Td>
+                            <Td right>
+                              {fmt(r.weeklyChicksHh, 2)}
+                              {r.chicks ? <div className="text-[10px] text-gray-400">{r.chicks.toLocaleString('en-IN')} chicks</div> : null}
+                            </Td>
+                            <Td right className={varClass(variance(r.weeklyChicksHh, s.weekly_chicks_hh))}>
+                              {fmt(variance(r.weeklyChicksHh, s.weekly_chicks_hh), 2)}
+                            </Td>
                             <Td right>{fmt(s.cum_chicks_hh)}</Td>
+                            <Td right>{fmt(r.cumChicksHh, 2)}</Td>
+                            <Td right className={varClass(variance(r.cumChicksHh, s.cum_chicks_hh))}>
+                              {fmt(variance(r.cumChicksHh, s.cum_chicks_hh), 2)}
+                            </Td>
                           </tr>
                         )
                       })}
@@ -2764,7 +2863,11 @@ export const FlockDetail: React.FC = () => {
                   </Table>
                 </div>
                 <div className="px-4 py-3 text-xs text-gray-400 border-t border-gray-100">
-                  Weekly/Cum Chicks per HH has no Actual column — the app doesn't record hatched chick counts (that's the hatchery's data). Depletion Var is shown negative when actual mortality/cull exceeds standard.
+                  Every percentage shows the figures it was worked out from underneath it, so a line can be checked
+                  against the register rather than taken on trust. Depletion is deaths plus culls measured against the
+                  {' '}{HH.toLocaleString('en-IN')} females placed. Hen-day is eggs divided by bird-days (the daily
+                  opening counts added up). Hatch % and Chicks/HH come from the HATCH BATCHES linked to this flock's
+                  dispatches, weighted by eggs set — they stay blank for any week whose batches have not been linked.
                 </div>
               </Card>
             )
