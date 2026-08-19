@@ -42,7 +42,8 @@ const Dev: React.FC<{ v: number | null; d?: number; goodHigh?: boolean }> = ({ v
 
 export const FlockLifetime: React.FC = () => {
   const [flockId, setFlockId] = useState('')
-  const [sex, setSex] = useState<'Female' | 'Male'>('Female')
+  // '' means both sexes side by side, the way the weekly report is laid out.
+  const [sex, setSex] = useState<'Female' | 'Male' | ''>('Female')
 
   const { data: flocks = [] } = useQuery({
     queryKey: ['flocks_lifetime'],
@@ -85,11 +86,11 @@ export const FlockLifetime: React.FC = () => {
   })
 
   const { data: std = [] } = useQuery({
-    queryKey: ['lifetime_std', season, sex],
+    queryKey: ['lifetime_std', season],
     queryFn: async () => {
       const { data } = await supabase.from('breed_standard')
-        .select('week_of_age,phase,body_weight_g,weekly_gain_g,feed_g_per_day,feed_type')
-        .eq('sex', sex).in('season', [season, 'Both']).order('week_of_age')
+        .select('week_of_age,sex,phase,body_weight_g,weekly_gain_g,feed_g_per_day,feed_type')
+        .in('season', [season, 'Both']).order('week_of_age')
       return data ?? []
     }
   })
@@ -104,8 +105,8 @@ export const FlockLifetime: React.FC = () => {
     }
   })
 
-  const rows = useMemo(() => {
-    if (!flock?.placement_date || (daily as any[]).length === 0) return []
+  const both = useMemo(() => {
+    if (!flock?.placement_date || (daily as any[]).length === 0) return { Female: [] as any[], Male: [] as any[] }
     const placed = new Date(flock.placement_date + 'T00:00:00')
     const weekOf = (d: string) => {
       const days = Math.floor((new Date(d + 'T00:00:00').getTime() - placed.getTime()) / 86400000)
@@ -153,15 +154,18 @@ export const FlockLifetime: React.FC = () => {
       lastDayOfWeek.set(wk, d)
     }
 
-    const bwOf = (wk: number) => (weights as any[]).find(w => w.week_of_age === wk && w.sex === sex)
-    const stdOf = (wk: number) => (std as any[]).find(s => s.week_of_age === wk)
+    const bwOf = (wk: number, sx: string) => (weights as any[]).find(w => w.week_of_age === wk && w.sex === sx)
+    const stdOf = (wk: number, sx: string) => (std as any[]).find(s => s.week_of_age === wk && s.sex === sx)
     const curveOf = (wk: number) => (curve as any[]).find(c => c.week_of_age === wk)
 
-    const placedTotal = sex === 'Female' ? Number(flock.total_placed_f ?? 0) : Number(flock.total_placed_m ?? 0)
-    let cumMort = 0, cumFeedKg = 0
+    // Built once per sex. The running totals must restart for each, or the
+    // males would inherit the females' cumulative feed.
+    const build = (sx: 'Female' | 'Male') => {
+    const placedTotal = sx === 'Female' ? Number(flock.total_placed_f ?? 0) : Number(flock.total_placed_m ?? 0)
+    let cumMort = 0, cumFeedKg = 0, cumStdKgPerBird = 0
 
     return [...m.values()].sort((a, b) => a.wk - b.wk).map(w => {
-      const isF = sex === 'Female'
+      const isF = sx === 'Female'
       const mort = isF ? w.mortF : w.mortM
       const feed = isF ? w.feedF : w.feedM
       cumMort += mort
@@ -176,14 +180,18 @@ export const FlockLifetime: React.FC = () => {
       // Feed per bird per day needs the birds that ate it and the days they
       // ate over — a short week must not read as a low intake.
       const feedGPerDay = birds && w.days > 0 ? (feed * 1000) / birds / w.days : null
-      const stdRow = stdOf(w.wk)
+      const stdRow = stdOf(w.wk, sx)
       const cur = curveOf(w.wk)
 
       const cumDepPct = placedTotal > 0 ? (cumMort / placedTotal) * 100 : null
-      const bw = bwOf(w.wk)
+      // The sheet also carries CUMULATIVE feed against cumulative standard, so
+      // a flock that ate well one week and poorly the next is judged on the
+      // whole run rather than the last seven days.
+      cumStdKgPerBird += stdRow?.feed_g_per_day != null ? (Number(stdRow.feed_g_per_day) * 7) / 1000 : 0
+      const bw = bwOf(w.wk, sx)
       const bwAct = n0(bw?.avg_body_weight_g)
       const bwStd = n0(stdRow?.body_weight_g)
-      const prevBw = bwOf(w.wk - 1)
+      const prevBw = bwOf(w.wk - 1, sx)
       const gainAct = bwAct != null && prevBw?.avg_body_weight_g != null
         ? bwAct - Number(prevBw.avg_body_weight_g) : null
       const hdPct = birds && w.days > 0 ? (w.eggs / birds / w.days) * 100 : null
@@ -195,39 +203,64 @@ export const FlockLifetime: React.FC = () => {
         feedKg: feed, feedGPerDay, feedStd: n0(stdRow?.feed_g_per_day),
         feedType: stdRow?.feed_type ?? null,
         cumFeedPerBird: birds ? cumFeedKg / birds : null,
+        cumStdPerBird: cumStdKgPerBird || null,
         eggs: w.eggs, hdPct, hdStd: n0(cur?.hen_week_pct),
         hePct: w.eggs > 0 ? (w.he / w.eggs) * 100 : null, heStd: n0(cur?.he_pct),
         phase: stdRow?.phase ?? (w.eggs > 0 ? 'Laying' : 'Growing'),
       }
     })
-  }, [daily, weights, std, curve, flock, sex])
+    }
+    return { Female: build('Female'), Male: build('Male') }
+  }, [daily, weights, std, curve, flock])
 
-  const chartBW = rows.filter(r => r.bwAct != null || r.bwStd != null)
-    .map(r => ({ wk: r.wk, Actual: r.bwAct, Standard: r.bwStd }))
-  const chartDep = rows.map(r => ({ wk: r.wk, Actual: r.cumDepPct, Standard: r.stdDepPct }))
-  const chartFeed = rows.filter(r => r.feedGPerDay != null || r.feedStd != null)
-    .map(r => ({ wk: r.wk, Actual: r.feedGPerDay, Standard: r.feedStd }))
+  // Eggs belong to the flock, not to a sex, so in the Both view they are shown
+  // once against the females that laid them.
+  const rows = sex === 'Male' ? both.Male : both.Female
+  const showingBoth = sex === ''
+
+  // In the Both view every chart carries four lines — each sex and its own
+  // standard. One combined "actual" line would zig-zag between two animals
+  // that are not comparable.
+  const pair = (key: 'bwAct' | 'cumDepPct' | 'feedGPerDay', stdKey: 'bwStd' | 'stdDepPct' | 'feedStd') => {
+    const byWeek = new Map<number, any>()
+    for (const r of both.Female) byWeek.set(r.wk, { wk: r.wk, Female: (r as any)[key], 'Female std': (r as any)[stdKey] })
+    for (const r of both.Male) {
+      const e = byWeek.get(r.wk) ?? { wk: r.wk }
+      e['Male'] = (r as any)[key]; e['Male std'] = (r as any)[stdKey]
+      byWeek.set(r.wk, e)
+    }
+    return [...byWeek.values()].sort((a, b) => a.wk - b.wk)
+  }
+
+  const chartBW = showingBoth ? pair('bwAct', 'bwStd')
+    : rows.filter(r => r.bwAct != null || r.bwStd != null)
+        .map(r => ({ wk: r.wk, Actual: r.bwAct, Standard: r.bwStd }))
+  const chartDep = showingBoth ? pair('cumDepPct', 'stdDepPct')
+    : rows.map(r => ({ wk: r.wk, Actual: r.cumDepPct, Standard: r.stdDepPct }))
+  const chartFeed = showingBoth ? pair('feedGPerDay', 'feedStd')
+    : rows.filter(r => r.feedGPerDay != null || r.feedStd != null)
+        .map(r => ({ wk: r.wk, Actual: r.feedGPerDay, Standard: r.feedStd }))
   const chartEgg = rows.filter(r => (r.hdPct ?? 0) > 0 || (r.hdStd ?? 0) > 0)
     .map(r => ({ wk: r.wk, Actual: r.hdPct, Standard: r.hdStd }))
 
   const exportCSV = () => {
     const headers = ['Week','Days','Opening','Closing','Mortality','Cum mortality','Cum depletion %','Std depletion %',
       'Body wt (g)','Std body wt','Gain (g)','Std gain','Feed kg','Feed g/bird/day','Std feed g/day','Feed type',
-      'Cum feed/bird (kg)','Eggs','HD %','Std HD %','HE %','Std HE %']
+      'Cum feed/bird (kg)','Std cum feed/bird (kg)','Eggs','HD %','Std HD %','HE %','Std HE %']
     const lines = rows.map(r => [r.wk, r.days, r.open ?? '', r.close ?? '', r.mort, r.cumMort,
       r.cumDepPct?.toFixed(2) ?? '', r.stdDepPct ?? '', r.bwAct ?? '', r.bwStd ?? '', r.gainAct ?? '', r.gainStd ?? '',
       r.feedKg.toFixed(1), r.feedGPerDay?.toFixed(1) ?? '', r.feedStd ?? '', r.feedType ?? '',
-      r.cumFeedPerBird?.toFixed(2) ?? '', r.eggs, r.hdPct?.toFixed(1) ?? '', r.hdStd ?? '',
+      r.cumFeedPerBird?.toFixed(2) ?? '', r.cumStdPerBird?.toFixed(2) ?? '', r.eggs, r.hdPct?.toFixed(1) ?? '', r.hdStd ?? '',
       r.hePct?.toFixed(1) ?? '', r.heStd ?? ''])
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const csv = [headers.map(esc).join(','), ...lines.map(l => l.map(esc).join(','))].join('\n')
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    a.download = `flock_${flock?.flock_no}_lifetime.csv`
+    a.download = `flock_${flock?.flock_no}_lifetime_${sex || 'female'}.csv`
     a.click()
   }
 
-  const chartCard = (title: string, data: any[], unit: string, d = 0) => (
+  const chartCard = (title: string, data: any[], unit: string, d = 0, single = false) => (
     <Card>
       <p className="text-sm font-semibold mb-2">{title}</p>
       {data.length === 0 ? (
@@ -241,8 +274,19 @@ export const FlockLifetime: React.FC = () => {
             <YAxis tick={{ fontSize: 11 }} />
             <Tooltip formatter={(v: any) => v == null ? '—' : `${fmt(Number(v), d)}${unit}`} />
             <Legend />
-            <Line type="monotone" dataKey="Actual" stroke="#10b981" strokeWidth={2} dot={false} connectNulls />
-            <Line type="monotone" dataKey="Standard" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls />
+            {showingBoth && !single ? (
+              <>
+                <Line type="monotone" dataKey="Female" stroke="#ec4899" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="Female std" stroke="#f9a8d4" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls />
+                <Line type="monotone" dataKey="Male" stroke="#2563eb" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="Male std" stroke="#93c5fd" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls />
+              </>
+            ) : (
+              <>
+                <Line type="monotone" dataKey="Actual" stroke="#10b981" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="Standard" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls />
+              </>
+            )}
           </LineChart>
         </ResponsiveContainer>
       )}
@@ -263,9 +307,10 @@ export const FlockLifetime: React.FC = () => {
           <Select label="Flock" placeholder="Select a flock" className="w-56"
                   options={(flocks as Flock[]).map(f => ({ value: f.id, label: `Flock ${f.flock_no} — ${f.status}` }))}
                   value={flockId} onChange={e => setFlockId(e.target.value)} />
-          <Select label="Sex" className="w-40" value={sex}
-                  options={[{ value: 'Female', label: 'Female' }, { value: 'Male', label: 'Male' }]}
-                  onChange={e => setSex(e.target.value as 'Female' | 'Male')} />
+          <Select label="Sex" className="w-52" value={sex}
+                  options={[{ value: 'Female', label: 'Female' }, { value: 'Male', label: 'Male' },
+                            { value: '', label: 'Both (male and female)' }]}
+                  onChange={e => setSex(e.target.value as 'Female' | 'Male' | '')} />
           {flock && (
             <div className="text-xs text-gray-500 pb-2">
               Placed {flock.placement_date ? fmtDate(flock.placement_date) : '—'} ·
@@ -289,19 +334,69 @@ export const FlockLifetime: React.FC = () => {
             {chartCard('Body weight (g)', chartBW, ' g')}
             {chartCard('Cumulative depletion (%)', chartDep, '%', 2)}
             {chartCard('Feed (g/bird/day)', chartFeed, ' g', 1)}
-            {chartCard('Hen-day production (%)', chartEgg, '%', 1)}
+            {chartCard('Hen-day production (%)', chartEgg, '%', 1, true)}
           </div>
 
           <Card padding={false}>
             <div className="overflow-x-auto">
+              {showingBoth ? (
+                // Both sexes on one line per week, the layout of the farm's own
+                // weekly report. Standards are shown as the deviation only —
+                // twelve more columns of standard would not fit on any screen,
+                // and the deviation is the number anybody actually reads.
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th>Wk</Th><Th right>Days</Th>
+                      <Th right>♀ Open</Th><Th right>♀ Deaths</Th><Th right>♀ Cum %</Th><Th right>♀ Dev</Th>
+                      <Th right>♀ Body wt</Th><Th right>♀ Dev</Th><Th right>♀ Feed g/b/d</Th><Th right>♀ Dev</Th>
+                      <Th right>♂ Open</Th><Th right>♂ Deaths</Th><Th right>♂ Cum %</Th><Th right>♂ Dev</Th>
+                      <Th right>♂ Body wt</Th><Th right>♂ Dev</Th><Th right>♂ Feed g/b/d</Th><Th right>♂ Dev</Th>
+                      <Th right>Eggs</Th><Th right>HD%</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {both.Female.map((f: any, i: number) => {
+                      const m2: any = both.Male[i] ?? {}
+                      return (
+                        <tr key={f.wk} className={f.days < 7 ? 'bg-amber-50/40' : ''}>
+                          <Td className="font-medium">{f.wk}</Td>
+                          <Td right className={f.days < 7 ? 'text-amber-700' : 'text-gray-400'}>{f.days}</Td>
+
+                          <Td right>{fmt(f.open)}</Td>
+                          <Td right className={f.mort > 0 ? 'text-red-600' : 'text-gray-400'}>{fmt(f.mort)}</Td>
+                          <Td right>{fmt(f.cumDepPct, 2)}</Td>
+                          <Td right><Dev v={f.stdDepPct != null && f.cumDepPct != null ? f.cumDepPct - f.stdDepPct : null} d={2} goodHigh={false} /></Td>
+                          <Td right className="font-medium">{fmt(f.bwAct)}</Td>
+                          <Td right><Dev v={f.bwAct != null && f.bwStd != null ? f.bwAct - f.bwStd : null} /></Td>
+                          <Td right>{fmt(f.feedGPerDay, 1)}</Td>
+                          <Td right><Dev v={f.feedGPerDay != null && f.feedStd != null ? f.feedGPerDay - f.feedStd : null} d={1} /></Td>
+
+                          <Td right>{fmt(m2.open)}</Td>
+                          <Td right className={m2.mort > 0 ? 'text-red-600' : 'text-gray-400'}>{fmt(m2.mort)}</Td>
+                          <Td right>{fmt(m2.cumDepPct, 2)}</Td>
+                          <Td right><Dev v={m2.stdDepPct != null && m2.cumDepPct != null ? m2.cumDepPct - m2.stdDepPct : null} d={2} goodHigh={false} /></Td>
+                          <Td right className="font-medium">{fmt(m2.bwAct)}</Td>
+                          <Td right><Dev v={m2.bwAct != null && m2.bwStd != null ? m2.bwAct - m2.bwStd : null} /></Td>
+                          <Td right>{fmt(m2.feedGPerDay, 1)}</Td>
+                          <Td right><Dev v={m2.feedGPerDay != null && m2.feedStd != null ? m2.feedGPerDay - m2.feedStd : null} d={1} /></Td>
+
+                          <Td right>{f.eggs ? fmt(f.eggs) : '—'}</Td>
+                          <Td right>{f.hdPct ? fmt(f.hdPct, 1) : '—'}</Td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </Table>
+              ) : (
               <Table>
                 <thead>
                   <tr>
                     <Th>Wk</Th><Th right>Days</Th><Th right>Opening</Th><Th right>Deaths</Th>
                     <Th right>Cum %</Th><Th right>Std %</Th><Th right>Dev</Th>
                     <Th right>Body wt</Th><Th right>Std</Th><Th right>Dev</Th>
-                    <Th right>Feed g/b/d</Th><Th right>Std</Th><Th right>Dev</Th>
-                    <Th right>Cum feed/bird</Th><Th>Feed type</Th>
+                    <Th right>Feed kg</Th><Th right>Feed g/b/d</Th><Th right>Std</Th><Th right>Dev</Th>
+                    <Th right>Cum feed/bird</Th><Th right>Std cum</Th><Th right>Dev</Th><Th>Feed type</Th>
                     <Th right>Eggs</Th><Th right>HD%</Th><Th right>Std</Th>
                   </tr>
                 </thead>
@@ -318,10 +413,13 @@ export const FlockLifetime: React.FC = () => {
                       <Td right className="font-medium">{fmt(r.bwAct)}</Td>
                       <Td right className="text-gray-500">{fmt(r.bwStd)}</Td>
                       <Td right><Dev v={r.bwAct != null && r.bwStd != null ? r.bwAct - r.bwStd : null} /></Td>
+                      <Td right>{fmt(r.feedKg, 0)}</Td>
                       <Td right>{fmt(r.feedGPerDay, 1)}</Td>
                       <Td right className="text-gray-500">{fmt(r.feedStd, 1)}</Td>
                       <Td right><Dev v={r.feedGPerDay != null && r.feedStd != null ? r.feedGPerDay - r.feedStd : null} d={1} /></Td>
                       <Td right>{fmt(r.cumFeedPerBird, 2)}</Td>
+                      <Td right className="text-gray-500">{fmt(r.cumStdPerBird, 2)}</Td>
+                      <Td right><Dev v={r.cumFeedPerBird != null && r.cumStdPerBird != null ? r.cumFeedPerBird - r.cumStdPerBird : null} d={2} /></Td>
                       <Td className="text-xs text-gray-500">{r.feedType ?? '—'}</Td>
                       <Td right>{r.eggs ? fmt(r.eggs) : '—'}</Td>
                       <Td right>{r.hdPct ? fmt(r.hdPct, 1) : '—'}</Td>
@@ -330,6 +428,7 @@ export const FlockLifetime: React.FC = () => {
                   ))}
                 </tbody>
               </Table>
+              )}
             </div>
             <p className="text-xs text-gray-500 px-3 py-2">
               Week 1 is the day after placement to placement + 7, the same as the farm's weekly report. A week with

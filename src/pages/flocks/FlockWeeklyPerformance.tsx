@@ -143,11 +143,29 @@ export const FlockWeeklyPerformance: React.FC = () => {
         stdFeedType: st?.feed_type ?? null,
       }
     })
-    .sort((a: any, b: any) => a.week_of_age - b.week_of_age), [rows, flockFilter, sexFilter, std])
+    // Week first, then sex: in the Both view the two sexes of a week belong
+    // together, which is how the farm's own weekly report is laid out.
+    .sort((a: any, b: any) => a.week_of_age - b.week_of_age || String(a.sex).localeCompare(String(b.sex))),
+    [rows, flockFilter, sexFilter, std])
 
-  const chart = shown
-    .filter((r: any) => r.avg_body_weight_g != null)
-    .map((r: any) => ({ wk: r.week_of_age, Actual: Number(r.avg_body_weight_g), Standard: r.target }))
+  // With one sex selected the chart is a plain actual-against-standard pair.
+  // With Both, plotting one "Actual" line would draw a zig-zag between the
+  // sexes, so each sex gets its own line and its own standard.
+  const showingBoth = !sexFilter
+  const chart = React.useMemo(() => {
+    const withBw = shown.filter((r: any) => r.avg_body_weight_g != null)
+    if (!showingBoth) {
+      return withBw.map((r: any) => ({ wk: r.week_of_age, Actual: Number(r.avg_body_weight_g), Standard: r.target }))
+    }
+    const byWeek = new Map<number, any>()
+    for (const r of withBw) {
+      const e = byWeek.get(r.week_of_age) ?? { wk: r.week_of_age }
+      if (r.sex === 'Male') { e['Male'] = Number(r.avg_body_weight_g); e['Male std'] = r.target }
+      else { e['Female'] = Number(r.avg_body_weight_g); e['Female std'] = r.target }
+      byWeek.set(r.week_of_age, e)
+    }
+    return [...byWeek.values()].sort((a, b) => a.wk - b.wk)
+  }, [shown, showingBoth])
 
   const withBoth = shown.filter((r: any) => r.diff != null)
   const avgPct = withBoth.length
@@ -306,7 +324,8 @@ export const FlockWeeklyPerformance: React.FC = () => {
         <SearchableSelect placeholder="All Flocks" options={flockOptions}
           value={flockFilter} onChange={v => setFlockFilter(v)} className="w-44" />
         <Select label="Sex" value={sexFilter} onChange={e => setSexFilter(e.target.value)}
-          options={[{ value: 'Female', label: 'Female' }, { value: 'Male', label: 'Male' }]} />
+          options={[{ value: 'Female', label: 'Female' }, { value: 'Male', label: 'Male' },
+                    { value: '', label: 'Both (male and female)' }]} />
       </div>
 
       {withBoth.length > 0 && (
@@ -333,8 +352,19 @@ export const FlockWeeklyPerformance: React.FC = () => {
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip formatter={(v: any) => v == null ? '—' : `${Number(v).toLocaleString('en-IN')} g`} />
                   <Legend />
-                  <Line type="monotone" dataKey="Actual" stroke="#10b981" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="Standard" stroke="#9ca3af" strokeDasharray="4 4" dot={false} />
+                  {showingBoth ? (
+                    <>
+                      <Line type="monotone" dataKey="Female" stroke="#ec4899" strokeWidth={2} dot={false} connectNulls />
+                      <Line type="monotone" dataKey="Female std" stroke="#f9a8d4" strokeDasharray="4 4" dot={false} connectNulls />
+                      <Line type="monotone" dataKey="Male" stroke="#2563eb" strokeWidth={2} dot={false} connectNulls />
+                      <Line type="monotone" dataKey="Male std" stroke="#93c5fd" strokeDasharray="4 4" dot={false} connectNulls />
+                    </>
+                  ) : (
+                    <>
+                      <Line type="monotone" dataKey="Actual" stroke="#10b981" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="Standard" stroke="#9ca3af" strokeDasharray="4 4" dot={false} />
+                    </>
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </Card>
@@ -347,6 +377,7 @@ export const FlockWeeklyPerformance: React.FC = () => {
                     <th className="px-3 py-2 text-left">Flock</th>
                     <th className="px-3 py-2 text-right">Age (wk)</th>
                     <th className="px-3 py-2 text-left">Week ending</th>
+                    <th className="px-3 py-2">Sex</th>
                     <th className="px-3 py-2 text-right">Actual (g)</th>
                     <th className="px-3 py-2 text-right">Standard (g)</th>
                     <th className="px-3 py-2 text-right">Diff</th>
@@ -367,6 +398,7 @@ export const FlockWeeklyPerformance: React.FC = () => {
                       <td className="px-3 py-2 font-medium">F-{r.flocks?.flock_no ?? '?'}</td>
                       <td className="px-3 py-2 text-right">{r.week_of_age}</td>
                       <td className="px-3 py-2">{r.week_ending ? fmtDate(r.week_ending) : '—'}</td>
+                      <td className={`px-3 py-2 text-xs font-medium ${r.sex === 'Male' ? 'text-blue-600' : 'text-pink-600'}`}>{r.sex}</td>
                       <td className="px-3 py-2 text-right font-semibold">{r.avg_body_weight_g ?? '—'}</td>
                       <td className="px-3 py-2 text-right text-gray-500">{r.target ?? '—'}</td>
                       <td className={`px-3 py-2 text-right font-medium ${r.diff == null ? 'text-gray-400' : r.diff < 0 ? 'text-red-600' : 'text-green-600'}`}>
