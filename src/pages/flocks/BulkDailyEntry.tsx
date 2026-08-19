@@ -1003,7 +1003,9 @@ export const BulkDailyEntry: React.FC = () => {
   }
 
   const handleMultiDayImport = async (file: File) => {
-    if (!selectedFlock || !flockSheds.length) { toast.error('Select a flock first'); return }
+    // Sheds are resolved inside, from the farms as well as the flock's own
+    // list, so a flock with no allocations yet can still be imported.
+    if (!selectedFlock) { toast.error('Select a flock first'); return }
     setMultiDayImporting(true)
     setMultiDayProgress('Reading file…')
     try {
@@ -1027,10 +1029,28 @@ export const BulkDailyEntry: React.FC = () => {
       // REFUSED rather than guessed.
       const farmName = (id: string | null | undefined) =>
         String((farms ?? []).find((f: any) => f.id === id)?.name ?? '').trim().toLowerCase()
+
+      // The daily grid only draws the sheds a flock is known to be in, which is
+      // right for entry but too narrow for a HISTORY import: a flock reared at
+      // one site and laying at another spends months in sheds it has no
+      // allocation for, and before the first allocation exists it is recorded
+      // as being nowhere at all. So the importer also accepts any active shed
+      // at the flock's rearing or laying farm — named by the Farm column, so
+      // the two sites' identically numbered sheds stay apart.
+      const importSheds: any[] = [...flockSheds]
+      const known = new Set(importSheds.map((s: any) => s.id))
+      const farmIds = [(flockObj as any)?.rearing_farm_id, (flockObj as any)?.laying_farm_id].filter(Boolean)
+      if (farmIds.length > 0) {
+        const { data: farmSheds } = await supabase
+          .from('sheds').select('id,shed_no,shed_name,farm_id,capacity_female,capacity_male')
+          .in('farm_id', [...new Set(farmIds)] as string[]).eq('is_active', true)
+        for (const sh of (farmSheds ?? []) as any[]) if (!known.has(sh.id)) { known.add(sh.id); importSheds.push(sh) }
+      }
+
       const shedByFarmNo: Record<string, any> = {}
       const countByNo: Record<string, number> = {}
       const shedByNo: Record<string, any> = {}
-      for (const s of flockSheds) {
+      for (const s of importSheds) {
         const no = String(s.shed_no).trim()
         shedByFarmNo[`${farmName(s.farm_id)}|${no}`] = s
         countByNo[no] = (countByNo[no] ?? 0) + 1

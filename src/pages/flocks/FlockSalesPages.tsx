@@ -1236,16 +1236,23 @@ export const HEDispatch: React.FC = () => {
     //
     // Rows sharing flock_no + dispatch_date + dc_no become ONE dispatch with
     // a line per production date.
-    const headers = 'flock_no,dispatch_date,dc_no,invoice_no,party_name,prod_date,grade_a,grade_b,grade_c,free_eggs,rate,remarks'
+    const headers = 'flock_no,dispatch_date,dc_no,invoice_no,party_name,prod_date,grade_a,grade_b,grade_c,free_eggs,rate,'
+      + 'boxes_20lb,boxes_23lb,extra_trays_20lb,extra_trays_23lb,vehicle_type,lorry_no,vehicle_no,driver_phone,out_time,'
+      + 'tds_pct,temp_min,temp_max,temp_avg,temp_remarks,remarks'
+    // The loading and vehicle details belong to the DISPATCH, not to a
+    // production date, so they are read from the first row of each group and
+    // may be left blank on the rest.
     const example = [
-      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-08,12000,800,200,0,5.20,',
-      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-09,11500,900,150,100,5.20,100 free on this day',
-      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-10,12200,700,100,0,5.40,rate revised',
+      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-08,12000,800,200,0,5.20,140,60,12,8,Container,AP01AB1234,AP01AB1234,9876543210,18:30,0,18.5,24.2,21.0,within range,',
+      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-09,11500,900,150,100,5.20,,,,,,,,,,,,,,,100 free on this day',
+      '19,2025-06-10,101,HE/25-26/001,Party Name,2025-06-10,12200,700,100,0,5.40,,,,,,,,,,,,,,,rate revised',
     ].join('\n')
     const notes = [
       '# One row per PRODUCTION DATE. Repeat flock_no, dispatch_date and dc_no on every row of the same dispatch.',
       '# Each row keeps its own grades and its own rate, so a rate change mid-dispatch is preserved.',
       '# free_eggs are given away, never billed. Amount = sum of (graded eggs less free) x that row rate.',
+      '# Boxes, trays, vehicle, driver, out time and temperatures belong to the DISPATCH - fill them on the first row only.',
+      '# out_time is free text as written on the DC, for example 18:30.',
     ].join('\n')
     const blob = new Blob([notes + '\n' + headers + '\n' + example], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -1269,7 +1276,7 @@ export const HEDispatch: React.FC = () => {
       type Line = { prod_date: string; grade_a: number; grade_b: number; grade_c: number; free: number; rate: number | null }
       const groups: Record<string, { flock_id: string | null; dispatch_date: string; dc_no: number | null;
                                      invoice_no: string | null; party_id: string | null; remarks: string | null;
-                                     lines: Line[] }> = {}
+                                     lines: Line[]; extra: Record<string, any> }> = {}
 
       for (const r of records as any[]) {
         const flockMatch = flocks?.find((f: any) => String(f.flock_no) === String(r.flock_no))
@@ -1281,8 +1288,28 @@ export const HEDispatch: React.FC = () => {
         const g = (groups[key] ??= {
           flock_id: flockMatch.id, dispatch_date: dispatchDate, dc_no: dcNo,
           invoice_no: r.invoice_no || null, party_id: partyMatch?.id ?? null,
-          remarks: r.remarks || null, lines: [],
+          remarks: r.remarks || null, lines: [], extra: {},
         })
+        // Loading, vehicle and temperature belong to the dispatch. Take them
+        // from whichever row of the group actually carries them, so they can
+        // be written once on the first line and left blank on the rest.
+        const numOrNull = (v: any) => (v !== '' && v != null && !isNaN(Number(v))) ? Number(v) : null
+        const put = (k: string, v: any) => { if (v != null && v !== '' && g.extra[k] == null) g.extra[k] = v }
+        put('boxes_20lb', numOrNull(r.boxes_20lb))
+        put('boxes_23lb', numOrNull(r.boxes_23lb))
+        put('extra_trays_20lb', numOrNull(r.extra_trays_20lb))
+        put('extra_trays_23lb', numOrNull(r.extra_trays_23lb))
+        put('vehicle_type', r.vehicle_type || null)
+        put('lorry_no', r.lorry_no || null)
+        put('vehicle_no', r.vehicle_no || null)
+        put('driver_phone', r.driver_phone || null)
+        put('out_time', r.out_time || null)
+        put('tds_pct', numOrNull(r.tds_pct))
+        put('temp_min', numOrNull(r.temp_min))
+        put('temp_max', numOrNull(r.temp_max))
+        put('temp_avg', numOrNull(r.temp_avg))
+        put('temp_remarks', r.temp_remarks || null)
+        if (!g.remarks && r.remarks) g.remarks = r.remarks
         g.lines.push({
           prod_date: r.prod_date || dispatchDate,
           grade_a: parseInt(r.grade_a) || 0,
@@ -1328,6 +1355,13 @@ export const HEDispatch: React.FC = () => {
           amount: anyRate ? amount : null,
           party_id: g.party_id,
           remarks: g.remarks,
+          // extra_trays is the app's own total of the two tray sizes.
+          extra_trays: (g.extra.extra_trays_20lb ?? 0) + (g.extra.extra_trays_23lb ?? 0) || null,
+          ...g.extra,
+          // Compliance is derived, never typed: it is the recorded maximum
+          // against the safe limit the dispatch is judged by.
+          temp_compliant: g.extra.temp_max != null ? Number(g.extra.temp_max) <= 25 : null,
+          tds_amount: g.extra.tds_pct != null && amount ? Number((amount * Number(g.extra.tds_pct) / 100).toFixed(2)) : null,
         }
       }
 
@@ -1395,7 +1429,9 @@ export const HEDispatch: React.FC = () => {
     // One row per PRODUCTION DATE, matching the import template, so a dispatch
     // can be exported, corrected and put back with its day-wise split and its
     // per-day rates intact. A dispatch with no lines still exports one row.
-    const headers = 'flock_no,dispatch_date,dc_no,invoice_no,party_name,prod_date,grade_a,grade_b,grade_c,free_eggs,rate,remarks'
+    const headers = 'flock_no,dispatch_date,dc_no,invoice_no,party_name,prod_date,grade_a,grade_b,grade_c,free_eggs,rate,'
+      + 'boxes_20lb,boxes_23lb,extra_trays_20lb,extra_trays_23lb,vehicle_type,lorry_no,vehicle_no,driver_phone,out_time,'
+      + 'tds_pct,temp_min,temp_max,temp_avg,temp_remarks,remarks'
     const esc = (v: any) => {
       const t = String(v ?? '')
       return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t
@@ -1404,9 +1440,16 @@ export const HEDispatch: React.FC = () => {
       const dls = (r.he_dispatch_lines ?? []) as any[]
       const base = [r.flocks?.flock_no ?? '', r.dispatch_date, r.dc_no ?? '', r.invoice_no ?? '',
                     r.parties?.name ?? '']
+      // Loading and vehicle details belong to the dispatch, so they go on the
+      // first row only — repeating them would read as several loadings.
+      const load = [r.boxes_20lb ?? '', r.boxes_23lb ?? '', r.extra_trays_20lb ?? '', r.extra_trays_23lb ?? '',
+                    r.vehicle_type ?? '', r.lorry_no ?? '', r.vehicle_no ?? '', r.driver_phone ?? '',
+                    r.out_time ?? '', r.tds_pct ?? '', r.temp_min ?? '', r.temp_max ?? '',
+                    r.temp_avg ?? '', r.temp_remarks ?? '']
+      const blankLoad = load.map(() => '')
       if (dls.length === 0) {
         return [[...base, prodDateLabel(r), r.grade_a ?? 0, r.grade_b ?? 0, r.grade_c ?? 0,
-                 r.free_eggs ?? 0, r.rate ?? '', r.remarks ?? ''].map(esc).join(',')]
+                 r.free_eggs ?? 0, r.rate ?? '', ...load, r.remarks ?? ''].map(esc).join(',')]
       }
       // Free eggs sit on the dispatch, not the line, so they are shown against
       // the first line only — putting them on every line would multiply them.
@@ -1414,6 +1457,7 @@ export const HEDispatch: React.FC = () => {
         .sort((a, b) => String(a.prod_date).localeCompare(String(b.prod_date)))
         .map((l, i) => [...base, l.prod_date, l.grade_a ?? 0, l.grade_b ?? 0, l.grade_c ?? 0,
                         i === 0 ? (r.free_eggs ?? 0) : 0, l.rate ?? r.rate ?? '',
+                        ...(i === 0 ? load : blankLoad),
                         i === 0 ? (r.remarks ?? '') : ''].map(esc).join(','))
     })
     const blob = new Blob([headers + '\n' + lines.join('\n')], { type: 'text/csv' })
@@ -2174,6 +2218,11 @@ export const NHESales: React.FC = () => {
 
   const [invSeries, setInvSeries] = useState('NHE')
   const [genningInv, setGenningInv] = useState(false)
+  // Off by default: an import adds new sales and skips ones already there.
+  // Ticked, a row that matches an existing sale UPDATES it instead — which is
+  // the only practical way to fill in a column added after the sales were
+  // entered, such as the shed 225 bird sales were recorded without.
+  const [updateExisting, setUpdateExisting] = useState(false)
   const [peekInv, setPeekInv] = useState<string | null>(null)
   const genInvoice = async () => {
     setGenningInv(true)
@@ -2964,7 +3013,7 @@ export const NHESales: React.FC = () => {
       // Skip rows that already exist — re-importing the same file used to
       // duplicate every sale.
       const { data: existingSales } = await supabase.from('nhe_sales')
-        .select('flock_id,sale_date,sale_type,dc_no,amount')
+        .select('id,flock_id,sale_date,sale_type,dc_no,amount')
         .in('flock_id', [...new Set(records.map((r: any) => r.flock_id))])
         .in('sale_date', [...new Set(records.map((r: any) => r.sale_date))])
       const isDupe = (r: any) => (existingSales ?? []).some((e: any) =>
@@ -2972,11 +3021,43 @@ export const NHESales: React.FC = () => {
         (r.dc_no != null ? e.dc_no === r.dc_no : e.amount === r.amount))
       const freshRecords = records.filter((r: any) => !isDupe(r))
       const dupCount = records.length - freshRecords.length
-      if (freshRecords.length === 0) throw new Error(`All ${dupCount} rows already exist — nothing imported`)
-      const { error } = await supabase.from('nhe_sales').insert(freshRecords)
-      if (error) throw error
+
+      // Update mode: a row that matches a sale already entered is written over
+      // it rather than skipped. Only the columns the sheet actually carries are
+      // touched, so a blank cell never wipes something already recorded.
+      let updated = 0
+      if (updateExisting && dupCount > 0) {
+        const matchOf = (r: any) => (existingSales ?? []).find((e: any) =>
+          e.flock_id === r.flock_id && e.sale_date === r.sale_date && e.sale_type === r.sale_type &&
+          (r.dc_no != null ? e.dc_no === r.dc_no : e.amount === r.amount))
+        for (const r of records.filter(isDupe)) {
+          const match: any = matchOf(r)
+          if (!match?.id) continue
+          const patch: any = {}
+          if (r.shed_id) patch.shed_id = r.shed_id
+          if (r.employee_id) { patch.employee_id = r.employee_id; patch.is_employee_sale = true }
+          if (r.invoice_no) patch.invoice_no = r.invoice_no
+          if (r.free_qty) patch.free_qty = r.free_qty
+          if (r.party_id) patch.party_id = r.party_id
+          if (r.remarks) patch.remarks = r.remarks
+          if (Object.keys(patch).length === 0) continue
+          const { error: upErr } = await supabase.from('nhe_sales').update(patch).eq('id', match.id)
+          if (!upErr) updated += 1
+        }
+      }
+
+      if (freshRecords.length === 0 && updated === 0) {
+        throw new Error(`All ${dupCount} rows already exist — nothing imported`)
+      }
+      if (freshRecords.length > 0) {
+        const { error } = await supabase.from('nhe_sales').insert(freshRecords)
+        if (error) throw error
+      }
       qc.invalidateQueries({ queryKey: ['nhe_sales'] })
-      toast.success(`Imported ${freshRecords.length} records!${dupCount ? ` (${dupCount} duplicates skipped)` : ''}`)
+      const skipped = dupCount - updated
+      toast.success(`Imported ${freshRecords.length} sale${freshRecords.length === 1 ? '' : 's'}` +
+        (updated ? `, updated ${updated}` : '') +
+        (skipped > 0 ? ` (${skipped} already existed)` : ''))
     } catch (e: any) {
       toast.error('Import failed: ' + e.message)
     } finally {
@@ -3152,6 +3233,10 @@ export const NHESales: React.FC = () => {
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleDownloadTemplate}>Template</Button>
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export CSV</Button>
           <Button variant="outline" size="sm" icon={<Upload size={14}/>} loading={importing} onClick={() => fileRef.current?.click()}>Import</Button>
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 select-none" title="A row matching a sale already entered updates it instead of being skipped — use this to fill in the shed on sales entered before the shed column existed.">
+            <input type="checkbox" checked={updateExisting} onChange={e => setUpdateExisting(e.target.checked)} />
+            Update existing
+          </label>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImport(f) }} />
         </div>
       </div>
