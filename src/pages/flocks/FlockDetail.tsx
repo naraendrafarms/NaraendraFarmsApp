@@ -2710,6 +2710,15 @@ export const FlockDetail: React.FC = () => {
               actual == null || std == null ? null : actual - std
             const varClass = (v: number | null) => v == null ? '' : v >= 0 ? 'text-green-600' : 'text-red-500'
             const fmt = (v: number | null, d = 1) => v != null ? v.toFixed(d) : '—'
+            // The standard as a NUMBER, not only a rate: a percentage cannot be
+            // checked against a register, and "3.15%" means nothing until it is
+            // read as "1,439 birds". Standards that are per hen housed are
+            // multiplied by the birds placed; rates that apply to something the
+            // flock actually did (hen-day, HE%, hatch%) are applied to that same
+            // real base, so standard and actual are answering one question.
+            const sub = (v: number | null | undefined, suffix = '') =>
+              v == null || !isFinite(v) ? null
+                : <div className="text-[10px] text-gray-400">{Math.round(v).toLocaleString('en-IN')}{suffix}</div>
 
             let cumDepletion = 0, cumTeHh = 0, cumHeHh = 0, cumChicksHh = 0, cumDeaths = 0
 
@@ -2798,7 +2807,10 @@ export const FlockDetail: React.FC = () => {
                         return (
                           <tr key={s.week_of_age} className="border-b border-gray-50">
                             <Td>{s.week_of_age}</Td>
-                            <Td right>{fmt(s.cum_depletion_pct)}</Td>
+                            <Td right>
+                              {fmt(s.cum_depletion_pct)}
+                              {sub(s.cum_depletion_pct != null && HH > 0 ? (s.cum_depletion_pct / 100) * HH : null, ' birds')}
+                            </Td>
                             <Td right>
                               {fmt(r.cumDepletion)}
                               {r.cumDeaths != null && r.cumDeaths > 0 && (
@@ -2809,7 +2821,10 @@ export const FlockDetail: React.FC = () => {
                               )}
                             </Td>
                             <Td right className={varClass(vDepletion != null ? -vDepletion : null)}>{fmt(vDepletion)}</Td>
-                            <Td right>{fmt(s.hen_week_pct)}</Td>
+                            <Td right>
+                              {fmt(s.hen_week_pct)}
+                              {sub(s.hen_week_pct != null && r.birdDays ? (s.hen_week_pct / 100) * r.birdDays : null, ' eggs')}
+                            </Td>
                             <Td right>
                               {fmt(r.actualHd)}
                               {r.eggs ? <div className="text-[10px] text-gray-400">
@@ -2817,25 +2832,43 @@ export const FlockDetail: React.FC = () => {
                               </div> : null}
                             </Td>
                             <Td right className={varClass(vHd)}>{fmt(vHd)}</Td>
-                            <Td right>{fmt(s.he_pct)}</Td>
+                            <Td right>
+                              {fmt(s.he_pct)}
+                              {sub(s.he_pct != null && r.eggs ? (s.he_pct / 100) * r.eggs : null, ' HE')}
+                            </Td>
                             <Td right>
                               {fmt(r.actualHe)}
                               {r.heEggs ? <div className="text-[10px] text-gray-400">{r.heEggs.toLocaleString('en-IN')} HE</div> : null}
                             </Td>
                             <Td right className={varClass(vHe)}>{fmt(vHe)}</Td>
-                            <Td right>{fmt(s.weekly_te_hh)}</Td>
-                            <Td right>{fmt(r.weeklyTeHh)}</Td>
+                            <Td right>
+                              {fmt(s.weekly_te_hh)}
+                              {sub(s.weekly_te_hh != null && HH > 0 ? s.weekly_te_hh * HH : null, ' eggs')}
+                            </Td>
+                            <Td right>{fmt(r.weeklyTeHh)}{sub(r.eggs, ' eggs')}</Td>
                             <Td right className={varClass(vTeHh)}>{fmt(vTeHh)}</Td>
-                            <Td right>{fmt(s.cum_te_hh)}</Td>
+                            <Td right>
+                              {fmt(s.cum_te_hh)}
+                              {sub(s.cum_te_hh != null && HH > 0 ? s.cum_te_hh * HH : null, ' eggs')}
+                            </Td>
                             <Td right>{fmt(r.cumTeHh)}</Td>
                             <Td right className={varClass(vCumTeHh)}>{fmt(vCumTeHh)}</Td>
-                            <Td right>{fmt(s.weekly_he_hh)}</Td>
-                            <Td right>{fmt(r.weeklyHeHh)}</Td>
+                            <Td right>
+                              {fmt(s.weekly_he_hh)}
+                              {sub(s.weekly_he_hh != null && HH > 0 ? s.weekly_he_hh * HH : null, ' HE')}
+                            </Td>
+                            <Td right>{fmt(r.weeklyHeHh)}{sub(r.heEggs, ' HE')}</Td>
                             <Td right className={varClass(vHeHh)}>{fmt(vHeHh)}</Td>
-                            <Td right>{fmt(s.cum_he_hh)}</Td>
+                            <Td right>
+                              {fmt(s.cum_he_hh)}
+                              {sub(s.cum_he_hh != null && HH > 0 ? s.cum_he_hh * HH : null, ' HE')}
+                            </Td>
                             <Td right>{fmt(r.cumHeHh)}</Td>
                             <Td right className={varClass(vCumHeHh)}>{fmt(vCumHeHh)}</Td>
-                            <Td right>{fmt(s.hatch_pct)}</Td>
+                            <Td right>
+                              {fmt(s.hatch_pct)}
+                              {sub(s.hatch_pct != null && r.eggsSet ? (s.hatch_pct / 100) * r.eggsSet : null, ' chicks')}
+                            </Td>
                             <Td right>
                               {fmt(r.actualHatch)}
                               {r.eggsSet ? <div className="text-[10px] text-gray-400">
@@ -2843,7 +2876,10 @@ export const FlockDetail: React.FC = () => {
                               </div> : null}
                             </Td>
                             <Td right className={varClass(vHatch)}>{fmt(vHatch)}</Td>
-                            <Td right>{fmt(s.weekly_chicks_hh)}</Td>
+                            <Td right>
+                              {fmt(s.weekly_chicks_hh)}
+                              {sub(s.weekly_chicks_hh != null && HH > 0 ? s.weekly_chicks_hh * HH : null, ' chicks')}
+                            </Td>
                             <Td right>
                               {fmt(r.weeklyChicksHh, 2)}
                               {r.chicks ? <div className="text-[10px] text-gray-400">{r.chicks.toLocaleString('en-IN')} chicks</div> : null}
@@ -2851,7 +2887,10 @@ export const FlockDetail: React.FC = () => {
                             <Td right className={varClass(variance(r.weeklyChicksHh, s.weekly_chicks_hh))}>
                               {fmt(variance(r.weeklyChicksHh, s.weekly_chicks_hh), 2)}
                             </Td>
-                            <Td right>{fmt(s.cum_chicks_hh)}</Td>
+                            <Td right>
+                              {fmt(s.cum_chicks_hh)}
+                              {sub(s.cum_chicks_hh != null && HH > 0 ? s.cum_chicks_hh * HH : null, ' chicks')}
+                            </Td>
                             <Td right>{fmt(r.cumChicksHh, 2)}</Td>
                             <Td right className={varClass(variance(r.cumChicksHh, s.cum_chicks_hh))}>
                               {fmt(variance(r.cumChicksHh, s.cum_chicks_hh), 2)}
@@ -2863,8 +2902,10 @@ export const FlockDetail: React.FC = () => {
                   </Table>
                 </div>
                 <div className="px-4 py-3 text-xs text-gray-400 border-t border-gray-100">
-                  Every percentage shows the figures it was worked out from underneath it, so a line can be checked
-                  against the register rather than taken on trust. Depletion is deaths plus culls measured against the
+                  BOTH sides show the real numbers under the percentage. A standard per hen housed is multiplied by
+                  the {HH.toLocaleString('en-IN')} females placed; a standard RATE (hen-day, HE%, hatch%) is applied to
+                  what this flock actually did — the same bird-days, the same eggs, the same eggs set — so the standard
+                  and the actual answer one question and the gap between them is a real number of birds, eggs or chicks. Depletion is deaths plus culls measured against the
                   {' '}{HH.toLocaleString('en-IN')} females placed. Hen-day is eggs divided by bird-days (the daily
                   opening counts added up). Hatch % and Chicks/HH come from the HATCH BATCHES linked to this flock's
                   dispatches, weighted by eggs set — they stay blank for any week whose batches have not been linked.
