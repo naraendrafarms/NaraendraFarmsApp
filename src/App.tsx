@@ -62,6 +62,7 @@ import { HealthCheckPage } from '@/pages/admin/HealthCheck'
 import { AccessControlPage } from '@/pages/admin/AccessControlPage'
 import { FlockDashboard, FlockDetail as NewFlockDetail } from '@/pages/flock/FlockPages'
 import { FlockComparison } from '@/pages/flock/FlockComparison'
+import { ChickReceipts } from '@/pages/flock/ChickReceipts'
 import { ShedPerformancePage } from '@/pages/flock/ShedPerformance'
 import { FarmExpensesPage } from '@/pages/expenses/FarmExpenses'
 import { EggOpeningStockPage } from '@/pages/flocks/EggOpeningStock'
@@ -325,6 +326,7 @@ export const App: React.FC = () => {
             <Route path="flock" element={<FlockDashboard />} />
             <Route path="flock/operations" element={<OperationsBoard />} />
             <Route path="flock/compare" element={<FlockComparison />} />
+            <Route path="flock/chick-receipts" element={<ChickReceipts />} />
             <Route path="flock/shed-performance" element={<ShedPerformancePage />} />
             <Route path="expenses" element={<FarmExpensesPage />} />
             <Route path="flock/:flockNo" element={<NewFlockDetail />} />
