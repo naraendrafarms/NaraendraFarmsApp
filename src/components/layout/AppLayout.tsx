@@ -96,6 +96,7 @@ const NAV: NavItem[] = [
       { label: 'Manpower Requirement', to: '/employees/manpower-requirement' },
       { label: 'Month Attendance',     to: '/employees/attendance-month' },
       { label: 'Attendance Register',  to: '/employees/attendance' },
+      { label: 'Attendance & Salary — Date Range', to: '/employees/attendance-range' },
       { label: 'Advances',             to: '/employees/advances' },
       { label: 'Payslip Generator',    to: '/employees/payslip' },
     ]

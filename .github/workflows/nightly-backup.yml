@@ -103,6 +103,13 @@ jobs:
 
       - name: Commit a weekly snapshot (Sundays, without the audit log)
         run: |
+          # A public repository must never carry the farm's data: salaries,
+          # bank entries and party ledgers would be readable by anyone. The
+          # artifact above is the backup either way; this second copy waits
+          # until the repository is private.
+          if [ "${{ github.event.repository.private }}" != "true" ]; then
+            echo "Repository is public — snapshot NOT committed. Artifact only."; exit 0
+          fi
           if [ "$(date +%u)" != "7" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
             echo "Not Sunday — artifact only."; exit 0
           fi
@@ -117,4 +124,8 @@ jobs:
           git add backups/
           git diff --cached --quiet && { echo "Nothing changed."; exit 0; }
           git commit -m "Weekly data snapshot $STAMP"
-          git push
+          # The export takes about a quarter of an hour, so main has usually
+          # moved on by the time this runs. Rebase before pushing, or the
+          # whole backup job fails on a race it does not care about.
+          git pull --rebase origin main
+          git push origin HEAD:main

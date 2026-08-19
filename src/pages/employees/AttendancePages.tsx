@@ -1582,3 +1582,181 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     </div>
   )
 }
+
+// ── ATTENDANCE & SALARY OVER A DATE RANGE ─────────────────────────────────────
+//
+// Every other attendance screen is tied to one calendar month, because that is
+// how attendance is entered and how salary is paid. But a question like "what
+// did the Site 2 men work between 15 April and 10 July" had no answer anywhere
+// in the app — you had to open three months and add them up by hand.
+//
+// This is read-only on purpose. Marking and paying stay where they are.
+
+export const AttendanceRangePage: React.FC = () => {
+  const [from, setFrom] = useState(() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 1); d.setDate(1)
+    return d.toISOString().slice(0, 10)
+  })
+  const [to, setTo] = useState(todayStr())
+  const [farmId, setFarmId] = useState('')
+  const [search, setSearch] = useState('')
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name,code').eq('is_active', true).order('name')
+      return data ?? []
+    }
+  })
+
+  const { data: employees = [] } = useQuery({
+    queryKey: ['emp_range', farmId],
+    queryFn: async () => {
+      let q = supabase.from('employees').select('id,name,emp_id,farm_id,designation,is_active')
+      if (farmId) q = q.eq('farm_id', farmId)
+      const { data } = await q.order('emp_id', { ascending: true, nullsFirst: false })
+      return data ?? []
+    }
+  })
+
+  const empIds = useMemo(() => (employees as any[]).map(e => e.id), [employees])
+
+  const { data: att = [], isLoading } = useQuery({
+    queryKey: ['att_range', from, to, farmId, empIds.length],
+    enabled: empIds.length > 0 && !!from && !!to,
+    queryFn: async () => fetchAllPages<any>(
+      (a, b) => supabase.from('attendance_daily')
+        .select('employee_id, attendance_date, status, ot_hours')
+        .in('employee_id', empIds)
+        .gte('attendance_date', from).lte('attendance_date', to)
+        .order('attendance_date').order('id').range(a, b),
+      'Attendance range'
+    )
+  })
+
+  // Salary is stored per calendar month, so a range covers the months whose
+  // first day falls inside it. Anything else would double-count a part month.
+  const { data: salary = [] } = useQuery({
+    queryKey: ['sal_range', from, to, farmId, empIds.length],
+    enabled: empIds.length > 0 && !!from && !!to,
+    queryFn: async () => fetchAllPages<any>(
+      (a, b) => supabase.from('salary_monthly')
+        .select('employee_id, month, days_worked, earned_salary, advance, net_salary, ot_bonus')
+        .in('employee_id', empIds)
+        .gte('month', from.slice(0, 8) + '01').lte('month', to)
+        .order('month').order('id').range(a, b),
+      'Salary range'
+    )
+  })
+
+  const rows = useMemo(() => {
+    const blank = () => ({ P: 0, A: 0, H: 0, WO: 0, OT: 0, otHours: 0, earned: 0, advance: 0, net: 0, months: 0 })
+    const m: Record<string, ReturnType<typeof blank>> = {}
+    for (const r of att as any[]) {
+      const e = (m[r.employee_id] ??= blank())
+      if (r.status in e) (e as any)[r.status] += 1
+      e.otHours += Number(r.ot_hours ?? 0)
+    }
+    for (const s of salary as any[]) {
+      const e = (m[s.employee_id] ??= blank())
+      e.earned += Number(s.earned_salary ?? 0)
+      e.advance += Number(s.advance ?? 0)
+      e.net += Number(s.net_salary ?? 0)
+      e.months += 1
+    }
+    const term = search.trim().toLowerCase()
+    return (employees as any[])
+      .map(e => ({ emp: e, ...(m[e.id] ?? blank()) }))
+      .filter(r => r.P || r.A || r.H || r.WO || r.OT || r.months)
+      .filter(r => !term || String(r.emp.name ?? '').toLowerCase().includes(term)
+                        || String(r.emp.emp_id ?? '').toLowerCase().includes(term))
+  }, [employees, att, salary, search])
+
+  // Paid days follow the same rule as the month grid: half day counts a half.
+  const paidDays = (r: any) => r.P + r.OT + r.H * 0.5
+  const tot = rows.reduce((s, r) => ({
+    P: s.P + r.P, A: s.A + r.A, H: s.H + r.H, WO: s.WO + r.WO, OT: s.OT + r.OT,
+    otHours: s.otHours + r.otHours, paid: s.paid + paidDays(r),
+    earned: s.earned + r.earned, advance: s.advance + r.advance, net: s.net + r.net,
+  }), { P: 0, A: 0, H: 0, WO: 0, OT: 0, otHours: 0, paid: 0, earned: 0, advance: 0, net: 0 })
+
+  const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader title="Attendance & Salary — Date Range"
+        subtitle="Any From–To period, across every employee. Read only: mark attendance on the daily or monthly pages." />
+
+      <Card>
+        <div className="flex flex-wrap gap-3 items-end">
+          <DateInput label="From" value={from} onChange={e => setFrom(e.target.value)} className="w-40" />
+          <DateInput label="To" value={to} onChange={e => setTo(e.target.value)} className="w-40" />
+          <Select label="Site" placeholder="All Sites" options={farmOptions} value={farmId}
+                  onChange={e => setFarmId(e.target.value)} className="w-52" />
+          <input className="border rounded-lg px-3 py-2 text-sm w-56" placeholder="Search name or ID"
+                 value={search} onChange={e => setSearch(e.target.value)} />
+          <Button variant="ghost" size="sm" icon={<Download size={15} />} onClick={() =>
+            exportCSV(`attendance_${from}_to_${to}.csv`,
+              ['Emp ID','Name','Site','Present','Absent','Half','Week Off','OT Days','OT Hours','Paid Days','Earned','Advance','Net'],
+              rows.map(r => [r.emp.emp_id, r.emp.name,
+                (farms ?? []).find((f: any) => f.id === r.emp.farm_id)?.name ?? '',
+                r.P, r.A, r.H, r.WO, r.OT, r.otHours, paidDays(r), r.earned, r.advance, r.net]))
+          }>Export</Button>
+        </div>
+      </Card>
+
+      {isLoading ? <Spinner /> : (
+        <Card padding={false}>
+          <div className="overflow-x-auto">
+            <Table>
+              <thead><tr>
+                <Th>Emp ID</Th><Th>Name</Th><Th>Site</Th>
+                <Th right>Present</Th><Th right>Absent</Th><Th right>Half</Th><Th right>Week Off</Th>
+                <Th right>OT Days</Th><Th right>OT Hrs</Th><Th right>Paid Days</Th>
+                <Th right>Earned</Th><Th right>Advance</Th><Th right>Net Paid</Th>
+              </tr></thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.emp.id}>
+                    <Td className="text-xs text-gray-500">{r.emp.emp_id}</Td>
+                    <Td className="font-medium">{r.emp.name}</Td>
+                    <Td className="text-xs text-gray-500">
+                      {(farms ?? []).find((f: any) => f.id === r.emp.farm_id)?.name ?? '—'}
+                    </Td>
+                    <Td right>{r.P}</Td>
+                    <Td right className={r.A ? 'text-red-600' : ''}>{r.A}</Td>
+                    <Td right>{r.H}</Td>
+                    <Td right className="text-gray-400">{r.WO}</Td>
+                    <Td right>{r.OT}</Td>
+                    <Td right>{r.otHours || ''}</Td>
+                    <Td right className="font-semibold">{paidDays(r)}</Td>
+                    <Td right>{r.earned ? inr(r.earned) : ''}</Td>
+                    <Td right>{r.advance ? inr(r.advance) : ''}</Td>
+                    <Td right className="font-semibold">{r.net ? inr(r.net) : ''}</Td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr><Td colSpan={13} className="text-center text-gray-400 py-6">Nothing marked in this period.</Td></tr>
+                )}
+              </tbody>
+              {rows.length > 0 && (
+                <tfoot>
+                  <tr className="bg-gray-50 font-semibold">
+                    <Td colSpan={3}>{rows.length} employees</Td>
+                    <Td right>{tot.P}</Td><Td right>{tot.A}</Td><Td right>{tot.H}</Td><Td right>{tot.WO}</Td>
+                    <Td right>{tot.OT}</Td><Td right>{tot.otHours || ''}</Td><Td right>{tot.paid}</Td>
+                    <Td right>{inr(tot.earned)}</Td><Td right>{inr(tot.advance)}</Td><Td right>{inr(tot.net)}</Td>
+                  </tr>
+                </tfoot>
+              )}
+            </Table>
+          </div>
+          <p className="text-xs text-gray-500 px-3 py-2">
+            Salary figures come from the monthly salary records whose month starts inside the range, so a part
+            month is never counted twice. Paid days count a half day as a half, the same as the month grid.
+          </p>
+        </Card>
+      )}
+    </div>
+  )
+}

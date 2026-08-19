@@ -58,6 +58,7 @@ const BillsTab: React.FC = () => {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [filterMonth, setFilterMonth] = useState('')
+  const [filterTo, setFilterTo] = useState('')
   const [filterMeter, setFilterMeter] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
@@ -78,14 +79,18 @@ const BillsTab: React.FC = () => {
   })
 
   const { data: bills, isLoading } = useQuery({
-    queryKey: ['elec_bills', filterMonth, filterMeter],
+    queryKey: ['elec_bills', filterMonth, filterTo, filterMeter],
     queryFn: async () => {
       // Bills are summed on this page, so page rather than cap.
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('electricity_bills')
           .select('*, electricity_meters(meter_name,usc_no,service_no,farms(name,code))')
           .order('bill_month', { ascending: false }).order('id').range(from, to)
-        if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
+        // From alone still means that one month, which is how this page has
+        // always been used. Set To as well and it becomes a range.
+        if (filterMonth && filterTo) q = q.gte('bill_month', filterMonth + '-01').lte('bill_month', filterTo + '-01')
+        else if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
+        else if (filterTo) q = q.lte('bill_month', filterTo + '-01')
         if (filterMeter) q = q.eq('meter_id', filterMeter)
         return q
       }, 'Electricity bills')
@@ -93,8 +98,9 @@ const BillsTab: React.FC = () => {
   })
 
   // Only meaningful when a single month is selected — "last month" per meter
-  // is the calendar month immediately before whatever's being printed.
-  const priorMonth = filterMonth ? (() => {
+  // is the calendar month immediately before whatever's being printed, which
+  // means nothing once a range is on screen.
+  const priorMonth = (filterMonth && (!filterTo || filterTo === filterMonth)) ? (() => {
     const [y, m] = filterMonth.split('-').map(Number)
     const d = new Date(y, m - 2, 1)
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -374,9 +380,10 @@ const BillsTab: React.FC = () => {
     <>
       <div className="flex flex-wrap gap-2 items-end justify-between mb-4">
         <div className="flex flex-wrap gap-2 items-end">
-          <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-44" />
+          <Input label="From" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-40" />
+          <Input label="To" type="month" value={filterTo} onChange={e=>setFilterTo(e.target.value)} className="w-40" />
           <Select label="" placeholder="All Meters" options={meterOptions} value={filterMeter} onChange={e=>setFilterMeter(e.target.value)} className="w-56" />
-          {(filterMonth||filterMeter) && <Button variant="ghost" size="sm" onClick={()=>{setFilterMonth('');setFilterMeter('')}}>Clear</Button>}
+          {(filterMonth||filterTo||filterMeter) && <Button variant="ghost" size="sm" onClick={()=>{setFilterMonth('');setFilterTo('');setFilterMeter('')}}>Clear</Button>}
           {bills && <span className="text-sm text-gray-500 self-center">{bills.length} bills · {totals.units.toLocaleString('en-IN')} units · <strong>{inr(totals.amount)}</strong>{totals.depositInterest>0 && <span className="text-green-600 ml-2">− {inr(totals.depositInterest)} interest = <strong>{inr(totals.netPayable)}</strong> net</span>}</span>}
         </div>
         <div className="flex gap-2">
@@ -428,7 +435,10 @@ const BillsTab: React.FC = () => {
                 inr(totals.depositInterest), inr(totals.netPayable)]
               printReport({
                 title: 'Electricity Bills',
-                subtitle: filterMonth ? fmtMonth(filterMonth+'-01') : 'All Months',
+                subtitle: filterMonth && filterTo && filterTo !== filterMonth
+                  ? `${fmtMonth(filterMonth+'-01')} to ${fmtMonth(filterTo+'-01')}`
+                  : filterMonth ? fmtMonth(filterMonth+'-01')
+                  : filterTo ? `Up to ${fmtMonth(filterTo+'-01')}` : 'All Months',
                 headers, rows, rightAlignFrom: 4, footerRow,
               })
             }}>
@@ -648,17 +658,20 @@ const BillsTab: React.FC = () => {
 const AllocationTab: React.FC = () => {
   const qc = useQueryClient()
   const [filterMonth, setFilterMonth] = useState('')
+  const [filterTo, setFilterTo] = useState('')
   const [allocModal, setAllocModal] = useState<any>(null)
   const [allocForm, setAllocForm] = useState<{ flock_id: string; alloc_pct: string; method: string }[]>([])
 
   const { data: bills, isLoading } = useQuery({
-    queryKey: ['elec_bills_alloc', filterMonth],
+    queryKey: ['elec_bills_alloc', filterMonth, filterTo],
     queryFn: async () => {
       return fetchAllPages<any>((from, to) => {
         let q = supabase.from('electricity_bills')
           .select('*, electricity_meters(meter_name,usc_no,farms(name,code))')
           .order('bill_month', { ascending: false }).order('id').range(from, to)
-        if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
+        if (filterMonth && filterTo) q = q.gte('bill_month', filterMonth + '-01').lte('bill_month', filterTo + '-01')
+        else if (filterMonth) q = q.eq('bill_month', filterMonth + '-01')
+        else if (filterTo) q = q.lte('bill_month', filterTo + '-01')
         return q
       }, 'Electricity bills')
     }
@@ -722,8 +735,9 @@ const AllocationTab: React.FC = () => {
         <strong>Allocation</strong> — split each bill's cost across flocks for accurate P&amp;L. Total must equal 100%.
       </div>
       <div className="flex gap-3 items-center mb-4">
-        <Input label="" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-48"/>
-        {filterMonth && <Button variant="ghost" size="sm" onClick={()=>setFilterMonth('')}>Clear</Button>}
+        <Input label="From" type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} className="w-40"/>
+        <Input label="To" type="month" value={filterTo} onChange={e=>setFilterTo(e.target.value)} className="w-40"/>
+        {(filterMonth||filterTo) && <Button variant="ghost" size="sm" onClick={()=>{setFilterMonth('');setFilterTo('')}}>Clear</Button>}
       </div>
       {isLoading ? <Spinner/> : (
         <Card padding={false}>

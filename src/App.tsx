@@ -36,7 +36,7 @@ import { WorkforceReviewPage } from '@/pages/employees/WorkforceReviewPage'
 import { OperationsBoard } from '@/pages/flock/OperationsBoard'
 import { SalaryHistoryPage } from '@/pages/employees/SalaryHistoryPage'
 import { PartnerRemunerationPage } from '@/pages/employees/PartnerRemunerationPage'
-import { DailyAttendancePage, MonthAttendancePage, EmployeeAdvancesPage, MonthlyAttendanceGridPage } from '@/pages/employees/AttendancePages'
+import { DailyAttendancePage, MonthAttendancePage, EmployeeAdvancesPage, MonthlyAttendanceGridPage, AttendanceRangePage } from '@/pages/employees/AttendancePages'
 import {
   FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster,
   ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster, VaccinationSchedulePage
@@ -224,6 +224,7 @@ export const App: React.FC = () => {
             <Route path="employees/attendance-daily" element={<DailyAttendancePage />} />
             <Route path="employees/attendance-month" element={<MonthAttendancePage />} />
             <Route path="employees/monthly-attendance" element={<MonthlyAttendanceGridPage />} />
+            <Route path="employees/attendance-range" element={<AttendanceRangePage />} />
             <Route path="employees/manpower-requirement" element={<ManpowerRequirement />} />
             <Route path="employees/advances" element={<EmployeeAdvancesPage />} />
             <Route path="employees/payslip" element={<PayslipGeneratorPage />} />
