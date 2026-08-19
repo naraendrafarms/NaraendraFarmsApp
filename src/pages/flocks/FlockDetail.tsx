@@ -120,6 +120,21 @@ export const FlockDetail: React.FC = () => {
   // dispatch_id. Flock 19 had 14 batches linked, all with a hatchability
   // figure, while the vs-Standard tab read the empty column and showed
   // nothing. Reading the batches is the whole fix.
+  // The production dates behind every dispatch. Day-wise entry began on
+  // 10/09/2025 (DC 3435); before that a whole load was recorded against a
+  // single production date, so 40,320 eggs sit on one day the flock laid
+  // 12,000. Those lumps are marked rather than spread, because spreading them
+  // would be a guess wearing a number's clothes.
+  const { data: dispatchLines } = useQuery({
+    queryKey: ['flock_dispatch_lines', id],
+    enabled: !!id,
+    queryFn: async () => fetchAllPages<any>((from, to) => supabase
+      .from('he_dispatch_lines')
+      .select('dispatch_id,prod_date,grade_a,grade_b,grade_c,he_dispatch!inner(flock_id,dispatch_date)')
+      .eq('he_dispatch.flock_id', id!)
+      .order('prod_date').order('id').range(from, to), 'Dispatch lines')
+  })
+
   const { data: hatchBatches } = useQuery({
     queryKey: ['flock_hatch_batches', id],
     enabled: !!id,
@@ -857,24 +872,45 @@ export const FlockDetail: React.FC = () => {
       row.heEggs += d.he_eggs ?? 0
       row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
     }
-    // Hatch results come from the BATCHES, weighted by eggs set -- a 30,000-egg
-    // batch and a 5,000-egg batch must not count equally, which a plain average
-    // of percentages would do. The week is the flock's age on the DISPATCH date
-    // the batch was set from, since that is when those eggs left the farm.
-    // Where a batch has no dispatch link, its own setting date is used.
-    const hatchWeekly: Record<number, { pctXeggs: number; eggs: number; chicks: number }> = {}
-    for (const b of (hatchBatches ?? []) as any[]) {
-      const when = b.he_dispatch?.dispatch_date ?? b.setting_date
-      if (!when) continue
-      const wk = stdWeekOf(when)
-      if (wk < 1) continue
-      const row = hatchWeekly[wk] ??= { pctXeggs: 0, eggs: 0, chicks: 0 }
-      const eggs = Number(b.eggs_set ?? 0)
-      if (b.hatchability_pct != null && eggs > 0) {
-        row.pctXeggs += Number(b.hatchability_pct) * eggs
-        row.eggs += eggs
+    // Eggs dispatched and eggs SET, attributed to the week the eggs were laid.
+    // A batch's eggs are split across the production dates of the dispatch it
+    // came from, in proportion to each day's eggs, so a batch set from seven
+    // laying days lands on those seven days' weeks.
+    const linesByDispatch: Record<string, any[]> = {}
+    for (const l of (dispatchLines ?? []) as any[]) (linesByDispatch[l.dispatch_id] ??= []).push(l)
+    const lineEggs = (l: any) => Number(l.grade_a ?? 0) + Number(l.grade_b ?? 0) + Number(l.grade_c ?? 0)
+
+    const flow: Record<number, { dispatched: number; set: number; chicks: number; pctXeggs: number; lumped: boolean }> = {}
+    const touch = (wk: number) => (flow[wk] ??= { dispatched: 0, set: 0, chicks: 0, pctXeggs: 0, lumped: false })
+
+    for (const [did, lines] of Object.entries(linesByDispatch)) {
+      const total = lines.reduce((a, l) => a + lineEggs(l), 0)
+      // One line for a whole load means the day-wise breakdown was never
+      // entered — the eggs are counted, but the week they belong to is the
+      // dispatch's own date and cannot be trusted as a laying week.
+      const isLump = lines.length === 1
+      for (const l of lines) {
+        const wk = stdWeekOf(l.prod_date)
+        if (wk < 1) continue
+        const e = touch(wk)
+        e.dispatched += lineEggs(l)
+        if (isLump) e.lumped = true
       }
-      row.chicks += Number(b.hatched_chicks ?? 0)
+      const batches = (hatchBatches ?? []).filter((b: any) => b.dispatch_id === did)
+      for (const b of batches as any[]) {
+        const eggsSet = Number(b.eggs_set ?? 0)
+        const chicks = Number(b.hatched_chicks ?? 0)
+        if (total <= 0) continue
+        for (const l of lines) {
+          const wk = stdWeekOf(l.prod_date)
+          if (wk < 1) continue
+          const share = lineEggs(l) / total
+          const e = touch(wk)
+          e.set += eggsSet * share
+          e.chicks += chicks * share
+          if (b.hatchability_pct != null) e.pctXeggs += Number(b.hatchability_pct) * eggsSet * share
+        }
+      }
     }
     const variance = (actual: number | null, std: number | null) =>
       actual == null || std == null ? null : actual - std
@@ -883,8 +919,8 @@ export const FlockDetail: React.FC = () => {
       const w = weekly[s.week_of_age]
       const actualHd = w && w.openFSum > 0 ? (w.totalEggs / w.openFSum) * 100 : null
       const actualHe = w && w.totalEggs > 0 ? (w.heEggs / w.totalEggs) * 100 : null
-      const hw = hatchWeekly[s.week_of_age]
-      const actualHatch = hw && hw.eggs > 0 ? hw.pctXeggs / hw.eggs : null
+      const hw = flow[s.week_of_age]
+      const actualHatch = hw && hw.set > 0 ? hw.pctXeggs / hw.set : null
       const weeklyChicksHh = hw && HH > 0 && hw.chicks > 0 ? hw.chicks / HH : null
       const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
       const weeklyHeHh = w && HH > 0 ? w.heEggs / HH : null
@@ -896,7 +932,10 @@ export const FlockDetail: React.FC = () => {
         cumChicksHh: cumChicksHh > 0 ? cumChicksHh : null,
         deaths: w ? w.depletion : null, cumDeaths: w ? cumDeaths : null,
         eggs: w ? w.totalEggs : null, heEggs: w ? w.heEggs : null, birdDays: w ? w.openFSum : null,
-        eggsSet: hw?.eggs ?? null, chicks: hw?.chicks ?? null,
+        eggsSet: hw?.set ? Math.round(hw.set) : null,
+        chicks: hw?.chicks ? Math.round(hw.chicks) : null,
+        heDispatched: hw?.dispatched ? Math.round(hw.dispatched) : null,
+        lumped: hw?.lumped ?? false,
         vChicksHh: variance(weeklyChicksHh, s.weekly_chicks_hh),
         vCumChicksHh: variance(cumChicksHh > 0 ? cumChicksHh : null, s.cum_chicks_hh),
         cumDepletion: w ? cumDepletion : null, cumTeHh: w ? cumTeHh : null, cumHeHh: w ? cumHeHh : null,
@@ -1411,6 +1450,7 @@ export const FlockDetail: React.FC = () => {
             'Std Cum TE/HH','Actual','Var',
             'Std Wk HE/HH','Actual','Var',
             'Std Cum HE/HH','Actual','Var',
+            'HE produced','HE dispatched','Eggs set','Day-wise?',
             'Std Hatch%','Actual','Var',
             'Std Wk Chicks/HH','Actual','Var',
             'Std Cum Chicks/HH','Actual','Var',
@@ -1427,6 +1467,8 @@ export const FlockDetail: React.FC = () => {
               f(r.s.cum_te_hh, 2), f(r.cumTeHh, 2), f(r.vCumTeHh, 2),
               f(r.s.weekly_he_hh, 2), f(r.weeklyHeHh, 2), f(r.vHeHh, 2),
               f(r.s.cum_he_hh, 2), f(r.cumHeHh, 2), f(r.vCumHeHh, 2),
+              r.heEggs ?? '', r.heDispatched ?? '', r.eggsSet ?? '',
+              r.heDispatched ? (r.lumped ? 'part lump' : 'day-wise') : '',
               f(r.s.hatch_pct), f(r.actualHatch), f(r.vHatch),
               f(r.s.weekly_chicks_hh, 2), f(r.weeklyChicksHh, 2), f(r.vChicksHh, 2),
               f(r.s.cum_chicks_hh, 2), f(r.cumChicksHh, 2), f(r.vCumChicksHh, 2),
@@ -2717,23 +2759,38 @@ export const FlockDetail: React.FC = () => {
               row.heEggs += d.he_eggs ?? 0
               row.depletion += (d.mortality_female ?? 0) + (d.cull_female ?? 0)
             }
-            // Hatch results from the BATCHES, weighted by eggs set. See the
-            // note on the memo above: he_dispatch.hatch_pct is empty on every
-            // dispatch, so reading it showed nothing however many batches were
-            // linked.
-            const hatchWeekly: Record<number, { pctXeggs: number; eggs: number; chicks: number }> = {}
-            for (const b of (hatchBatches ?? []) as any[]) {
-              const when = b.he_dispatch?.dispatch_date ?? b.setting_date
-              if (!when) continue
-              const wk = stdWeekOfR(when)
-              if (wk < 1) continue
-              const row = hatchWeekly[wk] ??= { pctXeggs: 0, eggs: 0, chicks: 0 }
-              const eggs = Number(b.eggs_set ?? 0)
-              if (b.hatchability_pct != null && eggs > 0) {
-                row.pctXeggs += Number(b.hatchability_pct) * eggs
-                row.eggs += eggs
+            // Eggs dispatched and eggs SET, attributed to the week the eggs
+            // were laid — see the note on the memo above.
+            const linesByDispatch: Record<string, any[]> = {}
+            for (const l of (dispatchLines ?? []) as any[]) (linesByDispatch[l.dispatch_id] ??= []).push(l)
+            const lineEggs = (l: any) => Number(l.grade_a ?? 0) + Number(l.grade_b ?? 0) + Number(l.grade_c ?? 0)
+            const flow: Record<number, { dispatched: number; set: number; chicks: number; pctXeggs: number; lumped: boolean }> = {}
+            const touch = (wk: number) => (flow[wk] ??= { dispatched: 0, set: 0, chicks: 0, pctXeggs: 0, lumped: false })
+            for (const [did, lines] of Object.entries(linesByDispatch)) {
+              const total = lines.reduce((a, l) => a + lineEggs(l), 0)
+              const isLump = lines.length === 1
+              for (const l of lines) {
+                const wk = stdWeekOfR(l.prod_date)
+                if (wk < 1) continue
+                const e = touch(wk)
+                e.dispatched += lineEggs(l)
+                if (isLump) e.lumped = true
               }
-              row.chicks += Number(b.hatched_chicks ?? 0)
+              const batches = (hatchBatches ?? []).filter((b: any) => b.dispatch_id === did)
+              for (const b of batches as any[]) {
+                const eggsSet = Number(b.eggs_set ?? 0)
+                const chicks = Number(b.hatched_chicks ?? 0)
+                if (total <= 0) continue
+                for (const l of lines) {
+                  const wk = stdWeekOfR(l.prod_date)
+                  if (wk < 1) continue
+                  const share = lineEggs(l) / total
+                  const e = touch(wk)
+                  e.set += eggsSet * share
+                  e.chicks += chicks * share
+                  if (b.hatchability_pct != null) e.pctXeggs += Number(b.hatchability_pct) * eggsSet * share
+                }
+              }
             }
             const variance = (actual: number | null, std: number | null) =>
               actual == null || std == null ? null : actual - std
@@ -2755,8 +2812,8 @@ export const FlockDetail: React.FC = () => {
               const w = weekly[s.week_of_age]
               const actualHd = w && w.openFSum > 0 ? (w.totalEggs / w.openFSum) * 100 : null
               const actualHe = w && w.totalEggs > 0 ? (w.heEggs / w.totalEggs) * 100 : null
-              const hw = hatchWeekly[s.week_of_age]
-              const actualHatch = hw && hw.eggs > 0 ? hw.pctXeggs / hw.eggs : null
+              const hw = flow[s.week_of_age]
+              const actualHatch = hw && hw.set > 0 ? hw.pctXeggs / hw.set : null
               const weeklyChicksHh = hw && HH > 0 && hw.chicks > 0 ? hw.chicks / HH : null
               const weeklyTeHh = w && HH > 0 ? w.totalEggs / HH : null
               const weeklyHeHh = w && HH > 0 ? w.heEggs / HH : null
@@ -2778,7 +2835,10 @@ export const FlockDetail: React.FC = () => {
                 deaths: w ? w.depletion : null, cumDeaths: w ? cumDeaths : null,
                 eggs: w ? w.totalEggs : null, heEggs: w ? w.heEggs : null,
                 birdDays: w ? w.openFSum : null,
-                eggsSet: hw?.eggs ?? null, chicks: hw?.chicks ?? null,
+                eggsSet: hw?.set ? Math.round(hw.set) : null,
+                chicks: hw?.chicks ? Math.round(hw.chicks) : null,
+                heDispatched: hw?.dispatched ? Math.round(hw.dispatched) : null,
+                lumped: hw?.lumped ?? false,
               }
             })
 
@@ -2811,6 +2871,9 @@ export const FlockDetail: React.FC = () => {
                         <Th right>Std Cum HE/HH</Th>
                         <Th right>Actual</Th>
                         <Th right>Var</Th>
+                        <Th right>HE produced</Th>
+                        <Th right>HE dispatched</Th>
+                        <Th right>Eggs set</Th>
                         <Th right>Std Hatch %</Th>
                         <Th right>Actual</Th>
                         <Th right>Var</Th>
@@ -2894,6 +2957,12 @@ export const FlockDetail: React.FC = () => {
                             </Td>
                             <Td right>{fmt(r.cumHeHh)}</Td>
                             <Td right className={varClass(vCumHeHh)}>{fmt(vCumHeHh)}</Td>
+                            <Td right>{r.heEggs ? r.heEggs.toLocaleString('en-IN') : '—'}</Td>
+                            <Td right>
+                              {r.heDispatched ? r.heDispatched.toLocaleString('en-IN') : '—'}
+                              {r.lumped && <span title="A dispatch in this week was entered without a day-wise production breakdown, so its eggs sit on one date" className="text-amber-600"> *</span>}
+                            </Td>
+                            <Td right>{r.eggsSet ? r.eggsSet.toLocaleString('en-IN') : '—'}</Td>
                             <Td right>
                               {fmt(s.hatch_pct)}
                               {sub(s.hatch_pct != null && r.eggsSet ? (s.hatch_pct / 100) * r.eggsSet : null, ' chicks')}
@@ -2931,7 +3000,12 @@ export const FlockDetail: React.FC = () => {
                   </Table>
                 </div>
                 <div className="px-4 py-3 text-xs text-gray-400 border-t border-gray-100">
-                  BOTH sides show the real numbers under the percentage. A standard per hen housed is multiplied by
+                  HE produced is what the birds laid that week. HE dispatched is what left the farm FROM those laying
+                  days, and Eggs set is how much of it the hatchery actually set — so hatch % is a fact about the eggs
+                  set, never about the whole week's production. A star marks a week fed by a dispatch entered without a
+                  day-wise breakdown (before 10/09/2025 a whole load sat on one production date), where the eggs are
+                  real but the laying week they are credited to is not reliable. BOTH sides show the real numbers under
+                  the percentage. A standard per hen housed is multiplied by
                   the {HH.toLocaleString('en-IN')} females placed; a standard RATE (hen-day, HE%, hatch%) is applied to
                   what this flock actually did — the same bird-days, the same eggs, the same eggs set — so the standard
                   and the actual answer one question and the gap between them is a real number of birds, eggs or chicks. Depletion is deaths plus culls measured against the
