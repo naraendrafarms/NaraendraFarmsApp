@@ -837,12 +837,20 @@ export const FlockDetail: React.FC = () => {
   const stdExportRows = useMemo(() => {
     if (!flock?.laying_season || !stdCurve || stdCurve.length === 0) return []
     const HH = flock.total_placed_f ?? 0
+    // flockAgeWeeks counts COMPLETED weeks, so the placement day and the six
+    // days after are its week 0 — correct for stating an age ("58w 4d"), wrong
+    // for the standard, which numbers the first week of life as week 1. The two
+    // conventions met here without anyone noticing, so standard week 24 was
+    // being compared against the flock's 25th week, and every row of the table
+    // was one week out. The shared helper is left alone because age display
+    // depends on it; the ordinal is made here, where the standard is matched.
+    const stdWeekOf = (date: string) => flockAgeWeeks(flock.placement_date, date) + 1
     type WeekAgg = { openFSum: number; totalEggs: number; heEggs: number; depletion: number }
     const weekly: Record<number, WeekAgg> = {}
     for (const d of (daily ?? [])) {
       if (!d.record_date) continue
-      const wk = flockAgeWeeks(flock.placement_date, d.record_date)
-      if (wk < 0) continue
+      const wk = stdWeekOf(d.record_date)
+      if (wk < 1) continue
       const row = weekly[wk] ??= { openFSum: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
       row.openFSum += d.opening_female ?? 0
       row.totalEggs += d.total_eggs ?? 0
@@ -858,8 +866,8 @@ export const FlockDetail: React.FC = () => {
     for (const b of (hatchBatches ?? []) as any[]) {
       const when = b.he_dispatch?.dispatch_date ?? b.setting_date
       if (!when) continue
-      const wk = flockAgeWeeks(flock.placement_date, when)
-      if (wk < 0) continue
+      const wk = stdWeekOf(when)
+      if (wk < 1) continue
       const row = hatchWeekly[wk] ??= { pctXeggs: 0, eggs: 0, chicks: 0 }
       const eggs = Number(b.eggs_set ?? 0)
       if (b.hatchability_pct != null && eggs > 0) {
@@ -2677,11 +2685,14 @@ export const FlockDetail: React.FC = () => {
             // mortality) — matches the weighted formula already used by
             // v_flock_summary (All Flocks Data) and the Reports page.
             type WeekAgg = { openFSum: number; totalEggs: number; heEggs: number; depletion: number }
+            // Same one-based rule as the memo above: the standard's week 1 is
+            // the flock's first week of life, not its first COMPLETED week.
+            const stdWeekOfR = (date: string) => flockAgeWeeks(flock.placement_date, date) + 1
             const weekly: Record<number, WeekAgg> = {}
             for (const d of (daily ?? [])) {
               if (!d.record_date) continue
-              const wk = flockAgeWeeks(flock.placement_date, d.record_date)
-              if (wk < 0) continue
+              const wk = stdWeekOfR(d.record_date)
+              if (wk < 1) continue
               const row = weekly[wk] ??= { openFSum: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
               row.openFSum += d.opening_female ?? 0
               row.totalEggs += d.total_eggs ?? 0
@@ -2696,8 +2707,8 @@ export const FlockDetail: React.FC = () => {
             for (const b of (hatchBatches ?? []) as any[]) {
               const when = b.he_dispatch?.dispatch_date ?? b.setting_date
               if (!when) continue
-              const wk = flockAgeWeeks(flock.placement_date, when)
-              if (wk < 0) continue
+              const wk = stdWeekOfR(when)
+              if (wk < 1) continue
               const row = hatchWeekly[wk] ??= { pctXeggs: 0, eggs: 0, chicks: 0 }
               const eggs = Number(b.eggs_set ?? 0)
               if (b.hatchability_pct != null && eggs > 0) {
