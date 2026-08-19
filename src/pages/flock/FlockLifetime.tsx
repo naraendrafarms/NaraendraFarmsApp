@@ -116,7 +116,12 @@ export const FlockLifetime: React.FC = () => {
     queryKey: ['lifetime_curve', laySeason ?? rearSeason],
     queryFn: async () => {
       const { data } = await supabase.from('std_production_curve')
-        .select('week_of_age,cum_depletion_pct,hen_week_pct,he_pct,std_production_pct')
+        // hen_week_pct IS the laying production standard — it is the column the
+        // HE Rate Register maintains as "Hen Week %" and the one Flock Detail
+        // and the Operations Board already compare actual HD% against.
+        // std_production_pct is an unused leftover from the table's first
+        // version and has never held a value, so it is not read here.
+        .select('week_of_age,cum_depletion_pct,hen_week_pct,he_pct')
         .eq('season', laySeason ?? rearSeason).order('week_of_age')
       return data ?? []
     }
