@@ -2306,12 +2306,25 @@ const HatchBatchesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
   const { data: batches, isLoading } = useQuery({
     queryKey: ['flock_hatch_batches', flockId],
     queryFn: async () => {
+      // Invoice and hatchery are read STRAIGHT off the batch, with no fallback
+      // to the dispatch it is linked to -- so a batch linked only by
+      // dispatch_id (which is what "Link Dispatch Invoice" actually sets)
+      // showed blank here while the main Hatch Batches page, which does fall
+      // back to the dispatch, showed it correctly. Same batch, two answers.
+      //
+      // A batch can also be linked to this flock ONLY through its dispatch --
+      // flock_id on the batch itself is set when it is entered directly, but
+      // a batch imported or linked later may carry the flock relationship
+      // through dispatch_id.flock_id instead. Reading only .eq('flock_id')
+      // silently dropped those rows from this tab.
       const { data } = await supabase
         .from('hatch_batches')
-        .select('*')
-        .eq('flock_id', flockId)
+        .select('*, he_dispatch:dispatch_id(invoice_no,dc_no,flock_id), hatcheries(name)')
+        .or(`flock_id.eq.${flockId},he_dispatch.flock_id.eq.${flockId}`)
         .order('setting_date', { ascending: false })
-      return data ?? []
+      // The .or() above cannot filter on the embedded table's column, so PostgREST
+      // returns every batch and the flock match is enforced here in JS.
+      return (data ?? []).filter((b: any) => b.flock_id === flockId || b.he_dispatch?.flock_id === flockId)
     }
   })
 
@@ -2344,8 +2357,10 @@ const HatchBatchesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           <tbody>
             {(batches ?? []).map((b: any) => (
               <tr key={b.id} className="hover:bg-gray-50">
-                <Td className="text-xs font-mono text-brand-700">{b.invoice_no ?? '—'}</Td>
-                <Td className="text-xs">{b.hatchery_name ?? '—'}</Td>
+                <Td className="text-xs font-mono text-brand-700">
+                  {b.invoice_no ?? b.he_dispatch?.invoice_no ?? (b.he_dispatch?.dc_no ? `DC-${b.he_dispatch.dc_no}` : '—')}
+                </Td>
+                <Td className="text-xs">{b.hatcheries?.name ?? b.hatchery_name ?? '—'}</Td>
                 <Td className="text-xs">{fmtDate(b.setting_date)}</Td>
                 <Td className="text-xs">{b.hatch_date ? fmtDate(b.hatch_date) : <span className="text-yellow-600">Pending</span>}</Td>
                 <Td right className="text-xs">{numFmt(b.eggs_set)}</Td>
