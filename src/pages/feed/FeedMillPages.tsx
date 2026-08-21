@@ -774,24 +774,64 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
     setIngs(prev => prev.map((r, i) => i === idx ? { ...r, ingredient_name: name, ingredient_code: rm?.code ?? r.ingredient_code } : r))
   }
 
+  // A formula can be written either way round: as percentages, or as the kilos
+  // that go into a 1,000 kg batch. They are the same number in different
+  // clothes -- 600 kg of a 1,000 kg batch IS 60% -- and the app already
+  // converts one into the other when importing and when producing. Only the
+  // check on Save had never been taught it, so a formula entered entirely in
+  // kilos was refused with "Current total: 0.0000%", counting a column the
+  // farm had deliberately left blank.
+  const effective = (i: typeof BLANK_ING) => {
+    const pct = i.percentage !== '' && i.percentage != null ? Number(i.percentage) : null
+    const kg = i.kg_per_1000 !== '' && i.kg_per_1000 != null ? Number(i.kg_per_1000) : null
+    if (pct != null && !isNaN(pct) && pct !== 0) return { pct, kg: kg ?? pct * 10, from: 'pct' as const }
+    if (kg != null && !isNaN(kg) && kg !== 0)  return { pct: kg / 10, kg, from: 'kg' as const }
+    return { pct: 0, kg: 0, from: 'none' as const }
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault()
-    // Percentages must sum to 100 (±0.5) or the formula is unusable for production
-    const namedPct = ings.filter(i => i.ingredient_name?.trim()).reduce((s, i) => s + (Number(i.percentage) || 0), 0)
-    if (Math.abs(namedPct - 100) > 0.5) {
-      toast.error(`Ingredient percentages must total 100% (±0.5). Current total: ${namedPct.toFixed(4)}%`)
+    const named = ings.filter(i => i.ingredient_name?.trim())
+
+    // Two figures that contradict each other are not resolved quietly: the row
+    // is named and the farm decides which is right.
+    const conflict = named.find(i => {
+      const pct = Number(i.percentage), kg = Number(i.kg_per_1000)
+      if (!i.percentage || !i.kg_per_1000 || isNaN(pct) || isNaN(kg)) return false
+      return Math.abs(pct * 10 - kg) > 0.5
+    })
+    if (conflict) {
+      toast.error(`${conflict.ingredient_name}: ${conflict.percentage}% and ${conflict.kg_per_1000} kg do not agree — ` +
+        `${conflict.percentage}% of a 1,000 kg batch is ${(Number(conflict.percentage) * 10).toFixed(1)} kg. Correct one of them.`)
       return
     }
+
+    const namedPct = named.reduce((s, i) => s + effective(i).pct, 0)
+    if (Math.abs(namedPct - 100) > 0.5) {
+      toast.error(`Ingredients must total 100% or 1,000 kg (±0.5). Current total: ` +
+        `${namedPct.toFixed(4)}% / ${(namedPct * 10).toFixed(1)} kg`)
+      return
+    }
+
+    // Whichever column was filled, both are saved, so production and costing
+    // never have to guess which one the formula was written in.
+    const ingredients = ings.map(i => {
+      if (!i.ingredient_name?.trim()) return i
+      const e2 = effective(i)
+      return { ...i, percentage: String(e2.pct), kg_per_1000: String(e2.kg) }
+    })
+
     onSave({
       ...form,
       age_week_from: form.age_week_from !== '' ? Number(form.age_week_from) : null,
       age_week_to: form.age_week_to !== '' ? Number(form.age_week_to) : null,
       version: Number(form.version),
       feed_type_id: form.feed_type_id || null,
-      ingredients: ings,
+      ingredients,
     })
   }
-  const totalPct = ings.reduce((s, i) => s + (Number(i.percentage) || 0), 0)
+  const totalPct = ings.reduce((s, i) => s + effective(i).pct, 0)
+  const totalKg  = ings.reduce((s, i) => s + effective(i).kg, 0)
 
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -816,7 +856,14 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-sm font-semibold text-gray-700">Ingredients</p>
-          <span className="text-xs text-gray-500">Total %: <span className={totalPct > 100.05 ? 'text-red-600 font-bold' : 'text-green-700 font-semibold'}>{totalPct.toFixed(4)}</span></span>
+          {/* Both totals, because a formula may be written in either column and
+              the farm should see the one it is actually typing reach its mark. */}
+          <span className="text-xs text-gray-500">
+            Total: <span className={Math.abs(totalPct - 100) > 0.5 ? 'text-red-600 font-bold' : 'text-green-700 font-semibold'}>{totalPct.toFixed(4)}%</span>
+            <span className="text-gray-300 mx-1">·</span>
+            <span className={Math.abs(totalKg - 1000) > 5 ? 'text-red-600 font-bold' : 'text-green-700 font-semibold'}>{totalKg.toFixed(1)} kg</span>
+            <span className="text-gray-400"> of 1,000</span>
+          </span>
         </div>
         <div className="border rounded overflow-hidden">
           <table className="w-full text-xs">
@@ -825,8 +872,8 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
                 <th className="px-2 py-1.5 text-left w-12">#</th>
                 <th className="px-2 py-1.5 text-left w-16">Code</th>
                 <th className="px-2 py-1.5 text-left">Ingredient Name *</th>
-                <th className="px-2 py-1.5 text-right w-20">%</th>
-                <th className="px-2 py-1.5 text-right w-24">Kg/1000</th>
+                <th className="px-2 py-1.5 text-right w-20" title="Fill either this or Kg/1000 — the other is worked out">%</th>
+                <th className="px-2 py-1.5 text-right w-24" title="Kilos in a 1,000 kg batch. Fill either this or % — the other is worked out">Kg/1000</th>
                 <th className="px-2 py-1.5 w-8"></th>
               </tr>
             </thead>
@@ -848,7 +895,7 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
                     />
                   </td>
                   <td className="px-2 py-1"><input type="number" step="0.0001" className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs text-right" value={ing.percentage} onChange={si(idx,'percentage')} placeholder="0" /></td>
-                  <td className="px-2 py-1"><input type="number" step="0.001" className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs text-right" value={ing.kg_per_1000} onChange={si(idx,'kg_per_1000')} placeholder="auto" /></td>
+                  <td className="px-2 py-1"><input type="number" step="0.001" className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs text-right" value={ing.kg_per_1000} onChange={si(idx,'kg_per_1000')} placeholder="or kg" /></td>
                   <td className="px-2 py-1 text-center"><button type="button" onClick={() => removeRow(idx)} className="text-red-400 hover:text-red-600"><Trash2 size={11}/></button></td>
                 </tr>
               ))}
