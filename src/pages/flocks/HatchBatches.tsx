@@ -315,6 +315,11 @@ export const HatchBatches: React.FC = () => {
   // recomputed it on every keystroke in Hatched / Culled / Rejects, so a figure
   // taken off the hatchery's report was silently replaced by a subtraction.
   const [stdTouched, setStdTouched] = useState(false)
+  // Whether the user has explicitly touched the Link Dispatch Invoice field
+  // this time round — picked one, or deliberately cleared it. Until they do,
+  // the auto-link suggestion is free to fill it in; once they do, their
+  // choice (including "none") stands, and auto-link never overrides it again.
+  const [linkTouched, setLinkTouched] = useState(false)
   // STD Hatch % OWNS Std Chicks: Std = Setting × STD Hatch % ÷ 100, on the
   // setting-eggs base. So the subtraction (Hatched − Culled − Rejects) only
   // fills the box while STD Hatch % is blank — otherwise the two would fight
@@ -329,6 +334,7 @@ export const HatchBatches: React.FC = () => {
 
   const openForm = (row?: any) => {
     setStdTouched(!!row?.std_chicks)
+    setLinkTouched(false)
     if (row) {
       setEditing(row)
       setForm({
@@ -746,10 +752,16 @@ export const HatchBatches: React.FC = () => {
   // can be split across several hatcheries and settings, so "nearest" would be
   // an assumption dressed up as a fact.
   const autoLinkMatch = (() => {
-    if (form.dispatch_id || !form.flock_id || !form.eggs_set) return null
+    if (linkTouched || form.dispatch_id || !form.flock_id || !form.eggs_set) return null
     const want = N(form.eggs_set)
     if (want <= 0) return null
-    const hits = (dispatches ?? []).filter((d: any) => isCandidate(d) && d.total_dispatched === want)
+    // Matching on total_dispatched alone would happily propose an invoice
+    // that another batch already fully consumed — remainingOf(d).left <= 0 —
+    // and the save would then reject it with a confusing "0 remain" error
+    // for an invoice the user never chose. Only ever propose one with enough
+    // left to actually cover this setting.
+    const hits = (dispatches ?? []).filter((d: any) =>
+      isCandidate(d) && d.total_dispatched === want && remainingOf(d).left >= want)
     return hits.length === 1 ? hits[0] : null
   })()
 
@@ -1296,6 +1308,7 @@ export const HatchBatches: React.FC = () => {
             <Select label="Link Dispatch Invoice" placeholder="— Select invoice (optional) —"
               options={dispatchOptions} value={form.dispatch_id}
               onChange={e => {
+                setLinkTouched(true)
                 s('dispatch_id', e.target.value)
                 const d = dispatches?.find((d: any) => d.id === e.target.value)
                 if (d) {
