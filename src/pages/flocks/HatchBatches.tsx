@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, today, pct, fetchAllPages, AGE_BANDS, SEASONS, flockAgeWeeksAt, inAgeBand, inSeason } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard, Divider
@@ -311,6 +312,11 @@ export const HatchBatches: React.FC = () => {
   }
   const [form, setForm] = useState(emptyForm)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  React.useEffect(() => {
+    if (!showForm) return
+    saveDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
   // Once Std Chicks is typed in by hand, nothing may overwrite it. The old form
   // recomputed it on every keystroke in Hatched / Culled / Rejects, so a figure
   // taken off the hatchery's report was silently replaced by a subtraction.
@@ -320,6 +326,13 @@ export const HatchBatches: React.FC = () => {
   // the auto-link suggestion is free to fill it in; once they do, their
   // choice (including "none") stands, and auto-link never overrides it again.
   const [linkTouched, setLinkTouched] = useState(false)
+  // Draft autosave -- keyed to the batch being edited, or 'new' for a fresh
+  // entry. A restored draft still goes through the normal Save button and its
+  // normal validation, so it can never slip into the table as a duplicate;
+  // the draft itself is deleted the moment that real save succeeds.
+  const draftKey = editing?.id ?? 'new'
+  const { draft, draftChecked, saveDraft, clearDraft } = useFormDraft('hatch_batches', draftKey, showForm)
+  const [draftDismissed, setDraftDismissed] = useState(false)
   // STD Hatch % OWNS Std Chicks: Std = Setting × STD Hatch % ÷ 100, on the
   // setting-eggs base. So the subtraction (Hatched − Culled − Rejects) only
   // fills the box while STD Hatch % is blank — otherwise the two would fight
@@ -335,6 +348,7 @@ export const HatchBatches: React.FC = () => {
   const openForm = (row?: any) => {
     setStdTouched(!!row?.std_chicks)
     setLinkTouched(false)
+    setDraftDismissed(false)
     if (row) {
       setEditing(row)
       setForm({
@@ -508,6 +522,7 @@ export const HatchBatches: React.FC = () => {
     onSuccess: () => {
       toast.success('Saved!')
       qc.invalidateQueries({ queryKey: ['hatch_batches'] })
+      clearDraft(draftKey)
       setShowForm(false)
     },
     onError: (e: any) => toast.error(e.message)
@@ -1293,6 +1308,15 @@ export const HatchBatches: React.FC = () => {
           }}>{editing ? 'Update' : 'Save'}</Button></>
         }>
         <div className="space-y-4">
+          {draftChecked && draft && !draftDismissed && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span>Unsaved draft found from {new Date(draft.updatedAt).toLocaleString('en-IN')} — restore it?</span>
+              <div className="flex gap-2 shrink-0">
+                <Button size="sm" variant="secondary" onClick={() => setDraftDismissed(true)}>Discard</Button>
+                <Button size="sm" onClick={() => { setForm(f => ({ ...f, ...draft.data })); setDraftDismissed(true) }}>Restore</Button>
+              </div>
+            </div>
+          )}
           <FormRow cols={3}>
             <SearchableSelect label="Flock" placeholder="— Select or auto from invoice —" options={flockOptions}
               value={form.flock_id} onChange={v => s('flock_id', v)} />

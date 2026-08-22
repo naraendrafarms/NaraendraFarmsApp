@@ -7,6 +7,7 @@ import { QuickAddMedicine } from '@/components/ui/QuickAdd'
 import { Save, Download, Upload, FileSpreadsheet, CalendarClock } from 'lucide-react'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import { useFeedRates } from '@/hooks/useFeedRates'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
@@ -124,6 +125,19 @@ export const BulkDailyEntry: React.FC = () => {
   type MedEntry = { key: string; med_id: string; med_qty: string; existingMedId: string | null }
   const [medRows, setMedRows] = useState<MedEntry[]>([{ key: 'm0', med_id: '', med_qty: '', existingMedId: null }])
   const [showWastage, setShowWastage] = useState(false)
+
+  // Draft autosave (shed mode only, one flock's whole day at a time) -- a
+  // restore still goes through the normal Save button and its normal
+  // existingId lookups, so it can never insert a duplicate row by itself.
+  const draftKey = selectedFlock && date ? `${selectedFlock}|${date}` : ''
+  const { draft, draftChecked, saveDraft, clearDraft } = useFormDraft('bulk_daily_entry', draftKey, !!draftKey)
+  const [draftDismissed, setDraftDismissed] = useState(false)
+  useEffect(() => { setDraftDismissed(false) }, [draftKey])
+  useEffect(() => {
+    if (!draftKey) return
+    saveDraft({ shedRows, gradeRow, medRows })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, shedRows, gradeRow, medRows])
 
   // ── Master data ──────────────────────────────────────────────────────────────
   const { data: feedTypesRaw = [] } = useQuery({
@@ -650,7 +664,7 @@ export const BulkDailyEntry: React.FC = () => {
     // Allow one rebuild now the save is done, so newly created rows pick up
     // their database id — without it a second Save would try to insert again.
     setRowsEpoch(e => e + 1)
-    if (errors === 0) toast.success(`Saved ${saved} shed(s) for ${date}`)
+    if (errors === 0) { toast.success(`Saved ${saved} shed(s) for ${date}`); clearDraft(draftKey) }
     else toast.error(`Saved ${saved} with ${errors} error(s)`)
   }
 
@@ -1319,6 +1333,21 @@ export const BulkDailyEntry: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {isSheedMode && draftChecked && draft && !draftDismissed && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span>Unsaved draft for {flockObj?.flock_no ? `Flock ${flockObj.flock_no}` : 'this flock'} on {date} from {new Date(draft.updatedAt).toLocaleString('en-IN')} — restore it?</span>
+          <div className="flex gap-2 shrink-0">
+            <Button size="sm" variant="secondary" onClick={() => setDraftDismissed(true)}>Discard</Button>
+            <Button size="sm" onClick={() => {
+              const d = draft.data || {}
+              if (d.shedRows) setShedRows((prev) => ({ ...prev, ...d.shedRows }))
+              if (d.gradeRow) setGradeRow(d.gradeRow)
+              if (d.medRows) setMedRows(d.medRows)
+              setDraftDismissed(true)
+            }}>Restore</Button>
+          </div>
+        </div>
+      )}
       <CardHeader
         title="Bulk Daily Entry"
         subtitle={isSheedMode
