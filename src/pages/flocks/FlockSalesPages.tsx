@@ -9,6 +9,7 @@ import {
 , DateInput, SearchableSelect } from '@/components/ui'
 import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
 import { useMedicineRates } from '@/lib/medicineRates'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { Plus, Package, Edit2, Egg, Trash2, Upload, Download, AlertCircle, Printer } from 'lucide-react'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
 import { useSearchParams } from 'react-router-dom'
@@ -864,16 +865,18 @@ export const HEDispatch: React.FC = () => {
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.party_id, form.flock_id, rateRegister, vendorDiffs, vendorTiers])
-  const HE_DRAFT_KEY = 'he_dispatch_draft'
-  // Auto-save a draft of NEW (unsaved) dispatches so nothing is lost if the form is closed
+  // Draft autosave -- database-backed (not the browser), keyed to the
+  // dispatch being edited or 'new'. Restoring only fills the form; Save still
+  // goes through the normal insert/update path, so a restore can never slip
+  // in as a duplicate row. Cleared automatically the moment a save succeeds.
+  const heDraftKey = editing?.id ?? 'new'
+  const { draft: heDraft, draftChecked: heDraftChecked, saveDraft: saveHeDraft, clearDraft } = useFormDraft('he_dispatch', heDraftKey, showForm)
+  const [heDraftDismissed, setHeDraftDismissed] = useState(false)
   useEffect(() => {
-    if (!showForm || editing) return
-    const t = setTimeout(() => {
-      try { localStorage.setItem(HE_DRAFT_KEY, JSON.stringify({ form, lines })) } catch {}
-    }, 400)
-    return () => clearTimeout(t)
-  }, [form, lines, showForm, editing])
-  const clearDraft = () => { try { localStorage.removeItem(HE_DRAFT_KEY) } catch {} }
+    if (!showForm) return
+    saveHeDraft({ form, lines })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, lines, showForm])
   // Preview next invoice number without consuming it (counter not changed)
   const genInvoice = async () => {
     setGenningInv(true)
@@ -909,6 +912,7 @@ export const HEDispatch: React.FC = () => {
   const autoTds = parseFloat(form.tds_pct) > 0 ? Math.round(effectiveAmount * parseFloat(form.tds_pct) / 100 * 100) / 100 : 0
 
   const openForm = (row?: any) => {
+    setHeDraftDismissed(false)
     if (row) {
       setEditing(row)
       setForm({
@@ -938,23 +942,10 @@ export const HEDispatch: React.FC = () => {
     } else {
       setEditing(null)
       setPeekInv(null)
-      // Restore an unsaved draft if one exists
-      let draft: any = null
-      try { const raw = localStorage.getItem(HE_DRAFT_KEY); if (raw) draft = JSON.parse(raw) } catch {}
-      const hasDraft = draft?.form && (
-        draft.form.party_id || draft.form.dc_no || draft.form.invoice_no ||
-        (draft.lines ?? []).some((l: any) => l && (l.grade_a || l.grade_b || l.grade_c))
-      )
-      if (hasDraft) {
-        setForm(draft.form)
-        setLines(draft.lines?.length ? draft.lines : [emptyLine()])
-        toast('Restored your unsaved draft', { icon: '📝' })
-      } else {
-        setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
-          party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
-          boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', vehicle_type: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
-        setLines([emptyLine()])
-      }
+      setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
+        party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
+        boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', vehicle_type: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
+      setLines([emptyLine()])
     }
     setShowForm(true)
   }
@@ -1064,7 +1055,7 @@ export const HEDispatch: React.FC = () => {
         if (error) throw error
       }
     },
-    onSuccess: () => { toast.success('Saved!'); clearDraft(); qc.invalidateQueries({ queryKey: ['he_dispatch'] }); setShowForm(false) },
+    onSuccess: () => { toast.success('Saved!'); clearDraft(heDraftKey); qc.invalidateQueries({ queryKey: ['he_dispatch'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -1901,12 +1892,20 @@ export const HEDispatch: React.FC = () => {
         title={editing ? 'Edit HE Dispatch' : 'New HE Dispatch'} size="xl"
         footer={
           <>
+          {heDraftChecked && heDraft && !heDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = heDraft.data || {}
+              if (d.form) setForm((f: any) => ({ ...f, ...d.form }))
+              if (d.lines?.length) setLines(d.lines)
+              setHeDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
           {!editing && <Button variant="secondary" onClick={() => {
-            clearDraft()
+            clearDraft(heDraftKey)
             setForm({ flock_id: flockFilter, dispatch_date: today(), dc_no: '', invoice_no: '',
               party_id: '', free_eggs: '0', rate: '', amount: '', tds_pct: '0', tds_amount: '0',
               boxes_20lb: '', boxes_23lb: '', extra_trays_20lb: '', extra_trays_23lb: '', vehicle_type: '', lorry_no: '', driver_phone: '', out_time: '', remarks: '' })
-            setLines([emptyLine()]); setPeekInv(null)
+            setLines([emptyLine()]); setPeekInv(null); setHeDraftDismissed(true)
             toast('Started fresh — draft cleared')
           }}>Start Fresh</Button>}
           <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
@@ -2187,6 +2186,12 @@ export const NHESales: React.FC = () => {
   const [receiptSale, setReceiptSale] = useState<any>(null)
   const [refundSale, setRefundSale] = useState<any>(null)
   const [nheLines, setNheLines] = useState<NheLine[]>([emptyNheLine()])
+  // Draft autosave -- database-backed, keyed to the sale being edited or
+  // 'new'. Restore only fills the form; Save still goes through the normal
+  // insert/update path, so it can never create a duplicate row by itself.
+  const nheDraftKey = editing?.id ?? 'new'
+  const { draft: nheDraft, draftChecked: nheDraftChecked, saveDraft: saveNheDraft, clearDraft: clearNheDraft } = useFormDraft('nhe_sales', nheDraftKey, showForm)
+  const [nheDraftDismissed, setNheDraftDismissed] = useState(false)
 
   const { data: bankAccounts } = useQuery({
     queryKey: ['bank_accounts'],
@@ -2363,6 +2368,11 @@ export const NHESales: React.FC = () => {
     }
     return nf
   })
+  useEffect(() => {
+    if (!showForm) return
+    saveNheDraft({ form, nheLines })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, nheLines, showForm])
   const autoAmt = isBirdSale(form.sale_type)
     ? ((parseFloat(form.total_weight_kg)||0) * (parseFloat(form.rate_per_kg)||0))
     : ((parseFloat(form.quantity)||0) * (parseFloat(form.rate)||0))
@@ -2808,12 +2818,14 @@ export const NHESales: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['flock_daily'] })
       qc.invalidateQueries({ queryKey: ['cash_book'] })
       qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      clearNheDraft(nheDraftKey)
       setPeekInv(null); setShowForm(false); setEditing(null); setNheLines([emptyNheLine()])
     },
     onError: (e: any) => toast.error(e.message)
   })
 
   const openNew = () => {
+    setNheDraftDismissed(false)
     setEditing(null)
     setPeekInv(null)
     setForm({ ...EMPTY_NHE_FORM, flock_id: flockFilter })
@@ -2821,6 +2833,7 @@ export const NHESales: React.FC = () => {
     setShowForm(true)
   }
   const openEdit = (row: any) => {
+    setNheDraftDismissed(false)
     setEditing(row)
     setForm({
       flock_id: row.flock_id, shed_id: row.shed_id ?? '', sale_date: row.sale_date,
@@ -3453,7 +3466,16 @@ export const NHESales: React.FC = () => {
 
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}
         title={editing ? 'Edit NHE / Bird Sale' : 'Record NHE / Bird Sale'} size="lg"
-        footer={<><Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}>Cancel</Button>
+        footer={<>
+          {nheDraftChecked && nheDraft && !nheDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = nheDraft.data || {}
+              if (d.form) setForm((f: any) => ({ ...f, ...d.form }))
+              if (d.nheLines?.length) setNheLines(d.nheLines)
+              setNheDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}>Cancel</Button>
           <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <FormRow>

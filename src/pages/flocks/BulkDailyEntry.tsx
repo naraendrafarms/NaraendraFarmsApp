@@ -1333,21 +1333,6 @@ export const BulkDailyEntry: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {isSheedMode && draftChecked && draft && !draftDismissed && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <span>Unsaved draft for {flockObj?.flock_no ? `Flock ${flockObj.flock_no}` : 'this flock'} on {date} from {new Date(draft.updatedAt).toLocaleString('en-IN')} — restore it?</span>
-          <div className="flex gap-2 shrink-0">
-            <Button size="sm" variant="secondary" onClick={() => setDraftDismissed(true)}>Discard</Button>
-            <Button size="sm" onClick={() => {
-              const d = draft.data || {}
-              if (d.shedRows) setShedRows((prev) => ({ ...prev, ...d.shedRows }))
-              if (d.gradeRow) setGradeRow(d.gradeRow)
-              if (d.medRows) setMedRows(d.medRows)
-              setDraftDismissed(true)
-            }}>Restore</Button>
-          </div>
-        </div>
-      )}
       <CardHeader
         title="Bulk Daily Entry"
         subtitle={isSheedMode
@@ -1373,6 +1358,17 @@ export const BulkDailyEntry: React.FC = () => {
               <Button size="sm" variant="outline" icon={<CalendarClock size={14} />}
                 onClick={() => { setMoveTo(''); setMoveOpen(true) }}>
                 Change Date
+              </Button>
+            )}
+            {isSheedMode && draftChecked && draft && !draftDismissed && (
+              <Button size="sm" variant="secondary" onClick={() => {
+                const d = draft.data || {}
+                if (d.shedRows) setShedRows((prev) => ({ ...prev, ...d.shedRows }))
+                if (d.gradeRow) setGradeRow(d.gradeRow)
+                if (d.medRows) setMedRows(d.medRows)
+                setDraftDismissed(true)
+              }}>
+                Restore Draft
               </Button>
             )}
             <Button icon={<Save size={16} />} loading={saving}

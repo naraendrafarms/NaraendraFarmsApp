@@ -1298,7 +1298,13 @@ export const HatchBatches: React.FC = () => {
       <Modal open={showForm} onClose={() => setShowForm(false)}
         title={editing ? 'Edit Hatch Batch' : 'New Hatch Batch'} size="xl"
         footer={
-          <><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+          <>
+          {draftChecked && draft && !draftDismissed && (
+            <Button variant="secondary" onClick={() => { setForm(f => ({ ...f, ...draft.data })); setDraftDismissed(true) }}>
+              Restore Draft
+            </Button>
+          )}
+          <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => {
             // Warn, never block: the hatchery's own sheet sometimes disagrees
             // with itself, and refusing the save would just move the figure
@@ -1308,15 +1314,6 @@ export const HatchBatches: React.FC = () => {
           }}>{editing ? 'Update' : 'Save'}</Button></>
         }>
         <div className="space-y-4">
-          {draftChecked && draft && !draftDismissed && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              <span>Unsaved draft found from {new Date(draft.updatedAt).toLocaleString('en-IN')} — restore it?</span>
-              <div className="flex gap-2 shrink-0">
-                <Button size="sm" variant="secondary" onClick={() => setDraftDismissed(true)}>Discard</Button>
-                <Button size="sm" onClick={() => { setForm(f => ({ ...f, ...draft.data })); setDraftDismissed(true) }}>Restore</Button>
-              </div>
-            </div>
-          )}
           <FormRow cols={3}>
             <SearchableSelect label="Flock" placeholder="— Select or auto from invoice —" options={flockOptions}
               value={form.flock_id} onChange={v => s('flock_id', v)} />
