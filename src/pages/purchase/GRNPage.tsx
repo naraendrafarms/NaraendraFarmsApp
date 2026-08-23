@@ -7,6 +7,7 @@ import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, Edit2, Download, Upload, X, Printer } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { printGRNLines, type GRNPrintLine } from '@/lib/invoicePrint'
 import { registerItemAlias } from '@/lib/itemAliases'
 
@@ -124,6 +125,18 @@ export const GRNPage: React.FC = () => {
   const [lines, setLines] = useState<ItemLine[]>([emptyLine()])
 
   const hs = (k: string, v: string) => setHeader(h => ({ ...h, [k]: v }))
+
+  // Draft autosave -- keyed to the GRN being edited, or 'new' for a fresh
+  // entry. Restoring only fills the form/lines; Save still goes through the
+  // normal insert/update path, so a restore can never slip in as a duplicate.
+  const grnDraftKey = editing?.id ?? 'new'
+  const { draft: grnDraft, draftChecked: grnDraftChecked, saveDraft: saveGrnDraft, clearDraft: clearGrnDraft } = useFormDraft('grn', grnDraftKey, showForm)
+  const [grnDraftDismissed, setGrnDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    saveGrnDraft({ header, lines })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [header, lines, showForm])
 
   const updateLine = (idx: number, field: keyof ItemLine, val: string) => {
     setLines(prev => prev.map((l, i) => {
@@ -257,6 +270,7 @@ export const GRNPage: React.FC = () => {
   }
 
   const openAdd = () => {
+    setGrnDraftDismissed(false)
     setEditing(null)
     setHeader(emptyHeader())
     setLines([emptyLine()])
@@ -281,6 +295,7 @@ export const GRNPage: React.FC = () => {
   })
 
   const openEdit = (g: any) => {
+    setGrnDraftDismissed(false)
     setEditing(g)
     setHeader({
       grn_no: g.grn_no ?? '',
@@ -366,6 +381,7 @@ export const GRNPage: React.FC = () => {
       toast.success(editing
         ? (lines.length > 1 ? `GRN updated (+${lines.length - 1} new item${lines.length > 2 ? 's' : ''})` : 'GRN updated')
         : `GRN saved (${lines.length} item${lines.length > 1 ? 's' : ''})`)
+      clearGrnDraft(grnDraftKey)
       setShowForm(false)
     },
     onError: (e: any) => toast.error(e.message)
@@ -1072,6 +1088,19 @@ export const GRNPage: React.FC = () => {
           </button>
 
           <div className="flex justify-end gap-2 pt-2">
+            {grnDraftChecked && grnDraft && !grnDraftDismissed && (
+              <button
+                onClick={() => {
+                  const d = grnDraft.data || {}
+                  if (d.header) setHeader((h: any) => ({ ...h, ...d.header }))
+                  if (d.lines?.length) setLines(d.lines)
+                  setGrnDraftDismissed(true)
+                }}
+                className="px-4 py-2 text-sm border rounded hover:bg-gray-50"
+              >
+                Restore Draft
+              </button>
+            )}
             <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm border rounded hover:bg-gray-50">
               Cancel
             </button>

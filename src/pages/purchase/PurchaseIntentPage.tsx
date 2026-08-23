@@ -13,6 +13,7 @@ import { printPurchaseIntent } from '@/lib/invoicePrint'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
 import { useItemOptionsWithAliases, registerItemAlias, resolveItemIdByName } from '@/lib/itemAliases'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 // Purchase Intent (indent) — optional stage before a Purchase Order, matching
 // the paper/Excel "INDENT FOR NARAENDRA BREEDING FARMS" format already in
@@ -54,6 +55,15 @@ export const PurchaseIntentPage: React.FC = () => {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
 
+  const draftKey = editingId ?? 'new'
+  const { draft, draftChecked, saveDraft, clearDraft } = useFormDraft('purchase_intent', draftKey, showForm)
+  const [intentDraftDismissed, setIntentDraftDismissed] = useState(false)
+
+  React.useEffect(() => {
+    if (!showForm) return
+    saveDraft({ header, lines })
+  }, [header, lines, showForm])
+
   const { data: farms } = useQuery({
     queryKey: ['farms'],
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
@@ -93,6 +103,7 @@ export const PurchaseIntentPage: React.FC = () => {
   })
 
   const openAdd = () => {
+    setIntentDraftDismissed(false)
     setEditingId(null)
     setHeader(emptyHeader())
     setLines([emptyLine()])
@@ -100,6 +111,7 @@ export const PurchaseIntentPage: React.FC = () => {
   }
 
   const openEdit = async (intent: any) => {
+    setIntentDraftDismissed(false)
     setEditingId(intent.id)
     setHeader({
       intent_no: intent.intent_no ?? '', intent_date: intent.intent_date ?? today(),
@@ -225,6 +237,7 @@ export const PurchaseIntentPage: React.FC = () => {
       toast.success(editingId ? 'Purchase Intent updated' : 'Purchase Intent created')
       qc.invalidateQueries({ queryKey: ['purchase_intents'] })
       qc.invalidateQueries({ queryKey: ['purchase_intent_lines_open'] })
+      clearDraft(draftKey)
       setShowForm(false)
     },
     onError: (e: any) => toast.error(e.message),
@@ -484,6 +497,14 @@ export const PurchaseIntentPage: React.FC = () => {
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editingId ? 'Edit Purchase Intent' : 'New Purchase Intent'} size="2xl"
         footer={<>
+          {draftChecked && draft && !intentDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = draft.data || {}
+              if (d.header) setHeader((h: any) => ({ ...h, ...d.header }))
+              if (d.lines) setLines(d.lines)
+              setIntentDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
           <Button variant="ghost" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button variant="primary" loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button>
         </>}

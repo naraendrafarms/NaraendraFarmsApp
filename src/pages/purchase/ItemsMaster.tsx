@@ -14,6 +14,7 @@ import toast from 'react-hot-toast'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import * as XLSX from 'xlsx'
 import { registerItemAlias } from '@/lib/itemAliases'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 // ─── Category grouping ────────────────────────────────────────────────────────
 const FEED_CATS = ['Feed Ingredient']
@@ -48,6 +49,15 @@ export const ItemsMasterPage: React.FC = () => {
   const [aliasItem, setAliasItem]   = useState<any>(null)
   const [newAlias, setNewAlias]     = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const itemDraftKey = editing?.id ?? 'new'
+  const { draft, draftChecked, saveDraft, clearDraft } = useFormDraft('items_master', itemDraftKey, showForm)
+  const [itemDraftDismissed, setItemDraftDismissed] = useState(false)
+
+  React.useEffect(() => {
+    if (!showForm) return
+    saveDraft(form)
+  }, [form, showForm])
 
   const categoryOptions = useConfigOptions('item_category')
   const unitOptions     = useConfigOptions('unit')
@@ -101,6 +111,7 @@ export const ItemsMasterPage: React.FC = () => {
     onSuccess: () => {
       toast.success(editing ? 'Item updated!' : 'Item added!')
       qc.invalidateQueries({ queryKey: ['items_master'] })
+      clearDraft(itemDraftKey)
       setShowForm(false); setEditing(null); setForm(emptyForm())
     },
     onError: (e: any) => toast.error(friendlyDbError(e, 'item')),
@@ -310,8 +321,9 @@ export const ItemsMasterPage: React.FC = () => {
     setMergeModal(true)
   }
 
-  const openNew  = () => { setEditing(null); setForm(emptyForm()); setShowForm(true) }
+  const openNew  = () => { setItemDraftDismissed(false); setEditing(null); setForm(emptyForm()); setShowForm(true) }
   const openEdit = (item: any) => {
+    setItemDraftDismissed(false)
     setEditing(item)
     setForm({
       code: item.code ?? '', name: item.name ?? '', short_name: item.short_name ?? '',
@@ -683,6 +695,16 @@ export const ItemsMasterPage: React.FC = () => {
             </label>
 
             <div className="flex gap-3 justify-end pt-2 border-t">
+              {draftChecked && draft && !itemDraftDismissed && (
+                <button onClick={() => {
+                  const d = draft.data || {}
+                  setForm((f: any) => ({ ...f, ...d }))
+                  setItemDraftDismissed(true)
+                }}
+                  className="px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
+                  Restore Draft
+                </button>
+              )}
               <button onClick={() => { setShowForm(false); setEditing(null) }}
                 className="px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
                 Cancel

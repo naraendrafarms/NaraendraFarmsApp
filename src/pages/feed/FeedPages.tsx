@@ -12,6 +12,7 @@ import { QuickAddParty, QuickAddIngredient } from '@/components/ui/QuickAdd'
 import toast from 'react-hot-toast'
 import { printGRN } from '@/lib/invoicePrint'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 // ── import value cleaners ─────────────────────────────────────────
 // Strip ₹ / ? / commas / spaces from money & number cells before parsing.
@@ -156,6 +157,16 @@ export const GRNEntry: React.FC = () => {
   })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  // Draft autosave — keyed to the GRN being edited, or 'new' for a fresh one.
+  const grnDraftKey = editing?.id ?? 'new'
+  const { draft: grnDraft, draftChecked: grnDraftChecked, saveDraft: saveGrnDraft, clearDraft: clearGrnDraft } = useFormDraft('feed_grn', grnDraftKey, showForm)
+  const [grnDraftDismissed, setGrnDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    saveGrnDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
+
   const basic  = (parseFloat(form.qty)||0) * (parseFloat(form.price_per_unit)||0)
   const gstAmt = basic * (parseFloat(form.gst_pct)||0) / 100
   const total  = basic + gstAmt
@@ -208,6 +219,7 @@ export const GRNEntry: React.FC = () => {
   const openAdd = () => {
     setEditing(null)
     setOpenPOs([])
+    setGrnDraftDismissed(false)
     setForm({ grn_no:'', grn_date:today(), farm_id:'', party_id:'', invoice_no:'',
       invoice_date:today(), category:'Feed Ingredient', ingredient_id:'', medicine_id:'',
       flock_id:'',
@@ -219,6 +231,7 @@ export const GRNEntry: React.FC = () => {
 
   const openEdit = (g: any) => {
     setOpenPOs([])
+    setGrnDraftDismissed(false)
     setEditing(g)
     setForm({
       grn_no: g.grn_no ?? '', grn_date: g.grn_date ?? today(),
@@ -270,6 +283,7 @@ export const GRNEntry: React.FC = () => {
       toast.success(editing ? 'GRN updated!' : isChick ? 'Chick GRN saved & flock rate updated!' : 'GRN saved!')
       qc.invalidateQueries({ queryKey: ['grns'] })
       qc.invalidateQueries({ queryKey: ['flocks'] })
+      clearGrnDraft(grnDraftKey)
       setShowForm(false)
     },
     onError: (e: any) => toast.error(e.message)
@@ -572,7 +586,15 @@ export const GRNEntry: React.FC = () => {
       </Modal>
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit GRN' : 'Add GRN'} size="lg"
-        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+        footer={<>
+          {grnDraftChecked && grnDraft && !grnDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = grnDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setGrnDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>}>
         <div className="space-y-4">
           <FormRow cols={4}>
@@ -710,12 +732,24 @@ export const FeedProduction: React.FC = () => {
   const [form, setForm] = useState({ production_date: today(), feed_type_id: '', batch_no: '', quantity_kg: '', remarks: '' })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  // Draft autosave — keyed to the production batch being edited, or 'new'.
+  const productionDraftKey = editing?.id ?? 'new'
+  const { draft: productionDraft, draftChecked: productionDraftChecked, saveDraft: saveProductionDraft, clearDraft: clearProductionDraft } = useFormDraft('feed_production_batch', productionDraftKey, showForm)
+  const [productionDraftDismissed, setProductionDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    saveProductionDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
+
   const openAdd = () => {
     setEditing(null)
+    setProductionDraftDismissed(false)
     setForm({ production_date: today(), feed_type_id: '', batch_no: '', quantity_kg: '', remarks: '' })
     setShowForm(true)
   }
   const openEdit = (p: any) => {
+    setProductionDraftDismissed(false)
     setEditing(p)
     setForm({
       production_date: p.production_date ?? today(),
@@ -743,7 +777,7 @@ export const FeedProduction: React.FC = () => {
         if (error) throw error
       }
     },
-    onSuccess: () => { toast.success(editing ? 'Batch updated!' : 'Batch recorded!'); qc.invalidateQueries({ queryKey: ['feed_production'] }); setShowForm(false) },
+    onSuccess: () => { toast.success(editing ? 'Batch updated!' : 'Batch recorded!'); qc.invalidateQueries({ queryKey: ['feed_production'] }); clearProductionDraft(productionDraftKey); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -810,7 +844,15 @@ export const FeedProduction: React.FC = () => {
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Production Batch' : 'Record Production Batch'} size="md"
-        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+        footer={<>
+          {productionDraftChecked && productionDraft && !productionDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = productionDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setProductionDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>}>
         <div className="space-y-4">
           <FormRow>
@@ -854,12 +896,24 @@ export const FeedTransfer: React.FC = () => {
   })
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  // Draft autosave — keyed to the transfer being edited, or 'new'.
+  const transferDraftKey = editing?.id ?? 'new'
+  const { draft: transferDraft, draftChecked: transferDraftChecked, saveDraft: saveTransferDraft, clearDraft: clearTransferDraft } = useFormDraft('feed_transfer', transferDraftKey, showForm)
+  const [transferDraftDismissed, setTransferDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    saveTransferDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
+
   const openAdd = () => {
     setEditing(null)
+    setTransferDraftDismissed(false)
     setForm({ transfer_date: today(), from_farm_id: '', to_farm_id: '', feed_type_id: '', flock_id: '', quantity_kg: '', vehicle_no: '', remarks: '' })
     setShowForm(true)
   }
   const openEdit = (t: any) => {
+    setTransferDraftDismissed(false)
     setEditing(t)
     setForm({
       transfer_date: t.transfer_date ?? today(),
@@ -891,7 +945,7 @@ export const FeedTransfer: React.FC = () => {
         if (error) throw error
       }
     },
-    onSuccess: () => { toast.success(editing ? 'Transfer updated!' : 'Transfer recorded!'); qc.invalidateQueries({ queryKey: ['feed_transfers'] }); setShowForm(false) },
+    onSuccess: () => { toast.success(editing ? 'Transfer updated!' : 'Transfer recorded!'); qc.invalidateQueries({ queryKey: ['feed_transfers'] }); clearTransferDraft(transferDraftKey); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
   })
 
@@ -942,7 +996,15 @@ export const FeedTransfer: React.FC = () => {
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Feed Transfer' : 'Record Feed Transfer'} size="md"
-        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
+        footer={<>
+          {transferDraftChecked && transferDraft && !transferDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = transferDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setTransferDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button>
           <Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>}>
         <div className="space-y-4">
           <DateInput label="Transfer Date" required value={form.transfer_date} onChange={e => s('transfer_date', e.target.value)} />

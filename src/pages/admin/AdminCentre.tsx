@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 // ── TAB IDs ──────────────────────────────────────────────────────
 type Tab = 'overview' | 'users' | 'flocks' | 'elec' | 'salary' | 'masters' | 'company'
@@ -30,6 +31,10 @@ const CompanySettingsCard: React.FC = () => {
   const [form, setForm] = useState<any>(null)
   useEffect(() => { if (data) setForm(data) }, [data])
   const s = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }))
+
+  const { draft, draftChecked, saveDraft, clearDraft } = useFormDraft('company_settings', data?.id ?? 'new', !!form)
+  const [companyDraftDismissed, setCompanyDraftDismissed] = useState(false)
+  React.useEffect(() => { if (!form) return; saveDraft(form) }, [form])
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -58,6 +63,7 @@ const CompanySettingsCard: React.FC = () => {
       // The watermark reads its own cached copy of this setting — refresh it
       // too, or turning it off would appear to do nothing until a reload.
       qc.invalidateQueries({ queryKey: ['company_show_watermark'] })
+      clearDraft(data?.id ?? 'new')
     },
     onError: (e: any) => toast.error(e.message),
   })
@@ -105,7 +111,16 @@ const CompanySettingsCard: React.FC = () => {
           </span>
         </label>
       </div>
-      <Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save Company Profile</Button>
+      <div className="flex items-center gap-2">
+        <Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save Company Profile</Button>
+        {draftChecked && draft && !companyDraftDismissed && (
+          <Button variant="secondary" onClick={() => {
+            const d = draft.data || {}
+            setForm((f: any) => ({ ...f, ...d }))
+            setCompanyDraftDismissed(true)
+          }}>Restore Draft</Button>
+        )}
+      </div>
     </Card>
   )
 }
@@ -342,6 +357,9 @@ const ElecAllocation: React.FC = () => {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0,7))
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<any>({})
+  const [elecDraftDismissed, setElecDraftDismissed] = useState(false)
+  const { draft, draftChecked, saveDraft, clearDraft } = useFormDraft('elec_allocation', 'new', showForm)
+  React.useEffect(() => { if (!showForm) return; saveDraft(form) }, [form, showForm])
 
   const { data: bills } = useQuery({
     queryKey: ['elec_bills_alloc', month],
@@ -379,7 +397,7 @@ const ElecAllocation: React.FC = () => {
       },{onConflict:'bill_id,flock_id'})
       if(error)throw error
     },
-    onSuccess:()=>{ toast.success('Allocation saved!'); qc.invalidateQueries({queryKey:['elec_alloc']}); setShowForm(false) },
+    onSuccess:()=>{ toast.success('Allocation saved!'); qc.invalidateQueries({queryKey:['elec_alloc']}); setShowForm(false); clearDraft('new') },
     onError:(e:any)=>toast.error(e.message)
   })
 
@@ -387,7 +405,7 @@ const ElecAllocation: React.FC = () => {
     <div className="space-y-4">
       <div className="flex items-center gap-3 flex-wrap">
         <Input label="" type="month" value={month} onChange={e=>setMonth(e.target.value)} className="w-44"/>
-        <Button icon={<Plus size={16}/>} onClick={()=>{setForm({bill_id:'',flock_id:'',amount:'',units:'',remarks:''});setShowForm(true)}}>Add Allocation</Button>
+        <Button icon={<Plus size={16}/>} onClick={()=>{setForm({bill_id:'',flock_id:'',amount:'',units:'',remarks:''});setElecDraftDismissed(false);setShowForm(true)}}>Add Allocation</Button>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -412,7 +430,7 @@ const ElecAllocation: React.FC = () => {
                   <Td right className="font-medium">{inr(a.amount)}</Td>
                   <Td className="text-xs text-gray-400">{a.remarks??'—'}</Td>
                   <Td>
-                    <button onClick={()=>{setForm({bill_id:a.bill_id,flock_id:a.flock_id,amount:a.amount?.toString(),units:a.units?.toString()??'',remarks:a.remarks??''});setShowForm(true)}}
+                    <button onClick={()=>{setForm({bill_id:a.bill_id,flock_id:a.flock_id,amount:a.amount?.toString(),units:a.units?.toString()??'',remarks:a.remarks??''});setElecDraftDismissed(false);setShowForm(true)}}
                       className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
                   </Td>
                 </tr>
@@ -427,7 +445,15 @@ const ElecAllocation: React.FC = () => {
       )}
 
       <Modal open={showForm} onClose={()=>setShowForm(false)} title="Electricity Cost Allocation" size="md"
-        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
+        footer={<>
+          {draftChecked && draft && !elecDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = draft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setElecDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <Select label="Electricity Bill (Meter)" required placeholder="— Select meter —" options={billOptions} value={form.bill_id} onChange={e=>setForm((f:any)=>({...f,bill_id:e.target.value}))}/>
           <SearchableSelect label="Allocate to Flock" required placeholder="— Select flock —" options={flockOptions} value={form.flock_id} onChange={v=>setForm((f:any)=>({...f,flock_id:v}))}/>
@@ -448,6 +474,9 @@ const SalaryAllocation: React.FC = () => {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0,7))
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<any>({})
+  const [salaryDraftDismissed, setSalaryDraftDismissed] = useState(false)
+  const { draft, draftChecked, saveDraft, clearDraft } = useFormDraft('salary_allocation', 'new', showForm)
+  React.useEffect(() => { if (!showForm) return; saveDraft(form) }, [form, showForm])
 
   const { data: abstracts } = useQuery({
     queryKey: ['salary_abstract', month],
@@ -484,7 +513,7 @@ const SalaryAllocation: React.FC = () => {
       },{onConflict:'abstract_id,flock_id'})
       if(error)throw error
     },
-    onSuccess:()=>{ toast.success('Allocation saved!'); qc.invalidateQueries({queryKey:['sal_alloc']}); setShowForm(false) },
+    onSuccess:()=>{ toast.success('Allocation saved!'); qc.invalidateQueries({queryKey:['sal_alloc']}); setShowForm(false); clearDraft('new') },
     onError:(e:any)=>toast.error(e.message)
   })
 
@@ -492,7 +521,7 @@ const SalaryAllocation: React.FC = () => {
     <div className="space-y-4">
       <div className="flex items-center gap-3 flex-wrap">
         <Input label="" type="month" value={month} onChange={e=>setMonth(e.target.value)} className="w-44"/>
-        <Button icon={<Plus size={16}/>} onClick={()=>{setForm({abstract_id:'',flock_id:'',amount:'',pct:'',remarks:''});setShowForm(true)}}>Add Allocation</Button>
+        <Button icon={<Plus size={16}/>} onClick={()=>{setForm({abstract_id:'',flock_id:'',amount:'',pct:'',remarks:''});setSalaryDraftDismissed(false);setShowForm(true)}}>Add Allocation</Button>
       </div>
       <div className="grid grid-cols-3 gap-3">
         <Card><p className="text-xs text-gray-400">Total Salary</p><p className="text-lg font-bold text-blue-700">{inr(totalSalary)}</p></Card>
@@ -513,7 +542,7 @@ const SalaryAllocation: React.FC = () => {
                   <Td right className="font-medium">{inr(a.amount)}</Td>
                   <Td className="text-xs text-gray-400">{a.remarks??'—'}</Td>
                   <Td>
-                    <button onClick={()=>{setForm({abstract_id:a.abstract_id,flock_id:a.flock_id,amount:a.amount?.toString(),pct:a.pct?.toString()??'',remarks:a.remarks??''});setShowForm(true)}}
+                    <button onClick={()=>{setForm({abstract_id:a.abstract_id,flock_id:a.flock_id,amount:a.amount?.toString(),pct:a.pct?.toString()??'',remarks:a.remarks??''});setSalaryDraftDismissed(false);setShowForm(true)}}
                       className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
                   </Td>
                 </tr>
@@ -527,7 +556,15 @@ const SalaryAllocation: React.FC = () => {
         </Card>
       )}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title="Salary Cost Allocation" size="md"
-        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
+        footer={<>
+          {draftChecked && draft && !salaryDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = draft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setSalaryDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>Save</Button></>}>
         <div className="space-y-4">
           <Select label="Site Salary (Farm)" required placeholder="— Select farm abstract —" options={absOptions} value={form.abstract_id} onChange={e=>setForm((f:any)=>({...f,abstract_id:e.target.value}))}/>
           <SearchableSelect label="Allocate to Flock" required placeholder="— Select flock —" options={flockOptions} value={form.flock_id} onChange={v=>setForm((f:any)=>({...f,flock_id:v}))}/>

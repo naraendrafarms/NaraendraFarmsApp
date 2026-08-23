@@ -11,6 +11,7 @@ import toast from 'react-hot-toast'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import { printReport } from '@/lib/invoicePrint'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 const CONDITION_OPTIONS = [{ value: 'Good', label: 'Good' }, { value: 'Damaged', label: 'Damaged' }]
 
@@ -46,6 +47,14 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
   const blank = { sale_date: today(), farm_id: '', buyer_name: '', bag_type: '', condition: 'Good', qty: '', rate: '', payment_mode: 'Cash', bank_account_id: '', remarks: '' }
   const [form, setForm] = useState(blank)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const bagDraftKey = editing?.id ?? 'new'
+  const { draft: bagDraft, draftChecked: bagDraftChecked, saveDraft: saveBagDraft, clearDraft: clearBagDraft } = useFormDraft('bags', bagDraftKey, showForm)
+  const [bagDraftDismissed, setBagDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    saveBagDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
   const [filterFarm, setFilterFarm] = useState('')
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
@@ -121,7 +130,7 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
       }
       await relinkLedger(saleId, form.sale_date, form.farm_id || null, form.buyer_name || null, qty, amt, form.payment_mode, form.bank_account_id || null, form.bag_type, form.condition)
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bag_sales'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); setShowForm(false); setEditing(null); setForm(blank); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['bag_sales'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); clearBagDraft(bagDraftKey); setShowForm(false); setEditing(null); setForm(blank); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
@@ -144,6 +153,7 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
   })
 
   const openEdit = (r: any) => {
+    setBagDraftDismissed(false)
     setEditing(r)
     setForm({
       sale_date: r.sale_date, farm_id: r.farm_id ?? '', buyer_name: r.buyer_name ?? '',
@@ -231,7 +241,7 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
           <Button variant="outline" icon={<Download size={14} />} onClick={exportRows}>Export</Button>
           <Button variant="outline" icon={<Printer size={14} />} onClick={printRows}>Print</Button>
           {sel.size > 0 && <Button variant="danger" icon={<Trash2 size={14} />} onClick={() => setBulkConfirm(true)}>Delete Selected ({sel.size})</Button>}
-          <Button icon={<Plus size={14} />} onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}>Add Sale</Button>
+          <Button icon={<Plus size={14} />} onClick={() => { setBagDraftDismissed(false); setEditing(null); setForm(blank); setShowForm(true) }}>Add Sale</Button>
         </div>
       </div>
       {bulkConfirm && (
@@ -291,7 +301,16 @@ const BagsSoldTab: React.FC<{ farms: any[] }> = ({ farms }) => {
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Bag Sale' : 'Add Bag Sale'}
-        footer={<Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button>}>
+        footer={<>
+          {bagDraftChecked && bagDraft && !bagDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = bagDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setBagDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button>
+        </>}>
         <div className="space-y-3">
           <FormRow>
             <DateInput label="Date *" value={form.sale_date} onChange={e => s('sale_date', e.target.value)} />

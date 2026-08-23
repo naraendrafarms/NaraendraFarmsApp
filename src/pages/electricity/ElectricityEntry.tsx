@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { inr, fmtMonth, currentFY, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal,
@@ -124,7 +125,18 @@ const BillsTab: React.FC = () => {
   const [form, setForm] = useState(blank())
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  const billDraftKey = editing?.id ?? 'new'
+  const { draft: billDraft, draftChecked: billDraftChecked, saveDraft: saveBillDraft, clearDraft: clearBillDraft } = useFormDraft('electricity_entry', billDraftKey, showForm)
+  const [billDraftDismissed, setBillDraftDismissed] = useState(false)
+
+  React.useEffect(() => {
+    if (!showForm) return
+    saveBillDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
+
   const openForm = (bill?: any) => {
+    setBillDraftDismissed(false)
     if (bill) {
       setEditing(bill)
       setForm({ meter_id: bill.meter_id, bill_month: bill.bill_month?.slice(0,7)??'', units_consumed: bill.units_consumed?.toString()??'', amount: bill.amount?.toString()??'', acd_dc_due: bill.acd_dc_due?.toString()??'0', deposit_amount: bill.deposit_amount?.toString()??'0', deposit_interest: bill.deposit_interest?.toString()??'0', meter_rent: bill.meter_rent?.toString()??'0', remarks: bill.remarks??'' })
@@ -290,7 +302,7 @@ const BillsTab: React.FC = () => {
         const { error }=await supabase.from('electricity_bills').insert(payload); if(error)throw error
       }
     },
-    onSuccess: () => { toast.success(editing?'Updated!':'Saved!'); qc.invalidateQueries({queryKey:['elec_bills']}); qc.invalidateQueries({queryKey:['elec_allocations']}); setShowForm(false) },
+    onSuccess: () => { toast.success(editing?'Updated!':'Saved!'); qc.invalidateQueries({queryKey:['elec_bills']}); qc.invalidateQueries({queryKey:['elec_allocations']}); clearBillDraft(billDraftKey); setShowForm(false) },
     onError: (e:any) => toast.error(e.message)
   })
 
@@ -524,7 +536,15 @@ const BillsTab: React.FC = () => {
       )}
 
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Bill':'Add Electricity Bill'} size="md"
-        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
+        footer={<>
+          {billDraftChecked && billDraft && !billDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = billDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setBillDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
           <Select label="Meter / Site" required placeholder="— Select meter —" options={meterOptions} value={form.meter_id} onChange={e=>set('meter_id',e.target.value)}/>
           <FormRow>

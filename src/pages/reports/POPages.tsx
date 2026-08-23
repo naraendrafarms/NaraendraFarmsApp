@@ -23,6 +23,7 @@ import {
 import toast from 'react-hot-toast'
 import { useConfigOptions, useConfigValues } from '@/hooks/useConfigOptions'
 import { useItemOptionsWithAliases, registerItemAlias, resolveItemIdByName, useInvalidateItemAliases } from '@/lib/itemAliases'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 // ── constants ─────────────────────────────────────────────────────
 const PAY_STATUS_FB  = ['Paid', 'Pending', 'Not Paid', 'HOLD']
@@ -336,6 +337,14 @@ const POTab: React.FC = () => {
   // Multi-line items for New PO
   const emptyLine = () => ({ item_name:'', material_type:'', quantity:'', unit:'', rate:'', gst_pct:'', total_amount:'', dose:'', intent_line_id:'' })
   const [newLines, setNewLines] = useState<any[]>([emptyLine()])
+  const poDraftKey = editing?.id ?? 'new'
+  const { draft: poDraft, draftChecked: poDraftChecked, saveDraft: savePoDraft, clearDraft: clearPoDraft } = useFormDraft('purchase_order', poDraftKey, open)
+  const [poDraftDismissed, setPoDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!open) return
+    savePoDraft({ form, newLines })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, newLines, open])
   const setLine = (i: number, k: string, v: string) => setNewLines(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l))
   const calcLineTotal = (i: number, k: string, v: string) => {
     setNewLines(ls => ls.map((l, idx) => {
@@ -545,6 +554,7 @@ const POTab: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['purchase_orders_all'] })
       qc.invalidateQueries({ queryKey: ['purchase_intent_lines_open'] })
       qc.invalidateQueries({ queryKey: ['purchase_intents'] })
+      clearPoDraft(poDraftKey)
       setOpen(false)
       setNewLines([emptyLine()])
       setMultiEditMode(false)
@@ -784,8 +794,8 @@ const POTab: React.FC = () => {
     })
   }, [filtered])
 
-  const openNew  = () => { setEditing(null); setMultiEditMode(false); setForm({...EMPTY_PO, fiscal_year: fy}); setOpen(true) }
-  const openEdit = (r: any) => { setEditing(r); setMultiEditMode(false); setForm({...r, po_date:r.po_date??'', grn_date:r.grn_date??''}); setOpen(true) }
+  const openNew  = () => { setEditing(null); setMultiEditMode(false); setForm({...EMPTY_PO, fiscal_year: fy}); setPoDraftDismissed(false); setOpen(true) }
+  const openEdit = (r: any) => { setEditing(r); setMultiEditMode(false); setForm({...r, po_date:r.po_date??'', grn_date:r.grn_date??''}); setPoDraftDismissed(false); setOpen(true) }
 
   // Edit ALL line items of a PO together (instead of only the first item) —
   // reuses the multi-line table from New PO, but each line carries its
@@ -803,6 +813,7 @@ const POTab: React.FC = () => {
       total_amount: o.total_amount != null ? String(o.total_amount) : '',
     })))
     setGroupEditIds(items.map((o: any) => o.id))
+    setPoDraftDismissed(false)
     setOpen(true)
   }
 
@@ -934,7 +945,7 @@ const POTab: React.FC = () => {
                 <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                   <button onClick={() => handlePrintPO(items)} className="p-1 text-gray-500 hover:text-gray-800" title="Print Purchase Order"><Printer size={13}/></button>
                   {canEdit && <button onClick={() => openEditGroup(items)} className="p-1 text-blue-400 hover:text-blue-600" title="Edit PO (all items)"><Pencil size={13}/></button>}
-                  {canEdit && <button onClick={() => { setEditing(null); setForm({...EMPTY_PO, fiscal_year: fy, po_no: first.po_no, vendor_name: first.vendor_name}); setOpen(true) }} className="p-1 text-green-500 hover:text-green-700" title="Add item to PO"><Plus size={13}/></button>}
+                  {canEdit && <button onClick={() => { setEditing(null); setForm({...EMPTY_PO, fiscal_year: fy, po_no: first.po_no, vendor_name: first.vendor_name}); setPoDraftDismissed(false); setOpen(true) }} className="p-1 text-green-500 hover:text-green-700" title="Add item to PO"><Plus size={13}/></button>}
                 </div>
                 {isExpanded ? <ChevronUp size={16} className="text-gray-400 shrink-0"/> : <ChevronDown size={16} className="text-gray-400 shrink-0"/>}
               </div>
@@ -986,7 +997,16 @@ const POTab: React.FC = () => {
 
       <Modal open={open} onClose={() => { setOpen(false); setNewLines([emptyLine()]); setMultiEditMode(false); setGroupEditIds([]) }}
         title={editing ? (multiEditMode ? `Edit Purchase Order — ${editing.po_no} (all items)` : 'Edit Purchase Order Line') : 'New Purchase Order'} size="lg"
-        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => { setOpen(false); setNewLines([emptyLine()]); setMultiEditMode(false); setGroupEditIds([]) }}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
+        footer={<div className="flex gap-2 justify-end">
+          {poDraftChecked && poDraft && !poDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = poDraft.data || {}
+              if (d.form) setForm((f: any) => ({ ...f, ...d.form }))
+              if (d.newLines) setNewLines(d.newLines)
+              setPoDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={() => { setOpen(false); setNewLines([emptyLine()]); setMultiEditMode(false); setGroupEditIds([]) }}>Cancel</Button><Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button></div>}>
         <div className="space-y-3">
           {/* PO Header */}
           <div className="grid grid-cols-3 gap-3">

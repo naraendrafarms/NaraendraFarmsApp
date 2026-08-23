@@ -14,6 +14,7 @@ import { parseGstin, GST_TYPE_OPTIONS, GST_RATE_OPTIONS } from '@/lib/gst'
 import { useConfigValues } from '@/hooks/useConfigOptions'
 import { printReport } from '@/lib/invoicePrint'
 import { useMedicineOptionsWithAliases, registerItemAlias } from '@/lib/itemAliases'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
   const csv = [headers, ...rows].map(r => r.map(v => `"${(v??'').toString().replace(/"/g,'""')}"`).join(',')).join('\n')
@@ -224,6 +225,14 @@ export const IngredientsMaster: React.FC = () => {
   const [mergeKeepId, setMergeKeepId] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+  const ingDraftKey = editing?.id ?? 'new'
+  const { draft: ingDraft, draftChecked: ingDraftChecked, saveDraft: saveIngDraft, clearDraft: clearIngDraft } = useFormDraft('master_ingredient', ingDraftKey, showForm)
+  const [ingDraftDismissed, setIngDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    saveIngDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
 
   const {data,isLoading}=useQuery({queryKey:['ingredients'],queryFn:async()=>{const{data}=await supabase.from('feed_ingredients').select('*').order('code');return data??[]}})
   const {data:ingCats=[]}=useQuery({queryKey:['config_ingredient_category'],queryFn:async()=>{const{data}=await supabase.from('config_options').select('value,sort_order').eq('grp','ingredient_category').order('sort_order');return(data??[]).map((r:any)=>r.value as string)},staleTime:5*60*1000})
@@ -231,6 +240,7 @@ export const IngredientsMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
+    setIngDraftDismissed(false)
     setForm(row?{code:row.code,name:row.name,short_name:row.short_name??'',category:row.category,unit:row.unit,protein_pct:row.protein_pct?.toString()??'',moisture_pct:row.moisture_pct?.toString()??'',hsn_code:row.hsn_code??'',gst_rate:row.gst_rate?.toString()??'0'}:{code:'',name:'',short_name:'',category:'grain',unit:'kg',protein_pct:'',moisture_pct:'',hsn_code:'',gst_rate:'0'})
     setShowForm(true)
   }
@@ -244,7 +254,7 @@ export const IngredientsMaster: React.FC = () => {
       if(editing){const{error}=await supabase.from('feed_ingredients').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('feed_ingredients').insert(p);if(error)throw error}
     },
-    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['ingredients']});setShowForm(false)},
+    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['ingredients']});clearIngDraft(ingDraftKey);setShowForm(false)},
     onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
@@ -436,7 +446,11 @@ export const IngredientsMaster: React.FC = () => {
 
       {/* Add/Edit modal */}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Ingredient':'Add Ingredient'} size="md"
-        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
+        footer={<>
+          {ingDraftChecked && ingDraft && !ingDraftDismissed && (
+            <Button variant="secondary" onClick={()=>{const d=ingDraft.data||{};setForm((f:any)=>({...f,...d}));setIngDraftDismissed(true)}}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
           <FormRow>
             <Input label="Code" required value={form.code} onChange={e=>s('code',e.target.value)} hint="e.g. MAIZE" />
@@ -476,6 +490,14 @@ export const PartiesMaster: React.FC = () => {
   const [form, setForm] = useState({name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0',bank_name:'',branch:'',account_no:'',ifsc:'',pan_no:'',deductee_type:'Non-Company'})
   const importRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+  const partyDraftKey = editing?.id ?? 'new'
+  const { draft: partyDraft, draftChecked: partyDraftChecked, saveDraft: savePartyDraft, clearDraft: clearPartyDraft } = useFormDraft('master_party', partyDraftKey, showForm)
+  const [partyDraftDismissed, setPartyDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    savePartyDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
   // When GSTIN typed: auto-set registered + derive state code
   const onGstin=(v:string)=>{
     const up=v.toUpperCase()
@@ -495,6 +517,7 @@ export const PartiesMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
+    setPartyDraftDismissed(false)
     setForm(row?{name:row.name,type:row.type,category:row.category??'',contact:row.contact??'',address:row.address??'',gstin:row.gstin??'',gst_type:row.gst_type??'unregistered',state_code:row.state_code??'',is_rcm_default:row.is_rcm_default??false,tds_pct_default:String(row.tds_pct_default??'0'),bank_name:row.bank_name??'',branch:row.branch??'',account_no:row.account_no??'',ifsc:row.ifsc??'',pan_no:row.pan_no??'',deductee_type:row.deductee_type??'Non-Company'}:{name:'',type:'supplier',category:'',contact:'',address:'',gstin:'',gst_type:'unregistered',state_code:'',is_rcm_default:false,tds_pct_default:'0',bank_name:'',branch:'',account_no:'',ifsc:'',pan_no:'',deductee_type:'Non-Company'})
     setShowForm(true)
   }
@@ -508,7 +531,7 @@ export const PartiesMaster: React.FC = () => {
       if(editing){const{error}=await supabase.from('parties').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('parties').insert(p);if(error)throw error}
     },
-    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['parties']});setShowForm(false)},
+    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['parties']});clearPartyDraft(partyDraftKey);setShowForm(false)},
     onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
@@ -747,7 +770,11 @@ export const PartiesMaster: React.FC = () => {
         </Modal>
       )}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Party':'Add Party'} size="md"
-        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
+        footer={<>
+          {partyDraftChecked && partyDraft && !partyDraftDismissed && (
+            <Button variant="secondary" onClick={()=>{const d=partyDraft.data||{};setForm((f:any)=>({...f,...d}));setPartyDraftDismissed(true)}}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
           <Input label="Party Name" required value={form.name} onChange={e=>s('name',e.target.value)} />
           <FormRow>
@@ -812,11 +839,20 @@ export const MedicinesMaster: React.FC = () => {
   const [mergeKeepId, setMergeKeepId] = useState('')
   const medImportRef = useRef<HTMLInputElement>(null)
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+  const medDraftKey = editing?.id ?? 'new'
+  const { draft: medDraft, draftChecked: medDraftChecked, saveDraft: saveMedDraft, clearDraft: clearMedDraft } = useFormDraft('master_medicine', medDraftKey, showForm)
+  const [medDraftDismissed, setMedDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    saveMedDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
 
   const {data,isLoading}=useQuery({queryKey:['medicines'],queryFn:async()=>{const{data}=await supabase.from('medicines_master').select('*').order('name');return data??[]}})
 
   const open=(row?:any)=>{
     setEditing(row??null)
+    setMedDraftDismissed(false)
     setForm(row?{name:row.name,type:row.type,unit:row.unit,manufacturer:row.manufacturer??'',rate:row.rate?.toString()??'',batch_no:row.batch_no??'',expiry_date:row.expiry_date??''}:{name:'',type:'medicine',unit:'ml',manufacturer:'',rate:'',batch_no:'',expiry_date:''})
     setShowForm(true)
   }
@@ -840,7 +876,7 @@ export const MedicinesMaster: React.FC = () => {
         const{error}=await supabase.from('medicines_master').insert(p);if(error)throw error
       }
     },
-    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['medicines']});qc.invalidateQueries({queryKey:['medicines_master']});qc.invalidateQueries({queryKey:['medicines_master_list']});qc.invalidateQueries({queryKey:['medicines_active']});qc.invalidateQueries({queryKey:['medicines_all']});setShowForm(false)},
+    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['medicines']});qc.invalidateQueries({queryKey:['medicines_master']});qc.invalidateQueries({queryKey:['medicines_master_list']});qc.invalidateQueries({queryKey:['medicines_active']});qc.invalidateQueries({queryKey:['medicines_all']});clearMedDraft(medDraftKey);setShowForm(false)},
     onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
@@ -1039,7 +1075,11 @@ export const MedicinesMaster: React.FC = () => {
       )}
 
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Medicine':'Add Medicine'} size="md"
-        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
+        footer={<>
+          {medDraftChecked && medDraft && !medDraftDismissed && (
+            <Button variant="secondary" onClick={()=>{const d=medDraft.data||{};setForm((f:any)=>({...f,...d}));setMedDraftDismissed(true)}}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
           <Input label="Medicine / Vaccine Name" required value={form.name} onChange={e=>s('name',e.target.value)} />
           <FormRow>
@@ -1072,6 +1112,14 @@ export const ShedsMaster: React.FC = () => {
     birds_per_box:'', water_tank_litres:'', remarks:''
   })
   const s=(k:string,v:string)=>setForm(f=>({...f,[k]:v}))
+  const shedDraftKey = editing?.id ?? 'new'
+  const { draft: shedDraft, draftChecked: shedDraftChecked, saveDraft: saveShedDraft, clearDraft: clearShedDraft } = useFormDraft('master_shed', shedDraftKey, showForm)
+  const [shedDraftDismissed, setShedDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showForm) return
+    saveShedDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
 
   const {data:farms}=useQuery({queryKey:['farms'],queryFn:async()=>{const{data}=await supabase.from('farms').select('id,name,code').eq('is_active',true).order('name');return data??[]}})
   const {data,isLoading}=useQuery({
@@ -1085,6 +1133,7 @@ export const ShedsMaster: React.FC = () => {
 
   const open=(row?:any)=>{
     setEditing(row??null)
+    setShedDraftDismissed(false)
     setForm(row?{farm_id:row.farm_id,shed_no:row.shed_no,shed_name:row.shed_name??'',shed_type:row.shed_type,sex:row.sex,capacity_female:row.capacity_female?.toString()??'',capacity_male:row.capacity_male?.toString()??'',a_side_boxes:row.a_side_boxes?.toString()??'',b_side_boxes:row.b_side_boxes?.toString()??'',birds_per_box:row.birds_per_box?.toString()??'',water_tank_litres:row.water_tank_litres?.toString()??'',remarks:row.remarks??''}:{farm_id:'',shed_no:'',shed_name:'',shed_type:'laying',sex:'combined',capacity_female:'',capacity_male:'',a_side_boxes:'',b_side_boxes:'',birds_per_box:'',water_tank_litres:'',remarks:''})
     setShowForm(true)
   }
@@ -1096,7 +1145,7 @@ export const ShedsMaster: React.FC = () => {
       if(editing){const{error}=await supabase.from('sheds').update(p).eq('id',editing.id);if(error)throw error}
       else{const{error}=await supabase.from('sheds').insert(p);if(error)throw error}
     },
-    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['sheds']});setShowForm(false)},
+    onSuccess:()=>{toast.success('Saved!');qc.invalidateQueries({queryKey:['sheds']});clearShedDraft(shedDraftKey);setShowForm(false)},
     onError:(e:any)=>toast.error(friendlyDbError(e))
   })
 
@@ -1163,7 +1212,11 @@ export const ShedsMaster: React.FC = () => {
         </Modal>
       )}
       <Modal open={showForm} onClose={()=>setShowForm(false)} title={editing?'Edit Shed':'Add Shed'} size="md"
-        footer={<><Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
+        footer={<>
+          {shedDraftChecked && shedDraft && !shedDraftDismissed && (
+            <Button variant="secondary" onClick={()=>{const d=shedDraft.data||{};setForm((f:any)=>({...f,...d}));setShedDraftDismissed(true)}}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={()=>setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={()=>mut.mutate()}>{editing?'Update':'Save'}</Button></>}>
         <div className="space-y-4">
           <FormRow>
             <SearchableSelect label="Farm / Site" required placeholder="— Select —" options={farmOptions} value={form.farm_id} onChange={v=>s('farm_id',v)}/>

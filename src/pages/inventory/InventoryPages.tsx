@@ -15,6 +15,7 @@ import {
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 import { useConfigValues, useConfigOptions } from '@/hooks/useConfigOptions'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 // ── constants ──────────────────────────────────────────────────────
 const CATEGORIES_DEFAULT = ['Feed Ingredient', 'Medicine', 'Vaccine', 'Packaging', 'Equipment', 'Spares', 'Chemical', 'Other']
@@ -439,6 +440,13 @@ const PhysicalAuditTab: React.FC = () => {
   const [counts, setCounts] = useState<Record<string, string>>({})
   const [search, setSearch] = useState('')
   const [onlyCounted, setOnlyCounted] = useState(false)
+  const { draft: auditDraft, draftChecked: auditDraftChecked, saveDraft: saveAuditDraft, clearDraft: clearAuditDraft } = useFormDraft('inventory_audit', 'new', showNew)
+  const [auditDraftDismissed, setAuditDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!showNew) return
+    saveAuditDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showNew])
 
   const { data: audits = [], isLoading } = useQuery({
     queryKey: ['stock_audits'],
@@ -523,7 +531,7 @@ const PhysicalAuditTab: React.FC = () => {
       if (error) throw error
       return data.id as string
     },
-    onSuccess: (id) => { qc.invalidateQueries({ queryKey: ['stock_audits'] }); setShowNew(false); setForm(blank); setOpenId(id); toast.success('Audit started — now enter what you counted') },
+    onSuccess: (id) => { qc.invalidateQueries({ queryKey: ['stock_audits'] }); clearAuditDraft('new'); setShowNew(false); setForm(blank); setOpenId(id); toast.success('Audit started — now enter what you counted') },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -678,7 +686,7 @@ const PhysicalAuditTab: React.FC = () => {
             <b> as on the date you counted</b> — valued at the weighted average rate. Posting corrects the
             stock ledger and charges any shortage to the flocks by feed share.
           </p>
-          {canEdit && <Button icon={<Plus size={16} />} onClick={() => { setForm(blank); setShowNew(true) }}>New Audit</Button>}
+          {canEdit && <Button icon={<Plus size={16} />} onClick={() => { setAuditDraftDismissed(false); setForm(blank); setShowNew(true) }}>New Audit</Button>}
         </div>
         {isLoading ? <Spinner /> : audits.length === 0 ? (
           <Card><EmptyState title="No stock audits yet" subtitle="Start one after your next physical count" /></Card>
@@ -716,7 +724,16 @@ const PhysicalAuditTab: React.FC = () => {
         )}
 
         <Modal open={showNew} onClose={() => setShowNew(false)} title="New Physical Stock Audit"
-          footer={<Button loading={createMut.isPending} onClick={() => createMut.mutate()}>Start Audit</Button>}>
+          footer={<>
+            {auditDraftChecked && auditDraft && !auditDraftDismissed && (
+              <Button variant="secondary" onClick={() => {
+                const d = auditDraft.data || {}
+                setForm((f: any) => ({ ...f, ...d }))
+                setAuditDraftDismissed(true)
+              }}>Restore Draft</Button>
+            )}
+            <Button loading={createMut.isPending} onClick={() => createMut.mutate()}>Start Audit</Button>
+          </>}>
           <div className="space-y-3">
             {/* DateInput fires a synthetic {target:{value}}, not the string —
                 read e.target.value, as every other screen does. */}
@@ -883,6 +900,14 @@ const AdjustmentsTab: React.FC = () => {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [delId, setDelId] = useState<string | null>(null)
   const [bulkDel, setBulkDel] = useState(false)
+  const adjDraftKey = editing?.id ?? 'new'
+  const { draft: adjDraft, draftChecked: adjDraftChecked, saveDraft: saveAdjDraft, clearDraft: clearAdjDraft } = useFormDraft('inventory_adjustments', adjDraftKey, open)
+  const [adjDraftDismissed, setAdjDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    if (!open) return
+    saveAdjDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, open])
 
   const save = useMutation({
     mutationFn: async () => {
@@ -899,7 +924,7 @@ const AdjustmentsTab: React.FC = () => {
       if (editing) { const { error } = await supabase.from('feed_stock_adjustments').update(payload).eq('id', editing.id); if (error) throw error }
       else { const { error } = await supabase.from('feed_stock_adjustments').insert(payload); if (error) throw error }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inv_adjustments'] }); qc.invalidateQueries({ queryKey: ['sl_all'] }); setOpen(false); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inv_adjustments'] }); qc.invalidateQueries({ queryKey: ['sl_all'] }); clearAdjDraft(adjDraftKey); setOpen(false); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
 
@@ -909,8 +934,9 @@ const AdjustmentsTab: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
-  const openAdd = () => { setEditing(null); setForm(blank); setOpen(true) }
+  const openAdd = () => { setAdjDraftDismissed(false); setEditing(null); setForm(blank); setOpen(true) }
   const openEdit = (r: any) => {
+    setAdjDraftDismissed(false)
     setEditing(r)
     setForm({ adjustment_date: r.adjustment_date ?? today(), ingredient_name: r.ingredient_name ?? '', adjustment_kg: String(r.adjustment_kg ?? ''), adjustment_type: r.adjustment_type ?? 'Opening Stock', unit: r.unit ?? 'kg', rate: r.rate != null ? String(r.rate) : '', remarks: r.remarks ?? '' })
     setOpen(true)
@@ -1036,7 +1062,15 @@ const AdjustmentsTab: React.FC = () => {
       </Card>
 
       <Modal open={open} onClose={() => setOpen(false)} title={`${editing ? 'Edit' : 'Add'} Stock Entry`}
-        footer={<div className="flex gap-2 justify-end"><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Save</Button></div>}>
+        footer={<div className="flex gap-2 justify-end">
+          {adjDraftChecked && adjDraft && !adjDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = adjDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setAdjDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => save.mutate()} loading={save.isPending}>Save</Button></div>}>
         <div className="grid grid-cols-2 gap-3">
           <DateInput label="Date" value={form.adjustment_date} onChange={e => s('adjustment_date', e.target.value)} />
           <SearchableSelect label="Item Name" required placeholder="Search item from master…"

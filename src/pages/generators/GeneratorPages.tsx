@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { inr, exportCSV, today, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
@@ -118,6 +119,16 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
   const blank = { generator_id: '', log_date: today(), from_time: '', to_time: '', hours_run: '', diesel_consumed_ltr: '', opening_reading: '', closing_reading: '', remarks: '' }
   const [form, setForm] = useState(blank)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const usageDraftKey = editing?.id ?? 'new'
+  const { draft: usageDraft, draftChecked: usageDraftChecked, saveDraft: saveUsageDraft, clearDraft: clearUsageDraft } = useFormDraft('generator_entry_usage', usageDraftKey, showForm)
+  const [usageDraftDismissed, setUsageDraftDismissed] = useState(false)
+
+  React.useEffect(() => {
+    if (!showForm) return
+    saveUsageDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
   // Hours Run auto-computed from From/To time (handles crossing midnight);
   // Diesel (Ltr) stays manual entry.
   const setTime = (k: 'from_time' | 'to_time', v: string) => setForm(f => {
@@ -154,7 +165,7 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
       if (editing) { const { error } = await supabase.from('generator_usage_log').update(payload).eq('id', editing.id); if (error) throw error }
       else { const { error } = await supabase.from('generator_usage_log').insert(payload); if (error) throw error }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_usage_log'] }); setShowForm(false); setEditing(null); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_usage_log'] }); clearUsageDraft(usageDraftKey); setShowForm(false); setEditing(null); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
@@ -171,7 +182,7 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
     <div className="space-y-4">
       <div className="flex justify-end gap-2">
         <Button variant="outline" icon={<Download size={14} />} onClick={exportRows}>Export</Button>
-        <Button icon={<Plus size={14} />} onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}>Add Entry</Button>
+        <Button icon={<Plus size={14} />} onClick={() => { setEditing(null); setForm(blank); setUsageDraftDismissed(false); setShowForm(true) }}>Add Entry</Button>
       </div>
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
@@ -189,7 +200,7 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
                   <Td right>{l.hours_run > 0 ? (l.diesel_consumed_ltr / l.hours_run).toFixed(2) : '—'}</Td>
                   <Td right>
                     <div className="flex gap-2 justify-end">
-                      <button onClick={() => { setEditing(l); setForm({ generator_id: l.generator_id, log_date: l.log_date, from_time: l.from_time?.slice(0,5) ?? '', to_time: l.to_time?.slice(0,5) ?? '', hours_run: l.hours_run?.toString() ?? '', diesel_consumed_ltr: l.diesel_consumed_ltr?.toString() ?? '', opening_reading: l.opening_reading?.toString() ?? '', closing_reading: l.closing_reading?.toString() ?? '', remarks: l.remarks ?? '' }); setShowForm(true) }}><Pencil size={14} className="text-gray-400 hover:text-brand-600" /></button>
+                      <button onClick={() => { setEditing(l); setForm({ generator_id: l.generator_id, log_date: l.log_date, from_time: l.from_time?.slice(0,5) ?? '', to_time: l.to_time?.slice(0,5) ?? '', hours_run: l.hours_run?.toString() ?? '', diesel_consumed_ltr: l.diesel_consumed_ltr?.toString() ?? '', opening_reading: l.opening_reading?.toString() ?? '', closing_reading: l.closing_reading?.toString() ?? '', remarks: l.remarks ?? '' }); setUsageDraftDismissed(false); setShowForm(true) }}><Pencil size={14} className="text-gray-400 hover:text-brand-600" /></button>
                       <button onClick={() => confirm('Delete this entry?') && delMut.mutate(l.id)}><Trash2 size={14} className="text-gray-400 hover:text-red-600" /></button>
                     </div>
                   </Td>
@@ -201,7 +212,15 @@ const UsageLogTab: React.FC<{ generators: any[] }> = ({ generators }) => {
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Usage Entry' : 'Add Usage Entry'}
-        footer={<Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button>}>
+        footer={<>
+          {usageDraftChecked && usageDraft && !usageDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = usageDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setUsageDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-3">
           <FormRow>
             <Select label="Generator *" value={form.generator_id} onChange={e => s('generator_id', e.target.value)} placeholder="Select Generator"
@@ -235,6 +254,15 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
   const blank = { generator_id: '', farm_id: '', purchase_date: today(), qty_ltr: '', rate: '', supplier: '', payment_mode: 'Cash', bank_account_id: '', remarks: '' }
   const [form, setForm] = useState(blank)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const { draft: dieselDraft, draftChecked: dieselDraftChecked, saveDraft: saveDieselDraft, clearDraft: clearDieselDraft } = useFormDraft('generator_entry_diesel', 'new', showForm)
+  const [dieselDraftDismissed, setDieselDraftDismissed] = useState(false)
+
+  React.useEffect(() => {
+    if (!showForm) return
+    saveDieselDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
 
   const { data: purchases = [], isLoading } = useQuery({
     queryKey: ['generator_diesel_purchases'],
@@ -284,7 +312,7 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
         if (btErr) throw new Error('Purchase saved, but Bank Ledger entry failed: ' + btErr.message)
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_diesel_purchases'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); setShowForm(false); setForm(blank); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_diesel_purchases'] }); qc.invalidateQueries({ queryKey: ['cash_book'] }); qc.invalidateQueries({ queryKey: ['bank_transactions'] }); clearDieselDraft('new'); setShowForm(false); setForm(blank); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
@@ -303,7 +331,7 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
         <Card className="!p-3 text-center"><p className="text-lg font-bold text-blue-600">{totalConsumed.toFixed(0)} Ltr</p><p className="text-xs text-gray-500">Consumed (usage log)</p></Card>
         <Card className="!p-3 text-center"><p className={`text-lg font-bold ${balance < 0 ? 'text-red-600' : 'text-green-600'}`}>{balance.toFixed(0)} Ltr</p><p className="text-xs text-gray-500">Balance in stock</p></Card>
       </div>
-      <div className="flex justify-end"><Button icon={<Plus size={14} />} onClick={() => { setForm(blank); setShowForm(true) }}>Add Purchase</Button></div>
+      <div className="flex justify-end"><Button icon={<Plus size={14} />} onClick={() => { setForm(blank); setDieselDraftDismissed(false); setShowForm(true) }}>Add Purchase</Button></div>
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
@@ -331,7 +359,15 @@ const DieselPurchasesTab: React.FC<{ farms: any[]; generators: any[] }> = ({ far
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add Diesel Purchase"
-        footer={<Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button>}>
+        footer={<>
+          {dieselDraftChecked && dieselDraft && !dieselDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = dieselDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setDieselDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-3">
           <FormRow>
             <Select label="Farm" value={form.farm_id} onChange={e => s('farm_id', e.target.value)} placeholder="Select Farm" options={farms.map((f: any) => ({ value: f.id, label: f.name }))} />
@@ -368,6 +404,15 @@ const MaintenanceTab: React.FC<{ generators: any[] }> = ({ generators }) => {
   const [form, setForm] = useState(blank)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  const { draft: maintDraft, draftChecked: maintDraftChecked, saveDraft: saveMaintDraft, clearDraft: clearMaintDraft } = useFormDraft('generator_entry_maintenance', 'new', showForm)
+  const [maintDraftDismissed, setMaintDraftDismissed] = useState(false)
+
+  React.useEffect(() => {
+    if (!showForm) return
+    saveMaintDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, showForm])
+
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ['generator_maintenance_log'],
     queryFn: async () => { const { data } = await supabase.from('generator_maintenance_log').select('*, generators(name,farms(name))').order('service_date', { ascending: false }); return data ?? [] }
@@ -380,7 +425,7 @@ const MaintenanceTab: React.FC<{ generators: any[] }> = ({ generators }) => {
       const { error } = await supabase.from('generator_maintenance_log').insert(payload)
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_maintenance_log'] }); setShowForm(false); setForm(blank); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['generator_maintenance_log'] }); clearMaintDraft('new'); setShowForm(false); setForm(blank); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
   const delMut = useMutation({
@@ -398,7 +443,7 @@ const MaintenanceTab: React.FC<{ generators: any[] }> = ({ generators }) => {
           <strong>{dueSoon.length} generator(s) due for service:</strong> {dueSoon.map((d: any) => d.generators?.name).join(', ')}
         </div>
       )}
-      <div className="flex justify-end"><Button icon={<Plus size={14} />} onClick={() => { setForm(blank); setShowForm(true) }}>Add Service Record</Button></div>
+      <div className="flex justify-end"><Button icon={<Plus size={14} />} onClick={() => { setForm(blank); setMaintDraftDismissed(false); setShowForm(true) }}>Add Service Record</Button></div>
       {isLoading ? <Spinner /> : (
         <Card padding={false}>
           <Table>
@@ -418,7 +463,15 @@ const MaintenanceTab: React.FC<{ generators: any[] }> = ({ generators }) => {
         </Card>
       )}
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add Service Record"
-        footer={<Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button>}>
+        footer={<>
+          {maintDraftChecked && maintDraft && !maintDraftDismissed && (
+            <Button variant="secondary" onClick={() => {
+              const d = maintDraft.data || {}
+              setForm((f: any) => ({ ...f, ...d }))
+              setMaintDraftDismissed(true)
+            }}>Restore Draft</Button>
+          )}
+          <Button loading={saveMut.isPending} onClick={() => saveMut.mutate()}>Save</Button></>}>
         <div className="space-y-3">
           <Select label="Generator *" value={form.generator_id} onChange={e => s('generator_id', e.target.value)} placeholder="Select Generator" options={generators.map((g: any) => ({ value: g.id, label: g.name }))} />
           <FormRow>

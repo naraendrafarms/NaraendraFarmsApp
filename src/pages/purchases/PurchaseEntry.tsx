@@ -8,6 +8,7 @@ import {
   DateInput, SearchableSelect,
 } from '@/components/ui'
 import { QuickAddParty } from '@/components/ui/QuickAdd'
+import { useFormDraft } from '@/hooks/useFormDraft'
 import { Plus, ShoppingCart, Download, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supplyType, splitTax, PURCHASE_NATURE_OPTIONS, GST_RATE_OPTIONS, OUR_STATE_CODE } from '@/lib/gst'
@@ -64,6 +65,18 @@ export const PurchaseEntry: React.FC = () => {
   // here never shows as an actual cash outflow anywhere.
   const [editOrigStatus, setEditOrigStatus] = useState<string | null>(null)
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  // Draft autosave -- this form has no modal (it's always on-screen), so it's
+  // keyed to whichever bill is being edited, or 'new' for a fresh entry.
+  // Restoring only fills the form; Save still goes through the normal
+  // insert/update path, so it can never slip in as a duplicate row.
+  const purchaseDraftKey = editId ?? 'new'
+  const { draft: purchaseDraft, draftChecked: purchaseDraftChecked, saveDraft: savePurchaseDraft, clearDraft: clearPurchaseDraft } = useFormDraft('purchase_entry', purchaseDraftKey, true)
+  const [purchaseDraftDismissed, setPurchaseDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    savePurchaseDraft(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form])
 
   const { data: items } = useQuery({
     queryKey: ['v_purchase_items'],
@@ -341,6 +354,7 @@ export const PurchaseEntry: React.FC = () => {
       toast.success(editId ? 'Purchase updated' : 'Purchase saved & routed')
       qc.invalidateQueries({ queryKey: ['cash_book'] })
       qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      clearPurchaseDraft(purchaseDraftKey)
       if (editId) { setForm(empty()); setEditId(null); setEditOrigStatus(null) }
       else setForm(f => ({ ...empty(), category: f.category, supplier_id: f.supplier_id, farm_id: f.farm_id, purchase_date: f.purchase_date }))
       qc.invalidateQueries({ queryKey: ['recent_purchases'] })
@@ -394,6 +408,7 @@ export const PurchaseEntry: React.FC = () => {
   }
 
   const openEdit = (r: any) => {
+    setPurchaseDraftDismissed(false)
     setEditId(r.id)
     setEditOrigStatus(r.payment_status ?? 'Pending')
     const qtyV = r.qty ?? (r.basic_amount && r.price_per_unit ? Number(r.basic_amount) / Number(r.price_per_unit) : '')
@@ -421,7 +436,7 @@ export const PurchaseEntry: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const cancelEdit = () => { setEditId(null); setEditOrigStatus(null); setForm(empty()) }
+  const cancelEdit = () => { setPurchaseDraftDismissed(false); setEditId(null); setEditOrigStatus(null); setForm(empty()) }
 
   return (
     <div className="space-y-5">
@@ -530,6 +545,13 @@ export const PurchaseEntry: React.FC = () => {
           <div className="flex items-center gap-3">
             <Button icon={<Plus size={16} />} loading={saveMut.isPending} onClick={() => saveMut.mutate()}>{editId ? 'Update Purchase' : 'Save Purchase'}</Button>
             {editId && <Button variant="outline" onClick={cancelEdit}>Cancel Edit</Button>}
+            {purchaseDraftChecked && purchaseDraft && !purchaseDraftDismissed && (
+              <Button variant="secondary" onClick={() => {
+                const d = purchaseDraft.data || {}
+                setForm((f: any) => ({ ...f, ...d }))
+                setPurchaseDraftDismissed(true)
+              }}>Restore Draft</Button>
+            )}
             <span className="text-xs text-gray-500">
               {form.category === 'Feed' && 'Files into Feed GRN + Pending Payments'}
               {form.category === 'Medicine' && 'Files into GRN (Medicine) — Pending Payment auto-created by DB trigger'}

@@ -17,6 +17,7 @@ import { Plus, Edit2, Trash2, Download, Upload, ChevronDown, ChevronUp, Copy } f
 import toast from 'react-hot-toast'
 import { useConfigValues } from '@/hooks/useConfigOptions'
 import { useFeedRates } from '@/hooks/useFeedRates'
+import { useFormDraft } from '@/hooks/useFormDraft'
 
 // ── helpers ───────────────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -507,9 +508,15 @@ const FormulasTab: React.FC = () => {
         if (rows.length) { const { error } = await supabase.from('feed_formula_ingredients').insert(rows); if (error) throw error }
       }
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); setShowForm(false); setEditing(null); setDupSource(null); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_formulas']}); qc.invalidateQueries({queryKey:['feed_formula_ingredients']}); clearFormulaDraft(formulaDraftKey); setShowForm(false); setEditing(null); setDupSource(null); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
+
+  // Draft autosave for the formula form — keyed to the formula being edited,
+  // or 'new' for a fresh/duplicated one. Lives here (not inside FormulaForm)
+  // because clearDraft must run from the same onSuccess that closes the modal.
+  const formulaDraftKey = editing?.id ?? 'new'
+  const { draft: formulaDraft, draftChecked: formulaDraftChecked, saveDraft: saveFormulaDraft, clearDraft: clearFormulaDraft } = useFormDraft('feed_formula', formulaDraftKey, showForm)
 
   const delMut = useMutation({
     mutationFn: async (id: string) => {
@@ -731,7 +738,8 @@ const FormulasTab: React.FC = () => {
       )}
 
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditing(null); setDupSource(null) }} title={editing ? 'Edit Formula' : dupSource ? 'Duplicate Formula' : 'Add Formula'} size="lg">
-        <FormulaForm key={editing?.id ?? (dupSource ? 'dup' : 'new')} initial={editing ?? dupSource?.formula} existingIngs={editing ? ingredients[editing.id] : dupSource?.ings} feedTypes={feedTypes} onSave={(d: any) => saveMut.mutate(d)} loading={saveMut.isPending} />
+        <FormulaForm key={editing?.id ?? (dupSource ? 'dup' : 'new')} initial={editing ?? dupSource?.formula} existingIngs={editing ? ingredients[editing.id] : dupSource?.ings} feedTypes={feedTypes} onSave={(d: any) => saveMut.mutate(d)} loading={saveMut.isPending}
+          draft={formulaDraft} draftChecked={formulaDraftChecked} saveDraft={saveFormulaDraft} />
       </Modal>
       <Modal open={!!showAddIngredient} onClose={() => setShowAddIngredient(null)} title="Add Ingredient" size="md">
         <IngredientForm formulaId={showAddIngredient!} initial={null} onSave={(d: any) => saveIngMut.mutate(d)} loading={saveIngMut.isPending} />
@@ -745,12 +753,20 @@ const FormulasTab: React.FC = () => {
 
 const BLANK_ING = { ingredient_code: '', ingredient_name: '', percentage: '', kg_per_1000: '' }
 
-const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: any[]; onSave: (d: any) => void; loading: boolean }> = ({ initial, existingIngs, feedTypes = [], onSave, loading }) => {
+const FormulaForm: React.FC<{
+  initial: any; existingIngs?: any[]; feedTypes?: any[]; onSave: (d: any) => void; loading: boolean
+  draft?: { data: any; updatedAt: string } | null; draftChecked?: boolean; saveDraft?: (d: any) => void
+}> = ({ initial, existingIngs, feedTypes = [], onSave, loading, draft, draftChecked, saveDraft }) => {
   const [form, setForm] = useState({ formula_code:'', formula_name:'', flock_type:'Breeder', age_week_from:'', age_week_to:'', version:'1', notes:'', is_active: true, ...initial, feed_type_id: initial?.feed_type_id ?? '' })
   const [ings, setIngs] = useState<typeof BLANK_ING[]>(
     existingIngs?.length ? existingIngs.map(i => ({ ingredient_code: i.ingredient_code||'', ingredient_name: i.ingredient_name, percentage: String(i.percentage), kg_per_1000: i.kg_per_1000 != null ? String(i.kg_per_1000) : '' }))
     : [{ ...BLANK_ING }]
   )
+  const [formulaDraftDismissed, setFormulaDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    saveDraft?.({ form, ings })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, ings])
   const s = (k: string) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement>) => setForm((f: any) => ({...f, [k]: e.target.value}))
 
   const handleFeedTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -906,6 +922,14 @@ const FormulaForm: React.FC<{ initial: any; existingIngs?: any[]; feedTypes?: an
       </div>
 
       <div className="flex justify-end gap-2 pt-2">
+        {draftChecked && draft && !formulaDraftDismissed && (
+          <Button type="button" variant="secondary" onClick={() => {
+            const d = draft.data || {}
+            if (d.form) setForm((f: any) => ({ ...f, ...d.form }))
+            if (d.ings) setIngs(d.ings)
+            setFormulaDraftDismissed(true)
+          }}>Restore Draft</Button>
+        )}
         <Button type="submit" loading={loading}>Save Formula</Button>
       </div>
     </form>
@@ -1093,9 +1117,13 @@ const ProductionTab: React.FC = () => {
         if (delErr) throw new Error('Saved, but old ingredient lines could not be removed: ' + delErr.message)
       }
     },
-    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); setShowForm(false); setEditing(null); toast.success('Saved') },
+    onSuccess: () => { qc.invalidateQueries({queryKey:['feed_production_log']}); clearProductionDraft(productionDraftKey); setShowForm(false); setEditing(null); toast.success('Saved') },
     onError: (e: any) => toast.error(e.message),
   })
+
+  // Draft autosave for the daily production entry form.
+  const productionDraftKey = editing?.id ?? 'new'
+  const { draft: productionDraft, draftChecked: productionDraftChecked, saveDraft: saveProductionDraft, clearDraft: clearProductionDraft } = useFormDraft('feed_production', productionDraftKey, showForm)
 
   const delMut = useMutation({
     mutationFn: async (id: string) => { const {error} = await supabase.from('feed_production_log').delete().eq('id',id); if(error) throw error },
@@ -1222,6 +1250,9 @@ const ProductionTab: React.FC = () => {
           allIngredients={allIngredients}
           onSave={(d: any) => saveMut.mutate(d)}
           loading={saveMut.isPending}
+          draft={productionDraft}
+          draftChecked={productionDraftChecked}
+          saveDraft={saveProductionDraft}
         />
       </Modal>
 
@@ -1273,7 +1304,8 @@ const ProductionTab: React.FC = () => {
 const ProductionForm: React.FC<{
   initial: any; farms: any[]; formulas: any[]; allIngredients: Record<string,any[]>;
   onSave: (d: any) => void; loading: boolean
-}> = ({ initial, farms, formulas, allIngredients, onSave, loading }) => {
+  draft?: { data: any; updatedAt: string } | null; draftChecked?: boolean; saveDraft?: (d: any) => void
+}> = ({ initial, farms, formulas, allIngredients, onSave, loading, draft, draftChecked, saveDraft }) => {
   const existingIngs = initial?.feed_production_ingredients ?? []
   // Same source as the Formula editor's raw-material dropdown, so manually
   // added rows resolve to a real feed_ingredients master row (ingredient_id)
@@ -1293,6 +1325,11 @@ const ProductionForm: React.FC<{
   const [ings, setIngs] = useState<{ingredient_name:string; quantity_kg:string}[]>(
     existingIngs.map((i:any) => ({ingredient_name:i.ingredient_name, quantity_kg: String(i.quantity_kg)}))
   )
+  const [productionDraftDismissed, setProductionDraftDismissed] = useState(false)
+  React.useEffect(() => {
+    saveDraft?.({ form, ings })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, ings])
 
   // ingredient kg = kg_per_1000 × batch/1000  OR  percentage/100 × batch (fallback,
   // because user-created formulas usually store percentage, not kg_per_1000).
@@ -1406,6 +1443,14 @@ const ProductionForm: React.FC<{
       </div>
 
       <div className="flex justify-end gap-2 pt-2">
+        {draftChecked && draft && !productionDraftDismissed && (
+          <Button type="button" variant="secondary" onClick={() => {
+            const d = draft.data || {}
+            if (d.form) setForm((f: any) => ({ ...f, ...d.form }))
+            if (d.ings) setIngs(d.ings)
+            setProductionDraftDismissed(true)
+          }}>Restore Draft</Button>
+        )}
         <Button type="submit" loading={loading}>Save Production</Button>
       </div>
     </form>
