@@ -33,10 +33,15 @@ export const ProductionReport: React.FC = () => {
   const monthly = React.useMemo(() => {
     if (!records) return []
     const map: Record<string, any> = {}
+    // Days must count distinct calendar dates, not rows -- a multi-shed flock
+    // has one daily_records row per shed per day, and counting rows inflated
+    // "Days" (and understated "Avg Open ♀", which divides by it) by the shed
+    // count on every multi-shed flock's report.
+    const monthDates: Record<string, Set<string>> = {}
     for (const r of records) {
       const m = r.record_date.slice(0, 7)
       if (!map[m]) map[m] = { month: m, days: 0, total_eggs: 0, he_eggs: 0, mort_f: 0, mort_m: 0, feed_f: 0, feed_m: 0, avg_open_f: 0, open_f_sum: 0 }
-      map[m].days++
+      ;(monthDates[m] ??= new Set()).add(r.record_date)
       map[m].total_eggs += r.total_eggs ?? 0
       map[m].he_eggs += r.he_eggs ?? 0
       map[m].mort_f += r.mortality_female ?? 0
@@ -45,6 +50,7 @@ export const ProductionReport: React.FC = () => {
       map[m].feed_m += r.feed_male_kg ?? 0
       map[m].open_f_sum += r.opening_female ?? 0
     }
+    for (const m of Object.keys(map)) map[m].days = monthDates[m].size
     return Object.values(map).map((m: any) => ({
       ...m,
       month_label: new Date(m.month + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }),

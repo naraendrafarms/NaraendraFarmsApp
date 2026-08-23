@@ -149,12 +149,20 @@ export const FlockLifetime: React.FC = () => {
       feedF: number; feedM: number; eggs: number; he: number
     }
     const m = new Map<number, W>()
+    // Days in a week must count distinct CALENDAR dates, not rows -- a flock
+    // recorded across several sheds gets one daily_records row per shed per
+    // day, so counting rows inflated "days" by the shed count (7-8x on a
+    // multi-shed flock), which silently divided feed-per-bird-per-day and
+    // hen-day % by that same multiple.
+    const weekDates = new Map<number, Set<string>>()
     for (const r of daily as any[]) {
       const wk = weekOf(r.record_date)
       if (wk < 1) continue                     // anything dated before placement
       const e = m.get(wk) ?? { wk, days: 0, openF: null, openM: null, closeF: null, closeM: null,
                                mortF: 0, mortM: 0, cullF: 0, cullM: 0, feedF: 0, feedM: 0, eggs: 0, he: 0 }
-      e.days += 1
+      const dates = weekDates.get(wk) ?? new Set<string>()
+      dates.add(r.record_date)
+      weekDates.set(wk, dates)
       // Opening is the FIRST reading of the week and closing the LAST, summed
       // across sheds on those days — a flock in five sheds has five rows a day.
       if (e.openF == null && r.opening_female != null) e.openF = 0
@@ -164,6 +172,7 @@ export const FlockLifetime: React.FC = () => {
       e.eggs += Number(r.total_eggs ?? 0); e.he += Number(r.he_eggs ?? 0)
       m.set(wk, e)
     }
+    for (const [wk, e] of m) e.days = weekDates.get(wk)?.size ?? 0
 
     // Opening and closing birds per week, taken from the first and last DAY of
     // the week across every shed, so a multi-shed flock is counted once.
