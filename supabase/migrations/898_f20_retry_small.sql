@@ -1,0 +1,103 @@
+-- Migration 898: retry chunk[50:100], guarded by NOT EXISTS to prevent
+-- duplicates from earlier partial attempts, in 10-row sub-batches with
+-- RETURNING so success is unambiguous per sub-batch.
+
+INSERT INTO public.daily_records (flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+SELECT v.* FROM (VALUES
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-02'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','84e234de-8212-411e-9abd-4fe5f0ef0eb7',3816,361,530.0,46.0,1647,0,0,0,0,1,1,3815,360,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-02'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','eb46b1f0-0d89-4893-ac7c-0e9ca1ad86c5',4063,395,540.0,51.0,1414,0,0,0,0,0,0,4063,395,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-02'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1cc2634f-615b-4ea2-a016-280d460cd20c',4059,398,552.0,51.0,1585,0,0,0,0,2,0,4057,398,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-02'::date,'62909634-e044-4232-bda7-7302b3a15f26','678fa4de-c9e1-4e8a-965c-40d21b5eaf47',371,90,48.0,12.0,164,0,0,0,0,0,0,371,90,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-03'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','d1280d0e-ca04-4f17-a285-0e91063bccc7',5812,669,773.0,86.0,1899,0,0,0,0,0,0,5812,669,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-03'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','4527ec6f-a889-4911-adf1-145513da93bf',5808,664,790.0,85.0,2388,0,0,0,0,2,0,5806,664,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-03'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1b4cd0c3-367b-4496-8767-150602cadae2',5772,676,768.0,87.0,1863,0,0,0,0,2,0,5770,676,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-03'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','c1359f2f-263d-417d-9a92-2b2235f6a7fd',5788,751,805.0,96.0,2352,0,0,0,0,1,0,5787,751,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-03'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','84e234de-8212-411e-9abd-4fe5f0ef0eb7',3815,360,530.0,46.0,1756,0,0,0,0,3,0,3812,360,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-03'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','eb46b1f0-0d89-4893-ac7c-0e9ca1ad86c5',4063,395,553.0,51.0,1527,0,0,0,0,0,1,4063,394,'F20_IMPORT_2026-08-24')
+) AS v(flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.daily_records d2
+   WHERE d2.shed_id = v.shed_id AND d2.record_date = v.record_date
+     AND d2.remarks = 'F20_IMPORT_2026-08-24'
+)
+RETURNING id;
+
+INSERT INTO public.daily_records (flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+SELECT v.* FROM (VALUES
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-03'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1cc2634f-615b-4ea2-a016-280d460cd20c',4057,398,552.0,51.0,1748,0,0,0,0,2,1,4055,397,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-03'::date,'62909634-e044-4232-bda7-7302b3a15f26','678fa4de-c9e1-4e8a-965c-40d21b5eaf47',371,90,49.0,12.0,167,0,0,0,0,0,0,371,90,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-04'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','d1280d0e-ca04-4f17-a285-0e91063bccc7',5812,669,773.0,86.0,2068,0,0,0,0,1,1,5811,668,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-04'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','4527ec6f-a889-4911-adf1-145513da93bf',5806,664,807.0,85.0,2503,0,0,0,0,1,1,5805,663,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-04'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1b4cd0c3-367b-4496-8767-150602cadae2',5770,676,767.0,87.0,1957,0,0,0,0,2,0,5768,676,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-04'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','c1359f2f-263d-417d-9a92-2b2235f6a7fd',5787,751,804.0,96.0,2490,0,0,0,0,1,0,5786,751,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-04'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','84e234de-8212-411e-9abd-4fe5f0ef0eb7',3812,360,530.0,46.0,1851,0,0,0,0,3,0,3809,360,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-04'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','eb46b1f0-0d89-4893-ac7c-0e9ca1ad86c5',4063,394,553.0,51.0,1621,0,0,0,0,2,0,4061,394,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-04'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1cc2634f-615b-4ea2-a016-280d460cd20c',4055,397,564.0,51.0,1776,0,0,0,0,2,0,4053,397,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-04'::date,'62909634-e044-4232-bda7-7302b3a15f26','678fa4de-c9e1-4e8a-965c-40d21b5eaf47',371,90,49.0,12.0,186,0,0,0,0,0,0,371,90,'F20_IMPORT_2026-08-24')
+) AS v(flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.daily_records d2
+   WHERE d2.shed_id = v.shed_id AND d2.record_date = v.record_date
+     AND d2.remarks = 'F20_IMPORT_2026-08-24'
+)
+RETURNING id;
+
+INSERT INTO public.daily_records (flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+SELECT v.* FROM (VALUES
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-05'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','d1280d0e-ca04-4f17-a285-0e91063bccc7',5811,668,773.0,86.0,2241,0,0,0,0,3,0,5808,668,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-05'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','4527ec6f-a889-4911-adf1-145513da93bf',5805,663,807.0,85.0,2752,0,0,0,0,0,0,5805,663,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-05'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1b4cd0c3-367b-4496-8767-150602cadae2',5768,676,767.0,87.0,2089,0,0,0,0,3,1,5765,675,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-05'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','c1359f2f-263d-417d-9a92-2b2235f6a7fd',5786,751,804.0,96.0,2635,0,0,0,0,1,0,5785,751,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-05'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','84e234de-8212-411e-9abd-4fe5f0ef0eb7',3809,360,530.0,46.0,1925,0,0,0,0,3,0,3806,360,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-05'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','eb46b1f0-0d89-4893-ac7c-0e9ca1ad86c5',4061,394,553.0,51.0,1762,0,0,0,0,1,1,4060,393,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-05'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1cc2634f-615b-4ea2-a016-280d460cd20c',4053,397,564.0,51.0,1933,0,0,0,0,0,0,4053,397,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-05'::date,'62909634-e044-4232-bda7-7302b3a15f26','678fa4de-c9e1-4e8a-965c-40d21b5eaf47',371,90,50.0,12.0,189,0,0,0,0,0,1,371,89,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-06'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','d1280d0e-ca04-4f17-a285-0e91063bccc7',5808,668,790.0,86.0,2372,0,0,0,0,1,0,5807,668,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-06'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','4527ec6f-a889-4911-adf1-145513da93bf',5805,663,824.0,85.0,2897,0,0,0,0,2,1,5803,662,'F20_IMPORT_2026-08-24')
+) AS v(flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.daily_records d2
+   WHERE d2.shed_id = v.shed_id AND d2.record_date = v.record_date
+     AND d2.remarks = 'F20_IMPORT_2026-08-24'
+)
+RETURNING id;
+
+INSERT INTO public.daily_records (flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+SELECT v.* FROM (VALUES
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-06'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1b4cd0c3-367b-4496-8767-150602cadae2',5765,675,784.0,87.0,2200,0,0,0,0,3,1,5762,674,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-06'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','c1359f2f-263d-417d-9a92-2b2235f6a7fd',5785,751,821.0,96.0,2825,0,0,0,0,1,0,5784,751,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-06'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','84e234de-8212-411e-9abd-4fe5f0ef0eb7',3806,360,556.0,46.0,2050,0,0,0,0,1,0,3805,360,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-06'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','eb46b1f0-0d89-4893-ac7c-0e9ca1ad86c5',4060,393,577.0,51.0,1821,0,0,0,0,2,1,4058,392,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-06'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1cc2634f-615b-4ea2-a016-280d460cd20c',4053,397,576.0,51.0,2028,0,0,0,0,2,0,4051,397,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-06'::date,'62909634-e044-4232-bda7-7302b3a15f26','678fa4de-c9e1-4e8a-965c-40d21b5eaf47',371,89,50.0,12.0,201,0,0,0,0,0,0,371,89,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-07'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','d1280d0e-ca04-4f17-a285-0e91063bccc7',5807,668,790.0,86.0,2535,0,0,0,0,0,0,5807,668,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-07'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','4527ec6f-a889-4911-adf1-145513da93bf',5803,662,824.0,85.0,3095,0,0,0,0,1,1,5802,661,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-07'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1b4cd0c3-367b-4496-8767-150602cadae2',5762,674,784.0,86.0,2325,0,0,0,0,4,1,5758,673,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-07'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','c1359f2f-263d-417d-9a92-2b2235f6a7fd',5784,751,821.0,96.0,2906,0,0,0,0,3,0,5781,751,'F20_IMPORT_2026-08-24')
+) AS v(flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.daily_records d2
+   WHERE d2.shed_id = v.shed_id AND d2.record_date = v.record_date
+     AND d2.remarks = 'F20_IMPORT_2026-08-24'
+)
+RETURNING id;
+
+INSERT INTO public.daily_records (flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+SELECT v.* FROM (VALUES
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-07'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','84e234de-8212-411e-9abd-4fe5f0ef0eb7',3805,360,556.0,46.0,2170,0,0,0,0,1,0,3804,360,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-07'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','eb46b1f0-0d89-4893-ac7c-0e9ca1ad86c5',4058,392,577.0,50.0,1937,0,0,0,0,2,0,4056,392,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-07'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1cc2634f-615b-4ea2-a016-280d460cd20c',4051,397,576.0,51.0,2151,0,0,0,0,0,0,4051,397,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-07'::date,'62909634-e044-4232-bda7-7302b3a15f26','678fa4de-c9e1-4e8a-965c-40d21b5eaf47',371,89,52.0,12.0,205,0,0,8,9,0,0,363,80,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-08'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','d1280d0e-ca04-4f17-a285-0e91063bccc7',5807,668,807.0,86.0,2704,0,0,0,0,1,0,5806,668,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-08'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','4527ec6f-a889-4911-adf1-145513da93bf',5802,661,847.0,85.0,3224,0,0,0,0,0,0,5802,661,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-08'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','1b4cd0c3-367b-4496-8767-150602cadae2',5758,673,800.0,86.0,2385,0,0,0,0,2,2,5756,671,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-08'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','c1359f2f-263d-417d-9a92-2b2235f6a7fd',5781,751,844.0,96.0,2988,0,0,0,0,2,0,5779,751,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-08'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','84e234de-8212-411e-9abd-4fe5f0ef0eb7',3804,360,571.0,46.0,2237,0,0,0,0,1,0,3803,360,'F20_IMPORT_2026-08-24'),
+  ('63f8e45a-d50b-4dad-ad71-90f634abc4f0','2025-12-08'::date,'d9ce0b1d-01bd-4011-ba1b-9c4379d48d1d','eb46b1f0-0d89-4893-ac7c-0e9ca1ad86c5',4056,392,576.0,50.0,1997,0,0,0,0,1,0,4055,392,'F20_IMPORT_2026-08-24')
+) AS v(flock_id, record_date, farm_id, shed_id, opening_female, opening_male, feed_female_kg, feed_male_kg, total_eggs, received_female, received_male, trcull_female, trcull_male, mortality_female, mortality_male, closing_female, closing_male, remarks)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.daily_records d2
+   WHERE d2.shed_id = v.shed_id AND d2.record_date = v.record_date
+     AND d2.remarks = 'F20_IMPORT_2026-08-24'
+)
+RETURNING id;
