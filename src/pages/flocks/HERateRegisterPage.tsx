@@ -566,6 +566,7 @@ const StdCurveTab: React.FC = () => {
 // invite the two copies to drift apart.
 const BS_COLS: { key: string; label: string; laying?: boolean }[] = [
   { key: 'week_of_age',          label: 'Age (wk)' },
+  { key: 'cum_depletion_pct',    label: 'Cum Depletion %' },
   { key: 'body_weight_g',        label: 'Body Wt (g)' },
   { key: 'weekly_gain_g',        label: 'Gain (g)' },
   { key: 'feed_g_per_day',       label: 'Feed /bird/day (g)' },
