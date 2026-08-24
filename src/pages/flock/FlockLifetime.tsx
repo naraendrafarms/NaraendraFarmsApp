@@ -106,7 +106,7 @@ export const FlockLifetime: React.FC = () => {
     queryKey: ['lifetime_std', rearSeason, laySeason],
     queryFn: async () => {
       const { data } = await supabase.from('breed_standard')
-        .select('week_of_age,sex,season,phase,body_weight_g,weekly_gain_g,feed_g_per_day,feed_type')
+        .select('week_of_age,sex,season,phase,body_weight_g,weekly_gain_g,feed_g_per_day,feed_type,cum_depletion_pct')
         .in('season', [...new Set([rearSeason, laySeason ?? rearSeason, 'Both'])]).order('week_of_age')
       return data ?? []
     }
@@ -247,7 +247,13 @@ export const FlockLifetime: React.FC = () => {
 
       return {
         wk: w.wk, days: w.days, open, close, mort, cumMort,
-        cumDepPct, stdDepPct: n0(cur?.cum_depletion_pct),
+        // std_production_curve only covers the laying weeks (24-66); weeks
+        // 1-23 have no depletion standard there at all, so this fell back to
+        // blank for the whole rearing period. breed_standard now carries the
+        // rearing-phase curve for those weeks (imported from the uploaded
+        // weekly reports' REARING DEPLETION sheet) -- use it when the laying
+        // curve has nothing for this week.
+        cumDepPct, stdDepPct: n0(cur?.cum_depletion_pct) ?? n0(stdRow?.cum_depletion_pct),
         bwAct, bwStd, gainAct, gainStd: n0(stdRow?.weekly_gain_g),
         feedKg: feed, feedGPerDay, feedStd: n0(stdRow?.feed_g_per_day),
         feedType: stdRow?.feed_type ?? null,
