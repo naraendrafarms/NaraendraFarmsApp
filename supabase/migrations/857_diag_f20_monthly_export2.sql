@@ -16,7 +16,7 @@ SELECT fm.name || ' sh' || s.shed_no || ',' ||
        sum(COALESCE(d.mortality_female,0)+COALESCE(d.mortality_male,0)) || ',' ||
        sum(COALESCE(d.cull_female,0)+COALESCE(d.cull_male,0)) || ',' ||
        sum(COALESCE(d.transfer_in_female,0)+COALESCE(d.transfer_in_male,0)) || ',' ||
-       sum(COALESCE(d.eggs_total,0))
+       sum(COALESCE(d.total_eggs,0))
   FROM public.daily_records d
   JOIN public.flocks fl ON fl.id = d.flock_id
   JOIN public.sheds s ON s.id = d.shed_id
