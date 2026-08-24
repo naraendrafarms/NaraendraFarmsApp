@@ -2734,18 +2734,15 @@ export const NHESales: React.FC = () => {
         }
       }
 
-      // Sync daily_records cull counts from total of ALL nhe_sales for this flock+date
-      if (bird) {
-        const saleDate = form.sale_date
-        const flockId = form.flock_id
-
-        // Fetch all bird sales for this flock+date AFTER the current save
-        // (the current sale is already saved at this point in the mutation flow)
-        // Only the sales for the SAME shed are totalled together — with a shed
-        // recorded, each shed's culls belong on its own daily record. Sales
-        // entered before the shed existed on this form carry no shed, and are
-        // kept together as before so their totals do not change.
-        const shedId = bird ? (form.shed_id || null) : null
+      // Sync daily_records cull counts from total of ALL nhe_sales for this
+      // flock+date+shed. Pulled into a helper because editing a cull sale's
+      // date or shed moves it OUT of its old daily_records row — that old row
+      // must be recomputed too, or it keeps showing the cull that isn't there
+      // any more. Only the sales for the SAME shed are totalled together —
+      // with a shed recorded, each shed's culls belong on its own daily
+      // record. Sales entered before the shed existed on this form carry no
+      // shed, and are kept together as before so their totals do not change.
+      const syncShedCull = async (flockId: string, saleDate: string, shedId: string | null) => {
         let salesQ = supabase.from('nhe_sales')
           .select('quantity,bird_sex,female_qty,male_qty')
           .eq('flock_id', flockId).eq('sale_date', saleDate)
@@ -2797,7 +2794,7 @@ export const NHESales: React.FC = () => {
               }).eq('id', other.id)
             }
           }
-        } else {
+        } else if (totalF > 0 || totalM > 0) {
           // No record for that day yet — create one ON THE SHED where possible.
           // A shed-less row is invisible in Bulk Daily Entry, which is exactly
           // how Flock 19's 36,080 culls came to be unreachable there.
@@ -2808,6 +2805,21 @@ export const NHESales: React.FC = () => {
             transfer_female: 0, transfer_male: 0,
             mortality_female: 0, mortality_male: 0,
           })
+        }
+      }
+
+      if (bird) {
+        const shedId = form.shed_id || null
+        await syncShedCull(form.flock_id, form.sale_date, shedId)
+        // The date and/or shed just moved off whatever it used to be — that
+        // old daily_records row still carries this sale's culls until it is
+        // recomputed too, or it keeps showing a cull that has moved elsewhere.
+        if (editing && isBirdSale(editing.sale_type)) {
+          const oldDate = editing.sale_date
+          const oldShedId = editing.shed_id || null
+          if (oldDate !== form.sale_date || oldShedId !== shedId) {
+            await syncShedCull(editing.flock_id, oldDate, oldShedId)
+          }
         }
       }
     },
