@@ -244,6 +244,18 @@ export const BulkDailyEntry: React.FC = () => {
 
   const flockSheds = useMemo(() => [...(rawSheds ?? [])].sort(shedSort), [rawSheds])
 
+  // A flock reared at one farm and laying at another can use the same shed
+  // number at both sites (e.g. Flock 19's "Shed 1" at both Kethireddypally and
+  // Agraharam Potlapally) -- these are different physical sheds, but without
+  // the farm name the rows look like duplicates. Only prefix the farm name
+  // when this flock's sheds actually span more than one farm.
+  const shedSpansMultipleFarms = useMemo(
+    () => new Set((flockSheds ?? []).map((s: any) => s.farm_id)).size > 1,
+    [flockSheds]
+  )
+  const shedFarmName = (farmId: string | null | undefined) =>
+    (farms ?? []).find((f: any) => f.id === farmId)?.name ?? ''
+
   // ── Existing daily records for date ─────────────────────────────────────────
   const { data: existingDR, isLoading: existingLoading, isFetching: existingFetching } = useQuery({
     queryKey: ['bulk_existing_dr', date, selectedFlock],
@@ -1495,6 +1507,7 @@ export const BulkDailyEntry: React.FC = () => {
                       return (
                             <tr key={shed.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
                               <td className="px-2 py-1.5 sticky left-0 bg-inherit z-10 font-semibold text-brand-700 whitespace-nowrap">
+                                {shedSpansMultipleFarms && shedFarmName(shed.farm_id) ? `${shedFarmName(shed.farm_id)} · ` : ''}
                                 Shed {shed.shed_no}{shed.shed_name ? ` · ${shed.shed_name}` : ''}
                               </td>
                               {/* Phase 1 — bird management */}
