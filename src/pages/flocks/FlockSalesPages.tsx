@@ -2165,6 +2165,17 @@ const EMPTY_NHE_FORM = {
 type NheLine = { sale_type: string; quantity: string; unit: string; rate: string; amount: string; free_qty: string }
 const emptyNheLine = (): NheLine => ({ sale_type: 'je', quantity: '', unit: 'nos', rate: '', amount: '', free_qty: '' })
 
+// One voucher (one DC No) can cover birds sold out of several sheds, and both
+// sexes, in a single visit. The form's main Bird Details box stays exactly as
+// it always has — it IS the first shed/sex line, unchanged — and these are
+// EXTRA lines for the rest: same DC No, date, party and payment, one more
+// nhe_sales row per line. Simple qty × rate only; the weighbridge fields
+// (gross/tare/net) describe one truckload's weighing and stay on the primary
+// line, since splitting one weighing across sheds would invent numbers that
+// were never actually weighed separately.
+type ExtraBirdLine = { shed_id: string; bird_sex: string; bird_category: string; quantity: string; rate: string; amount: string }
+const emptyExtraBirdLine = (): ExtraBirdLine => ({ shed_id: '', bird_sex: 'female', bird_category: 'cull', quantity: '', rate: '', amount: '' })
+
 export const NHESales: React.FC = () => {
   const qc = useQueryClient()
   const { applyFlockFarmFilter, farmId } = useFarmScope()
@@ -2186,6 +2197,20 @@ export const NHESales: React.FC = () => {
   const [receiptSale, setReceiptSale] = useState<any>(null)
   const [refundSale, setRefundSale] = useState<any>(null)
   const [nheLines, setNheLines] = useState<NheLine[]>([emptyNheLine()])
+  const [extraBirdLines, setExtraBirdLines] = useState<ExtraBirdLine[]>([])
+  const setExtraBirdLine = (idx: number, patch: Partial<ExtraBirdLine>) => setExtraBirdLines(prev => prev.map((l, i) => {
+    if (i !== idx) return l
+    const nl = { ...l, ...patch }
+    // Amount auto-fills from qty × rate, same as every other line item in the
+    // app — still editable by hand for a negotiated lump sum.
+    if ('quantity' in patch || 'rate' in patch) {
+      const q = parseFloat(nl.quantity) || 0, r = parseFloat(nl.rate) || 0
+      if (q && r) nl.amount = (q * r).toFixed(2)
+    }
+    return nl
+  }))
+  const addExtraBirdLine = () => setExtraBirdLines(prev => [...prev, emptyExtraBirdLine()])
+  const removeExtraBirdLine = (idx: number) => setExtraBirdLines(prev => prev.filter((_, i) => i !== idx))
   // Draft autosave -- database-backed, keyed to the sale being edited or
   // 'new'. Restore only fills the form; Save still goes through the normal
   // insert/update path, so it can never create a duplicate row by itself.
@@ -2821,6 +2846,41 @@ export const NHESales: React.FC = () => {
             await syncShedCull(editing.flock_id, oldDate, oldShedId)
           }
         }
+
+        // Extra shed/sex lines — one voucher, several sheds and/or both sexes.
+        // Each becomes its own nhe_sales row sharing this sale's date, party,
+        // DC No, invoice and vehicle; only new entries offer this (editing
+        // keeps to the one row it always has). Payment stays on the primary
+        // row only — one voucher has one payment, so these are left Pending
+        // rather than each claiming a slice of a receipt already recorded once.
+        if (!editing && extraBirdLines.length > 0) {
+          const validLines = extraBirdLines.filter(l => (parseFloat(l.quantity) || 0) > 0)
+          for (const line of validLines) {
+            const lineQty = parseFloat(line.quantity) || 0
+            const lineRate = parseFloat(line.rate) || 0
+            const lineAmt = parseFloat(line.amount) || (lineQty * lineRate)
+            const lineTax = splitTax(lineAmt, gstPct, nheSupply)
+            const linePayload: any = {
+              flock_id: form.flock_id, sale_date: form.sale_date,
+              shed_id: line.shed_id || null,
+              sale_type: 'bird_sale',
+              party_id: form.party_id || null, dc_no: form.dc_no || null,
+              invoice_no: finalInvoiceNo,
+              quantity: lineQty, unit: 'nos', rate: lineRate || null,
+              amount: lineAmt,
+              supply_type: nheSupply, gst_pct: gstPct, taxable_value: lineAmt,
+              cgst_amount: lineTax.cgst, sgst_amount: lineTax.sgst, igst_amount: lineTax.igst,
+              buyer_gstin: buyer?.gstin || null,
+              vehicle_no: form.vehicle_no || null,
+              bird_sex: line.bird_sex || null, bird_category: line.bird_category || null,
+              is_employee_sale: form.is_employee_sale || false,
+              employee_id: form.is_employee_sale && form.employee_id ? form.employee_id : null,
+            }
+            const { error: lineErr } = await supabase.from('nhe_sales').insert(linePayload)
+            if (lineErr) throw new Error(`Extra line (shed/sex) failed: ${lineErr.message}`)
+            await syncShedCull(form.flock_id, form.sale_date, line.shed_id || null)
+          }
+        }
       }
     },
     onSuccess: () => {
@@ -2831,7 +2891,7 @@ export const NHESales: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['cash_book'] })
       qc.invalidateQueries({ queryKey: ['bank_transactions'] })
       clearNheDraft(nheDraftKey)
-      setPeekInv(null); setShowForm(false); setEditing(null); setNheLines([emptyNheLine()])
+      setPeekInv(null); setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]); setExtraBirdLines([])
     },
     onError: (e: any) => toast.error(e.message)
   })
@@ -2842,11 +2902,15 @@ export const NHESales: React.FC = () => {
     setPeekInv(null)
     setForm({ ...EMPTY_NHE_FORM, flock_id: flockFilter })
     setNheLines([emptyNheLine()])
+    setExtraBirdLines([])
     setShowForm(true)
   }
   const openEdit = (row: any) => {
     setNheDraftDismissed(false)
     setEditing(row)
+    // Extra shed/sex lines are only offered on a fresh entry — editing an
+    // existing sale edits that one row, same as it always has.
+    setExtraBirdLines([])
     setForm({
       flock_id: row.flock_id, shed_id: row.shed_id ?? '', sale_date: row.sale_date,
       sale_type: isBirdSale(row.sale_type) ? 'bird_sale' : row.sale_type,
@@ -3562,6 +3626,50 @@ export const NHESales: React.FC = () => {
                     hint={autoAmt > 0 ? `Auto: ${inr(autoAmt)}` : 'Net wt × rate/kg'} />
                 </FormRow>
               </div>
+
+              {/* ── Extra shed/sex lines — same voucher (DC No), more sheds ──
+                  Only offered on a fresh entry; the box above is the first
+                  line, these are additional ones sharing its date/party/DC. */}
+              {!editing && (
+                <div className="space-y-2">
+                  {extraBirdLines.map((line, idx) => (
+                    <div key={idx} className="p-3 bg-orange-50/60 border border-orange-200 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-orange-700 uppercase">Extra Line {idx + 2} — another shed/sex</p>
+                        <button type="button" onClick={() => removeExtraBirdLine(idx)}
+                          className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                      </div>
+                      <FormRow cols={4}>
+                        <SearchableSelect label="Shed" placeholder="— Flock level —"
+                          options={saleShedOptions} value={line.shed_id} onChange={v => setExtraBirdLine(idx, { shed_id: v })} />
+                        <Select label="Sex" options={BIRD_SEX_OPTS}
+                          value={line.bird_sex} onChange={e => setExtraBirdLine(idx, { bird_sex: e.target.value })} />
+                        <Select label="Category" options={BIRD_CAT_OPTS}
+                          value={line.bird_category} onChange={e => setExtraBirdLine(idx, { bird_category: e.target.value })} />
+                        <Input label="Qty" type="number"
+                          value={line.quantity} onChange={e => setExtraBirdLine(idx, { quantity: e.target.value })} />
+                      </FormRow>
+                      <FormRow cols={2}>
+                        <Input label="Rate (₹/bird)" type="number" step="0.01"
+                          value={line.rate} onChange={e => setExtraBirdLine(idx, { rate: e.target.value })} />
+                        <Input label="Amount (₹)" type="number" step="0.01"
+                          value={line.amount} onChange={e => setExtraBirdLine(idx, { amount: e.target.value })}
+                          hint="Auto: Qty × Rate" />
+                      </FormRow>
+                    </div>
+                  ))}
+                  <Button type="button" variant="outline" size="sm" onClick={addExtraBirdLine}>
+                    + Add Another Shed/Sex
+                  </Button>
+                  {extraBirdLines.length > 0 && (
+                    <p className="text-xs text-gray-500">
+                      One DC No / date / party covers all lines above — {extraBirdLines.length + 1} sale
+                      {extraBirdLines.length + 1 > 1 ? 's' : ''} will be saved for this voucher.
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
                 <p className="text-xs font-semibold text-blue-700 uppercase">Payment & Logistics</p>
                 <FormRow cols={3}>
