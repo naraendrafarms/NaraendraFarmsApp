@@ -212,6 +212,86 @@ export const FarmsMaster: React.FC = () => {
   )
 }
 
+// ── VEHICLES MASTER ──────────────────────────────────────
+// Shared vehicles (Creta, Innova, Activa...) that carry no farm of their own
+// on a Farm Expense — just a vendor name. Each one gets a base farm here so
+// its cash posts to that farm's Cash Book instead of being hardcoded to HO.
+export const VehiclesMaster: React.FC = () => {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<any>(null)
+  const [deleteRow, setDeleteRow] = useState<any>(null)
+  const [form, setForm] = useState({ name: '', vehicle_no: '', farm_id: '', remarks: '' })
+  const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['vehicles'],
+    queryFn: async () => { const { data } = await supabase.from('vehicles').select('*, farms(code,name)').order('name'); return data ?? [] }
+  })
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
+  })
+  const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (${f.code})` }))
+
+  const open = (row?: any) => {
+    setEditing(row ?? null)
+    setForm(row
+      ? { name: row.name, vehicle_no: row.vehicle_no ?? '', farm_id: row.farm_id ?? '', remarks: row.remarks ?? '' }
+      : { name: '', vehicle_no: '', farm_id: '', remarks: '' })
+    setShowForm(true)
+  }
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      if (!form.name) throw new Error('Name required')
+      const p = { name: form.name, vehicle_no: form.vehicle_no || null, farm_id: form.farm_id || null, remarks: form.remarks || null }
+      if (editing) { const { error } = await supabase.from('vehicles').update(p).eq('id', editing.id); if (error) throw error }
+      else { const { error } = await supabase.from('vehicles').insert(p); if (error) throw error }
+    },
+    onSuccess: () => { toast.success('Saved!'); qc.invalidateQueries({ queryKey: ['vehicles'] }); setShowForm(false) },
+    onError: (e: any) => toast.error(friendlyDbError(e))
+  })
+
+  const delMut = useMutation({
+    mutationFn: async (id: string) => { const { error } = await supabase.from('vehicles').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { toast.success('Deleted'); qc.invalidateQueries({ queryKey: ['vehicles'] }); setDeleteRow(null) },
+    onError: (e: any) => { toast.error(e.message); setDeleteRow(null) }
+  })
+
+  return (
+    <>
+      <MasterTable title="Vehicles" subtitle="Shared vehicles used as a vendor on Farm Expenses — each gets a base farm, so its cash posts there instead of always defaulting to Head Office."
+        loading={isLoading} data={data ?? []} onAdd={() => open()} onEdit={open} onDelete={setDeleteRow}
+        columns={[
+          { label: 'Name', key: 'name', render: r => <span className="font-medium">{r.name}</span> },
+          { label: 'Vehicle No', key: 'vehicle_no', render: r => <span className="text-xs text-gray-500">{r.vehicle_no ?? '—'}</span> },
+          { label: 'Base Farm', key: 'farm_id', render: r => r.farms ? <Badge color="blue">{r.farms.code}</Badge> : <span className="text-gray-400 text-xs">— none —</span> },
+          { label: 'Remarks', key: 'remarks', render: r => <span className="text-xs text-gray-500">{r.remarks ?? '—'}</span> },
+        ]}
+      />
+      {deleteRow && (
+        <Modal open onClose={() => setDeleteRow(null)} title="Delete Vehicle" size="sm"
+          footer={<><Button variant="secondary" onClick={() => setDeleteRow(null)}>Cancel</Button><Button variant="danger" loading={delMut.isPending} onClick={() => delMut.mutate(deleteRow.id)}>Delete</Button></>}>
+          <p className="text-sm text-gray-700">Delete <strong>{deleteRow.name}</strong>? This cannot be undone.</p>
+          <p className="text-xs text-gray-500 mt-2">Existing Farm Expense entries already saved under this vendor name are untouched.</p>
+        </Modal>
+      )}
+      <Modal open={showForm} onClose={() => setShowForm(false)} title={editing ? 'Edit Vehicle' : 'Add Vehicle'} size="md"
+        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Cancel</Button><Button loading={mut.isPending} onClick={() => mut.mutate()}>{editing ? 'Update' : 'Save'}</Button></>}>
+        <div className="space-y-4">
+          <FormRow>
+            <Input label="Name" required value={form.name} onChange={e => s('name', e.target.value)} hint="e.g. Creta, Innova" />
+            <Input label="Vehicle No" value={form.vehicle_no} onChange={e => s('vehicle_no', e.target.value)} hint="Registration number, optional" />
+          </FormRow>
+          <SearchableSelect label="Base Farm" placeholder="— None (Head Office by default) —" options={farmOptions} value={form.farm_id} onChange={v => s('farm_id', v)} />
+          <Input label="Remarks" value={form.remarks} onChange={e => s('remarks', e.target.value)} />
+        </div>
+      </Modal>
+    </>
+  )
+}
+
 // ── FEED INGREDIENTS MASTER ──────────────────────────────────────
 export const IngredientsMaster: React.FC = () => {
   const qc = useQueryClient()

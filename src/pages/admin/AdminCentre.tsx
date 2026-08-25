@@ -1390,7 +1390,7 @@ const MastersHub: React.FC = () => (
     </Section>
 
     <p className="text-xs text-gray-400">
-      Feed Types are managed separately in <strong>Masters → Feed Types</strong>. Farms, Sites, Sheds, Hatcheries, and Vaccination Schedules have their own dedicated masters pages.
+      Feed Types are managed separately in <strong>Masters → Feed Types</strong>. Farms, Sites, Sheds, Hatcheries, Vehicles, and Vaccination Schedules have their own dedicated masters pages.
     </p>
   </div>
 )

@@ -39,7 +39,8 @@ import { PartnerRemunerationPage } from '@/pages/employees/PartnerRemunerationPa
 import { DailyAttendancePage, MonthAttendancePage, EmployeeAdvancesPage, MonthlyAttendanceGridPage, AttendanceRangePage } from '@/pages/employees/AttendancePages'
 import {
   FarmsMaster, IngredientsMaster, PartiesMaster, MedicinesMaster,
-  ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster, VaccinationSchedulePage
+  ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster, VaccinationSchedulePage,
+  VehiclesMaster
 } from '@/pages/masters/MastersPages'
 import { ImportDaily, ImportElectricity, ImportSalary, ImportHE, ImportGRN } from '@/pages/import/ImportPages'
 import { HatchabilityPage } from '@/pages/hatchability/HatchabilityPage'
@@ -248,6 +249,7 @@ export const App: React.FC = () => {
             <Route path="masters/formulas" element={<FeedTypesMaster />} />
             <Route path="masters/parties" element={<PartiesMaster />} />
             <Route path="masters/hatcheries" element={<HatcheriesMaster />} />
+            <Route path="masters/vehicles" element={<VehiclesMaster />} />
             <Route path="masters/medicines" element={<MedicinesMaster />} />
             <Route path="masters/meters" element={<MetersMaster />} />
             <Route path="masters/vaccination" element={<VaccinationSchedulePage />} />

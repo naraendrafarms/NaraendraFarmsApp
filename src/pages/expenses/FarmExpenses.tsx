@@ -77,6 +77,19 @@ export const FarmExpensesPage: React.FC = () => {
     queryKey: ['flocks_active'],
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no').order('flock_no'); return data ?? [] }
   })
+  // A vendor with no farm on the expense (a shared vehicle — Creta, Innova...)
+  // still needs somewhere for its cash to post. Each vehicle now carries its
+  // own base farm in Masters → Vehicles, editable there instead of hardcoded
+  // here; a vendor name not found there still falls back to Head Office.
+  const { data: vehicles } = useQuery({
+    queryKey: ['vehicles'],
+    queryFn: async () => { const { data } = await supabase.from('vehicles').select('name,farm_id').eq('is_active', true); return data ?? [] }
+  })
+  const vehicleFarmId = (vendor: string | null | undefined, hoFarmId: string | null) => {
+    if (!vendor) return null
+    const v = (vehicles ?? []).find((x: any) => x.name.toLowerCase() === vendor.toLowerCase())
+    return v?.farm_id ?? hoFarmId
+  }
 
   const { data: expenses, isLoading } = useQuery({
     queryKey: ['farm_expenses', filterFarm, filterFlock, filterCat, filterVendor, filterFrom, filterTo],
@@ -169,7 +182,7 @@ export const FarmExpensesPage: React.FC = () => {
       // as a cost. A vendor with no farm (Creta, Innova...) is a shared
       // vehicle with no imprest of its own — that cash came out of HO's.
       const hoFarmId = (farms ?? []).find((f: any) => f.code === 'HO')?.id ?? null
-      const cbFarmId = payload.farm_id ?? (payload.vendor ? hoFarmId : null)
+      const cbFarmId = payload.farm_id ?? vehicleFarmId(payload.vendor, hoFarmId)
       const { error: cbErr } = await supabase.from('cash_book').insert({
         txn_date: payload.expense_date, txn_type: 'payment', category: 'expense',
         farm_id: cbFarmId, flock_id: payload.flock_id,
@@ -305,7 +318,7 @@ export const FarmExpensesPage: React.FC = () => {
         const d = deduped[i]
         return {
           txn_date: d.expense_date, txn_type: 'payment', category: 'expense',
-          farm_id: d.farm_id ?? (d.vendor ? hoFarmId : null), flock_id: d.flock_id,
+          farm_id: d.farm_id ?? vehicleFarmId(d.vendor, hoFarmId), flock_id: d.flock_id,
           description: [d.category, d.vendor, d.description].filter(Boolean).join(' — '),
           party_name: d.vendor, reference_no: d.reference_no,
           amount_in: 0, amount_out: d.amount,

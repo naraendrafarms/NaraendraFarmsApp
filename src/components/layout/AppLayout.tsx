@@ -113,6 +113,7 @@ const NAV: NavItem[] = [
       { label: 'Vaccination Schedule', to: '/masters/vaccination' },
       { label: 'Hatcheries',           to: '/masters/hatcheries' },
       { label: 'Electricity Meters',   to: '/masters/meters' },
+      { label: 'Vehicles',            to: '/masters/vehicles' },
     ]
   },
   {
