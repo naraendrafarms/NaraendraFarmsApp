@@ -16,7 +16,7 @@ by_type AS (
   UNION ALL
   SELECT COALESCE(feed_type_m, '(none recorded)') AS feed_type, feed_male_kg AS kg
   FROM filtered WHERE feed_male_kg IS NOT NULL AND feed_male_kg <> 0
-)
+),
 per_type AS (
   SELECT feed_type, round(sum(kg)::numeric,1) AS total_kg, count(*)::int AS n_rows
   FROM by_type GROUP BY feed_type
