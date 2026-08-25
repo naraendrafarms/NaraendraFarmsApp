@@ -204,9 +204,9 @@ export const FlockDashboard: React.FC = () => {
     queryKey: ['flock_fcr_stats'],
     queryFn: async () => fetchAllPages<any>(
       (from, to) => supabase.from('daily_records')
-        .select('flock_id,feed_female_kg,feed_male_kg,he_eggs,je_eggs,te_eggs,be_eggs')
+        .select('flock_id,record_date,shed_id,feed_female_kg,feed_male_kg,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs')
         .range(from, to),
-      'FCR stats'
+      'Feed/Egg stats'
     ),
     enabled: !!flocks && flocks.length > 0
   })
@@ -289,20 +289,43 @@ export const FlockDashboard: React.FC = () => {
   }, [liveStats])
 
 
-  // FCR per flock
+  // Feed/Egg (kg feed per egg) per flock — NOT a true FCR (which is feed
+  // divided by body-weight gain during rearing, or feed divided by egg MASS
+  // during lay). Real FCR would need per-flock body-weight tracking (only
+  // ever imported historically for flocks 19/20/22/23 — see
+  // flock_weekly_performance, migrations 677/679/785/844/1032) and egg-weight
+  // data (never recorded anywhere in daily_records), so it isn't computable
+  // for flocks in general. This is deliberately labeled "Feed/Egg" in the UI
+  // instead of "FCR" so it isn't mistaken for the real breeder-flock metric.
+  //
+  // Egg-type counts (he/je/te/be/le_eggs) only belong at the per-shed level
+  // (shed_id NOT NULL) once a flock is split into sheds — a flock-level row
+  // (shed_id NULL) for the same date can carry the SAME counts again for
+  // grade-breakdown purposes only, which would double the total if summed
+  // blindly (see migrations 927/928/951, a real bug hit for Flock 20). So
+  // for each flock+date: prefer the per-shed rows if any exist that date,
+  // and only fall back to the flock-level row when the flock isn't split
+  // into sheds at all (no per-shed row exists for that date).
   const fcrByFlock = React.useMemo(() => {
     const map: Record<string, number | null> = {}
     if (!fcrStats) return map
-    const grouped: Record<string, any[]> = {}
+    const byFlockDate: Record<string, Record<string, any[]>> = {}
     for (const r of fcrStats) {
-      if (!grouped[r.flock_id]) grouped[r.flock_id] = []
-      grouped[r.flock_id].push(r)
+      const fid = r.flock_id
+      const d = r.record_date
+      if (!byFlockDate[fid]) byFlockDate[fid] = {}
+      if (!byFlockDate[fid][d]) byFlockDate[fid][d] = []
+      byFlockDate[fid][d].push(r)
     }
-    for (const [fid, rows] of Object.entries(grouped)) {
+    for (const [fid, byDate] of Object.entries(byFlockDate)) {
       let totalFeed = 0, totalEggs = 0
-      for (const r of rows) {
-        totalFeed += (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0)
-        totalEggs += (r.he_eggs ?? 0) + (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0)
+      for (const dateRows of Object.values(byDate)) {
+        const shedRows = dateRows.filter(r => r.shed_id != null)
+        const rowsToSum = shedRows.length > 0 ? shedRows : dateRows
+        for (const r of rowsToSum) {
+          totalFeed += (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0)
+          totalEggs += (r.he_eggs ?? 0) + (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0) + (r.le_eggs ?? 0)
+        }
       }
       map[fid] = totalFeed > 0 && totalEggs > 0 ? totalFeed / totalEggs : null
     }
@@ -462,7 +485,7 @@ export const FlockDashboard: React.FC = () => {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-gray-500">FCR</span>
+                  <span className="text-gray-500" title="Feed consumed (kg) per egg produced — not the same as true FCR, which is feed vs body-weight gain / egg mass">Feed/Egg</span>
                   <span className="font-medium">{fcr != null ? fcr.toFixed(2) : '—'}</span>
                 </div>
                 {costPerBird != null && (
