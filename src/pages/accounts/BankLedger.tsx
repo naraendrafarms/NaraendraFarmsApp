@@ -21,6 +21,7 @@ const EMPTY_FORM = {
   settle_payment_id: '',
   settle_receivable_ids: [] as string[],
   already_linked: false,
+  settled_amount: 0,
   linked_payment_id: '',
   linked_nhe_sale_id: '',
   linked_he_dispatch_id: '',
@@ -734,7 +735,12 @@ export const BankLedgerPage: React.FC = () => {
       const heRows = (he.data ?? []).map((r: any) => ({ ...r, source: 'he_dispatch' }))
       return [...nheRows, ...heRows]
     },
-    enabled: !!form.party_id && form.txn_type === 'Credit' && !form.already_linked,
+    // No longer gated on !already_linked — once one invoice has been settled
+    // against this transaction, there may still be unallocated amount left
+    // (see settled_amount) that a later edit should be able to apply to
+    // another invoice. The JSX below decides visibility from the remaining
+    // unallocated amount instead.
+    enabled: !!form.party_id && form.txn_type === 'Credit',
   })
   const receivableBalance = (r: any) => Math.max(0, (r.amount ?? 0) - (r.amount_received ?? 0))
   const settleReceivableOptions = (openReceivablesForParty ?? []).map((r: any) => ({
@@ -851,7 +857,7 @@ export const BankLedgerPage: React.FC = () => {
       if (!selectedAccount) return Promise.resolve([])
       return fetchAllPages((from, to) => supabase
         .from('bank_transactions')
-        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type),linked_payment_id,nhe_sale_id,he_dispatch_id')
+        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type),linked_payment_id,nhe_sale_id,he_dispatch_id,settled_amount')
         .eq('bank_account_id', selectedAccount)
         .gte('txn_date', fyRange(fy).start)
         .order('txn_date', { ascending: true })
@@ -1008,6 +1014,7 @@ export const BankLedgerPage: React.FC = () => {
       settle_payment_id: '',
       settle_receivable_ids: [],
       already_linked: !!(t.linked_payment_id || t.nhe_sale_id || t.he_dispatch_id),
+      settled_amount: t.settled_amount ?? 0,
       linked_payment_id: t.linked_payment_id ?? '',
       linked_nhe_sale_id: t.nhe_sale_id ?? '',
       linked_he_dispatch_id: t.he_dispatch_id ?? '',
@@ -1143,7 +1150,12 @@ export const BankLedgerPage: React.FC = () => {
       // the later ones.
       let receivablesSettledCount = 0
       if (txnId && form.settle_receivable_ids.length > 0) {
-        let remaining = amount
+        // Ceiling is what's still unallocated from THIS transaction, not the
+        // full amount — a prior save may already have settled part of it
+        // against a different invoice (see settled_amount / the "still
+        // unallocated" picker above).
+        let remaining = Math.max(0, amount - (form.settled_amount || 0))
+        let allocatedThisSave = 0
         let firstNheId: string | null = null
         let firstHeId: string | null = null
         for (const key of form.settle_receivable_ids) {
@@ -1154,6 +1166,7 @@ export const BankLedgerPage: React.FC = () => {
           const settleAmt = Math.min(balance, Math.max(0, remaining))
           if (settleAmt <= 0) continue
           remaining -= settleAmt
+          allocatedThisSave += settleAmt
           const newReceived = (inv.amount_received ?? 0) + settleAmt
           // nhe_sales/he_dispatch.payment_mode has its own CHECK constraint
           // (Cash/NEFT/RTGS/Bank Transfer/UPI/Cheque/Advance — see migration
@@ -1175,18 +1188,18 @@ export const BankLedgerPage: React.FC = () => {
           else if (!firstNheId) firstNheId = recvId
         }
         // bank_transactions only has one nhe_sale_id/he_dispatch_id column
-        // each — when several invoices are settled, link the first one of
-        // each kind so "already linked" detection and the linked-ref detail
-        // view still find something; the invoices themselves (via
-        // amount_received/payment_status above) are the source of truth for
-        // what was actually settled.
-        if (firstNheId || firstHeId) {
-          const linkPayload: Record<string, string> = {}
-          if (firstNheId) linkPayload.nhe_sale_id = firstNheId
-          if (firstHeId) linkPayload.he_dispatch_id = firstHeId
-          const { error: btErr } = await supabase.from('bank_transactions').update(linkPayload).eq('id', txnId)
-          if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
-        }
+        // each — keep whichever was linked first (from an earlier save) and
+        // only fill a column if it was never set, so a later save settling a
+        // different invoice doesn't silently overwrite that pointer. The
+        // invoices themselves (via amount_received/payment_status above) are
+        // the real source of truth for what was actually settled; the link
+        // columns and settled_amount just let the UI/detail view show
+        // something and know how much is left to allocate.
+        const linkPayload: Record<string, any> = { settled_amount: (form.settled_amount || 0) + allocatedThisSave }
+        if (firstNheId && !form.linked_nhe_sale_id) linkPayload.nhe_sale_id = firstNheId
+        if (firstHeId && !form.linked_he_dispatch_id) linkPayload.he_dispatch_id = firstHeId
+        const { error: btErr } = await supabase.from('bank_transactions').update(linkPayload).eq('id', txnId)
+        if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
         qc.invalidateQueries({ queryKey: ['receivables_open_for_party'] })
         qc.invalidateQueries({ queryKey: ['pending_receivables'] })
         qc.invalidateQueries({ queryKey: ['nhe_sales'] })
@@ -1900,6 +1913,11 @@ export const BankLedgerPage: React.FC = () => {
           />
           {editId && form.already_linked && (
             <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 -mt-2">
+              {form.txn_type === 'Credit' && form.settled_amount > 0 && (
+                <p className="text-xs text-gray-600 mb-1">
+                  ₹{form.settled_amount.toLocaleString('en-IN')} of this entry already settled against invoice(s) so far.
+                </p>
+              )}
               {linkedRefDetails?.kind === 'bill' ? (
                 <p className="text-xs text-gray-600">
                   Linked to bill — <strong>{linkedRefDetails.vendor_name}</strong>
@@ -1932,11 +1950,22 @@ export const BankLedgerPage: React.FC = () => {
               )}
             </div>
           )}
-          {form.txn_type === 'Credit' && form.party_id && !form.already_linked && (() => {
+          {form.txn_type === 'Credit' && form.party_id && (() => {
+            const enteredAmount = parseFloat(form.amount) || 0
+            // How much of THIS entry is still unallocated — settled_amount
+            // reflects whatever was applied to invoices in earlier saves, so
+            // reopening a partly-settled Credit later still offers the rest
+            // of it against another invoice, instead of hiding the picker
+            // just because something was settled once before.
+            const remaining = Math.round((enteredAmount - form.settled_amount) * 100) / 100
+            if (remaining <= 0) {
+              return form.settled_amount > 0 ? (
+                <p className="text-xs text-gray-500">This entry's full amount is already settled against invoice(s) — increase the amount above to settle it against more.</p>
+              ) : null
+            }
             const selectedInvoices = (openReceivablesForParty ?? []).filter((r: any) => form.settle_receivable_ids.includes(`${r.source}:${r.id}`))
             const selectedTotal = selectedInvoices.reduce((s: number, r: any) => s + receivableBalance(r), 0)
-            const enteredAmount = parseFloat(form.amount) || 0
-            const diff = Math.round((selectedTotal - enteredAmount) * 100) / 100
+            const diff = Math.round((selectedTotal - remaining) * 100) / 100
             const toggleReceivable = (key: string) => setForm(f => ({
               ...f,
               settle_receivable_ids: f.settle_receivable_ids.includes(key)
@@ -1947,6 +1976,7 @@ export const BankLedgerPage: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Settle against invoice(s) (optional — tick one or more; marks them Received and posts to Party Ledger)
+                  {form.settled_amount > 0 && <span className="text-gray-400 font-normal"> — ₹{remaining.toLocaleString('en-IN')} of this entry still unallocated</span>}
                 </label>
                 {settleReceivableOptions.length === 0 ? (
                   <p className="text-xs text-gray-400 border border-gray-200 rounded-lg px-3 py-2">No open invoices for this party</p>
@@ -1970,7 +2000,7 @@ export const BankLedgerPage: React.FC = () => {
                     <span className="text-gray-500">{form.settle_receivable_ids.length} invoice(s) selected — combined balance ₹{selectedTotal.toLocaleString('en-IN')}</span>
                     {diff !== 0 && (
                       <span className={Math.abs(diff) < 1 ? 'text-green-600' : 'text-amber-600'}>
-                        {diff > 0 ? `₹${Math.abs(diff).toLocaleString('en-IN')} more than this entry — will settle partially, oldest-first` : `₹${Math.abs(diff).toLocaleString('en-IN')} left over after settling all`}
+                        {diff > 0 ? `₹${Math.abs(diff).toLocaleString('en-IN')} more than what's unallocated — will settle partially, oldest-first` : `₹${Math.abs(diff).toLocaleString('en-IN')} left over after settling all`}
                       </span>
                     )}
                   </div>
