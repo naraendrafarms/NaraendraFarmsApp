@@ -11,10 +11,10 @@ SELECT * FROM (VALUES
    'development', 'Flocks', 'high', 'pending'),
   ('Audit: same bird movement double-written into trcull/transfer/cull columns (87 rows)',
    'OPEN: On 87 rows across Flocks 19/20/22/23, the identical figure is stored in both trcull_female and transfer_female (or cull_female and trcull_female). Closing values are correct, but FlockLifetime.tsx:170 sums trcull_female as culls -- so Flock 22 (11/11 rows) and Flock 23 (2/2 rows) transfers-out are misreported as culls in that view. Needs a decision: pick one canonical column per movement type and either null out the duplicate or fix FlockLifetime.tsx to not double-read it.',
-   'development', 'Flocks', 'medium', 'pending'),
+   'development', 'Flocks', 'normal', 'pending'),
   ('Audit: 15 Flock 20 rows have wrong/missing farm_id',
    'OPEN: 14 rows from 2025-11-07/08 (7 each) say farm_id=Kethireddypally but the shed itself belongs to Bodjanampet-1 -- misattributes 2 days of Bodjanampet-1 production to Kethireddypally in farm-filtered reports. Separately, 1 row from 2026-08-24 (Flock 20 shed 4) has farm_id=NULL -- this one is NEW, written yesterday, not import residue, so check whether the app is failing to set farm_id somewhere in the live insert path. Also ~30+ flock-level (shed_id IS NULL) event rows on Flock 19/20 have farm_id NULL by what looks like convention -- confirm intentional or fix.',
-   'development', 'Flocks', 'medium', 'open')
+   'development', 'Flocks', 'normal', 'pending')
 ) AS v(title, description, task_type, team, priority, status)
 WHERE NOT EXISTS (
   SELECT 1 FROM public.tasks t WHERE t.title = v.title AND t.task_type = 'development'
