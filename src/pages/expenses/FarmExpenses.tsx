@@ -59,6 +59,7 @@ export const FarmExpensesPage: React.FC = () => {
   const [filterFarm, setFilterFarm] = useState('')
   const [filterFlock, setFilterFlock] = useState('')
   const [filterCat, setFilterCat] = useState('')
+  const [filterVendor, setFilterVendor] = useState('')
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
   const [sel, setSel] = useState<Set<string>>(new Set())
@@ -78,7 +79,7 @@ export const FarmExpensesPage: React.FC = () => {
   })
 
   const { data: expenses, isLoading } = useQuery({
-    queryKey: ['farm_expenses', filterFarm, filterFlock, filterCat, filterFrom, filterTo],
+    queryKey: ['farm_expenses', filterFarm, filterFlock, filterCat, filterVendor, filterFrom, filterTo],
     queryFn: async () => {
       // These rows are summed into the expense total on the page.
       return fetchAllPages<any>((from, to) => {
@@ -86,13 +87,28 @@ export const FarmExpensesPage: React.FC = () => {
           .select('*, farms(name,code), flocks(flock_no)')
           .order('expense_date', { ascending: false })
           .order('id').range(from, to)
-        if (filterFarm)  q = q.eq('farm_id', filterFarm)
-        if (filterFlock) q = q.eq('flock_id', filterFlock)
-        if (filterCat)   q = q.eq('category', filterCat)
-        if (filterFrom)  q = q.gte('expense_date', filterFrom)
-        if (filterTo)    q = q.lte('expense_date', filterTo)
+        if (filterFarm)   q = q.eq('farm_id', filterFarm)
+        if (filterFlock)  q = q.eq('flock_id', filterFlock)
+        if (filterCat)    q = q.eq('category', filterCat)
+        if (filterVendor) q = q.eq('vendor', filterVendor)
+        if (filterFrom)   q = q.gte('expense_date', filterFrom)
+        if (filterTo)     q = q.lte('expense_date', filterTo)
         return q
       }, 'Farm expenses')
+    }
+  })
+
+  // Distinct vendor names for the filter dropdown — this is how a vehicle
+  // (Creta, Innova...) with no farm of its own gets filtered, since it only
+  // ever carries a vendor, never a farm_id.
+  const { data: vendorList } = useQuery({
+    queryKey: ['farm_expense_vendors'],
+    queryFn: async () => {
+      const data = await fetchAllPages<any>(
+        (from, to) => supabase.from('farm_expenses').select('vendor').not('vendor', 'is', null).range(from, to),
+        'Vendors'
+      )
+      return [...new Set(data.map((r: any) => r.vendor).filter(Boolean))].sort()
     }
   })
 
@@ -133,17 +149,43 @@ export const FarmExpensesPage: React.FC = () => {
         reference_no:  form.reference_no || null,
         remarks:       form.remarks || null,
       }
+      let savedId: string
       if (editing) {
         const { error } = await supabase.from('farm_expenses').update(payload).eq('id', editing.id)
         if (error) throw error
+        savedId = editing.id
+        // The old Cash Book entry is stale the moment the date/farm/amount can
+        // change under it — delete and re-post rather than patch in place, the
+        // same way NHE Sales handles its own linked Cash Book row.
+        await supabase.from('cash_book').delete().eq('farm_expense_id', editing.id)
       } else {
-        const { error } = await supabase.from('farm_expenses').insert(payload)
+        const { data: ins, error } = await supabase.from('farm_expenses').insert(payload).select('id').single()
         if (error) throw error
+        savedId = ins!.id
       }
+
+      // Post to Cash Book — this is real cash spent out of a site's or HO's
+      // imprest float, so the float must actually go down, not just show up
+      // as a cost. A vendor with no farm (Creta, Innova...) is a shared
+      // vehicle with no imprest of its own — that cash came out of HO's.
+      const hoFarmId = (farms ?? []).find((f: any) => f.code === 'HO')?.id ?? null
+      const cbFarmId = payload.farm_id ?? (payload.vendor ? hoFarmId : null)
+      const { error: cbErr } = await supabase.from('cash_book').insert({
+        txn_date: payload.expense_date, txn_type: 'payment', category: 'expense',
+        farm_id: cbFarmId, flock_id: payload.flock_id,
+        description: [payload.category, payload.vendor, payload.description].filter(Boolean).join(' — '),
+        party_name: payload.vendor, reference_no: payload.reference_no,
+        amount_in: 0, amount_out: payload.amount,
+        payment_mode: payload.payment_mode || 'cash',
+        remarks: payload.remarks,
+        farm_expense_id: savedId,
+      })
+      if (cbErr) throw new Error('Expense saved, but Cash Book entry failed: ' + cbErr.message)
     },
     onSuccess: () => {
       toast.success(editing ? 'Updated' : 'Expense recorded')
       qc.invalidateQueries({ queryKey: ['farm_expenses'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
       setShowForm(false); setEditing(null)
     },
     onError: (e: any) => toast.error(e.message)
@@ -151,11 +193,15 @@ export const FarmExpensesPage: React.FC = () => {
 
   const delMut = useMutation({
     mutationFn: async (ids: string[]) => {
+      // FK is ON DELETE SET NULL, not CASCADE, so an orphaned Cash Book row
+      // would otherwise survive with no expense behind it — delete it first.
+      await supabase.from('cash_book').delete().in('farm_expense_id', ids)
       const { error } = await supabase.from('farm_expenses').delete().in('id', ids)
       if (error) throw error
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['farm_expenses'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
       toast.success('Deleted')
       setSel(new Set())
       setBulkConfirm(false)
@@ -246,10 +292,36 @@ export const FarmExpensesPage: React.FC = () => {
       })
       const skipped = toInsert.length - deduped.length
       if (!deduped.length) { toast.error(`All ${toInsert.length} rows already exist — nothing imported`); return }
-      const { error } = await supabase.from('farm_expenses').insert(deduped)
+      const { data: ins, error } = await supabase.from('farm_expenses').insert(deduped).select('id')
       if (error) throw error
+
+      // Each imported row is real cash spent from a site's or HO's imprest —
+      // post it to Cash Book too, same as a manually-entered expense, so the
+      // imprest balance actually goes down. A vendor with no farm (a shared
+      // vehicle — Creta, Innova...) has no imprest of its own; that cash came
+      // out of HO's.
+      const hoFarmId = (farms ?? []).find((f: any) => f.code === 'HO')?.id ?? null
+      const cbRows = (ins ?? []).map((row: any, i: number) => {
+        const d = deduped[i]
+        return {
+          txn_date: d.expense_date, txn_type: 'payment', category: 'expense',
+          farm_id: d.farm_id ?? (d.vendor ? hoFarmId : null), flock_id: d.flock_id,
+          description: [d.category, d.vendor, d.description].filter(Boolean).join(' — '),
+          party_name: d.vendor, reference_no: d.reference_no,
+          amount_in: 0, amount_out: d.amount,
+          payment_mode: d.payment_mode || 'cash',
+          remarks: d.remarks,
+          farm_expense_id: row.id,
+        }
+      })
+      if (cbRows.length) {
+        const { error: cbErr } = await supabase.from('cash_book').insert(cbRows)
+        if (cbErr) throw new Error(`${deduped.length} expenses imported, but Cash Book posting failed: ${cbErr.message}`)
+      }
+
       toast.success(`Imported ${deduped.length} expenses${skipped ? ` (skipped ${skipped} duplicate${skipped > 1 ? 's' : ''})` : ''}`)
       qc.invalidateQueries({ queryKey: ['farm_expenses'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
     } catch (e: any) {
       toast.error('Import failed: ' + e.message)
     } finally {
@@ -272,7 +344,7 @@ export const FarmExpensesPage: React.FC = () => {
   const totalAmount = rows.reduce((s: number, e: any) => s + (e.amount ?? 0), 0)
   const byCat: Record<string, number> = {}
   rows.forEach((e: any) => { byCat[e.category] = (byCat[e.category] ?? 0) + (e.amount ?? 0) })
-  const hasFilter = filterFarm || filterFlock || filterCat || filterFrom || filterTo
+  const hasFilter = filterFarm || filterFlock || filterCat || filterVendor || filterFrom || filterTo
 
   return (
     <div className="space-y-5">
@@ -292,15 +364,20 @@ export const FarmExpensesPage: React.FC = () => {
 
       {/* Filters */}
       <Card>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 items-end">
           <SearchableSelect label="Site" placeholder="All Sites" options={farmOptions} value={filterFarm} onChange={v => setFilterFarm(v)} />
           <SearchableSelect label="Flock" placeholder="All Flocks" options={flockOptions} value={filterFlock} onChange={v => setFilterFlock(v)} />
           <Select label="Category" placeholder="All Categories" options={catOptions} value={filterCat} onChange={e => setFilterCat(e.target.value)} />
+          {/* Vendor — the only filter that reaches a shared vehicle (Creta,
+              Innova...), since those rows carry no farm/site of their own. */}
+          <SearchableSelect label="Vendor" placeholder="All Vendors"
+            options={(vendorList ?? []).map((v: string) => ({ value: v, label: v }))}
+            value={filterVendor} onChange={v => setFilterVendor(v)} />
           <DateInput label="From" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} />
           <DateInput label="To"   value={filterTo}   onChange={e => setFilterTo(e.target.value)} />
         </div>
         {hasFilter && <button className="text-xs text-brand-600 hover:underline mt-2"
-          onClick={() => { setFilterFarm(''); setFilterFlock(''); setFilterCat(''); setFilterFrom(''); setFilterTo('') }}>Clear filters</button>}
+          onClick={() => { setFilterFarm(''); setFilterFlock(''); setFilterCat(''); setFilterVendor(''); setFilterFrom(''); setFilterTo('') }}>Clear filters</button>}
       </Card>
 
       {/* Summary stats */}
