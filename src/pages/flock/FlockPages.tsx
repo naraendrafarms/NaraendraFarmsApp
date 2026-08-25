@@ -212,37 +212,25 @@ export const FlockDashboard: React.FC = () => {
   })
 
   // First egg date per flock (earliest record_date where HE eggs > 0) —
-  // same unbounded-history risk as above.
-  const { data: firstEggRows } = useQuery({
-    queryKey: ['flock_first_egg'],
-    queryFn: async () => fetchAllPages<any>(
-      (from, to) => supabase.from('daily_records')
-        .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
-        .gt('he_eggs_a', 0)
-        .order('record_date', { ascending: true })
-        .order('id').range(from, to),
-      // Also try he_eggs_b, he_eggs_c — we need rows where any of them > 0
-      // Supabase doesn't support OR on gt easily, so fetch all with he_eggs_a>0 first
-      // We'll do a broader query below
-      'First egg (A)'
-    ),
-    enabled: !!flocks && flocks.length > 0
-  })
-
-  // Broader first egg query covering all egg columns — unbounded across
-  // every flock/day, paged for the same reason as fcrStats above.
+  // unbounded across every flock/day, paged for the same reason as fcrStats
+  // above. NOTE: this used to select he_eggs_a/he_eggs_b/he_eggs_c, columns
+  // that were never added to daily_records anywhere (grep migrations/*.sql —
+  // the real columns are he_grade_a/b/c, added in migrations 045/364). That
+  // made every request for this data come back empty, so firstEggByFlock was
+  // silently {} for every flock — no error, since Supabase/PostgREST simply
+  // returns no matching rows for the request rather than failing outright.
   const { data: firstEggRowsAll } = useQuery({
     queryKey: ['flock_first_egg_all'],
     queryFn: async () => {
       const data = await fetchAllPages<any>(
         (from, to) => supabase.from('daily_records')
-          .select('flock_id,record_date,he_eggs_a,he_eggs_b,he_eggs_c')
+          .select('flock_id,record_date,he_grade_a,he_grade_b,he_grade_c')
           .order('record_date', { ascending: true })
           .order('id').range(from, to),
         'First egg (all)'
       )
       return data.filter((r: any) =>
-        ((r.he_eggs_a ?? 0) + (r.he_eggs_b ?? 0) + (r.he_eggs_c ?? 0)) > 0
+        ((r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0)) > 0
       )
     },
     enabled: !!flocks && flocks.length > 0
@@ -638,7 +626,7 @@ const HDTrendChart: React.FC<{ flockId: string }> = ({ flockId }) => {
     queryFn: async () => {
       const { data } = await supabase
         .from('daily_records')
-        .select('record_date,he_eggs_a,he_eggs_b,he_eggs_c,nhe_je,nhe_te,nhe_be,female_alive')
+        .select('record_date,shed_id,total_eggs,he_grade_a,he_grade_b,he_grade_c,je_eggs,te_eggs,be_eggs,opening_female')
         .eq('flock_id', flockId)
         .gte('record_date', thirtyStr)
         .order('record_date')
@@ -646,15 +634,46 @@ const HDTrendChart: React.FC<{ flockId: string }> = ({ flockId }) => {
     }
   })
 
+  // NOTE: this used to select he_eggs_a/b/c, nhe_je/te/be and female_alive —
+  // none of which exist in daily_records anywhere (grep migrations/*.sql).
+  // Every request came back with none of the columns it asked for, so
+  // totalEggs and female were always 0 and hd was always null — the chart
+  // silently never rendered (see the `if (!chartData.length) return null`
+  // below) rather than erroring, so this went unnoticed. Real columns:
+  // he_grade_a/b/c (migrations 045/364) for HE, je_eggs/te_eggs/be_eggs for
+  // the other egg types (same columns fcrStats above reads), and
+  // opening_female for the day's female count (same fallback used by
+  // statsByFlock above). total_eggs is the app's own precomputed total and
+  // is preferred when present, falling back to summing the grade/type
+  // columns for any row where it isn't.
+  //
+  // A flock split into sheds has one row per shed per day PLUS a flock-level
+  // row (shed_id NULL) for the same date — summing every row for a date
+  // blindly double-counts (same class of bug documented in migrations
+  // 927/928/951 for egg-type totals). Group by date first and prefer the
+  // per-shed rows when any exist that day, falling back to the flock-level
+  // row only for flocks that don't use shed splits at all.
   const chartData = React.useMemo(() => {
     if (!trendData) return []
-    return trendData
-      .map((r: any) => {
-        const totalEggs = (r.he_eggs_a ?? 0) + (r.he_eggs_b ?? 0) + (r.he_eggs_c ?? 0) +
-          (r.nhe_je ?? 0) + (r.nhe_te ?? 0) + (r.nhe_be ?? 0)
-        const female = r.female_alive ?? 0
+    const byDate: Record<string, any[]> = {}
+    for (const r of trendData) {
+      if (!byDate[r.record_date]) byDate[r.record_date] = []
+      byDate[r.record_date].push(r)
+    }
+    return Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, rows]) => {
+        const shedRows = rows.filter(r => r.shed_id != null)
+        const rowsToSum = shedRows.length > 0 ? shedRows : rows
+        let totalEggs = 0, female = 0
+        for (const r of rowsToSum) {
+          totalEggs += r.total_eggs ??
+            ((r.he_grade_a ?? 0) + (r.he_grade_b ?? 0) + (r.he_grade_c ?? 0) +
+             (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0))
+          female += r.opening_female ?? 0
+        }
         const hd = female > 0 ? parseFloat(((totalEggs / female) * 100).toFixed(1)) : null
-        return { date: fmtChartDate(r.record_date), hd }
+        return { date: fmtChartDate(date), hd }
       })
       .filter((r: any) => r.hd != null)
   }, [trendData])
