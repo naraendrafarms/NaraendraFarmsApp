@@ -382,13 +382,25 @@ export const FlockLifetime: React.FC = () => {
     if (showingBoth) {
       sections.push({
         heading: 'Weekly detail — Female & Male',
-        headers: ['Wk', 'Days', '♀ Open', '♀ Deaths', '♀ Cum%', '♀ Body wt', '♀ Feed g/b/d',
-                  '♂ Open', '♂ Deaths', '♂ Cum%', '♂ Body wt', '♂ Feed g/b/d', 'Eggs', 'HD%'],
+        // Same columns as the on-screen Both table, Dev included — standard
+        // itself isn't shown there either (only the deviation is), same as
+        // the screen: twelve more columns of standard would not fit anywhere.
+        headers: ['Wk', 'Days', '♀ Open', '♀ Deaths', '♀ Cum%', '♀ Dev', '♀ Body wt', '♀ Dev', '♀ Feed g/b/d', '♀ Dev',
+                  '♂ Open', '♂ Deaths', '♂ Cum%', '♂ Dev', '♂ Body wt', '♂ Dev', '♂ Feed g/b/d', '♂ Dev', 'Eggs', 'HD%'],
         rightAlignFrom: 1,
         rows: both.Female.map((f: any, i: number) => {
           const m2: any = both.Male[i] ?? {}
-          return [f.wk, f.days, fmt(f.open), fmt(f.mort), fmt(f.cumDepPct, 2), fmt(f.bwAct), fmt(f.feedGPerDay, 1),
-                  fmt(m2.open), fmt(m2.mort), fmt(m2.cumDepPct, 2), fmt(m2.bwAct), fmt(m2.feedGPerDay, 1),
+          const devFmt = (v: number | null, d = 0) => v == null ? '—' : `${v > 0 ? '+' : ''}${fmt(v, d)}`
+          const fDepDev = f.stdDepPct != null && f.cumDepPct != null ? f.cumDepPct - f.stdDepPct : null
+          const fBwDev = f.bwAct != null && f.bwStd != null ? f.bwAct - f.bwStd : null
+          const fFeedDev = f.feedGPerDay != null && f.feedStd != null ? f.feedGPerDay - f.feedStd : null
+          const mDepDev = m2.stdDepPct != null && m2.cumDepPct != null ? m2.cumDepPct - m2.stdDepPct : null
+          const mBwDev = m2.bwAct != null && m2.bwStd != null ? m2.bwAct - m2.bwStd : null
+          const mFeedDev = m2.feedGPerDay != null && m2.feedStd != null ? m2.feedGPerDay - m2.feedStd : null
+          return [f.wk, f.days, fmt(f.open), fmt(f.mort), fmt(f.cumDepPct, 2), devFmt(fDepDev, 2),
+                  fmt(f.bwAct), devFmt(fBwDev), fmt(f.feedGPerDay, 1), devFmt(fFeedDev, 1),
+                  fmt(m2.open), fmt(m2.mort), fmt(m2.cumDepPct, 2), devFmt(mDepDev, 2),
+                  fmt(m2.bwAct), devFmt(mBwDev), fmt(m2.feedGPerDay, 1), devFmt(mFeedDev, 1),
                   f.eggs ? fmt(f.eggs) : '—', f.hdPct ? fmt(f.hdPct, 1) : '—']
         }),
         pageBreakBefore: true,
@@ -396,11 +408,25 @@ export const FlockLifetime: React.FC = () => {
     } else {
       sections.push({
         heading: `Weekly detail — ${sex}`,
-        headers: ['Wk', 'Days', 'Opening', 'Deaths', 'Cum%', 'Std%', 'Body wt', 'Std', 'Feed g/b/d', 'Std', 'Eggs', 'HD%', 'Std'],
+        // Same 21 columns as the on-screen table, in the same order — a
+        // printed copy that's missing columns can't be checked against the
+        // page it came from.
+        headers: ['Wk', 'Days', 'Opening', 'Deaths', 'Cum%', 'Std%', 'Dev', 'Body wt', 'Std', 'Dev',
+                   'Feed kg', 'Feed g/b/d', 'Std', 'Dev', 'Cum feed/bird', 'Std cum', 'Dev', 'Feed type',
+                   'Eggs', 'HD%', 'Std'],
         rightAlignFrom: 1,
-        rows: rows.map(r => [r.wk, r.days, fmt(r.open), fmt(r.mort), fmt(r.cumDepPct, 2), fmt(r.stdDepPct, 2),
-                              fmt(r.bwAct), fmt(r.bwStd), fmt(r.feedGPerDay, 1), fmt(r.feedStd, 1),
-                              r.eggs ? fmt(r.eggs) : '—', r.hdPct ? fmt(r.hdPct, 1) : '—', fmt(r.hdStd, 1)]),
+        rows: rows.map(r => {
+          const depDev = r.stdDepPct != null && r.cumDepPct != null ? r.cumDepPct - r.stdDepPct : null
+          const bwDev = r.bwAct != null && r.bwStd != null ? r.bwAct - r.bwStd : null
+          const feedDev = r.feedGPerDay != null && r.feedStd != null ? r.feedGPerDay - r.feedStd : null
+          const cumFeedDev = r.cumFeedPerBird != null && r.cumStdPerBird != null ? r.cumFeedPerBird - r.cumStdPerBird : null
+          const devFmt = (v: number | null, d = 0) => v == null ? '—' : `${v > 0 ? '+' : ''}${fmt(v, d)}`
+          return [r.wk, r.days, fmt(r.open), fmt(r.mort), fmt(r.cumDepPct, 2), fmt(r.stdDepPct, 2), devFmt(depDev, 2),
+                  fmt(r.bwAct), fmt(r.bwStd), devFmt(bwDev),
+                  fmt(r.feedKg, 0), fmt(r.feedGPerDay, 1), fmt(r.feedStd, 1), devFmt(feedDev, 1),
+                  fmt(r.cumFeedPerBird, 2), fmt(r.cumStdPerBird, 2), devFmt(cumFeedDev, 2), r.feedType ?? '—',
+                  r.eggs ? fmt(r.eggs) : '—', r.hdPct ? fmt(r.hdPct, 1) : '—', fmt(r.hdStd, 1)]
+        }),
         pageBreakBefore: true,
       })
     }
