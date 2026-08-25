@@ -1,10 +1,23 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fetchAllPages, fmtDate } from '@/lib/utils'
 import { Card, Select, SectionHeader, Spinner, Table, Th, Td, Button, EmptyState } from '@/components/ui'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'
-import { Download, LineChart as LineIcon } from 'lucide-react'
+import { Download, LineChart as LineIcon, Printer } from 'lucide-react'
+import { printMultiReport, type PrintSection } from '@/lib/invoicePrint'
+
+// Serialises an on-screen Recharts SVG (found inside the given container) to a
+// data URI, so the print copy is the exact chart the reviewer saw — not a
+// second chart re-drawn from the data, which could disagree with the first.
+const svgToDataUri = (container: HTMLDivElement | null): string | null => {
+  const svg = container?.querySelector('svg')
+  if (!svg) return null
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  const xml = new XMLSerializer().serializeToString(clone)
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(xml)))}`
+}
 
 // One flock, week 1 to the last bird, actual against standard.
 //
@@ -48,6 +61,10 @@ export const FlockLifetime: React.FC = () => {
   const [flockId, setFlockId] = useState('')
   // '' means both sexes side by side, the way the weekly report is laid out.
   const [sex, setSex] = useState<'Female' | 'Male' | ''>('Female')
+  const bwChartRef = useRef<HTMLDivElement>(null)
+  const depChartRef = useRef<HTMLDivElement>(null)
+  const feedChartRef = useRef<HTMLDivElement>(null)
+  const eggChartRef = useRef<HTMLDivElement>(null)
 
   const { data: flocks = [] } = useQuery({
     queryKey: ['flocks_lifetime'],
@@ -315,12 +332,13 @@ export const FlockLifetime: React.FC = () => {
     a.click()
   }
 
-  const chartCard = (title: string, data: any[], unit: string, d = 0, single = false) => (
+  const chartCard = (title: string, data: any[], unit: string, d = 0, single = false, ref?: React.RefObject<HTMLDivElement>) => (
     <Card>
       <p className="text-sm font-semibold mb-2">{title}</p>
       {data.length === 0 ? (
         <p className="text-xs text-gray-400 py-8 text-center">Nothing recorded yet.</p>
       ) : (
+        <div ref={ref}>
         <ResponsiveContainer width="100%" height={230}>
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -344,16 +362,66 @@ export const FlockLifetime: React.FC = () => {
             )}
           </LineChart>
         </ResponsiveContainer>
+        </div>
       )}
     </Card>
   )
+
+  const printLifetime = () => {
+    if (!flock) return
+    const sections: PrintSection[] = []
+    const chartImg = (ref: React.RefObject<HTMLDivElement>, heading: string, note?: string) => {
+      const uri = svgToDataUri(ref.current)
+      if (uri) sections.push({ heading, headers: [], rows: [], image: uri, note })
+    }
+    chartImg(bwChartRef, 'Body weight (g) — Actual vs Standard')
+    chartImg(depChartRef, 'Cumulative depletion (%) — Actual vs Standard')
+    chartImg(feedChartRef, 'Feed (g/bird/day) — Actual vs Standard')
+    chartImg(eggChartRef, 'Hen-day production (%) — Actual vs Standard')
+
+    if (showingBoth) {
+      sections.push({
+        heading: 'Weekly detail — Female & Male',
+        headers: ['Wk', 'Days', '♀ Open', '♀ Deaths', '♀ Cum%', '♀ Body wt', '♀ Feed g/b/d',
+                  '♂ Open', '♂ Deaths', '♂ Cum%', '♂ Body wt', '♂ Feed g/b/d', 'Eggs', 'HD%'],
+        rightAlignFrom: 1,
+        rows: both.Female.map((f: any, i: number) => {
+          const m2: any = both.Male[i] ?? {}
+          return [f.wk, f.days, fmt(f.open), fmt(f.mort), fmt(f.cumDepPct, 2), fmt(f.bwAct), fmt(f.feedGPerDay, 1),
+                  fmt(m2.open), fmt(m2.mort), fmt(m2.cumDepPct, 2), fmt(m2.bwAct), fmt(m2.feedGPerDay, 1),
+                  f.eggs ? fmt(f.eggs) : '—', f.hdPct ? fmt(f.hdPct, 1) : '—']
+        }),
+        pageBreakBefore: true,
+      })
+    } else {
+      sections.push({
+        heading: `Weekly detail — ${sex}`,
+        headers: ['Wk', 'Days', 'Opening', 'Deaths', 'Cum%', 'Std%', 'Body wt', 'Std', 'Feed g/b/d', 'Std', 'Eggs', 'HD%', 'Std'],
+        rightAlignFrom: 1,
+        rows: rows.map(r => [r.wk, r.days, fmt(r.open), fmt(r.mort), fmt(r.cumDepPct, 2), fmt(r.stdDepPct, 2),
+                              fmt(r.bwAct), fmt(r.bwStd), fmt(r.feedGPerDay, 1), fmt(r.feedStd, 1),
+                              r.eggs ? fmt(r.eggs) : '—', r.hdPct ? fmt(r.hdPct, 1) : '—', fmt(r.hdStd, 1)]),
+        pageBreakBefore: true,
+      })
+    }
+
+    printMultiReport({
+      title: `Flock ${flock.flock_no} Lifetime — Actual vs Standard`,
+      subtitle: `${sex || 'Female & Male'} · Placed ${flock.placement_date ? fmtDate(flock.placement_date) : '—'} · ` +
+        `Rearing standard ${rearSeason} · Laying standard ${laySeason ?? '—'}`,
+      sections,
+    })
+  }
 
   return (
     <div className="space-y-4">
       <SectionHeader title="Flock Lifetime — Actual vs Standard"
         subtitle="Week 1 to the last bird. Built from the daily records and the weekly weighing, against the Vencobb430 standard — nothing is entered twice."
         action={rows.length > 0
-          ? <Button variant="ghost" size="sm" icon={<Download size={15} />} onClick={exportCSV}>Export</Button>
+          ? <div className="flex gap-2">
+              <Button variant="ghost" size="sm" icon={<Printer size={15} />} onClick={printLifetime}>Print</Button>
+              <Button variant="ghost" size="sm" icon={<Download size={15} />} onClick={exportCSV}>Export</Button>
+            </div>
           : undefined}
       />
 
@@ -388,10 +456,10 @@ export const FlockLifetime: React.FC = () => {
       ) : (
         <>
           <div className="grid md:grid-cols-2 gap-4">
-            {chartCard('Body weight (g)', chartBW, ' g')}
-            {chartCard('Cumulative depletion (%)', chartDep, '%', 2)}
-            {chartCard('Feed (g/bird/day)', chartFeed, ' g', 1)}
-            {chartCard('Hen-day production (%)', chartEgg, '%', 1, true)}
+            {chartCard('Body weight (g)', chartBW, ' g', 0, false, bwChartRef)}
+            {chartCard('Cumulative depletion (%)', chartDep, '%', 2, false, depChartRef)}
+            {chartCard('Feed (g/bird/day)', chartFeed, ' g', 1, false, feedChartRef)}
+            {chartCard('Hen-day production (%)', chartEgg, '%', 1, true, eggChartRef)}
           </div>
 
           <Card padding={false}>
