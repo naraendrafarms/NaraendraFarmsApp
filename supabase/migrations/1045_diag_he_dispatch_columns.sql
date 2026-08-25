@@ -1,0 +1,3 @@
+SELECT string_agg(column_name, ',' ORDER BY ordinal_position)
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name='he_dispatch';
