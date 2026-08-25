@@ -289,14 +289,23 @@ export const FlockDashboard: React.FC = () => {
   }, [liveStats])
 
 
-  // Feed/Egg (kg feed per egg) per flock — NOT a true FCR (which is feed
-  // divided by body-weight gain during rearing, or feed divided by egg MASS
-  // during lay). Real FCR would need per-flock body-weight tracking (only
-  // ever imported historically for flocks 19/20/22/23 — see
-  // flock_weekly_performance, migrations 677/679/785/844/1032) and egg-weight
-  // data (never recorded anywhere in daily_records), so it isn't computable
-  // for flocks in general. This is deliberately labeled "Feed/Egg" in the UI
-  // instead of "FCR" so it isn't mistaken for the real breeder-flock metric.
+  // Feed/Egg (kg feed per egg), split into Rearing and Laying — NOT a true
+  // FCR (which is feed divided by body-weight gain during rearing, or feed
+  // divided by egg MASS during lay). Real FCR would need per-flock
+  // body-weight tracking (only ever imported historically for flocks
+  // 19/20/22/23 — see flock_weekly_performance, migrations
+  // 677/679/785/844/1032) and egg-weight data (never recorded anywhere in
+  // daily_records), so it isn't computable for flocks in general. This is
+  // deliberately labeled "Feed/Egg" in the UI instead of "FCR" so it isn't
+  // mistaken for the real breeder-flock metric.
+  //
+  // Splitting by phase matters because the whole-life ratio (feed including
+  // ~22 weeks of rearing with zero eggs, divided by eggs from lay only)
+  // overstates the flock's actual in-lay feed efficiency — it carries the
+  // one-time rearing cost forever. Rearing has no eggs to divide by at all,
+  // so it's reported as cumulative feed (kg), not a ratio; Laying sums feed
+  // AND eggs only from the flock's first-egg date onward, giving a figure
+  // that's actually comparable across flocks/weeks.
   //
   // Egg-type counts (he/je/te/be/le_eggs) only belong at the per-shed level
   // (shed_id NOT NULL) once a flock is split into sheds — a flock-level row
@@ -307,7 +316,7 @@ export const FlockDashboard: React.FC = () => {
   // and only fall back to the flock-level row when the flock isn't split
   // into sheds at all (no per-shed row exists for that date).
   const fcrByFlock = React.useMemo(() => {
-    const map: Record<string, number | null> = {}
+    const map: Record<string, { rearingFeedKg: number; layFeedPerEgg: number | null }> = {}
     if (!fcrStats) return map
     const byFlockDate: Record<string, Record<string, any[]>> = {}
     for (const r of fcrStats) {
@@ -318,19 +327,31 @@ export const FlockDashboard: React.FC = () => {
       byFlockDate[fid][d].push(r)
     }
     for (const [fid, byDate] of Object.entries(byFlockDate)) {
-      let totalFeed = 0, totalEggs = 0
-      for (const dateRows of Object.values(byDate)) {
+      const firstEgg = firstEggByFlock[fid]
+      let rearingFeedKg = 0
+      let layFeed = 0, layEggs = 0
+      for (const [date, dateRows] of Object.entries(byDate)) {
         const shedRows = dateRows.filter(r => r.shed_id != null)
         const rowsToSum = shedRows.length > 0 ? shedRows : dateRows
+        let dayFeed = 0, dayEggs = 0
         for (const r of rowsToSum) {
-          totalFeed += (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0)
-          totalEggs += (r.he_eggs ?? 0) + (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0) + (r.le_eggs ?? 0)
+          dayFeed += (r.feed_female_kg ?? 0) + (r.feed_male_kg ?? 0)
+          dayEggs += (r.he_eggs ?? 0) + (r.je_eggs ?? 0) + (r.te_eggs ?? 0) + (r.be_eggs ?? 0) + (r.le_eggs ?? 0)
+        }
+        if (!firstEgg || date < firstEgg) {
+          rearingFeedKg += dayFeed
+        } else {
+          layFeed += dayFeed
+          layEggs += dayEggs
         }
       }
-      map[fid] = totalFeed > 0 && totalEggs > 0 ? totalFeed / totalEggs : null
+      map[fid] = {
+        rearingFeedKg,
+        layFeedPerEgg: layFeed > 0 && layEggs > 0 ? layFeed / layEggs : null,
+      }
     }
     return map
-  }, [fcrStats])
+  }, [fcrStats, firstEggByFlock])
 
   // Current birds: latest allocation per flock (sum all sheds)
   const currentBirds = React.useMemo(() => {
@@ -484,9 +505,15 @@ export const FlockDashboard: React.FC = () => {
                     <span className="font-semibold text-brand-700">{inr(f.chick_cost)}</span>
                   </div>
                 )}
+                {fcr && fcr.rearingFeedKg > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500" title="Total feed consumed (kg) before this flock's first egg — one-time rearing cost, not a ratio">Rearing Feed</span>
+                    <span className="font-medium">{numFmt(Math.round(fcr.rearingFeedKg))} kg</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
-                  <span className="text-gray-500" title="Feed consumed (kg) per egg produced — not the same as true FCR, which is feed vs body-weight gain / egg mass">Feed/Egg</span>
-                  <span className="font-medium">{fcr != null ? fcr.toFixed(2) : '—'}</span>
+                  <span className="text-gray-500" title="Feed consumed (kg) per egg produced, counted from this flock's first egg onward only — excludes rearing feed. Not the same as true FCR, which is feed vs body-weight gain / egg mass">Lay Feed/Egg</span>
+                  <span className="font-medium">{fcr?.layFeedPerEgg != null ? fcr.layFeedPerEgg.toFixed(2) : '—'}</span>
                 </div>
                 {costPerBird != null && (
                   <div className="flex justify-between">

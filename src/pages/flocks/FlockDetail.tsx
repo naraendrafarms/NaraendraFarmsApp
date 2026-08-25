@@ -1103,7 +1103,7 @@ export const FlockDetail: React.FC = () => {
 
   // One row per date. Chick cost sits on the placement day only, exactly as you
   // asked — so it appears once and never distorts cost per egg on other days.
-  const ciDaily = (() => {
+  const ciDailyAll = (() => {
     const byDate: Record<string, any> = {}
     for (const d of (dailyAggregated ?? []) as any[]) {
       const k = String(d.record_date)
@@ -1132,15 +1132,20 @@ export const FlockDetail: React.FC = () => {
         med, exp, chick, cost,
         perEgg: r.eggs > 0 ? cost / r.eggs : 0,
       }
-    }).filter((r: any) => (!ciFrom || r.date >= ciFrom) && (!ciTo || r.date <= ciTo))
-      .sort((a: any, b: any) => b.date.localeCompare(a.date))
+    }).sort((a: any, b: any) => b.date.localeCompare(a.date))
   })()
+
+  // The Cost/Income tab's own From/To filter (ciFrom/ciTo) only narrows what's
+  // DISPLAYED there — a lifetime breakeven figure must never depend on that
+  // filter being cleared, so it rolls up from the unfiltered ciDailyAll below,
+  // not from the filtered ciDaily used by the tab's tables.
+  const ciDaily = ciDailyAll.filter((r: any) => (!ciFrom || r.date >= ciFrom) && (!ciTo || r.date <= ciTo))
 
   // Monthly rolls the daily figures up and ADDS the site costs, which only
   // exist per month — so the month view is complete where the day view cannot be.
-  const ciMonthly = (() => {
+  const rollUpMonthly = (dailyRows: any[]) => {
     const m: Record<string, any> = {}
-    for (const r of ciDaily) {
+    for (const r of dailyRows) {
       const k = r.date.slice(0, 7)
       m[k] ??= { month: k, eggs: 0, he: 0, feedCost: 0, med: 0, exp: 0, value: 0, sales: 0, chick: 0, site: r.site }
       m[k].eggs += r.eggs; m[k].he += r.he; m[k].feedCost += r.feedCost
@@ -1157,7 +1162,35 @@ export const FlockDetail: React.FC = () => {
           ? s2 + (b.amount ?? 0) : s2, 0)
       const total = r.feedCost + r.med + r.exp + r.chick + sal + elec
       return { ...r, sal, elec, total, perEgg: r.eggs > 0 ? total / r.eggs : 0 }
-    }).sort((a: any, b: any) => b.month.localeCompare(a.month))
+    })
+  }
+  const ciMonthly = rollUpMonthly(ciDaily).sort((a: any, b: any) => b.month.localeCompare(a.month))
+
+  // ── Investment recovery (breakeven) ──────────────────────────────────────
+  // Walks the flock's WHOLE life, oldest month first, adding up total cost
+  // (chick + feed + medicine + expenses + site salary + site electricity —
+  // same components as ciMonthly's "total") against actual cash sales
+  // (HE dispatch + NHE sales, on the date the money came in, not the day the
+  // egg was valued) until cumulative sales first reaches cumulative cost.
+  // That crossover month is the flock's breakeven point. Deliberately built
+  // from ciDailyAll (never touched by the Cost/Income tab's own ciFrom/ciTo
+  // filter) so this figure can't silently change depending on what someone
+  // last set on a different tab.
+  const breakeven = (() => {
+    const monthsAsc = rollUpMonthly(ciDailyAll).sort((a: any, b: any) => a.month.localeCompare(b.month))
+    let cumCost = 0, cumSales = 0, breakevenMonth: string | null = null
+    for (const m of monthsAsc) {
+      cumCost += m.total
+      cumSales += m.sales
+      if (breakevenMonth == null && cumCost > 0 && cumSales >= cumCost) breakevenMonth = m.month
+    }
+    const totalBirdsPlaced = (flock.total_placed_f ?? 0) + (flock.total_placed_m ?? 0)
+    return {
+      cumCost, cumSales,
+      netPL: cumSales - cumCost,
+      breakevenMonth,
+      costPerBird: totalBirdsPlaced > 0 ? cumCost / totalBirdsPlaced : null,
+    }
   })()
 
   // ── Financial tab date range ─────────────────────────────────────────────
@@ -2541,6 +2574,42 @@ export const FlockDetail: React.FC = () => {
               Chick cost is counted only if the placement date falls inside this range, otherwise a one-month view would
               read as though the birds were bought again that month.
             </div>
+          )}
+          {!finRanged && (
+            <Card>
+              <CardHeader title="Investment Recovery" subtitle="Whole flock life — always the full history, regardless of the From/To filter above" />
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-2">
+                <div>
+                  <p className="text-xs text-gray-500">Total Invested So Far</p>
+                  <p className="text-lg font-bold text-orange-700">{inr(breakeven.cumCost)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Total Cash Received</p>
+                  <p className="text-lg font-bold text-green-700">{inr(breakeven.cumSales)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Cost / Bird Placed</p>
+                  <p className="text-lg font-bold text-gray-800">{breakeven.costPerBird != null ? `₹${breakeven.costPerBird.toFixed(0)}` : '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Net P&amp;L So Far</p>
+                  <p className={`text-lg font-bold ${breakeven.netPL >= 0 ? 'text-green-700' : 'text-red-600'}`}>{inr(breakeven.netPL)}</p>
+                </div>
+              </div>
+              <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${breakeven.breakevenMonth ? 'border-green-200 bg-green-50 text-green-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                {breakeven.breakevenMonth ? (
+                  <>✅ Investment recovered in <strong>{breakeven.breakevenMonth}</strong> — cumulative cash received first caught up with cumulative cost that month.</>
+                ) : (
+                  <>⏳ Not yet broken even — cumulative cash received (<strong>{inr(breakeven.cumSales)}</strong>) is still below cumulative cost (<strong>{inr(breakeven.cumCost)}</strong>).</>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Cost includes chick cost, feed, medicine, other expenses, and site salary/electricity for the months
+                this flock was active (same components as the Cost/Income tab's monthly total). Cash received is HE
+                Dispatch + NHE Sales on the date the money actually came in — not the day the egg was produced/valued,
+                so this can differ from the accrual Revenue figure shown below.
+              </p>
+            </Card>
           )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <Card>
