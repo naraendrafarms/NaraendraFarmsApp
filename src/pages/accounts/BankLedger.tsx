@@ -19,7 +19,7 @@ const EMPTY_FORM = {
   bank_account_id: '',
   party_id: '',
   settle_payment_id: '',
-  settle_receivable_id: '',
+  settle_receivable_ids: [] as string[],
   already_linked: false,
   linked_payment_id: '',
   linked_nhe_sale_id: '',
@@ -1006,7 +1006,7 @@ export const BankLedgerPage: React.FC = () => {
       bank_account_id: t.bank_account_id ?? selectedAccount,
       party_id: t.party_id ?? '',
       settle_payment_id: '',
-      settle_receivable_id: '',
+      settle_receivable_ids: [],
       already_linked: !!(t.linked_payment_id || t.nhe_sale_id || t.he_dispatch_id),
       linked_payment_id: t.linked_payment_id ?? '',
       linked_nhe_sale_id: t.nhe_sale_id ?? '',
@@ -1132,41 +1132,68 @@ export const BankLedgerPage: React.FC = () => {
         qc.invalidateQueries({ queryKey: ['cash_book'] })
       }
 
-      // Buyer side: settling a specific NHE sale / HE dispatch invoice —
-      // same idea, mirrored for Credit (money received).
-      if (txnId && form.settle_receivable_id) {
-        const [source, recvId] = form.settle_receivable_id.split(':')
-        const inv = (openReceivablesForParty ?? []).find((r: any) => r.source === source && r.id === recvId)
-        if (!inv) throw new Error('Selected invoice could not be found — reopen Add Transaction and try again')
-        const balance = receivableBalance(inv)
-        const settled = Math.min(balance, amount)
-        const newReceived = (inv.amount_received ?? 0) + settled
-        // nhe_sales/he_dispatch.payment_mode has its own CHECK constraint
-        // (Cash/NEFT/RTGS/Bank Transfer/UPI/Cheque/Advance — see migration
-        // 338) which has nothing to do with Bank Ledger's own category list
-        // (Vendor Payment/Bank Charges/etc.) — writing form.category here
-        // violated the constraint. This is money received into a bank
-        // account, so NEFT is always a valid, safe default.
-        const { error: invErr } = await supabase.from(source).update({
-          amount_received: newReceived,
-          received_date: form.txn_date,
-          payment_mode: 'NEFT',
-          payment_status: newReceived >= (inv.amount ?? 0) ? 'Received' : 'Partial',
-          bank_account_id: form.bank_account_id,
-          utr_ref: form.reference_no || null,
-        }).eq('id', recvId)
-        if (invErr) throw new Error('Invoice settle failed: ' + invErr.message)
-        const { error: btErr } = await supabase.from('bank_transactions').update({
-          [source === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id']: recvId,
-        }).eq('id', txnId)
-        if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
+      // Buyer side: settling one or more NHE sale / HE dispatch invoices —
+      // same idea as the bill side, mirrored for Credit (money received).
+      // One bank receipt can cover several invoices (e.g. a buyer clears 3
+      // pending invoices in one NEFT) — the entered amount is applied as a
+      // waterfall across the ticked invoices in the order selected: each
+      // invoice takes min(its own balance, whatever of the bank amount is
+      // still unallocated), so a receipt short of the combined balance still
+      // partially settles the invoices instead of silently doing nothing to
+      // the later ones.
+      let receivablesSettledCount = 0
+      if (txnId && form.settle_receivable_ids.length > 0) {
+        let remaining = amount
+        let firstNheId: string | null = null
+        let firstHeId: string | null = null
+        for (const key of form.settle_receivable_ids) {
+          const [source, recvId] = key.split(':')
+          const inv = (openReceivablesForParty ?? []).find((r: any) => r.source === source && r.id === recvId)
+          if (!inv) throw new Error('A selected invoice could not be found — reopen Add Transaction and try again')
+          const balance = receivableBalance(inv)
+          const settleAmt = Math.min(balance, Math.max(0, remaining))
+          if (settleAmt <= 0) continue
+          remaining -= settleAmt
+          const newReceived = (inv.amount_received ?? 0) + settleAmt
+          // nhe_sales/he_dispatch.payment_mode has its own CHECK constraint
+          // (Cash/NEFT/RTGS/Bank Transfer/UPI/Cheque/Advance — see migration
+          // 338) which has nothing to do with Bank Ledger's own category list
+          // (Vendor Payment/Bank Charges/etc.) — writing form.category here
+          // violated the constraint. This is money received into a bank
+          // account, so NEFT is always a valid, safe default.
+          const { error: invErr } = await supabase.from(source).update({
+            amount_received: newReceived,
+            received_date: form.txn_date,
+            payment_mode: 'NEFT',
+            payment_status: newReceived >= (inv.amount ?? 0) ? 'Received' : 'Partial',
+            bank_account_id: form.bank_account_id,
+            utr_ref: form.reference_no || null,
+          }).eq('id', recvId)
+          if (invErr) throw new Error('Invoice settle failed: ' + invErr.message)
+          receivablesSettledCount++
+          if (source === 'he_dispatch') { if (!firstHeId) firstHeId = recvId }
+          else if (!firstNheId) firstNheId = recvId
+        }
+        // bank_transactions only has one nhe_sale_id/he_dispatch_id column
+        // each — when several invoices are settled, link the first one of
+        // each kind so "already linked" detection and the linked-ref detail
+        // view still find something; the invoices themselves (via
+        // amount_received/payment_status above) are the source of truth for
+        // what was actually settled.
+        if (firstNheId || firstHeId) {
+          const linkPayload: Record<string, string> = {}
+          if (firstNheId) linkPayload.nhe_sale_id = firstNheId
+          if (firstHeId) linkPayload.he_dispatch_id = firstHeId
+          const { error: btErr } = await supabase.from('bank_transactions').update(linkPayload).eq('id', txnId)
+          if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
+        }
         qc.invalidateQueries({ queryKey: ['receivables_open_for_party'] })
         qc.invalidateQueries({ queryKey: ['pending_receivables'] })
         qc.invalidateQueries({ queryKey: ['nhe_sales'] })
         qc.invalidateQueries({ queryKey: ['he_dispatch'] })
       }
 
-      const settled = !!(form.settle_payment_id || form.settle_receivable_id)
+      const settled = !!(form.settle_payment_id || receivablesSettledCount > 0)
       toast.success(
         `${editId ? 'Updated' : 'Saved'}: ${form.txn_date} — ${form.txn_type} ${inr(amount)}` +
         (settled ? ' — invoice settled' : '')
@@ -1867,7 +1894,7 @@ export const BankLedgerPage: React.FC = () => {
             onChange={e => {
               const id = (e.target as HTMLSelectElement).value
               const p = (parties ?? []).find((x: any) => x.id === id)
-              setForm(f => ({ ...f, party_id: id, settle_payment_id: '', settle_receivable_id: '', description: !f.description && p ? p.name : f.description }))
+              setForm(f => ({ ...f, party_id: id, settle_payment_id: '', settle_receivable_ids: [], description: !f.description && p ? p.name : f.description }))
             }}
             options={[{ value: '', label: '— None —' }, ...(parties ?? []).map((p: any) => ({ value: p.id, label: `${p.name} (${p.type})` }))]}
           />
@@ -1905,20 +1932,54 @@ export const BankLedgerPage: React.FC = () => {
               )}
             </div>
           )}
-          {form.txn_type === 'Credit' && form.party_id && !form.already_linked && (
-            <div>
-              <SearchableSelect
-                label="Settle against invoice (optional — marks it Received and posts to Party Ledger)"
-                placeholder={settleReceivableOptions.length ? 'Not linked to an invoice' : 'No open invoices for this party'}
-                options={settleReceivableOptions}
-                value={form.settle_receivable_id}
-                onChange={v => setForm(f => ({ ...f, settle_receivable_id: v }))}
-              />
-              {!form.settle_receivable_id && (
-                <p className="text-xs text-amber-600 mt-1">Without picking an invoice here, this stays a plain bank entry and won't show in that party's ledger.</p>
-              )}
-            </div>
-          )}
+          {form.txn_type === 'Credit' && form.party_id && !form.already_linked && (() => {
+            const selectedInvoices = (openReceivablesForParty ?? []).filter((r: any) => form.settle_receivable_ids.includes(`${r.source}:${r.id}`))
+            const selectedTotal = selectedInvoices.reduce((s: number, r: any) => s + receivableBalance(r), 0)
+            const enteredAmount = parseFloat(form.amount) || 0
+            const diff = Math.round((selectedTotal - enteredAmount) * 100) / 100
+            const toggleReceivable = (key: string) => setForm(f => ({
+              ...f,
+              settle_receivable_ids: f.settle_receivable_ids.includes(key)
+                ? f.settle_receivable_ids.filter(k => k !== key)
+                : [...f.settle_receivable_ids, key],
+            }))
+            return (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Settle against invoice(s) (optional — tick one or more; marks them Received and posts to Party Ledger)
+                </label>
+                {settleReceivableOptions.length === 0 ? (
+                  <p className="text-xs text-gray-400 border border-gray-200 rounded-lg px-3 py-2">No open invoices for this party</p>
+                ) : (
+                  <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
+                    {settleReceivableOptions.map(opt => (
+                      <label key={opt.value} className={`flex items-center gap-2 px-3 py-2 text-sm border-b border-gray-100 last:border-b-0 cursor-pointer hover:bg-gray-50 ${form.settle_receivable_ids.includes(opt.value) ? 'bg-blue-50' : ''}`}>
+                        <input
+                          type="checkbox"
+                          className="rounded border-gray-300 text-blue-600"
+                          checked={form.settle_receivable_ids.includes(opt.value)}
+                          onChange={() => toggleReceivable(opt.value)}
+                        />
+                        <span className="flex-1">{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {form.settle_receivable_ids.length > 0 ? (
+                  <div className="flex items-center justify-between text-xs mt-1 px-1">
+                    <span className="text-gray-500">{form.settle_receivable_ids.length} invoice(s) selected — combined balance ₹{selectedTotal.toLocaleString('en-IN')}</span>
+                    {diff !== 0 && (
+                      <span className={Math.abs(diff) < 1 ? 'text-green-600' : 'text-amber-600'}>
+                        {diff > 0 ? `₹${Math.abs(diff).toLocaleString('en-IN')} more than this entry — will settle partially, oldest-first` : `₹${Math.abs(diff).toLocaleString('en-IN')} left over after settling all`}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-600 mt-1">Without picking an invoice here, this stays a plain bank entry and won't show in that party's ledger.</p>
+                )}
+              </div>
+            )
+          })()}
           <Input
             label="Reference No"
             value={form.reference_no}
