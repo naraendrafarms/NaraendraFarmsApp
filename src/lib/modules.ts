@@ -77,6 +77,7 @@ export const ROUTE_MODULES: Record<string, ModuleKey> = {
   'reports/production': 'reports_ops',
   'reports/feed': 'reports_ops',
   'reports/egg-stock': 'reports_ops',
+  'reports/shed-day': 'reports_ops',
   'reports/stock-statement': 'reports_ops',
   'reports/daily-summary': 'reports_ops',
   'reports/bird-sales': 'reports_ops',

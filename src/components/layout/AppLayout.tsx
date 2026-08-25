@@ -130,6 +130,7 @@ const NAV: NavItem[] = [
       { label: 'Cost Analysis',         to: '/reports/costs' },
       { label: 'Export to Excel',       to: '/reports/export' },
       { label: 'Egg Stock Balance',      to: '/reports/egg-stock' },
+      { label: 'Shed & Day Report',      to: '/reports/shed-day' },
       { label: 'Daily Summary',           to: '/reports/daily-summary' },
       { label: 'TDS Receivable',          to: '/reports/tds-receivable' },
       { label: 'TDS Payable',             to: '/reports/tds-payable' },
