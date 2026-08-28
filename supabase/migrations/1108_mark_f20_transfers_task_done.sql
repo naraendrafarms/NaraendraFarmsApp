@@ -11,3 +11,9 @@ WHERE task_type = 'development'
 SELECT string_agg(title || ' [' || status || ']', ' | ' ORDER BY title) AS dev_tasks
 FROM public.tasks
 WHERE task_type = 'development';
+
+-- Flock 22 must be untouched by 1105: it has no rows at all in that window.
+SELECT count(*)::int AS f22_rows_in_sep_window
+FROM public.daily_records
+WHERE flock_id = (SELECT id FROM public.flocks WHERE flock_no::text = '22')
+  AND record_date BETWEEN '2025-09-24' AND '2025-09-28';
