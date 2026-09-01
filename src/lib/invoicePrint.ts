@@ -1256,8 +1256,11 @@ export function printPaymentPlanning(opts: {
   bankBalance: number
   bankBalanceAfter: number
   needToReceive: number
+  // Ticked receivables, printed as their own breakdown so "Need to Receive"
+  // is backed by named rows instead of being one unexplained figure.
+  receivables?: { party: string; source: string; ref?: string; due_date?: string | null; amount: number }[]
 }) {
-  const { planDate, rows, totals, bankBalance, bankBalanceAfter, needToReceive } = opts
+  const { planDate, rows, totals, bankBalance, bankBalanceAfter, needToReceive, receivables } = opts
 
   // Balance Due and Still Owed print alongside what is being paid, because a
   // part payment must not look like a full settlement on a sheet somebody signs:
@@ -1319,6 +1322,35 @@ export function printPaymentPlanning(opts: {
       </tbody>
     </table>
   </div>
+
+  ${(receivables?.length ?? 0) > 0 ? `
+  <div class="section" style="margin-top:16px">
+    <h2>Expected Receipts</h2>
+    <table>
+      <thead><tr>
+        <th class="tc" style="width:38px">#</th>
+        <th>Party / Item</th>
+        <th class="tc" style="width:70px">Source</th>
+        <th class="tc" style="width:70px">Ref</th>
+        <th class="tc" style="width:90px">Date</th>
+        <th class="tr" style="width:120px">Amount</th>
+      </tr></thead>
+      <tbody>
+        ${(receivables ?? []).map((r, i) => `<tr>
+          <td class="tc">${i + 1}</td>
+          <td>${r.party}</td>
+          <td class="tc">${r.source}</td>
+          <td class="tc">${r.ref || '—'}</td>
+          <td class="tc">${r.due_date ? fmt(r.due_date) : '—'}</td>
+          <td class="tr">${inr(r.amount)}</td>
+        </tr>`).join('')}
+        <tr class="total-row">
+          <td colspan="5" class="tr bold">Total Expected</td>
+          <td class="tr bold">${inr((receivables ?? []).reduce((s, r) => s + (r.amount || 0), 0))}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>` : ''}
 
   <div class="section" style="width:60%;margin:16px auto 0">
     <table style="margin:0">

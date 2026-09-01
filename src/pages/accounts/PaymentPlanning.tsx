@@ -205,6 +205,25 @@ export const PaymentPlanningPage: React.FC = () => {
   const selectedManualPayable = selectedManualItems.filter((m: any) => m.direction === 'payable').reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
   const selectedManualReceivable = selectedManualItems.filter((m: any) => m.direction === 'receivable').reduce((s: number, m: any) => s + (m.amount ?? 0), 0)
 
+  // Automatic receivables are tickable too, so the printed sheet can carry a
+  // breakdown of exactly what is expected in rather than one lump "Need to
+  // Receive" figure with nothing behind it. Only ticked rows print.
+  const [selectedRecv, setSelectedRecv] = useState<Set<string>>(new Set())
+  const toggleRecv = (id: string) => {
+    setSelectedRecv(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const selectedRecvItems = (receivables ?? []).filter((r: any) => selectedRecv.has(r.id))
+  const selectedRecvTotal = selectedRecvItems.reduce((s: number, r: any) => s + (r.amount ?? 0), 0)
+  const selectAllRecv = () => setSelectedRecv(prev =>
+    prev.size === (receivables?.length ?? 0) ? new Set() : new Set((receivables ?? []).map((r: any) => r.id)))
+  // Everything expected in, ticked on either list — the one figure the printed
+  // breakdown must add up to.
+  const plannedReceivable = selectedRecvTotal + selectedManualReceivable
+
   const addManualMut = useMutation({
     mutationFn: async () => {
       if (!manualForm.label.trim()) throw new Error('Label is required')
@@ -479,7 +498,7 @@ export const PaymentPlanningPage: React.FC = () => {
 
   const kotakBal = kotakBalance?.balance ?? 0
   const cashBal  = cashBalance ?? 0
-  const balanceAfter = kotakBal - totalSelected - selectedManualPayable + selectedManualReceivable
+  const balanceAfter = kotakBal - totalSelected - selectedManualPayable + plannedReceivable
 
   const exportCMS = () => {
     if (!selectedPayments.length) { toast.error('Select payments to export'); return }
@@ -562,7 +581,9 @@ export const PaymentPlanningPage: React.FC = () => {
   }
 
   const handlePrint = () => {
-    if (!selectedPayments.length && !selectedManualItems.length) { toast.error('Select payments to print'); return }
+    if (!selectedPayments.length && !selectedManualItems.length && !selectedRecvItems.length) {
+      toast.error('Select payments or receivables to print'); return
+    }
     const totals = selectedPayments.reduce((acc: any, p: any) => {
       const invoice = p.invoice_amount ?? 0
       const payable = netPayable(p)
@@ -623,13 +644,36 @@ export const PaymentPlanningPage: React.FC = () => {
       days: '',
     }))
 
+    // Receivables print as their own breakdown instead of vanishing into a
+    // single "Need to Receive" figure. Only TICKED rows print, from both the
+    // automatic list and the manual items, and needToReceive is the sum of
+    // exactly these rows so the sheet can never show a total that its own
+    // lines do not add up to.
+    const recvRows = [
+      ...selectedRecvItems.map((r: any) => ({
+        party: r.party,
+        source: r.type,
+        ref: r.flock ? `F-${r.flock}` : '',
+        due_date: r.date ?? null,
+        amount: r.amount ?? 0,
+      })),
+      ...selectedManualItems.filter((m: any) => m.direction === 'receivable').map((m: any) => ({
+        party: `${m.label} (manual)`,
+        source: 'Manual',
+        ref: m.deduction_reason ?? '',
+        due_date: m.due_date ?? null,
+        amount: m.amount ?? 0,
+      })),
+    ]
+
     printPaymentPlanning({
       planDate,
       rows: [...rows, ...manualPayableRows],
       totals,
       bankBalance: kotakBal,
-      bankBalanceAfter: kotakBal - totals.payable + selectedManualReceivable,
-      needToReceive: totalReceivable + selectedManualReceivable,
+      bankBalanceAfter: kotakBal - totals.payable + plannedReceivable,
+      needToReceive: plannedReceivable,
+      receivables: recvRows,
     })
   }
 
@@ -654,7 +698,7 @@ export const PaymentPlanningPage: React.FC = () => {
                 Mark Paid ({selected.size})
               </Button>
             )}
-            <Button variant="outline" icon={<Printer size={16} />} onClick={handlePrint} disabled={selected.size === 0 && selectedManual.size === 0}>
+            <Button variant="outline" icon={<Printer size={16} />} onClick={handlePrint} disabled={selected.size === 0 && selectedManual.size === 0 && selectedRecv.size === 0}>
               Print
             </Button>
             <Button icon={<Download size={16} />} onClick={exportCMS} disabled={selected.size === 0}>
@@ -860,16 +904,38 @@ export const PaymentPlanningPage: React.FC = () => {
       {(receivables?.length ?? 0) > 0 && (
         <Card padding={false}>
           <div className="px-4 py-2 bg-purple-50 border-b border-purple-100 flex items-center justify-between">
-            <h3 className="font-semibold text-purple-800 text-sm">Pending Receivables — {inr(totalReceivable)}</h3>
+            <div>
+              <h3 className="font-semibold text-purple-800 text-sm">Pending Receivables — {inr(totalReceivable)} outstanding</h3>
+              <p className="text-xs text-purple-500 mt-0.5">
+                Tick the ones you expect to receive — only ticked rows print on the payment sheet.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={selectAllRecv}>
+              {selectedRecv.size === (receivables?.length ?? 0) ? 'Deselect All' : 'Select All'}
+            </Button>
           </div>
-          <div className="overflow-x-auto">
+          {selectedRecv.size > 0 && (
+            <div className="px-4 py-1.5 bg-purple-50/60 text-xs text-purple-700 border-b border-purple-100">
+              {selectedRecv.size} receivable(s) ticked — <strong>{inr(selectedRecvTotal)}</strong>
+              {selectedManualReceivable > 0 && <> plus {inr(selectedManualReceivable)} manual = <strong>{inr(plannedReceivable)}</strong></>}
+            </div>
+          )}
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
             <Table>
               <thead><tr>
-                <Th>Type</Th><Th>Date</Th><Th>Party</Th><Th>Flock</Th><Th right>Amount</Th>
+                <Th></Th><Th>Type</Th><Th>Date</Th><Th>Party</Th><Th>Flock</Th><Th right>Amount</Th>
               </tr></thead>
               <tbody>
-                {(receivables ?? []).slice(0, 10).map((r: any) => (
-                  <tr key={r.id} className="hover:bg-gray-50">
+                {(receivables ?? []).map((r: any) => (
+                  <tr key={r.id}
+                    onClick={() => toggleRecv(r.id)}
+                    className={`cursor-pointer transition-colors ${selectedRecv.has(r.id) ? 'bg-purple-50 border-l-2 border-purple-500' : 'hover:bg-gray-50'}`}
+                  >
+                    <Td>
+                      <input type="checkbox" checked={selectedRecv.has(r.id)} onChange={() => toggleRecv(r.id)}
+                        onClick={e => e.stopPropagation()}
+                        className="rounded border-gray-300 text-purple-600" />
+                    </Td>
                     <Td><Badge color="blue">{r.type}</Badge></Td>
                     <Td className="text-xs">{fmtDate(r.date)}</Td>
                     <Td>{r.party}</Td>
