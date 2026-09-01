@@ -727,11 +727,14 @@ export const BankLedgerPage: React.FC = () => {
           .or('payment_status.neq.Received,payment_status.is.null')
           .or('is_employee_sale.is.null,is_employee_sale.eq.false'),
         supabase.from('he_dispatch')
-          .select('id,amount,amount_received,invoice_no,dc_no,payment_status')
+          .select('id,amount,amount_received,tds_amount,invoice_no,dc_no,payment_status')
           .eq('party_id', form.party_id)
           .or('payment_status.neq.Received,payment_status.is.null'),
       ])
-      const nheRows = (nhe.data ?? []).map((r: any) => ({ ...r, source: 'nhe_sales' }))
+      // nhe_sales has no TDS column at all — only he_dispatch carries
+      // tds_pct/tds_amount — so NHE rows are normalised to zero TDS here and
+      // the net-of-TDS arithmetic below then works uniformly for both.
+      const nheRows = (nhe.data ?? []).map((r: any) => ({ ...r, tds_amount: 0, source: 'nhe_sales' }))
       const heRows = (he.data ?? []).map((r: any) => ({ ...r, source: 'he_dispatch' }))
       return [...nheRows, ...heRows]
     },
@@ -742,10 +745,18 @@ export const BankLedgerPage: React.FC = () => {
     // unallocated amount instead.
     enabled: !!form.party_id && form.txn_type === 'Credit',
   })
-  const receivableBalance = (r: any) => Math.max(0, (r.amount ?? 0) - (r.amount_received ?? 0))
+  // What the buyer will actually PAY into the bank: the invoice less any TDS
+  // they deduct at source, less whatever has already come in. Showing the gross
+  // balance here meant a receipt of (invoice - TDS) could never clear the
+  // invoice — it stayed Partial forever with a leftover exactly equal to the
+  // TDS. Same convention the purchase side already uses in InvoiceRegister
+  // (total - paid - tds) and the HE Dispatch receipt screen (amount - tds).
+  const receivableNet = (r: any) => Math.max(0, (r.amount ?? 0) - (r.tds_amount ?? 0))
+  const receivableBalance = (r: any) => Math.max(0, receivableNet(r) - (r.amount_received ?? 0))
   const settleReceivableOptions = (openReceivablesForParty ?? []).map((r: any) => ({
     value: `${r.source}:${r.id}`,
-    label: `${r.invoice_no ?? r.dc_no ?? r.id.slice(0, 8)} (${r.source === 'he_dispatch' ? 'HE' : (r.sale_type ?? 'NHE')}) — Balance ₹${receivableBalance(r).toLocaleString('en-IN')}`,
+    label: `${r.invoice_no ?? r.dc_no ?? r.id.slice(0, 8)} (${r.source === 'he_dispatch' ? 'HE' : (r.sale_type ?? 'NHE')}) — Balance ₹${receivableBalance(r).toLocaleString('en-IN')}`
+      + ((r.tds_amount ?? 0) > 0 ? ` (net of ₹${(r.tds_amount ?? 0).toLocaleString('en-IN')} TDS)` : ''),
   }))
 
   // Every account (active + inactive) for the Manage Accounts modal — the
@@ -1167,7 +1178,7 @@ export const BankLedgerPage: React.FC = () => {
           if (settleAmt <= 0) continue
           remaining -= settleAmt
           allocatedThisSave += settleAmt
-          const newReceived = (inv.amount_received ?? 0) + settleAmt
+          const newReceived = Math.round(((inv.amount_received ?? 0) + settleAmt) * 100) / 100
           // nhe_sales/he_dispatch.payment_mode has its own CHECK constraint
           // (Cash/NEFT/RTGS/Bank Transfer/UPI/Cheque/Advance — see migration
           // 338) which has nothing to do with Bank Ledger's own category list
@@ -1178,7 +1189,12 @@ export const BankLedgerPage: React.FC = () => {
             amount_received: newReceived,
             received_date: form.txn_date,
             payment_mode: 'NEFT',
-            payment_status: newReceived >= (inv.amount ?? 0) ? 'Received' : 'Partial',
+            // Closed once the NET (invoice - TDS) is in, not the gross —
+            // otherwise a buyer who deducts TDS can never fully settle an
+            // invoice and it sits Partial with a TDS-sized tail forever.
+            // Rounded to paise on both sides so float drift can't leave an
+            // invoice one paisa short of Received.
+            payment_status: newReceived >= Math.round(receivableNet(inv) * 100) / 100 ? 'Received' : 'Partial',
             bank_account_id: form.bank_account_id,
             utr_ref: form.reference_no || null,
           }).eq('id', recvId)
@@ -1975,7 +1991,7 @@ export const BankLedgerPage: React.FC = () => {
             return (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Settle against invoice(s) (optional — tick one or more; marks them Received and posts to Party Ledger)
+                  Settle against invoice(s) (optional — tick one or more; marks them Received and posts to Party Ledger). Balances are net of TDS — what the buyer actually pays.
                   {form.settled_amount > 0 && <span className="text-gray-400 font-normal"> — ₹{remaining.toLocaleString('en-IN')} of this entry still unallocated</span>}
                 </label>
                 {settleReceivableOptions.length === 0 ? (
