@@ -16,7 +16,12 @@ import { NotificationBanner } from '@/components/NotificationBanner'
 import { useQuery } from '@tanstack/react-query'
 import { searchAppData, type SearchHit } from '@/lib/globalSearch'
 
-interface NavChild { label: string; to: string }
+// `roles` on a CHILD lets one section mix items with different audiences —
+// Masters shows its existing entries only to admin/accounts while Line Master
+// is additionally visible to the shed roles. Without this the whole section
+// would have to open up, newly exposing Farms, Sheds and Parties to roles that
+// cannot see them today.
+interface NavChild { label: string; to: string; roles?: Role[] }
 interface NavItem {
   label: string
   icon: React.ReactNode
@@ -105,15 +110,19 @@ const NAV: NavItem[] = [
   },
   {
     label: 'Masters', icon: <Settings size={18}/>,
-    roles: ['admin', 'accounts'],
+    // The shed roles are allowed into the section so Line Master is reachable;
+    // every pre-existing entry below keeps roles: ['admin','accounts'], so
+    // nothing that was hidden from them yesterday becomes visible today.
+    roles: ['admin', 'accounts', 'shed_supervisor', 'site_manager', 'site_incharge'],
     children: [
-      { label: 'Farm / Sites',         to: '/masters/farms' },
-      { label: 'Sheds',                to: '/masters/sheds' },
-      { label: 'Feed Types',           to: '/masters/feed-types' },
-      { label: 'Vaccination Schedule', to: '/masters/vaccination' },
-      { label: 'Hatcheries',           to: '/masters/hatcheries' },
-      { label: 'Electricity Meters',   to: '/masters/meters' },
-      { label: 'Vehicles',            to: '/masters/vehicles' },
+      { label: 'Farm / Sites',         to: '/masters/farms',       roles: ['admin', 'accounts'] },
+      { label: 'Sheds',                to: '/masters/sheds',       roles: ['admin', 'accounts'] },
+      { label: 'Line Master',          to: '/masters/lines' },
+      { label: 'Feed Types',           to: '/masters/feed-types',  roles: ['admin', 'accounts'] },
+      { label: 'Vaccination Schedule', to: '/masters/vaccination', roles: ['admin', 'accounts'] },
+      { label: 'Hatcheries',           to: '/masters/hatcheries',  roles: ['admin', 'accounts'] },
+      { label: 'Electricity Meters',   to: '/masters/meters',      roles: ['admin', 'accounts'] },
+      { label: 'Vehicles',            to: '/masters/vehicles',     roles: ['admin', 'accounts'] },
     ]
   },
   {
@@ -241,6 +250,7 @@ const ROLE_LABELS: Record<Role, string> = {
   site_manager:  'Site Manager',
   site_incharge: 'Site Incharge',
   viewer:        'Viewer',
+  shed_supervisor: 'Shed Supervisor',
 }
 const ROLE_COLORS: Record<Role, string> = {
   admin:         'bg-red-100 text-red-700',
@@ -249,6 +259,7 @@ const ROLE_COLORS: Record<Role, string> = {
   site_manager:  'bg-orange-100 text-orange-700',
   site_incharge: 'bg-green-100 text-green-700',
   viewer:        'bg-gray-100 text-gray-600',
+  shed_supervisor: 'bg-teal-100 text-teal-700',
 }
 
 // Filters both by the existing static roles/hideRoles arrays AND by the
@@ -266,7 +277,8 @@ function filterNav(nav: NavItem[], role: Role): NavItem[] {
       return true
     })
     .map(item => item.children
-      ? { ...item, children: item.children.filter(c => hasModule(resolveModuleForPath(c.to))) }
+      ? { ...item, children: item.children.filter(c =>
+          (!c.roles || c.roles.includes(role)) && hasModule(resolveModuleForPath(c.to))) }
       : item)
     .filter(item => !item.children || item.children.length > 0)
 }

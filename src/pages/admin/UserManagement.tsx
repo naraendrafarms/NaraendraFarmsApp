@@ -26,6 +26,7 @@ const ROLE_COLORS: Record<Role, any> = {
   site_manager:  'orange',
   site_incharge: 'green',
   viewer:        'gray',
+  shed_supervisor: 'teal',
 }
 
 export const UserManagement: React.FC = () => {

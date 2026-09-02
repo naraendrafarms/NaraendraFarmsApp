@@ -42,6 +42,7 @@ import {
   ShedsMaster, HatcheriesMaster, MetersMaster, FeedTypesMaster, VaccinationSchedulePage,
   VehiclesMaster
 } from '@/pages/masters/MastersPages'
+import { LineMaster } from '@/pages/masters/LineMaster'
 import { ImportDaily, ImportElectricity, ImportSalary, ImportHE, ImportGRN } from '@/pages/import/ImportPages'
 import { HatchabilityPage } from '@/pages/hatchability/HatchabilityPage'
 import { SetupPage } from '@/pages/setup/SetupPage'
@@ -244,6 +245,7 @@ export const App: React.FC = () => {
             {/* Masters */}
             <Route path="masters/farms" element={<FarmsMaster />} />
             <Route path="masters/sheds" element={<ShedsMaster />} />
+            <Route path="masters/lines" element={<LineMaster />} />
             <Route path="masters/ingredients" element={<IngredientsMaster />} />
             <Route path="masters/feed-types" element={<FeedTypesMaster />} />
             <Route path="masters/formulas" element={<FeedTypesMaster />} />

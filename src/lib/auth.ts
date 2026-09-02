@@ -5,7 +5,10 @@ import type { ModuleKey } from '@/lib/modules'
 
 export type PermLevel = 'hidden' | 'read_only' | 'full'
 
-export type Role = 'admin' | 'management' | 'accounts' | 'site_manager' | 'site_incharge' | 'viewer'
+// 'shed_supervisor' was added to the database role list in migration 640 but
+// never to this type, so the app could not refer to a role its own database
+// already accepts. Kept in step with the profiles.role CHECK constraint.
+export type Role = 'admin' | 'management' | 'accounts' | 'site_manager' | 'site_incharge' | 'viewer' | 'shed_supervisor'
 
 export interface Profile {
   id: string

@@ -6,6 +6,7 @@ export type ModuleKey =
   | 'dashboard' | 'flock_ops' | 'feed_mill' | 'electricity' | 'purchase'
   | 'inventory' | 'attendance' | 'payroll' | 'masters' | 'reports_ops'
   | 'reports_financial' | 'accounts' | 'vhl' | 'planning' | 'admin'
+  | 'line_master'
 
 export const MODULES: { key: ModuleKey; label: string }[] = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -23,6 +24,11 @@ export const MODULES: { key: ModuleKey; label: string }[] = [
   { key: 'vhl', label: 'VHL' },
   { key: 'planning', label: 'Planning' },
   { key: 'admin', label: 'Admin' },
+  // Sits under the Masters tab but carries its own access rule: admin edits,
+  // shed supervisor / site manager / site incharge view. Folding it into
+  // 'masters' would have handed those roles edit rights, since they hold
+  // 'full' there (migration 1127 checked this against the live table).
+  { key: 'line_master', label: 'Line Master (shed lines)' },
 ]
 
 // Longest-prefix match against the current route path (no leading slash,
@@ -60,6 +66,9 @@ export const ROUTE_MODULES: Record<string, ModuleKey> = {
 
   'masters': 'masters',
   'import': 'masters',
+  // More specific prefix than 'masters', so longest-prefix wins and this page
+  // is gated by line_master rather than by Masters as a whole.
+  'masters/lines': 'line_master',
 
   'reports/pl': 'reports_financial',
   'reports/costs': 'reports_financial',
