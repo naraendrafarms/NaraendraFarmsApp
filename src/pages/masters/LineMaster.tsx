@@ -34,6 +34,7 @@ export const LineMaster: React.FC = () => {
   const [deleteRow, setDeleteRow] = useState<any>(null)
   const [form, setForm] = useState({
     shed_id: '', side: 'A', line_no: '', boxes: '',
+    boxes_female: '', boxes_male: '',
     capacity_female: '', capacity_male: '', is_provisional: true, remarks: '',
   })
   const s = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
@@ -87,10 +88,12 @@ export const LineMaster: React.FC = () => {
     for (const l of (lines ?? [])) {
       const key = l.shed_id
       if (!m[key]) m[key] = {
-        shed: l.sheds, rows: [], boxes: 0, capF: 0, capM: 0,
+        shed: l.sheds, rows: [], boxes: 0, boxF: 0, boxM: 0, capF: 0, capM: 0,
       }
       m[key].rows.push(l)
       m[key].boxes += l.boxes ?? 0
+      m[key].boxF += l.boxes_female ?? 0
+      m[key].boxM += l.boxes_male ?? 0
       m[key].capF += l.capacity_female ?? 0
       m[key].capM += l.capacity_male ?? 0
     }
@@ -102,12 +105,15 @@ export const LineMaster: React.FC = () => {
     setForm(row ? {
       shed_id: row.shed_id, side: row.side, line_no: String(row.line_no),
       boxes: row.boxes?.toString() ?? '',
+      boxes_female: row.boxes_female?.toString() ?? '',
+      boxes_male: row.boxes_male?.toString() ?? '',
       capacity_female: row.capacity_female?.toString() ?? '',
       capacity_male: row.capacity_male?.toString() ?? '',
       is_provisional: row.is_provisional ?? true,
       remarks: row.remarks ?? '',
     } : {
       shed_id: shedFilter || '', side: 'A', line_no: '', boxes: '',
+      boxes_female: '', boxes_male: '',
       capacity_female: '', capacity_male: '', is_provisional: true, remarks: '',
     })
     setShowForm(true)
@@ -120,11 +126,19 @@ export const LineMaster: React.FC = () => {
       if (!form.shed_id) throw new Error('Pick a shed')
       const lineNo = parseInt(form.line_no, 10)
       if (!(lineNo > 0)) throw new Error('Line number must be greater than 0')
+      const bf = num(form.boxes_female)
+      const bm = num(form.boxes_male)
+      // When the sheet gives a female/male box split, the total is that split's
+      // sum -- never a separately typed number that could drift away from it.
+      // Boxes is what reconciles against sheds.total_boxes, so it must stay true.
+      const split = bf != null || bm != null
       const payload = {
         shed_id: form.shed_id,
         side: form.side,
         line_no: lineNo,
-        boxes: num(form.boxes),
+        boxes: split ? (bf ?? 0) + (bm ?? 0) : num(form.boxes),
+        boxes_female: bf,
+        boxes_male: bm,
         capacity_female: num(form.capacity_female),
         capacity_male: num(form.capacity_male),
         is_provisional: form.is_provisional,
@@ -163,7 +177,7 @@ export const LineMaster: React.FC = () => {
     <div className="space-y-4">
       <CardHeader
         title="Line Master"
-        subtitle="The cage lines inside each shed — boxes and bird capacity per line, by side"
+        subtitle="The cage lines inside each shed — boxes per line, by side"
         action={canEdit
           ? <Button icon={<Plus size={16} />} onClick={() => open()}>Add Line</Button>
           : <Badge color="gray">View only</Badge>}
@@ -213,8 +227,12 @@ export const LineMaster: React.FC = () => {
                     </span>
                   )}
                 </>}
+                {(g.boxF > 0 || g.boxM > 0) && <span className="ml-3">
+                  (<strong>{g.boxF.toLocaleString('en-IN')}</strong> F
+                  {' / '}<strong>{g.boxM.toLocaleString('en-IN')}</strong> M)
+                </span>}
                 {(g.capF > 0 || g.capM > 0) && <span className="ml-3">
-                  Capacity <strong>{g.capF.toLocaleString('en-IN')}</strong> F
+                  Bird capacity <strong>{g.capF.toLocaleString('en-IN')}</strong> F
                   {g.capM > 0 && <> / <strong>{g.capM.toLocaleString('en-IN')}</strong> M</>}
                 </span>}
               </div>
@@ -223,7 +241,8 @@ export const LineMaster: React.FC = () => {
               <Table>
                 <thead><tr>
                   <Th>Side</Th><Th>Line</Th><Th right>Boxes</Th>
-                  <Th right>Capacity F</Th><Th right>Capacity M</Th>
+                  <Th right>Boxes F</Th><Th right>Boxes M</Th>
+                  <Th right>Bird Cap F</Th><Th right>Bird Cap M</Th>
                   <Th>Status</Th><Th>Remarks</Th>{canEdit && <Th></Th>}
                 </tr></thead>
                 <tbody>
@@ -232,6 +251,8 @@ export const LineMaster: React.FC = () => {
                       <Td><Badge color="blue">{l.side}</Badge></Td>
                       <Td>{l.line_no}</Td>
                       <Td right>{l.boxes ?? '—'}</Td>
+                      <Td right>{l.boxes_female ?? '—'}</Td>
+                      <Td right>{l.boxes_male ?? '—'}</Td>
                       <Td right>{l.capacity_female ?? '—'}</Td>
                       <Td right>{l.capacity_male ?? '—'}</Td>
                       <Td>{l.is_provisional
@@ -274,13 +295,27 @@ export const LineMaster: React.FC = () => {
             <Input label="Line No" type="number" value={form.line_no}
               onChange={e => s('line_no', e.target.value)} />
           </div>
-          <Input label="Boxes (cages on this line)" type="number" value={form.boxes}
-            onChange={e => s('boxes', e.target.value)} placeholder="leave blank if not known" />
           <div className="grid grid-cols-2 gap-4">
-            <Input label="Capacity Female" type="number" value={form.capacity_female}
-              onChange={e => s('capacity_female', e.target.value)} />
-            <Input label="Capacity Male" type="number" value={form.capacity_male}
-              onChange={e => s('capacity_male', e.target.value)} />
+            <Input label="Boxes Female" type="number" value={form.boxes_female}
+              onChange={e => s('boxes_female', e.target.value)} placeholder="if sheet splits F/M" />
+            <Input label="Boxes Male" type="number" value={form.boxes_male}
+              onChange={e => s('boxes_male', e.target.value)} placeholder="if sheet splits F/M" />
+          </div>
+          <Input label="Boxes (total cages on this line)" type="number" value={form.boxes}
+            onChange={e => s('boxes', e.target.value)}
+            disabled={form.boxes_female.trim() !== '' || form.boxes_male.trim() !== ''}
+            placeholder="leave blank if not known" />
+          {(form.boxes_female.trim() !== '' || form.boxes_male.trim() !== '') && (
+            <p className="text-xs text-gray-500 -mt-2">
+              Total is {(Number(form.boxes_female || 0) + Number(form.boxes_male || 0)).toLocaleString('en-IN')} —
+              added up from the female and male boxes above.
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Bird Capacity Female" type="number" value={form.capacity_female}
+              onChange={e => s('capacity_female', e.target.value)} placeholder="birds, not boxes" />
+            <Input label="Bird Capacity Male" type="number" value={form.capacity_male}
+              onChange={e => s('capacity_male', e.target.value)} placeholder="birds, not boxes" />
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.is_provisional}
