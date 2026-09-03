@@ -206,6 +206,11 @@ export const ImprestLedger: React.FC = () => {
         .from('v_imprest_entries')
         .select('cash_book_id,txn_date,created_at,txn_type,category,description,party_name,reference_no,amount_in,amount_out,payment_mode,farm_id,farm_name,derived')
         .eq('cash_account_id', acctId)
+        // Cash only. cash_book also holds cheque, NEFT, RTGS and UPI rows, and
+        // listing them buried 30 real cash entries under 692 bank payments at
+        // Head Office. They never counted toward the balance either, so showing
+        // them served no purpose.
+        .eq('counts_to_balance', true)
         .order('txn_date').order('created_at')
       if (from) q = q.gte('txn_date', from)
       if (to) q = q.lte('txn_date', to)
@@ -236,21 +241,20 @@ export const ImprestLedger: React.FC = () => {
 
   const openingForPeriod = Number(acct?.opening_balance ?? 0) + Number(priorNet ?? 0)
 
-  const isCash = (r: any) => (r.payment_mode ?? 'cash') === 'cash'
+  // The query already returns cash rows only, so no per-row filtering here.
 
   const withBalance = useMemo(() => {
     let bal = openingForPeriod
     return (rows ?? []).map((r: any) => {
       // Non-cash rows are LISTED but do not move the balance -- shown rather
       // than silently dropped, so nobody wonders where an entry went.
-      if (isCash(r)) bal += Number(r.amount_in ?? 0) - Number(r.amount_out ?? 0)
-      return { ...r, running: bal, counted: isCash(r) }
+      bal += Number(r.amount_in ?? 0) - Number(r.amount_out ?? 0)
+      return { ...r, running: bal }
     })
   }, [rows, openingForPeriod])
 
-  const nonCashCount = (rows ?? []).filter((r: any) => !isCash(r)).length
-  const totIn = (rows ?? []).filter(isCash).reduce((a: number, r: any) => a + Number(r.amount_in ?? 0), 0)
-  const totOut = (rows ?? []).filter(isCash).reduce((a: number, r: any) => a + Number(r.amount_out ?? 0), 0)
+  const totIn = (rows ?? []).reduce((a: number, r: any) => a + Number(r.amount_in ?? 0), 0)
+  const totOut = (rows ?? []).reduce((a: number, r: any) => a + Number(r.amount_out ?? 0), 0)
   const closing = openingForPeriod + totIn - totOut
 
   const exportXlsx = () => {
@@ -327,12 +331,7 @@ export const ImprestLedger: React.FC = () => {
             <span className="text-gray-400">
               {from || to ? `${from ? fmtDate(from) : 'start'} – ${to ? fmtDate(to) : 'today'}` : 'all dates'}
             </span>
-            {nonCashCount > 0 && (
-              <span className="text-amber-600">
-                {nonCashCount} cheque/UPI {nonCashCount === 1 ? 'entry' : 'entries'} listed but not counted —
-                an imprest is physical cash
-              </span>
-            )}
+            <span className="text-gray-400">cash only — bank payments are in the Bank Ledger</span>
           </div>
 
           {withBalance.length === 0 ? (
@@ -354,7 +353,7 @@ export const ImprestLedger: React.FC = () => {
                     <Td right><strong>₹{rupee(openingForPeriod)}</strong></Td><Td></Td>
                   </tr>
                   {withBalance.map((r: any) => (
-                    <tr key={r.cash_book_id} className={`hover:bg-gray-50 ${r.counted ? '' : 'opacity-60'}`}>
+                    <tr key={r.cash_book_id} className="hover:bg-gray-50">
                       <Td>{fmtDate(r.txn_date)}</Td>
                       <Td><Badge color={TYPE_COLOR[r.txn_type] ?? 'gray'}>{r.txn_type}</Badge></Td>
                       <Td className="text-xs text-gray-500">{r.category ?? ''}</Td>
@@ -363,9 +362,7 @@ export const ImprestLedger: React.FC = () => {
                       <Td className="text-xs text-gray-500">{r.farm_name ?? ''}</Td>
                       <Td right className="text-green-700">{Number(r.amount_in) ? '₹' + rupee(r.amount_in) : ''}</Td>
                       <Td right className="text-red-700">{Number(r.amount_out) ? '₹' + rupee(r.amount_out) : ''}</Td>
-                      <Td right>{r.counted
-                        ? <strong className={r.running < 0 ? 'text-red-600' : ''}>₹{rupee(r.running)}</strong>
-                        : <span className="text-xs text-amber-600">not cash</span>}</Td>
+                      <Td right><strong className={r.running < 0 ? 'text-red-600' : ''}>₹{rupee(r.running)}</strong></Td>
                       <Td className="text-xs text-gray-500">{r.payment_mode ?? ''}</Td>
                     </tr>
                   ))}
