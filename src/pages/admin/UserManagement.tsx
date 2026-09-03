@@ -16,6 +16,9 @@ const ROLES: { value: Role; label: string; desc: string }[] = [
   { value: 'accounts',      label: 'Accounts',       desc: 'All entry access — financial, salary, GRN, imports' },
   { value: 'site_manager',  label: 'Site Manager',   desc: 'All sites — daily entry, flocks, reports. No salary.' },
   { value: 'site_incharge', label: 'Site Incharge',  desc: 'Own site only — daily entry, HE, medicine' },
+  // Valid in the database since migration 640, but never offered here, so the
+  // role could not actually be given to anyone.
+  { value: 'shed_supervisor', label: 'Shed Supervisor', desc: 'Line Daily Entry and Line Master only — nothing else' },
   { value: 'viewer',        label: 'Viewer',         desc: 'View and reports only — no data entry' },
 ]
 
