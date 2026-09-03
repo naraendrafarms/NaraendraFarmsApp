@@ -1,22 +1,54 @@
 import React, { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { today, fmtDate } from '@/lib/utils'
 import {
   Card, CardHeader, Select, Spinner, EmptyState, DateInput,
-  Table, Th, Td, Badge, Button,
+  Table, Th, Td, Badge, Button, Modal, Input,
 } from '@/components/ui'
-import { Download, Wallet } from 'lucide-react'
+import { Download, Wallet, Plus } from 'lucide-react'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
+import { moduleLevel } from '@/lib/auth'
+import { friendlyDbError } from '@/lib/utils'
+import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
+
+// The same option groups the Cash Book reads, so the two screens can never
+// offer different categories or modes for the same book.
+const CATEGORIES_FB = [
+  { value: 'sales_collection', label: 'Sales Collection (General)' },
+  { value: 'he_sale', label: 'HE Egg Sale' }, { value: 'je_sale', label: 'Jumbo Egg Sale (JE)' },
+  { value: 'te_sale', label: 'Table Egg Sale (TE)' }, { value: 'be_sale', label: 'Broken/Crack Egg Sale (BE)' },
+  { value: 'bird_sale', label: 'Bird Sale' }, { value: 'litter_sale', label: 'Litter / Manure Sale' },
+  { value: 'bag_sale', label: 'Empty Bag Sale' }, { value: 'expense', label: 'Expense' },
+  { value: 'salary', label: 'Salary' }, { value: 'advance', label: 'Advance' },
+  { value: 'transfer', label: 'Transfer' }, { value: 'other', label: 'Other' },
+]
+const PAYMENT_MODES_FB = [
+  { value: 'cash', label: 'Cash' }, { value: 'upi', label: 'UPI' }, { value: 'cheque', label: 'Cheque' },
+]
+// cash_book.txn_type accepts only these three. Hardcoded rather than read from
+// the options table: that table once held only credit/debit and made every save
+// fail with a constraint error, and this screen will not repeat it.
+const TXN_TYPES = [
+  { value: 'receipt', label: 'Receipt (money in)' },
+  { value: 'payment', label: 'Payment (money out)' },
+  { value: 'contra',  label: 'Contra (transfer)' },
+]
 
 // Each imprest account as its own cash book: every entry it holds, in date
 // order, with a running balance.
 //
-// READ ONLY. Entries are made on the Cash Book screen as they always were;
-// this only reads them back per holder. It answers the question the cash book
-// could never answer -- "what has Srinath been given, what has he spent, and
-// what is he holding?" -- because until now nothing recorded WHICH cash box a
-// transaction moved through.
+// A voucher can be entered straight from here, pre-set to the account being
+// viewed, so nobody has to go to the Cash Book and remember to pick the imprest
+// -- forgetting it is what leaves an entry untagged and a balance wrong. It
+// writes to cash_book like any other entry: there is no second store, and
+// nothing entered here is hidden from the Cash Book, which stays the single
+// place every transaction is visible.
+//
+// It answers the question the cash book could never answer -- "what has Srinath
+// been given, what has he spent, and what is he holding?" -- because until now
+// nothing recorded WHICH cash box a transaction moved through.
 //
 // The opening balance comes from the account master. The running balance starts
 // there and moves with each entry, so the last row is the account's balance
@@ -50,6 +82,66 @@ export const ImprestLedger: React.FC = () => {
   }, [accounts, acctId])
 
   const acct = (accounts ?? []).find((a: any) => a.cash_account_id === acctId) as any
+
+  const qc = useQueryClient()
+  const canEdit = moduleLevel('accounts') === 'full'
+  const CATEGORIES = useConfigOptions('cashbook_category', CATEGORIES_FB)
+  const PAYMENT_MODES = useConfigOptions('payment_method', PAYMENT_MODES_FB)
+
+  const { data: farms } = useQuery({
+    queryKey: ['farms'],
+    queryFn: async () => {
+      const { data } = await supabase.from('farms').select('id,name').order('name')
+      return data ?? []
+    },
+  })
+
+  const [showForm, setShowForm] = useState(false)
+  const emptyVoucher = () => ({
+    txn_date: today(), txn_type: 'payment', category: 'expense',
+    description: '', party_name: '', farm_id: '', amount: '',
+    payment_mode: 'cash', reference_no: '', remarks: '',
+  })
+  const [v, setV] = useState(emptyVoucher())
+  const sv = (k: string, val: any) => setV(f => ({ ...f, [k]: val }))
+
+  const saveVoucher = useMutation({
+    mutationFn: async () => {
+      if (!acctId) throw new Error('Pick an imprest account first')
+      if (!v.description.trim()) throw new Error('Description is required')
+      const amt = parseFloat(v.amount) || 0
+      if (amt <= 0) throw new Error('Enter an amount greater than zero')
+      // ONE amount box, with the Type deciding which side it lands on. Two
+      // separate boxes is exactly how the 05/05 row ended up typed 'receipt'
+      // while carrying a payment amount.
+      const isIn = v.txn_type === 'receipt'
+      const { error } = await supabase.from('cash_book').insert({
+        txn_date: v.txn_date,
+        txn_type: v.txn_type,
+        category: v.category || null,
+        description: v.description.trim(),
+        party_name: v.party_name.trim() || null,
+        farm_id: v.farm_id || null,
+        cash_account_id: acctId,
+        amount_in: isIn ? amt : 0,
+        amount_out: isIn ? 0 : amt,
+        payment_mode: v.payment_mode || 'cash',
+        reference_no: v.reference_no.trim() || null,
+        remarks: v.remarks.trim() || null,
+      })
+      if (error) throw new Error(friendlyDbError(error))
+    },
+    onSuccess: () => {
+      toast.success('Voucher recorded')
+      qc.invalidateQueries({ queryKey: ['imprest_ledger'] })
+      qc.invalidateQueries({ queryKey: ['imprest_prior'] })
+      qc.invalidateQueries({ queryKey: ['cash_account_balances'] })
+      qc.invalidateQueries({ queryKey: ['cash_book'] })
+      setV(emptyVoucher())
+      setShowForm(false)
+    },
+    onError: (e: any) => toast.error(e.message),
+  })
 
   const { data: rows, isLoading } = useQuery({
     queryKey: ['imprest_ledger', acctId, from, to],
@@ -112,9 +204,17 @@ export const ImprestLedger: React.FC = () => {
       <CardHeader
         title="Imprest Ledger"
         subtitle="Each imprest account as its own cash book — what came in, what went out, what is held"
-        action={withBalance.length
-          ? <Button variant="outline" icon={<Download size={16} />} onClick={exportXlsx}>Export</Button>
-          : undefined} />
+        action={
+          <div className="flex gap-2">
+            {withBalance.length > 0 && (
+              <Button variant="outline" icon={<Download size={16} />} onClick={exportXlsx}>Export</Button>
+            )}
+            {canEdit
+              ? <Button icon={<Plus size={16} />} disabled={!acctId}
+                  onClick={() => { setV(emptyVoucher()); setShowForm(true) }}>Add Voucher</Button>
+              : <Badge color="gray">View only</Badge>}
+          </div>
+        } />
 
       {/* Every account's balance at a glance, and a one-click switch. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -203,6 +303,65 @@ export const ImprestLedger: React.FC = () => {
           )}
         </Card>
       )}
+
+      <Modal open={showForm} onClose={() => setShowForm(false)}
+        title={`Add Voucher — ${acct?.name ?? ''}`}>
+        <div className="space-y-4">
+          <div className="rounded-lg bg-brand-50 border border-brand-200 px-3 py-2 text-sm">
+            This voucher is recorded against <strong>{acct?.name}</strong>. It goes into the
+            Cash Book like any other entry — there is no separate book.
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <DateInput label="Date" value={v.txn_date} onChange={e => sv('txn_date', e.target.value)} />
+            <Select label="Type" value={v.txn_type}
+              onChange={e => sv('txn_type', (e.target as HTMLSelectElement).value)}
+              options={TXN_TYPES} />
+          </div>
+
+          <Input label="Description" required value={v.description}
+            onChange={e => sv('description', e.target.value)}
+            placeholder="e.g. Being amount paid for office tea expenses" />
+
+          <div className="grid grid-cols-2 gap-4">
+            <Select label="Category" value={v.category}
+              onChange={e => sv('category', (e.target as HTMLSelectElement).value)}
+              options={CATEGORIES} />
+            <Select label="Payment Mode" value={v.payment_mode}
+              onChange={e => sv('payment_mode', (e.target as HTMLSelectElement).value)}
+              options={PAYMENT_MODES} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Input label={v.txn_type === 'receipt' ? 'Amount Received (₹)' : 'Amount Paid (₹)'}
+              required type="number" step="0.01" value={v.amount}
+              onChange={e => sv('amount', e.target.value)}
+              hint="One box — the Type above decides which side it lands on" />
+            <Select label="Site (which site bears the cost)" value={v.farm_id}
+              onChange={e => sv('farm_id', (e.target as HTMLSelectElement).value)}
+              options={[{ value: '', label: '— Head Office / none —' },
+                ...(farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))]} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Party (optional)" value={v.party_name}
+              onChange={e => sv('party_name', e.target.value)}
+              placeholder="who paid or was paid" />
+            <Input label="Reference No (optional)" value={v.reference_no}
+              onChange={e => sv('reference_no', e.target.value)} />
+          </div>
+
+          <Input label="Remarks (optional)" value={v.remarks}
+            onChange={e => sv('remarks', e.target.value)} />
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button loading={saveVoucher.isPending} onClick={() => saveVoucher.mutate()}>
+              Save Voucher
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
