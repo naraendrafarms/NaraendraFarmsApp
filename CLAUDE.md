@@ -56,6 +56,36 @@ Rules:
 
 ---
 
+## ASK BEFORE CHANGING DATA OR BUILDING — NO INFERRED PERMISSION (NEVER CHANGE THIS)
+Added after a backfill was run on 540 live rows on the strength of a passing
+remark, and after a whole screen was built that duplicated a report that
+already existed.
+
+**A general remark is NOT permission.** "Mostly it is the laying farm" explains
+how the farm works; it does not authorise writing that value onto 540 rows.
+Before ANY of the following, ask in plain words and WAIT for a yes:
+- writing, updating, backfilling or deleting existing rows
+- turning a switch on for live sites, or seeding master records
+- building a new page, report or screen
+
+**Before building anything new, check whether it already exists.** Search the
+routes, the Reports menu and the pages folder first, and say what you found. If
+something close exists, extend THAT rather than adding a second screen showing
+the same data. Two screens for one thing is worse than none.
+
+**Ask ONE clear question and stop.** Do not ask a question and then proceed on
+the assumed answer in the same turn. Do not bundle a decision inside a wall of
+explanation where it can be missed.
+
+Reading is always allowed: diagnostics, SELECTs and information_schema checks
+need no permission and should be used freely to answer a question properly
+before asking it.
+
+If something was built or changed that was not asked for, say so plainly,
+say exactly what it touched, and offer to reverse it.
+
+---
+
 ## NEVER ASSUME — CHECK FIRST, SAY WHAT IT IS, THEN DO IT (NEVER CHANGE THIS)
 Do not guess a column name, a table name, a status/enum value, an existing
 value, or whether something already exists. **Verify it against the real
