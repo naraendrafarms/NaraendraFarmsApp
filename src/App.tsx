@@ -23,6 +23,7 @@ import { BulkDailyEntry } from '@/pages/flocks/BulkDailyEntry'
 import { LineDailyEntry } from '@/pages/flocks/LineDailyEntry'
 import { LineReports } from '@/pages/flocks/LineReports'
 import { CashAccounts } from '@/pages/masters/CashAccounts'
+import { ImprestLedger } from '@/pages/accounts/ImprestLedger'
 import { EggConversions } from '@/pages/flocks/EggConversions'
 import { HatchBatches } from '@/pages/flocks/HatchBatches'
 import { HatchAnalysis } from '@/pages/flocks/HatchAnalysis'
@@ -284,6 +285,7 @@ export const App: React.FC = () => {
             <Route path="reports/daily-summary" element={<DailySummaryPage />} />
             <Route path="accounts/cash-book" element={<CashBookPage />} />
             <Route path="accounts/bank-ledger" element={<BankLedgerPage />} />
+            <Route path="accounts/imprest-ledger" element={<ImprestLedger />} />
             <Route path="reports/flock-pl-summary" element={<FlockPLSummary />} />
             <Route path="reports/site-invoice" element={<SiteInvoicePage />} />
             <Route path="reports/bird-sales" element={<BirdSalesReport />} />

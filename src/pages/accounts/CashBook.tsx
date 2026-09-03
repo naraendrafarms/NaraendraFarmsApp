@@ -108,6 +108,10 @@ function emptyForm() {
     party_ref:    '',
     farm_id:      '',
     flock_id:     '',
+    // Which imprest the cash physically moved through. Separate from farm_id,
+    // which says which SITE bears the cost -- one column cannot mean both, and
+    // trying to make it did is why imprest balances never existed.
+    cash_account_id: '',
     reference_no: '',
     amount_in:    '',
     amount_out:   '',
@@ -200,6 +204,17 @@ export const CashBookPage: React.FC = () => {
   const sf = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   // ── Queries ───────────────────────────────────────────────────────────────
+
+  // The imprest accounts -- which cash box the money moved through. Only
+  // active ones are offered; a retired holder must not collect new entries.
+  const { data: cashAccounts } = useQuery({
+    queryKey: ['cash_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_accounts')
+        .select('id,name,acct_type').eq('is_active', true).order('sort_order')
+      return data ?? []
+    }
+  })
 
   const { data: farms } = useQuery({
     queryKey: ['farms'],
@@ -371,6 +386,7 @@ export const CashBookPage: React.FC = () => {
         partner_id:   form.party_ref.startsWith('partner:') ? form.party_ref.slice(8) : null,
         farm_id:      form.farm_id     || null,
         flock_id:     form.flock_id    || null,
+        cash_account_id: form.cash_account_id || null,
         reference_no: form.reference_no || null,
         amount_in:    amtIn,
         amount_out:   amtOut,
@@ -422,6 +438,7 @@ export const CashBookPage: React.FC = () => {
         description:  row.description   ?? '',
         party_name:   row.party_name    ?? '',
         party_ref:    row.party_id ? `party:${row.party_id}` : row.partner_id ? `partner:${row.partner_id}` : '',
+        cash_account_id: row.cash_account_id ?? '',
         farm_id:      row.farm_id       ?? '',
         flock_id:     row.flock_id      ?? '',
         reference_no: row.reference_no  ?? '',
@@ -837,6 +854,12 @@ export const CashBookPage: React.FC = () => {
           </FormRow>
           <FormRow>
             <SearchableSelect label="Farm (optional)" placeholder="— Select Farm —" options={farmOptions} value={form.farm_id} onChange={v => sf('farm_id', v)} />
+            <Select label="Imprest Account (cash box)"
+              value={form.cash_account_id}
+              onChange={e => sf('cash_account_id', e.target.value)}
+              options={[{ value: '', label: '— Not an imprest —' },
+                ...(cashAccounts ?? []).map((a: any) => ({ value: a.id, label: a.name }))]}
+              hint="Whose cash this moved through. The Farm above is which site bears the cost — the two are different." />
             <SearchableSelect label="Flock (optional)" placeholder="— Select Flock —" options={flockOptions} value={form.flock_id} onChange={v => sf('flock_id', v)} />
           </FormRow>
           <Input label="Remarks" placeholder="Optional notes" value={form.remarks} onChange={e => sf('remarks', e.target.value)} />
