@@ -62,9 +62,13 @@ const TYPE_COLOR: Record<string, any> = { receipt: 'green', payment: 'red', cont
 
 export const ImprestLedger: React.FC = () => {
   const [acctId, setAcctId] = useState('')
+  // Opens on the current financial year rather than a silent 3-month window.
+  // A short default made an account with older entries look empty, which reads
+  // as "no data" rather than "not in these dates".
   const [from, setFrom] = useState(() => {
-    const d = new Date(); d.setMonth(d.getMonth() - 3)
-    return d.toISOString().slice(0, 10)
+    const d = new Date()
+    const fyStart = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1
+    return `${fyStart}-04-01`
   })
   const [to, setTo] = useState(today())
 
@@ -330,7 +334,7 @@ export const ImprestLedger: React.FC = () => {
           {withBalance.length === 0 ? (
             <div className="p-6">
               <EmptyState title="No entries for this account in this period"
-                subtitle="Cash book entries appear here once they are tagged to an imprest account. Existing entries were left untagged on purpose — they record which site bore the cost but never which cash box held the money, so tagging them would have invented balances. Tag new entries using the Imprest Account box on the Cash Book form." />
+                subtitle="Nothing fell in these dates — the dates above default to the last 3 months, so widen the From date to see older entries. An entry belongs to a site's imprest automatically, from where the cash was received; the Imprest Account box on the Cash Book form is only needed when the cash is NOT at a site, such as Head Office cash actually held by Mandal or by a person." />
             </div>
           ) : (
             <div className="overflow-x-auto">
