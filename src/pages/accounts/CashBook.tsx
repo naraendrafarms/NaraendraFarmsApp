@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { fmtDate, inr } from '@/lib/utils'
+import { fmtDate, inr, friendlyDbError } from '@/lib/utils'
 import { today, FY_OPTIONS, currentFY, fyRange, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
@@ -187,7 +187,7 @@ export const CashBookPage: React.FC = () => {
   // Internal Transfer modal
   const [showTransfer, setShowTransfer] = useState(false)
   const [xferForm, setXferForm] = useState({
-    date: today(), amount: '', description: '', fromLocation: 'ho', toLocation: '',
+    date: today(), amount: '', description: '', fromLocation: '', toLocation: '',
   })
   const [xferSaving, setXferSaving] = useState(false)
 
@@ -212,6 +212,15 @@ export const CashBookPage: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase.from('cash_accounts')
         .select('id,name,acct_type').eq('is_active', true).order('sort_order')
+      return data ?? []
+    }
+  })
+
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_accounts')
+        .select('id,bank_name,account_no,is_active').eq('is_active', true).order('bank_name')
       return data ?? []
     }
   })
@@ -361,9 +370,17 @@ export const CashBookPage: React.FC = () => {
     { value: 'ho', label: 'Head Office' },
     ...(farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` })),
   ]
+  // A transfer endpoint is now an IMPREST, a BANK ACCOUNT, or a site. The old
+  // site-to-site options are kept so nothing that worked yesterday stops
+  // working; imprest and bank are added above them.
   const xferLocationOptions = [
-    { value: 'ho', label: 'Head Office' },
-    ...(farms ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` })),
+    ...(cashAccounts ?? []).map((a: any) => ({ value: `imprest:${a.id}`, label: `${a.name} (Imprest)` })),
+    ...(bankAccounts ?? []).map((b: any) => ({
+      value: `bank:${b.id}`,
+      label: `${b.bank_name}${b.account_no ? ' ****' + String(b.account_no).slice(-4) : ''} (Bank)`,
+    })),
+    { value: 'site:ho', label: 'Head Office (Site)' },
+    ...(farms ?? []).map((f: any) => ({ value: `site:${f.id}`, label: `${f.name} (Site)` })),
   ]
 
   // ── Mutations ─────────────────────────────────────────────────────────────
@@ -485,32 +502,81 @@ export const CashBookPage: React.FC = () => {
     obMut.mutate(v)
   }
 
+  // An internal transfer now moves cash between any two of: an IMPREST, a BANK
+  // ACCOUNT, or a site. Imprest-to-bank (a deposit) and bank-to-imprest (cash
+  // drawn) were impossible before, because cash_book and bank_transactions are
+  // separate tables with nothing crossing between them.
+  //
+  // Both legs share one transfer_group_id. Previously the two legs were loose
+  // rows with nothing linking them, so deleting one silently unbalanced the
+  // book -- and across two tables that would have been worse.
   const handleTransfer = async () => {
     const amt = parseFloat(xferForm.amount)
     if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return }
-    if (xferForm.fromLocation === xferForm.toLocation) { toast.error('From and To locations must differ'); return }
+    if (!xferForm.fromLocation || !xferForm.toLocation) { toast.error('Choose both From and To'); return }
+    if (xferForm.fromLocation === xferForm.toLocation) { toast.error('From and To must differ'); return }
     if (!xferForm.description) { toast.error('Enter a description'); return }
     setXferSaving(true)
     try {
-      const fromFarmId = xferForm.fromLocation === 'ho' ? null : xferForm.fromLocation
-      const toFarmId   = xferForm.toLocation   === 'ho' ? null : xferForm.toLocation
+      const groupId = crypto.randomUUID()
       const desc = xferForm.description
-      // Payment at source
-      await supabase.from('cash_book').insert({
+      const parse = (v: string) => {
+        const [kind, id] = v.split(':')
+        return { kind, id: id === 'ho' ? null : id }
+      }
+      const src = parse(xferForm.fromLocation)
+      const dst = parse(xferForm.toLocation)
+
+      // The imprest on the other side of a bank leg, so a deposit row can name
+      // its source without having to read the paired row.
+      const otherImprest = (a: any, b: any) => (b.kind === 'imprest' ? b.id : null)
+
+      const cashLeg = (side: any, other: any, isOut: boolean) => ({
         txn_date: xferForm.date, txn_type: 'contra', category: 'transfer',
-        description: desc, farm_id: fromFarmId,
-        amount_in: 0, amount_out: amt, payment_mode: 'cash',
+        description: desc,
+        farm_id: side.kind === 'site' ? side.id : null,
+        cash_account_id: side.kind === 'imprest' ? side.id : null,
+        amount_in: isOut ? 0 : amt,
+        amount_out: isOut ? amt : 0,
+        payment_mode: 'cash',
+        transfer_group_id: groupId,
       })
-      // Receipt at destination
-      await supabase.from('cash_book').insert({
-        txn_date: xferForm.date, txn_type: 'contra', category: 'transfer',
-        description: desc, farm_id: toFarmId,
-        amount_in: amt, amount_out: 0, payment_mode: 'cash',
+
+      const bankLeg = (side: any, other: any, isOut: boolean) => ({
+        bank_account_id: side.id,
+        txn_date: xferForm.date,
+        // Money INTO the bank is a Credit; money out of it is a Debit.
+        txn_type: isOut ? 'Debit' : 'Credit',
+        category: 'transfer',
+        description: desc,
+        amount: amt,
+        cash_account_id: otherImprest(side, other),
+        transfer_group_id: groupId,
       })
+
+      const cashRows: any[] = []
+      const bankRows: any[] = []
+      ;(src.kind === 'bank' ? bankRows : cashRows).push(
+        src.kind === 'bank' ? bankLeg(src, dst, true) : cashLeg(src, dst, true))
+      ;(dst.kind === 'bank' ? bankRows : cashRows).push(
+        dst.kind === 'bank' ? bankLeg(dst, src, false) : cashLeg(dst, src, false))
+
+      if (cashRows.length) {
+        const { error } = await supabase.from('cash_book').insert(cashRows)
+        if (error) throw new Error(friendlyDbError(error))
+      }
+      if (bankRows.length) {
+        const { error } = await supabase.from('bank_transactions').insert(bankRows)
+        if (error) throw new Error(friendlyDbError(error))
+      }
+
       toast.success('Internal transfer recorded')
       qc.invalidateQueries({ queryKey: ['cash_book'] })
+      qc.invalidateQueries({ queryKey: ['cash_account_balances'] })
+      qc.invalidateQueries({ queryKey: ['imprest_ledger'] })
+      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
       setShowTransfer(false)
-      setXferForm({ date: today(), amount: '', description: '', fromLocation: 'ho', toLocation: '' })
+      setXferForm({ date: today(), amount: '', description: '', fromLocation: '', toLocation: '' })
     } catch (e: any) { toast.error(e.message) }
     setXferSaving(false)
   }
@@ -880,7 +946,7 @@ export const CashBookPage: React.FC = () => {
         }
       >
         <div className="space-y-4 text-sm text-gray-600 mb-2">
-          Transfer cash between a farm site and Head Office. Two contra entries will be created automatically.
+          Move cash between any two of an imprest, a bank account, or a site. Two paired entries are created — imprest and site legs in the cash book, bank legs in the bank ledger — so an imprest-to-bank deposit is one action.
         </div>
         <div className="space-y-3">
           <FormRow>
