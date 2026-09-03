@@ -62,15 +62,11 @@ const TYPE_COLOR: Record<string, any> = { receipt: 'green', payment: 'red', cont
 
 export const ImprestLedger: React.FC = () => {
   const [acctId, setAcctId] = useState('')
-  // Opens on the current financial year rather than a silent 3-month window.
-  // A short default made an account with older entries look empty, which reads
-  // as "no data" rather than "not in these dates".
-  const [from, setFrom] = useState(() => {
-    const d = new Date()
-    const fyStart = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1
-    return `${fyStart}-04-01`
-  })
-  const [to, setTo] = useState(today())
+  // Both blank by default: picking an account shows EVERY voucher it holds. A
+  // date default silently hid older entries and made a populated account look
+  // empty. Either box can still be filled to narrow the view.
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
 
   const { data: accounts } = useQuery({
     queryKey: ['cash_account_balances'],
@@ -203,12 +199,17 @@ export const ImprestLedger: React.FC = () => {
       // Reads v_imprest_entries, not cash_book, so the ledger lists exactly the
       // rows the balance counts. A receipt at a site belongs to that site's
       // imprest whether or not anyone tagged it -- the location already says so.
-      const { data, error } = await supabase
+      // No embed and no created_at ordering against the view: a view has no
+      // foreign keys so farms(name) cannot resolve, and created_at was not on
+      // the view -- either one failed the whole request and returned nothing.
+      let q = supabase
         .from('v_imprest_entries')
-        .select('cash_book_id,txn_date,txn_type,category,description,party_name,reference_no,amount_in,amount_out,payment_mode,farm_id,derived,farms(name)')
+        .select('cash_book_id,txn_date,created_at,txn_type,category,description,party_name,reference_no,amount_in,amount_out,payment_mode,farm_id,farm_name,derived')
         .eq('cash_account_id', acctId)
-        .gte('txn_date', from).lte('txn_date', to)
         .order('txn_date').order('created_at')
+      if (from) q = q.gte('txn_date', from)
+      if (to) q = q.lte('txn_date', to)
+      const { data, error } = await q
       if (error) throw error
       return data ?? []
     },
@@ -220,6 +221,7 @@ export const ImprestLedger: React.FC = () => {
     queryKey: ['imprest_prior', acctId, from],
     enabled: !!acctId,
     queryFn: async () => {
+      if (!from) return 0   // no From date means the list already starts at the beginning
       const { data } = await supabase
         .from('v_imprest_entries').select('amount_in,amount_out,payment_mode')
         .eq('cash_account_id', acctId).lt('txn_date', from)
@@ -255,13 +257,13 @@ export const ImprestLedger: React.FC = () => {
     const out = withBalance.map((r: any) => ({
       Date: fmtDate(r.txn_date), Type: r.txn_type, Category: r.category ?? '',
       Description: r.description, Party: r.party_name ?? '',
-      Site: r.farms?.name ?? '', Reference: r.reference_no ?? '',
+      Site: r.farm_name ?? '', Reference: r.reference_no ?? '',
       Received: Number(r.amount_in ?? 0), Paid: Number(r.amount_out ?? 0),
       Balance: r.running, Mode: r.payment_mode ?? '',
     }))
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(out), 'Imprest Ledger')
-    XLSX.writeFile(wb, `imprest-${(acct?.name ?? 'account').replace(/\s+/g, '-')}-${from}-to-${to}.xlsx`)
+    XLSX.writeFile(wb, `imprest-${(acct?.name ?? 'account').replace(/\s+/g, '-')}-${from || 'all'}-to-${to || 'all'}.xlsx`)
   }
 
   return (
@@ -322,7 +324,9 @@ export const ImprestLedger: React.FC = () => {
             <span className="text-gray-500">Received <strong className="text-green-700">₹{rupee(totIn)}</strong></span>
             <span className="text-gray-500">Paid <strong className="text-red-700">₹{rupee(totOut)}</strong></span>
             <span className="text-gray-500">Closing <strong className={closing < 0 ? 'text-red-600' : 'text-gray-900'}>₹{rupee(closing)}</strong></span>
-            <span className="text-gray-400">{fmtDate(from)} – {fmtDate(to)}</span>
+            <span className="text-gray-400">
+              {from || to ? `${from ? fmtDate(from) : 'start'} – ${to ? fmtDate(to) : 'today'}` : 'all dates'}
+            </span>
             {nonCashCount > 0 && (
               <span className="text-amber-600">
                 {nonCashCount} cheque/UPI {nonCashCount === 1 ? 'entry' : 'entries'} listed but not counted —
@@ -333,8 +337,8 @@ export const ImprestLedger: React.FC = () => {
 
           {withBalance.length === 0 ? (
             <div className="p-6">
-              <EmptyState title="No entries for this account in this period"
-                subtitle="Nothing fell in these dates — the dates above default to the last 3 months, so widen the From date to see older entries. An entry belongs to a site's imprest automatically, from where the cash was received; the Imprest Account box on the Cash Book form is only needed when the cash is NOT at a site, such as Head Office cash actually held by Mandal or by a person." />
+              <EmptyState title="No entries for this account"
+                subtitle="This account holds no cash book entries. An entry belongs to a site's imprest automatically, from where the cash was received; the Imprest Account box on the Cash Book form is only needed when the cash is NOT at a site — Head Office cash actually held by Mandal or by a person. If you have set a From or To date above, clear them to see every voucher." />
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -356,7 +360,7 @@ export const ImprestLedger: React.FC = () => {
                       <Td className="text-xs text-gray-500">{r.category ?? ''}</Td>
                       <Td>{r.description}</Td>
                       <Td className="text-xs text-gray-500">{r.party_name ?? ''}</Td>
-                      <Td className="text-xs text-gray-500">{r.farms?.name ?? ''}</Td>
+                      <Td className="text-xs text-gray-500">{r.farm_name ?? ''}</Td>
                       <Td right className="text-green-700">{Number(r.amount_in) ? '₹' + rupee(r.amount_in) : ''}</Td>
                       <Td right className="text-red-700">{Number(r.amount_out) ? '₹' + rupee(r.amount_out) : ''}</Td>
                       <Td right>{r.counted
