@@ -663,8 +663,11 @@ export const EmployeeAdvancesPage: React.FC = () => {
     queryFn: async () => {
       let q = supabase.from('employee_advances')
         .select('*, employees(name, emp_id, farm_id, farms(name))')
-        .eq('salary_month', filterMonth)
         .order('advance_date', { ascending: false })
+      // Blank = All months. Without this the filter always demanded an exact
+      // month, so an advance whose salary month was never set was invisible in
+      // every single view rather than merely filed under the wrong one.
+      if (filterMonth) q = q.eq('salary_month', filterMonth)
       if (farmId) q = q.eq('farm_id', farmId)
       const { data } = await q
       return data ?? []
@@ -811,8 +814,12 @@ export const EmployeeAdvancesPage: React.FC = () => {
     return { value: val, label: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) }
   })
 
+  // The FILTER may be "all"; the form's Deduct from Month may not -- an advance
+  // has to be deducted from one specific month.
+  const filterMonthOptions = [{ value: '', label: 'All months' }, ...monthOptions]
+
   const handleExport = () => {
-    exportCSV(`Employee_Advances_${filterMonth}.csv`,
+    exportCSV(`Employee_Advances_${filterMonth || 'All-Months'}.csv`,
       ['Date', 'Employee', 'Emp ID', 'Site', 'Type', 'Details', 'Amount', 'Salary Month', 'Payment Mode', 'Narration'],
       (advances ?? []).map((r: any) => [
         r.advance_date, r.employees?.name ?? '', r.employees?.emp_id ?? '', r.employees?.farms?.name ?? '',
@@ -823,7 +830,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
 
   const IMPORT_HEADERS = ['Emp ID', 'Advance Date', 'Type', 'Amount', 'Egg Qty', 'Egg Rate', 'Salary Month', 'Payment Mode', 'Narration']
   const downloadImportTemplate = () => downloadXlsxTemplate('employee_advances_template.xlsx', IMPORT_HEADERS,
-    ['NF-001', todayStr(), 'cash', '1000', '', '', filterMonth, 'Cash', 'e.g. Advance for personal expense'])
+    ['NF-001', todayStr(), 'cash', '1000', '', '', filterMonth || curMonth, 'Cash', 'e.g. Advance for personal expense'])
 
   const importRef = useRef<HTMLInputElement>(null)
   const [importing, setImporting] = useState(false)
@@ -959,7 +966,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
         <SearchableSelect label="Site" placeholder="All Sites" options={farmOptions} value={farmId} onChange={v => setFarmId(v)} className="w-48" />
-        <Select label="Month" options={monthOptions} value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-48" />
+        <Select label="Month" options={filterMonthOptions} value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-48" />
       </div>
 
       {/* Summary */}
