@@ -606,6 +606,10 @@ const EMPTY_FORM = {
   employee_id: '', farm_id: '', advance_date: todayStr(),
   advance_type: 'cash', amount: '', egg_qty: '', egg_rate: '', narration: '', salary_month: '',
   payment_mode: 'Cash', bank_account_id: '',
+  // Which imprest the cash physically comes out of. A cash advance that leaves
+  // this blank reduces the Cash Book but no holder's balance, so the tin reads
+  // higher than it is -- silently. Required for cash advances below.
+  cash_account_id: '',
 }
 
 export const EmployeeAdvancesPage: React.FC = () => {
@@ -616,6 +620,15 @@ export const EmployeeAdvancesPage: React.FC = () => {
   const [farmId, setFarmId] = useState('')
   const [filterMonth, setFilterMonth] = useState(curMonth)
   const [form, setForm] = useState({ ...EMPTY_FORM, salary_month: curMonth })
+  const { data: cashAccounts } = useQuery({
+    queryKey: ['cash_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_accounts')
+        .select('id,name').eq('is_active', true).order('sort_order')
+      return data ?? []
+    }
+  })
+
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [sel, setSel] = useState<Set<string>>(new Set())
@@ -669,6 +682,9 @@ export const EmployeeAdvancesPage: React.FC = () => {
     mutationFn: async () => {
       if (!form.employee_id) throw new Error('Select an employee')
       if (!form.amount || parseFloat(form.amount) <= 0) throw new Error('Enter a valid amount')
+      if (form.advance_type === 'cash' && form.payment_mode === 'Cash' && !form.cash_account_id) {
+        throw new Error('Choose which imprest the cash is paid from')
+      }
       if (form.advance_type === 'cash' && form.payment_mode === 'Bank' && !form.bank_account_id) {
         throw new Error('Select a Bank Account for a bank-paid advance, or it won\'t be recorded in any ledger')
       }
@@ -687,6 +703,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
         salary_month: form.salary_month || null,
         payment_mode: form.advance_type === 'cash' ? form.payment_mode : null,
         bank_account_id: form.advance_type === 'cash' && form.payment_mode === 'Bank' ? form.bank_account_id : null,
+        cash_account_id: form.advance_type === 'cash' && form.payment_mode === 'Cash' ? form.cash_account_id : null,
       }
 
       // Delete any previously-linked cash_book/bank_transactions row before
@@ -716,6 +733,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
             txn_date: form.advance_date, txn_type: 'payment', category: 'advance',
             farm_id: advFarmId, description: `Advance to ${empName}${form.narration ? ' — ' + form.narration : ''}`,
             party_name: empName, amount_out: amount, payment_mode: 'cash',
+            cash_account_id: form.cash_account_id || null,
           }).select('id').single()
           if (cbErr) throw cbErr
           payload.cash_book_id = cb.id
@@ -750,6 +768,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
       egg_qty: r.egg_qty != null ? String(r.egg_qty) : '', egg_rate: r.egg_rate != null ? String(r.egg_rate) : '',
       narration: r.narration ?? '', salary_month: r.salary_month ?? '',
       payment_mode: r.payment_mode ?? 'Cash', bank_account_id: r.bank_account_id ?? '',
+      cash_account_id: r.cash_account_id ?? '',
     })
     setShowForm(true)
   }
@@ -906,6 +925,12 @@ export const EmployeeAdvancesPage: React.FC = () => {
                   <Select label="Bank Account" placeholder="— Select —"
                     options={(bankAccounts ?? []).map((b: any) => ({ value: b.id, label: `${b.bank_name}${b.account_name ? ' — '+b.account_name : ''}` }))}
                     value={form.bank_account_id} onChange={e => s('bank_account_id', e.target.value)} />
+                )}
+                {form.payment_mode === 'Cash' && (
+                  <Select label="Paid from (Imprest)" required placeholder="— Select —"
+                    options={(cashAccounts ?? []).map((a: any) => ({ value: a.id, label: a.name }))}
+                    value={form.cash_account_id} onChange={e => s('cash_account_id', e.target.value)}
+                    hint="Whose cash this comes out of. Without it the Cash Book falls but no holder's balance does." />
                 )}
               </>
             )}
