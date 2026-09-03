@@ -772,7 +772,9 @@ export const HEDispatch: React.FC = () => {
       }
       // Same rule as NHE Sales: latest 200 unfiltered (fast default), but a
       // filtered view must return every match, paging past the 1000 cap.
-      if (!hasFilter) { const { data } = await build().limit(NHE_RECENT_LIMIT); return data ?? [] }
+      // Load every dispatch. The old 200 cap made an unfiltered list -- and the
+      // totals with it -- silently partial. Length is handled by paging the
+      // table instead, so nothing is hidden from the figures.
       return fetchAllPages<any>((from, to) => build().range(from, to), 'HE Dispatch', toast.error)
     }
   })
@@ -1074,6 +1076,9 @@ export const HEDispatch: React.FC = () => {
   const totalFree = filtered.reduce((s: number, d: any) => s + (d.free_eggs ?? 0), 0)
   const totalTds  = filtered.reduce((s: number, d: any) => s + (d.tds_amount ?? 0), 0)
   const totalInvQty = filtered.reduce((s: number, d: any) => s + (d.invoice_eggs ?? 0), 0)
+  const pgHE = usePagination(filtered.length, `${noInvoiceOnly}|${hePartyFilter}`)
+  const pageDispatches = filtered.slice(pgHE.from, pgHE.to)
+
   const noInvoiceCount = (dispatches ?? []).filter((d: any) => !d.invoice_no).length
 
   // Stock register — same logic as Reports → Egg Stock Balance day-wise view
@@ -1548,12 +1553,6 @@ export const HEDispatch: React.FC = () => {
         extraAction={sel.size > 1 ? <Button variant="outline" size="sm" onClick={() => setConsolidateOpen(true)}>Consolidate to Invoice</Button> : undefined} />
 
 
-      {!hasFilter && (dispatches ?? []).length >= NHE_RECENT_LIMIT && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
-          Showing only the latest <strong>{NHE_RECENT_LIMIT}</strong> dispatches — the totals below cover just these.
-          Apply a flock or date filter to load every matching record.
-        </div>
-      )}
 
       {tab === 'dispatch' && (isLoading ? <Spinner /> : (
         <Card padding={false}>
@@ -1566,7 +1565,7 @@ export const HEDispatch: React.FC = () => {
               <Th right>Rate</Th><Th right>Amount</Th><Th right>TDS</Th><Th>Vehicle</Th><Th>Lorry</Th><Th>Out Time</Th><Th>Payment</Th><Th>Temp</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {filtered.map((d: any) => (<>
+              {pageDispatches.map((d: any) => (<>
                 <tr key={d.id} className={`hover:bg-gray-50 ${sel.has(d.id) ? 'bg-red-50' : !d.invoice_no ? 'bg-orange-50' : ''}`}>
                   <Td><CB checked={sel.has(d.id)} onChange={() => toggle(d.id)}/></Td>
                   <Td><Badge color="green">F-{d.flocks?.flock_no}</Badge></Td>
@@ -1687,6 +1686,9 @@ export const HEDispatch: React.FC = () => {
               </tr></tfoot>
             )}
           </Table>
+          <PageSizeControl page={pgHE.page} setPage={pgHE.setPage}
+            pageSize={pgHE.pageSize} setPageSize={pgHE.setPageSize}
+            totalPages={pgHE.totalPages} totalItems={filtered.length} />
           {filtered.length === 0 && (
             <EmptyState icon={<Egg size={32}/>} title={noInvoiceOnly ? 'All dispatches have invoice numbers' : 'No dispatches yet'}
               action={!noInvoiceOnly ? <Button onClick={() => openForm()} icon={<Plus size={16}/>}>Add Dispatch</Button> : undefined}
@@ -2107,7 +2109,6 @@ export const HEDispatch: React.FC = () => {
 // ── NHE SALES ────────────────────────────────────────────────────
 // Rows loaded in the unfiltered view — surfaced in the UI so the count is
 // never mistaken for the full history.
-const NHE_RECENT_LIMIT = 200
 
 const NHE_TYPES = [
   { value: 'je',         label: 'Jumbo Eggs (JE)' },
@@ -3938,7 +3939,6 @@ export const MedicineEntry: React.FC = () => {
         if (toDate) q = q.lte('usage_date', toDate)
         return q
       }
-      if (!hasFilter) { const { data } = await build().limit(NHE_RECENT_LIMIT); return data ?? [] }
       return fetchAllPages<any>((from, to) => build().range(from, to), 'Medicine usage', toast.error)
     }
   })
@@ -3964,7 +3964,6 @@ export const MedicineEntry: React.FC = () => {
         if (toDate) q = q.lte('allocation_date', toDate)
         return q
       }
-      if (!hasFilter) { const { data } = await build().limit(NHE_RECENT_LIMIT); return data ?? [] }
       return fetchAllPages<any>((from, to) => build().range(from, to), 'Medicine allocations', toast.error)
     }
   })
@@ -4123,6 +4122,9 @@ export const MedicineEntry: React.FC = () => {
   const filteredUsage = (usage ?? []).filter((u: any) =>
     !medSearch || String(u.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
 
+  const pgUsage = usePagination(filteredUsage.length, medSearch)
+  const pageUsage = filteredUsage.slice(pgUsage.from, pgUsage.to)
+
   const usageIds = filteredUsage.map((u: any) => u.id)
   const allUsageSel = usageIds.length > 0 && usageIds.every((id: string) => sel.has(id))
   const someUsageSel = usageIds.some((id: string) => sel.has(id))
@@ -4131,6 +4133,9 @@ export const MedicineEntry: React.FC = () => {
 
   const filteredAllocations = (allocations ?? []).filter((a: any) =>
     !medSearch || String(a.medicines_master?.name ?? '').toLowerCase().includes(medSearch.toLowerCase()))
+  const pgAlloc = usePagination(filteredAllocations.length, medSearch)
+  const pageAllocations = filteredAllocations.slice(pgAlloc.from, pgAlloc.to)
+
   const allocIds = filteredAllocations.map((a: any) => a.id)
   const allAllocSel = allocIds.length > 0 && allocIds.every((id: string) => selAlloc.has(id))
   const someAllocSel = allocIds.some((id: string) => selAlloc.has(id))
@@ -4219,12 +4224,6 @@ export const MedicineEntry: React.FC = () => {
       </div>
 
 
-      {!hasFilter && (usage ?? []).length >= NHE_RECENT_LIMIT && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
-          Showing only the latest <strong>{NHE_RECENT_LIMIT}</strong> medicine entries — the totals below cover just these.
-          Apply a flock or date filter to load every matching record.
-        </div>
-      )}
 
       {isLoading ? <Spinner /> : tab === 'monthly' ? (
         <Card padding={false}>
@@ -4262,7 +4261,7 @@ export const MedicineEntry: React.FC = () => {
                 <Th right>Qty</Th><Th right>Rate</Th><Th right>Amount</Th>
               </tr></thead>
               <tbody>
-                {filteredUsage.map((u: any) => (
+                {pageUsage.map((u: any) => (
                   <tr key={u.id} className={`hover:bg-gray-50 ${sel.has(u.id) ? 'bg-red-50' : ''}`}>
                     <Td><CB checked={sel.has(u.id)} onChange={() => toggleUsage(u.id)}/></Td>
                     <Td><Badge color="green">F-{u.flocks?.flock_no}</Badge></Td>
@@ -4281,6 +4280,9 @@ export const MedicineEntry: React.FC = () => {
                 </tr></tfoot>
               )}
             </Table>
+            <PageSizeControl page={pgUsage.page} setPage={pgUsage.setPage}
+              pageSize={pgUsage.pageSize} setPageSize={pgUsage.setPageSize}
+              totalPages={pgUsage.totalPages} totalItems={filteredUsage.length} />
             {filteredUsage.length === 0 && <EmptyState icon={<Package size={32}/>} title={medSearch ? `No medicine matching "${medSearch}"` : 'No usage records'} />}
           </Card>
           {bulkConfirm && (
@@ -4299,7 +4301,7 @@ export const MedicineEntry: React.FC = () => {
                 <Th right>Qty</Th><Th>Remarks</Th><Th></Th>
               </tr></thead>
               <tbody>
-                {loadingAlloc ? null : filteredAllocations.map((a: any) => (
+                {loadingAlloc ? null : pageAllocations.map((a: any) => (
                   <tr key={a.id} className={`hover:bg-gray-50 ${selAlloc.has(a.id) ? 'bg-red-50' : ''}`}>
                     <Td><CB checked={selAlloc.has(a.id)} onChange={() => toggleAlloc(a.id)}/></Td>
                     <Td><Badge color="blue">F-{a.flocks?.flock_no}</Badge></Td>
@@ -4317,6 +4319,9 @@ export const MedicineEntry: React.FC = () => {
                 ))}
               </tbody>
             </Table>
+            <PageSizeControl page={pgAlloc.page} setPage={pgAlloc.setPage}
+              pageSize={pgAlloc.pageSize} setPageSize={pgAlloc.setPageSize}
+              totalPages={pgAlloc.totalPages} totalItems={filteredAllocations.length} />
             {!loadingAlloc && filteredAllocations.length === 0 && (
               <EmptyState icon={<Package size={32}/>} title={medSearch ? `No medicine matching "${medSearch}"` : 'No allocations yet'}
                 action={<Button onClick={() => openAllocForm()} icon={<Plus size={16}/>}>Add Allocation</Button>} />
