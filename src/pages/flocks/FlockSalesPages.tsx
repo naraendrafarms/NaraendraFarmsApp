@@ -6,7 +6,7 @@ import { useFarmScope } from '@/lib/useFarmScope'
 import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, StatCard
-, DateInput, SearchableSelect } from '@/components/ui'
+, DateInput, SearchableSelect, usePagination, PageSizeControl } from '@/components/ui'
 import { useMedicineOptionsWithAliases } from '@/lib/itemAliases'
 import { useMedicineRates } from '@/lib/medicineRates'
 import { useFormDraft } from '@/hooks/useFormDraft'
@@ -2344,11 +2344,10 @@ export const NHESales: React.FC = () => {
         if (toDate) q = q.lte('sale_date', toDate)
         return q
       }
-      if (!hasFilter) {
-        const { data, error } = await build().limit(NHE_RECENT_LIMIT)
-        if (error) { toast.error(error.message); return [] }
-        return data ?? []
-      }
+      // Every sale is loaded, filtered or not. The old 200-row cap made an
+      // unfiltered list silently partial -- and the TOTALS with it -- which is
+      // a worse problem than a long page. Page length is handled by paging the
+      // table below instead, so nothing is hidden from the figures.
       return fetchAllPages<any>((from, to) => build().range(from, to), 'NHE Sales', toast.error)
     }
   })
@@ -3171,6 +3170,11 @@ export const NHESales: React.FC = () => {
     return true
   })
 
+  // Every filtered row is loaded and counted; only the RENDERED slice is
+  // paged, so the totals and the type summary always cover the whole set.
+  const pg = usePagination(filtered.length, `${typeFilter}|${partyFilter}|${flockFilter}|${empFilter}|${payFilter}|${fromDate}|${toDate}`)
+  const pageRows = filtered.slice(pg.from, pg.to)
+
   const saleIds = filtered.map((s: any) => s.id)
   const allSel  = saleIds.length > 0 && saleIds.every((id: string) => sel.has(id))
   const someSel = saleIds.some((id: string) => sel.has(id))
@@ -3330,16 +3334,6 @@ export const NHESales: React.FC = () => {
         </div>
       </div>
 
-      {/* The unfiltered view loads only the most recent NHE_RECENT_LIMIT rows.
-          Without saying so, the table AND the totals below silently described
-          a partial set as if it were everything. */}
-      {!hasFilter && (sales ?? []).length >= NHE_RECENT_LIMIT && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
-          Showing only the latest <strong>{NHE_RECENT_LIMIT}</strong> sales — the totals below cover just these.
-          Apply a flock, date or payment filter to load every matching record.
-        </div>
-      )}
-
       <div className={`grid grid-cols-1 gap-3 ${totalFreeQty > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
         <StatCard title="Total Sales" value={inr(payTotSale)} icon={<Package size={18}/>} color="text-blue-600" />
         <StatCard title="Received (Paid)" value={inr(payTotRecd)} icon={<Package size={18}/>} color="text-green-600" />
@@ -3414,7 +3408,7 @@ export const NHESales: React.FC = () => {
               <Th>Payment</Th><Th>Vehicle No</Th><Th>DC No</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {filtered.map((s: any) => (
+              {pageRows.map((s: any) => (
                 <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''} ${isBirdSale(s.sale_type) ? 'bg-orange-50/40' : ''}`}>
                   <Td><CB checked={sel.has(s.id)} onChange={() => toggle(s.id)}/></Td>
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
@@ -3500,6 +3494,9 @@ export const NHESales: React.FC = () => {
               </tr></tfoot>
             )}
           </Table>
+          <PageSizeControl page={pg.page} setPage={pg.setPage}
+            pageSize={pg.pageSize} setPageSize={pg.setPageSize}
+            totalPages={pg.totalPages} totalItems={filtered.length} />
           {filtered.length === 0 && <EmptyState icon={<Egg size={32}/>} title="No sales yet" action={<Button onClick={openNew} icon={<Plus size={16}/>}>Add</Button>} />}
         </Card>
       )}
