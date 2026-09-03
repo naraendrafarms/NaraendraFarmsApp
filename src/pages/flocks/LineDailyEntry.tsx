@@ -47,7 +47,12 @@ export const LineDailyEntry: React.FC = () => {
   const [shedId, setShedId] = useState('')
   const [date, setDate] = useState(today())
   const [tab, setTab] = useState<'birds' | 'eggs' | 'mortality' | 'feed' | 'transfer'>('birds')
-  const [feedTypeId, setFeedTypeId] = useState('')
+  // Two feed types for the day, not one: males are on male feed while females
+  // are on a layer ration, so a single dropdown could never describe a day
+  // correctly. Mirrors Bulk Daily Entry, which has held feed_type_f and
+  // feed_type_m at shed level all along.
+  const [feedTypeF, setFeedTypeF] = useState('')
+  const [feedTypeM, setFeedTypeM] = useState('')
   // Side filter. A shed has A-D or just A-B depending on how it was built, so
   // the choices come from the shed's own lines rather than a fixed list.
   const [sideFilter, setSideFilter] = useState('')
@@ -90,8 +95,12 @@ export const LineDailyEntry: React.FC = () => {
   const { data: feedTypes } = useQuery({
     queryKey: ['feed_types_active'],
     queryFn: async () => {
+      // Same list, same order as Bulk Daily Entry uses at shed level (active
+      // feed types by sort_order), so the two screens can never offer a
+      // different set of feeds for the same day.
       const { data, error } = await supabase
-        .from('feed_types').select('id,code,name').eq('is_active', true).order('code')
+        .from('feed_types').select('id,code,name,sort_order')
+        .eq('is_active', true).order('sort_order')
       if (error) throw error
       return data ?? []
     },
@@ -185,14 +194,20 @@ export const LineDailyEntry: React.FC = () => {
         reason: r.reason ?? '',
       }
     }
-    let ft = ''
+    // A line can now hold two feed rows for one day -- one per sex -- so merge
+    // rather than overwrite, and take each sex's feed type from the row that
+    // actually carries that sex's kg.
+    let ftF = '', ftM = ''
     for (const r of existing?.feed ?? []) {
       if (!f[r.line_id]) continue
-      f[r.line_id] = {
-        f: r.female_kg ? String(r.female_kg) : '',
-        m: r.male_kg ? String(r.male_kg) : '',
+      if (Number(r.female_kg) > 0) {
+        f[r.line_id].f = String(r.female_kg)
+        if (r.feed_type_id) ftF = r.feed_type_id
       }
-      if (r.feed_type_id) ft = r.feed_type_id
+      if (Number(r.male_kg) > 0) {
+        f[r.line_id].m = String(r.male_kg)
+        if (r.feed_type_id) ftM = r.feed_type_id
+      }
     }
     const pz: Record<string, PlaceRow> = {}
     for (const l of allLines) pz[l.id] = { f: '', m: '' }
@@ -202,7 +217,8 @@ export const LineDailyEntry: React.FC = () => {
     }
     setPlace(pz)
     setEggs(e); setMort(m); setFeed(f)
-    if (ft) setFeedTypeId(ft)
+    if (ftF) setFeedTypeF(ftF)
+    if (ftM) setFeedTypeM(ftM)
   }, [allLines, existing])
 
   // ── Totals, and the comparison against the shed's own figure ──────────────
@@ -318,15 +334,29 @@ export const LineDailyEntry: React.FC = () => {
         return rows.length
       }
 
-      if (!feedTypeId) throw new Error('Choose the feed type for the day first')
+      const anyF = lineIds.some(id => (feed[id]?.f ?? '').trim() !== '')
+      const anyM = lineIds.some(id => (feed[id]?.m ?? '').trim() !== '')
+      if (anyF && !feedTypeF) throw new Error('Choose the FEMALE feed type for the day')
+      if (anyM && !feedTypeM) throw new Error('Choose the MALE feed type for the day')
+
+      // One row per line per feed type. Female kg is booked against the female
+      // feed type and male kg against the male one, so the two never get mixed
+      // under a single ration. When both happen to be the same feed type they
+      // collapse into one row, which is what the unique key expects.
       const rows: any[] = []
       for (const id of lineIds) {
         const f = feed[id]; if (!f) continue
-        if (f.f.trim() === '' && f.m.trim() === '') continue
-        rows.push({
-          line_id: id, record_date: date, feed_type_id: feedTypeId,
-          female_kg: numOrNull(f.f) ?? 0, male_kg: numOrNull(f.m) ?? 0, entered_by: by,
-        })
+        const hasF = f.f.trim() !== '', hasM = f.m.trim() !== ''
+        if (!hasF && !hasM) continue
+        if (hasF && hasM && feedTypeF === feedTypeM) {
+          rows.push({ line_id: id, record_date: date, feed_type_id: feedTypeF,
+                      female_kg: n(f.f), male_kg: n(f.m), entered_by: by })
+          continue
+        }
+        if (hasF) rows.push({ line_id: id, record_date: date, feed_type_id: feedTypeF,
+                              female_kg: n(f.f), male_kg: 0, entered_by: by })
+        if (hasM) rows.push({ line_id: id, record_date: date, feed_type_id: feedTypeM,
+                              female_kg: 0, male_kg: n(f.m), entered_by: by })
       }
       if (!rows.length) throw new Error('Nothing to save — no feed entered')
       const { error } = await supabase.from('line_feed')
@@ -451,12 +481,21 @@ export const LineDailyEntry: React.FC = () => {
           </div>
 
           {tab === 'feed' && (
-            <div className="px-4 py-3 border-b border-gray-100 max-w-sm">
-              <Select label="Feed type for the day (applies to every line)"
-                value={feedTypeId}
-                onChange={e => setFeedTypeId((e.target as HTMLSelectElement).value)}
+            <div className="px-4 py-3 border-b border-gray-100 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl">
+              <Select label="FEMALE feed type for the day (every line)"
+                value={feedTypeF}
+                onChange={e => setFeedTypeF((e.target as HTMLSelectElement).value)}
                 options={[{ value: '', label: '— Select —' },
                   ...(feedTypes ?? []).map((f: any) => ({ value: f.id, label: `${f.code} — ${f.name}` }))]} />
+              <Select label="MALE feed type for the day (every line)"
+                value={feedTypeM}
+                onChange={e => setFeedTypeM((e.target as HTMLSelectElement).value)}
+                options={[{ value: '', label: '— Select —' },
+                  ...(feedTypes ?? []).map((f: any) => ({ value: f.id, label: `${f.code} — ${f.name}` }))]} />
+              <p className="sm:col-span-2 text-xs text-gray-500">
+                One feed type each for the whole day, not per line. Only the sex you actually
+                enter kg for needs a type chosen — a shed with no males needs no male feed type.
+              </p>
             </div>
           )}
 
