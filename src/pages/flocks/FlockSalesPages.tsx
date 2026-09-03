@@ -2336,7 +2336,7 @@ export const NHESales: React.FC = () => {
       // single request is capped at 1000 rows by Supabase, so page through it
       // rather than silently stopping at 1000.
       const build = () => {
-        let q = supabase.from('nhe_sales').select('*, farms(name), flocks(flock_no), sheds(shed_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
+        let q = supabase.from('nhe_sales').select('*, flocks(flock_no), sheds(shed_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
           .order('sale_date', { ascending: false })
         if (flockFilter) q = q.eq('flock_id', flockFilter)
         if (empFilter) q = q.eq('employee_id', empFilter)
@@ -3413,11 +3413,14 @@ export const NHESales: React.FC = () => {
                 <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''} ${isBirdSale(s.sale_type) ? 'bg-orange-50/40' : ''}`}>
                   <Td><CB checked={sel.has(s.id)} onChange={() => toggle(s.id)}/></Td>
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
-                  {/* The sale's OWN site. Backfilled from the flock's laying
-                      farm, which is right for most but not for sales such as
-                      sex-error birds sold elsewhere -- shown so it can be
-                      checked and corrected rather than trusted blindly. */}
-                  <Td className="text-xs">{s.farms?.name ?? <span className="text-amber-600">not set</span>}</Td>
+                  {/* Where the cash was received, as typed on the form. This is
+                      the field that already existed; a second site column was
+                      added by mistake and has been removed. */}
+                  <Td className="text-xs">{
+                    s.cash_farm_id
+                      ? (farmsNhe ?? []).find((f: any) => f.id === s.cash_farm_id)?.name ?? '—'
+                      : <span className="text-gray-500">Head Office</span>
+                  }</Td>
                   <Td className="text-xs">{fmtDate(s.sale_date)}</Td>
                   <Td className="text-xs">
                     {isBirdSale(s.sale_type) ? (

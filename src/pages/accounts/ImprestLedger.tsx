@@ -196,9 +196,12 @@ export const ImprestLedger: React.FC = () => {
     queryKey: ['imprest_ledger', acctId, from, to],
     enabled: !!acctId,
     queryFn: async () => {
+      // Reads v_imprest_entries, not cash_book, so the ledger lists exactly the
+      // rows the balance counts. A receipt at a site belongs to that site's
+      // imprest whether or not anyone tagged it -- the location already says so.
       const { data, error } = await supabase
-        .from('cash_book')
-        .select('id,txn_date,txn_type,category,description,party_name,reference_no,amount_in,amount_out,payment_mode,farm_id,farms(name)')
+        .from('v_imprest_entries')
+        .select('cash_book_id,txn_date,txn_type,category,description,party_name,reference_no,amount_in,amount_out,payment_mode,farm_id,derived,farms(name)')
         .eq('cash_account_id', acctId)
         .gte('txn_date', from).lte('txn_date', to)
         .order('txn_date').order('created_at')
@@ -214,7 +217,7 @@ export const ImprestLedger: React.FC = () => {
     enabled: !!acctId,
     queryFn: async () => {
       const { data } = await supabase
-        .from('cash_book').select('amount_in,amount_out,payment_mode')
+        .from('v_imprest_entries').select('amount_in,amount_out,payment_mode')
         .eq('cash_account_id', acctId).lt('txn_date', from)
       // Cash only, matching v_cash_account_balance. An imprest is physical cash
       // the holder carries; a cheque or UPI moves through the bank and never
@@ -343,7 +346,7 @@ export const ImprestLedger: React.FC = () => {
                     <Td right><strong>₹{rupee(openingForPeriod)}</strong></Td><Td></Td>
                   </tr>
                   {withBalance.map((r: any) => (
-                    <tr key={r.id} className={`hover:bg-gray-50 ${r.counted ? '' : 'opacity-60'}`}>
+                    <tr key={r.cash_book_id} className={`hover:bg-gray-50 ${r.counted ? '' : 'opacity-60'}`}>
                       <Td>{fmtDate(r.txn_date)}</Td>
                       <Td><Badge color={TYPE_COLOR[r.txn_type] ?? 'gray'}>{r.txn_type}</Badge></Td>
                       <Td className="text-xs text-gray-500">{r.category ?? ''}</Td>
