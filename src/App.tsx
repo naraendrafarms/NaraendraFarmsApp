@@ -190,7 +190,7 @@ export const App: React.FC = () => {
             <Route path="flocks/daily" element={<DailyEntry />} />
             <Route path="flocks/bulk-daily" element={<BulkDailyEntry />} />
             <Route path="flocks/line-daily" element={<LineDailyEntry />} />
-            <Route path="flocks/line-reports" element={<LineReports />} />
+            <Route path="reports/lines" element={<LineReports />} />
             <Route path="flocks/he-dispatch" element={<HEDispatch />} />
             <Route path="flocks/nhe-sales" element={<NHESales />} />
             <Route path="flocks/egg-conversions" element={<EggConversions />} />
