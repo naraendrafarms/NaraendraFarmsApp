@@ -6,10 +6,11 @@ import {
   Card, CardHeader, Select, Spinner, EmptyState, DateInput,
   Table, Th, Td, Badge, Button, Modal, Input,
 } from '@/components/ui'
-import { Download, Wallet, Plus } from 'lucide-react'
+import { Download, Wallet, Plus, ArrowLeftRight } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { moduleLevel } from '@/lib/auth'
 import { friendlyDbError } from '@/lib/utils'
+import { recordTransfer, TRANSFER_QUERY_KEYS } from '@/lib/cashTransfer'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
@@ -94,6 +95,54 @@ export const ImprestLedger: React.FC = () => {
       const { data } = await supabase.from('farms').select('id,name').order('name')
       return data ?? []
     },
+  })
+
+  const { data: bankAccounts } = useQuery({
+    queryKey: ['bank_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('bank_accounts')
+        .select('id,bank_name,account_no').eq('is_active', true).order('bank_name')
+      return data ?? []
+    },
+  })
+
+  // A transfer endpoint is an imprest, a bank account, or a site -- the same
+  // list the Cash Book offers, built from the same shapes.
+  const endpointOptions = [
+    ...(accounts ?? []).map((a: any) => ({ value: `imprest:${a.cash_account_id}`, label: `${a.name} (Imprest)` })),
+    ...(bankAccounts ?? []).map((b: any) => ({
+      value: `bank:${b.id}`,
+      label: `${b.bank_name}${b.account_no ? ' ****' + String(b.account_no).slice(-4) : ''} (Bank)`,
+    })),
+    { value: 'site:ho', label: 'Head Office (Site)' },
+    ...(farms ?? []).map((f: any) => ({ value: `site:${f.id}`, label: `${f.name} (Site)` })),
+  ]
+
+  const [showTransfer, setShowTransfer] = useState(false)
+  const emptyTransfer = () => ({ date: today(), amount: '', description: '', to: '' })
+  const [xfer, setXfer] = useState(emptyTransfer())
+  const sx = (k: string, val: any) => setXfer(f => ({ ...f, [k]: val }))
+
+  // FROM is always the account being viewed. A transfer opened from Srinath's
+  // page is money leaving Srinath -- letting From be changed here would just be
+  // the Cash Book's transfer box in a confusing place.
+  const doTransfer = useMutation({
+    mutationFn: async () => {
+      await recordTransfer({
+        date: xfer.date,
+        amount: parseFloat(xfer.amount),
+        description: xfer.description,
+        from: `imprest:${acctId}`,
+        to: xfer.to,
+      })
+    },
+    onSuccess: () => {
+      toast.success('Transfer recorded')
+      for (const k of TRANSFER_QUERY_KEYS) qc.invalidateQueries({ queryKey: [k] })
+      setXfer(emptyTransfer())
+      setShowTransfer(false)
+    },
+    onError: (e: any) => toast.error(e.message),
   })
 
   const [showForm, setShowForm] = useState(false)
@@ -218,10 +267,12 @@ export const ImprestLedger: React.FC = () => {
             {withBalance.length > 0 && (
               <Button variant="outline" icon={<Download size={16} />} onClick={exportXlsx}>Export</Button>
             )}
-            {canEdit
-              ? <Button icon={<Plus size={16} />} disabled={!acctId}
-                  onClick={() => { setV(emptyVoucher()); setShowForm(true) }}>Add Voucher</Button>
-              : <Badge color="gray">View only</Badge>}
+            {canEdit ? <>
+              <Button variant="outline" icon={<ArrowLeftRight size={16} />} disabled={!acctId}
+                onClick={() => { setXfer(emptyTransfer()); setShowTransfer(true) }}>Transfer</Button>
+              <Button icon={<Plus size={16} />} disabled={!acctId}
+                onClick={() => { setV(emptyVoucher()); setShowForm(true) }}>Add Voucher</Button>
+            </> : <Badge color="gray">View only</Badge>}
           </div>
         } />
 
@@ -320,6 +371,40 @@ export const ImprestLedger: React.FC = () => {
           )}
         </Card>
       )}
+
+      <Modal open={showTransfer} onClose={() => setShowTransfer(false)}
+        title={`Transfer from ${acct?.name ?? ''}`}>
+        <div className="space-y-4">
+          <div className="rounded-lg bg-brand-50 border border-brand-200 px-3 py-2 text-sm">
+            Money leaving <strong>{acct?.name}</strong>. Both sides are written together —
+            imprest and site legs into the Cash Book, a bank leg into the Bank Ledger —
+            so the two halves stay tied to each other.
+          </div>
+
+          <Select label="To" value={xfer.to}
+            onChange={e => sx('to', (e.target as HTMLSelectElement).value)}
+            options={[{ value: '', label: '— Select destination —' },
+              ...endpointOptions.filter(o => o.value !== `imprest:${acctId}`)]}
+            hint="Another imprest, a bank account (a cash deposit), or a site" />
+
+          <div className="grid grid-cols-2 gap-4">
+            <DateInput label="Date" value={xfer.date} onChange={e => sx('date', e.target.value)} />
+            <Input label="Amount (₹)" required type="number" step="0.01"
+              value={xfer.amount} onChange={e => sx('amount', e.target.value)} />
+          </div>
+
+          <Input label="Description" required value={xfer.description}
+            onChange={e => sx('description', e.target.value)}
+            placeholder="e.g. Cash handed to Mandal Imprest" />
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="outline" onClick={() => setShowTransfer(false)}>Cancel</Button>
+            <Button loading={doTransfer.isPending} onClick={() => doTransfer.mutate()}>
+              Record Transfer
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={showForm} onClose={() => setShowForm(false)}
         title={`Add Voucher — ${acct?.name ?? ''}`}>

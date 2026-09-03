@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, inr, friendlyDbError } from '@/lib/utils'
+import { recordTransfer, TRANSFER_QUERY_KEYS } from '@/lib/cashTransfer'
 import { today, FY_OPTIONS, currentFY, fyRange, fetchAllPages } from '@/lib/utils'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
@@ -502,79 +503,21 @@ export const CashBookPage: React.FC = () => {
     obMut.mutate(v)
   }
 
-  // An internal transfer now moves cash between any two of: an IMPREST, a BANK
-  // ACCOUNT, or a site. Imprest-to-bank (a deposit) and bank-to-imprest (cash
-  // drawn) were impossible before, because cash_book and bank_transactions are
-  // separate tables with nothing crossing between them.
-  //
-  // Both legs share one transfer_group_id. Previously the two legs were loose
-  // rows with nothing linking them, so deleting one silently unbalanced the
-  // book -- and across two tables that would have been worse.
+  // The transfer itself lives in lib/cashTransfer so the Cash Book and the
+  // Imprest Ledger cannot drift apart on how a paired, cross-table write is
+  // shaped.
   const handleTransfer = async () => {
-    const amt = parseFloat(xferForm.amount)
-    if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return }
-    if (!xferForm.fromLocation || !xferForm.toLocation) { toast.error('Choose both From and To'); return }
-    if (xferForm.fromLocation === xferForm.toLocation) { toast.error('From and To must differ'); return }
-    if (!xferForm.description) { toast.error('Enter a description'); return }
     setXferSaving(true)
     try {
-      const groupId = crypto.randomUUID()
-      const desc = xferForm.description
-      const parse = (v: string) => {
-        const [kind, id] = v.split(':')
-        return { kind, id: id === 'ho' ? null : id }
-      }
-      const src = parse(xferForm.fromLocation)
-      const dst = parse(xferForm.toLocation)
-
-      // The imprest on the other side of a bank leg, so a deposit row can name
-      // its source without having to read the paired row.
-      const otherImprest = (a: any, b: any) => (b.kind === 'imprest' ? b.id : null)
-
-      const cashLeg = (side: any, other: any, isOut: boolean) => ({
-        txn_date: xferForm.date, txn_type: 'contra', category: 'transfer',
-        description: desc,
-        farm_id: side.kind === 'site' ? side.id : null,
-        cash_account_id: side.kind === 'imprest' ? side.id : null,
-        amount_in: isOut ? 0 : amt,
-        amount_out: isOut ? amt : 0,
-        payment_mode: 'cash',
-        transfer_group_id: groupId,
+      await recordTransfer({
+        date: xferForm.date,
+        amount: parseFloat(xferForm.amount),
+        description: xferForm.description,
+        from: xferForm.fromLocation,
+        to: xferForm.toLocation,
       })
-
-      const bankLeg = (side: any, other: any, isOut: boolean) => ({
-        bank_account_id: side.id,
-        txn_date: xferForm.date,
-        // Money INTO the bank is a Credit; money out of it is a Debit.
-        txn_type: isOut ? 'Debit' : 'Credit',
-        category: 'transfer',
-        description: desc,
-        amount: amt,
-        cash_account_id: otherImprest(side, other),
-        transfer_group_id: groupId,
-      })
-
-      const cashRows: any[] = []
-      const bankRows: any[] = []
-      ;(src.kind === 'bank' ? bankRows : cashRows).push(
-        src.kind === 'bank' ? bankLeg(src, dst, true) : cashLeg(src, dst, true))
-      ;(dst.kind === 'bank' ? bankRows : cashRows).push(
-        dst.kind === 'bank' ? bankLeg(dst, src, false) : cashLeg(dst, src, false))
-
-      if (cashRows.length) {
-        const { error } = await supabase.from('cash_book').insert(cashRows)
-        if (error) throw new Error(friendlyDbError(error))
-      }
-      if (bankRows.length) {
-        const { error } = await supabase.from('bank_transactions').insert(bankRows)
-        if (error) throw new Error(friendlyDbError(error))
-      }
-
       toast.success('Internal transfer recorded')
-      qc.invalidateQueries({ queryKey: ['cash_book'] })
-      qc.invalidateQueries({ queryKey: ['cash_account_balances'] })
-      qc.invalidateQueries({ queryKey: ['imprest_ledger'] })
-      qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+      for (const k of TRANSFER_QUERY_KEYS) qc.invalidateQueries({ queryKey: [k] })
       setShowTransfer(false)
       setXferForm({ date: today(), amount: '', description: '', fromLocation: '', toLocation: '' })
     } catch (e: any) { toast.error(e.message) }
