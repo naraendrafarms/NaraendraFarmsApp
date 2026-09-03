@@ -3,6 +3,34 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, fmtDate, currentFY, today, fetchAllPages } from '@/lib/utils'
 
+// A sale settled through salary was left reading Pending for ever: marking a
+// salary Paid moved employee_deductions to 'deducted' but nothing ever updated
+// nhe_sales. Recompute the sale's status from what has ACTUALLY been settled --
+// cash and online already recorded, plus deductions genuinely taken -- so the
+// Due figure on the NHE Sales page reflects money still owed rather than money
+// already recovered. Used on both sides: marking Paid, and un-marking it.
+async function resyncSalesForDeductions(saleIds: string[]) {
+  const ids = [...new Set(saleIds.filter(Boolean))]
+  if (!ids.length) return
+  const { data: sales } = await supabase.from('nhe_sales')
+    .select('id,amount,payment_cash,payment_online').in('id', ids)
+  const { data: deds } = await supabase.from('employee_deductions')
+    .select('nhe_sale_id,amount,status,deducted_at').in('nhe_sale_id', ids)
+  for (const sale of (sales ?? [])) {
+    const taken = (deds ?? []).filter((d: any) => d.nhe_sale_id === sale.id && d.status === 'deducted')
+    const recovered = taken.reduce((a: number, d: any) => a + Number(d.amount ?? 0), 0)
+    const direct = Number(sale.payment_cash ?? 0) + Number(sale.payment_online ?? 0)
+    const settled = direct + recovered
+    const amount = Number(sale.amount ?? 0)
+    const lastDate = taken.map((d: any) => d.deducted_at).filter(Boolean).sort().pop() ?? null
+    await supabase.from('nhe_sales').update({
+      amount_received: Math.min(settled, amount),
+      received_date: settled > 0 ? lastDate : null,
+      payment_status: settled >= amount && amount > 0 ? 'Received' : settled > 0 ? 'Partial' : 'Pending',
+    }).eq('id', sale.id)
+  }
+}
+
 // cash_book.payment_mode allows 'cash' | 'upi' | 'cheque' | 'neft' | 'rtgs' | 'imps' | 'bank_transfer'.
 const toCbMode = (mode: string) => {
   const m = (mode || '').toLowerCase()
@@ -1602,17 +1630,28 @@ export const SalaryEntryPage: React.FC = () => {
         // marked 'deducted' with no way back — when this salary is later
         // re-paid (possibly corrected), the deduction was silently lost
         // from the recovery pipeline. Restore it to pending.
+        const {data:toRevert}=await supabase.from('employee_deductions').select('nhe_sale_id')
+          .eq('salary_monthly_id',upserted.id).eq('status','deducted')
         await supabase.from('employee_deductions')
           .update({status:'pending',deducted_at:null,salary_monthly_id:null})
           .eq('salary_monthly_id',upserted.id).eq('status','deducted')
+        // Un-paying must put the sale back to owed, or it would read as
+        // received on money that has not been recovered.
+        await resyncSalesForDeductions((toRevert??[]).map((d:any)=>d.nhe_sale_id))
+        qc.invalidateQueries({queryKey:['nhe_sales']})
         qc.invalidateQueries({queryKey:['employee_deductions_pending']})
       }
       // When marking as paid: auto-deduct pending employee_deductions for this employee+month
       if(payload.is_paid && upserted?.id){
+        const {data:toDeduct}=await supabase.from('employee_deductions').select('nhe_sale_id')
+          .eq('employee_id',payload.employee_id).eq('deduction_month',payload.month).eq('status','pending')
         await supabase.from('employee_deductions')
           .update({status:'deducted',deducted_at:(payload as any).paid_date??new Date().toISOString().slice(0,10),salary_monthly_id:upserted.id})
           .eq('employee_id',payload.employee_id).eq('deduction_month',payload.month).eq('status','pending')
+        // The sale is only settled once the deduction is actually taken.
+        await resyncSalesForDeductions((toDeduct??[]).map((d:any)=>d.nhe_sale_id))
         qc.invalidateQueries({queryKey:['employee_deductions_pending']})
+        qc.invalidateQueries({queryKey:['nhe_sales']})
       }
     },
     onSuccess:()=>{toast.success('Salary saved!');qc.invalidateQueries({queryKey:['salary_monthly_detail','salary_fy_summary']});qc.invalidateQueries({queryKey:['cash_book']});qc.invalidateQueries({queryKey:['bank_transactions']});setShowForm(false);setEditingId(null)},
@@ -1627,9 +1666,14 @@ export const SalaryEntryPage: React.FC = () => {
       // from delete instead.
       await supabase.from('cash_book').delete().eq('salary_monthly_id',id)
       await supabase.from('bank_transactions').delete().eq('salary_monthly_id',id)
+      const {data:toRevert}=await supabase.from('employee_deductions').select('nhe_sale_id')
+        .eq('salary_monthly_id',id).eq('status','deducted')
       await supabase.from('employee_deductions')
         .update({status:'pending',deducted_at:null,salary_monthly_id:null})
         .eq('salary_monthly_id',id).eq('status','deducted')
+      // Same reason as un-marking Paid: the sale goes back to owed.
+      await resyncSalesForDeductions((toRevert??[]).map((d:any)=>d.nhe_sale_id))
+      qc.invalidateQueries({queryKey:['nhe_sales']})
       const{error}=await supabase.from('salary_monthly').delete().eq('id',id)
       if(error)throw error
       qc.invalidateQueries({queryKey:['employee_deductions_pending']})
