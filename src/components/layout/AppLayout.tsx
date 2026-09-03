@@ -162,6 +162,7 @@ const NAV: NavItem[] = [
       { label: 'Cash Book', to: '/accounts/cash-book' },
       { label: 'Bank Ledger', to: '/accounts/bank-ledger' },
       { label: 'Imprest Ledger', to: '/accounts/imprest-ledger' },
+      { label: 'Sale Receipts → Imprest', to: '/accounts/imprest-tagging' },
       { label: 'Party Ledger', to: '/accounts/party-ledger' },
       { label: 'Opening Balances', to: '/accounts/opening-balances' },
       { label: 'Buyer Advances', to: '/accounts/buyer-advances' },
