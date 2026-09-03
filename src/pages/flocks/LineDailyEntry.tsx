@@ -9,6 +9,7 @@ import {
 } from '@/components/ui'
 import { Save, Egg, HeartCrack, Wheat, Bird, ArrowLeftRight } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { lineSex } from '@/lib/lineSex'
 
 // Line-wise daily entry, running in PARALLEL with Bulk Daily Entry.
 //
@@ -47,6 +48,9 @@ export const LineDailyEntry: React.FC = () => {
   const [date, setDate] = useState(today())
   const [tab, setTab] = useState<'birds' | 'eggs' | 'mortality' | 'feed' | 'transfer'>('birds')
   const [feedTypeId, setFeedTypeId] = useState('')
+  // Side filter. A shed has A-D or just A-B depending on how it was built, so
+  // the choices come from the shed's own lines rather than a fixed list.
+  const [sideFilter, setSideFilter] = useState('')
 
   const [eggs, setEggs] = useState<Record<string, EggRow>>({})
   const [mort, setMort] = useState<Record<string, MortRow>>({})
@@ -93,7 +97,7 @@ export const LineDailyEntry: React.FC = () => {
     },
   })
 
-  const { data: lines, isLoading } = useQuery({
+  const { data: allLines, isLoading } = useQuery({
     queryKey: ['lines_for_entry', shedId],
     enabled: !!shedId,
     queryFn: async () => {
@@ -107,7 +111,24 @@ export const LineDailyEntry: React.FC = () => {
     },
   })
 
-  const lineIds = useMemo(() => (lines ?? []).map((l: any) => l.id), [lines])
+  const sides = useMemo(
+    () => Array.from(new Set((allLines ?? []).map((l: any) => l.side))).sort(),
+    [allLines])
+
+  // Reset the side filter when the chosen shed has no such side -- otherwise
+  // switching from a four-sided shed to a two-sided one shows an empty grid.
+  useEffect(() => {
+    if (sideFilter && !sides.includes(sideFilter)) setSideFilter('')
+  }, [sides, sideFilter])
+
+  const lines = useMemo(
+    () => (allLines ?? []).filter((l: any) => !sideFilter || l.side === sideFilter),
+    [allLines, sideFilter])
+
+  // Saving, totals and the shed comparison run over the WHOLE shed, never the
+  // filtered view -- a filter is for reading, and must not quietly change what
+  // a Save writes or make a shed total look wrong.
+  const lineIds = useMemo(() => (allLines ?? []).map((l: any) => l.id), [allLines])
 
   // Everything already recorded for these lines on this date, plus the shed's
   // own daily_records row so the two can be shown side by side.
@@ -140,11 +161,11 @@ export const LineDailyEntry: React.FC = () => {
   // so switching back to a day already entered shows the saved figures rather
   // than blanks that would overwrite them on the next save.
   useEffect(() => {
-    if (!lines) return
+    if (!allLines) return
     const e: Record<string, EggRow> = {}
     const m: Record<string, MortRow> = {}
     const f: Record<string, FeedRow> = {}
-    for (const l of lines) {
+    for (const l of allLines) {
       e[l.id] = { r1: '', r2: '', r3: '', r4: '' }
       m[l.id] = { mf: '', mm: '', df: '', dm: '', reason: '' }
       f[l.id] = { f: '', m: '' }
@@ -174,7 +195,7 @@ export const LineDailyEntry: React.FC = () => {
       if (r.feed_type_id) ft = r.feed_type_id
     }
     const pz: Record<string, PlaceRow> = {}
-    for (const l of lines) pz[l.id] = { f: '', m: '' }
+    for (const l of allLines) pz[l.id] = { f: '', m: '' }
     for (const r of existing?.placements ?? []) {
       if (!pz[r.line_id]) continue
       pz[r.line_id] = { f: r.female ? String(r.female) : '', m: r.male ? String(r.male) : '' }
@@ -182,7 +203,7 @@ export const LineDailyEntry: React.FC = () => {
     setPlace(pz)
     setEggs(e); setMort(m); setFeed(f)
     if (ft) setFeedTypeId(ft)
-  }, [lines, existing])
+  }, [allLines, existing])
 
   // ── Totals, and the comparison against the shed's own figure ──────────────
   // Current birds per line, from v_line_balance. Keyed by line so every tab can
@@ -202,7 +223,7 @@ export const LineDailyEntry: React.FC = () => {
       const f = feed[id]; if (f) { feedF += n(f.f); feedM += n(f.m) }
     }
     let curF = 0, curM = 0, capacity = 0, boxes = 0
-    for (const l of (lines ?? []) as any[]) {
+    for (const l of (allLines ?? []) as any[]) {
       const b = balByLine[l.id]
       curF += b?.current_female ?? 0
       curM += b?.current_male ?? 0
@@ -211,7 +232,7 @@ export const LineDailyEntry: React.FC = () => {
     }
     return { eggTotal, mf, mm, df, dm, mortF: mf + df, mortM: mm + dm, feedF, feedM,
              curF, curM, capacity, boxes }
-  }, [eggs, mort, feed, lineIds, lines, balByLine])
+  }, [eggs, mort, feed, lineIds, allLines, balByLine])
 
   const flockId = (existing?.shedDay as any)?.flock_id ?? null
 
@@ -359,7 +380,7 @@ export const LineDailyEntry: React.FC = () => {
       />
 
       <Card>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <Select label="Shed" value={shedId}
             onChange={e => setShedId((e.target as HTMLSelectElement).value)}
             options={(sheds ?? []).map((s: any) => ({
@@ -367,6 +388,13 @@ export const LineDailyEntry: React.FC = () => {
               label: `${s.farms?.name ?? ''} — Shed ${s.shed_no}${s.shed_name ? ` (${s.shed_name})` : ''}`,
             }))} />
           <DateInput label="Date" value={date} onChange={setDate} />
+          <Select label="Side / Lines" value={sideFilter}
+            onChange={e => setSideFilter((e.target as HTMLSelectElement).value)}
+            options={[{ value: '', label: `All lines (${(allLines ?? []).length})` },
+              ...sides.map((sd: string) => ({
+                value: sd,
+                label: `Side ${sd} (${(allLines ?? []).filter((l: any) => l.side === sd).length} lines)`,
+              }))]} />
           <div className="flex items-end text-sm text-gray-600">
             {shedDay?.flocks?.flock_no
               ? <span>Flock <strong>{shedDay.flocks.flock_no}</strong> on {fmtDate(date)}</span>
@@ -503,7 +531,7 @@ export const LineDailyEntry: React.FC = () => {
           <div className="overflow-x-auto">
             <Table>
               <thead><tr>
-                <Th>Side</Th><Th>Line</Th><Th right>Boxes</Th>
+                <Th>Side</Th><Th>Line</Th><Th>Holds</Th><Th right>Boxes</Th>
                 {tab === 'birds' && <>
                   <Th right>Birds/Box</Th><Th right>Capacity</Th>
                   <Th right>Placed F</Th><Th right>Placed M</Th>
@@ -534,6 +562,11 @@ export const LineDailyEntry: React.FC = () => {
                     <tr key={l.id} className="hover:bg-gray-50">
                       <Td><Badge color="blue">{l.side}</Badge></Td>
                       <Td>{l.line_no}</Td>
+                      <Td>{(() => {
+                        const sx = lineSex(l)
+                        return sx == null ? <span className="text-gray-300">—</span>
+                          : <Badge color={sx === 'M' ? 'orange' : sx === 'F' ? 'blue' : 'gray'}>{sx}</Badge>
+                      })()}</Td>
                       <Td right className="text-gray-500">{l.boxes ?? '—'}</Td>
                       {tab === 'birds' && (() => {
                         const b = balByLine[l.id]
@@ -610,8 +643,13 @@ export const LineDailyEntry: React.FC = () => {
           )}
 
           <div className="px-4 py-2 border-t border-gray-100 text-xs text-gray-500">
-            {shed?.farms?.name} — Shed {shed?.shed_no} · {lines.length} lines · {fmtDate(date)}.
-            A blank box is left alone on save; it is not stored as a zero.
+            {shed?.farms?.name} — Shed {shed?.shed_no} · {fmtDate(date)} ·
+            {sideFilter
+              ? ` showing side ${sideFilter} (${lines.length} of ${(allLines ?? []).length} lines)`
+              : ` all ${lines.length} lines`}.
+            The side filter changes what you SEE only — Save always writes the whole shed,
+            and the totals above are the whole shed too. A blank box is left alone on save;
+            it is not stored as a zero.
           </div>
         </Card>
       )}

@@ -49,6 +49,7 @@ const NAV: NavItem[] = [
       // Gated by line_entry, not by the flocks module — a shed supervisor is
       // hidden from every other child here and must still reach this one.
       { label: 'Line Daily Entry',   to: '/flocks/line-daily' },
+      { label: 'Line Reports',       to: '/flocks/line-reports' },
       { label: 'HE Dispatch',        to: '/flocks/he-dispatch' },
       { label: 'NHE Sales',          to: '/flocks/nhe-sales' },
       { label: 'Egg Conversions',    to: '/flocks/egg-conversions' },

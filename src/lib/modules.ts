@@ -74,6 +74,7 @@ export const ROUTE_MODULES: Record<string, ModuleKey> = {
   // Longest prefix wins, so this beats the general 'flocks' mapping and a shed
   // supervisor reaches line entry without gaining any other flock screen.
   'flocks/line-daily': 'line_entry',
+  'flocks/line-reports': 'line_entry',
 
   'reports/pl': 'reports_financial',
   'reports/costs': 'reports_financial',

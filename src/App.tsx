@@ -21,6 +21,7 @@ import { StatutoryFilingPage } from '@/pages/employees/StatutoryFilingPage'
 import { ManpowerRequirement } from '@/pages/employees/ManpowerRequirement'
 import { BulkDailyEntry } from '@/pages/flocks/BulkDailyEntry'
 import { LineDailyEntry } from '@/pages/flocks/LineDailyEntry'
+import { LineReports } from '@/pages/flocks/LineReports'
 import { EggConversions } from '@/pages/flocks/EggConversions'
 import { HatchBatches } from '@/pages/flocks/HatchBatches'
 import { HatchAnalysis } from '@/pages/flocks/HatchAnalysis'
@@ -189,6 +190,7 @@ export const App: React.FC = () => {
             <Route path="flocks/daily" element={<DailyEntry />} />
             <Route path="flocks/bulk-daily" element={<BulkDailyEntry />} />
             <Route path="flocks/line-daily" element={<LineDailyEntry />} />
+            <Route path="flocks/line-reports" element={<LineReports />} />
             <Route path="flocks/he-dispatch" element={<HEDispatch />} />
             <Route path="flocks/nhe-sales" element={<NHESales />} />
             <Route path="flocks/egg-conversions" element={<EggConversions />} />

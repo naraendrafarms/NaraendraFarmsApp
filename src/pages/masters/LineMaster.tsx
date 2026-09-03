@@ -9,6 +9,7 @@ import {
 import { Plus, Edit2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { moduleLevel } from '@/lib/auth'
+import { lineSex } from '@/lib/lineSex'
 
 // The physical rows of cages inside a shed, under side A/B/C/D. Loaded from
 // the owner's line sheets (Kethireddypally as boxes per line, Agraharam as
@@ -242,7 +243,7 @@ export const LineMaster: React.FC = () => {
             <div className="overflow-x-auto">
               <Table>
                 <thead><tr>
-                  <Th>Side</Th><Th>Line</Th><Th right>Boxes</Th>
+                  <Th>Side</Th><Th>Line</Th><Th>Holds</Th><Th right>Boxes</Th>
                   <Th right>Boxes F</Th><Th right>Boxes M</Th>
                   <Th right>Birds/Box</Th><Th right>Capacity</Th>
                   <Th right>Bird Cap F</Th><Th right>Bird Cap M</Th>
@@ -253,6 +254,11 @@ export const LineMaster: React.FC = () => {
                     <tr key={l.id} className="hover:bg-gray-50">
                       <Td><Badge color="blue">{l.side}</Badge></Td>
                       <Td>{l.line_no}</Td>
+                      <Td>{(() => {
+                        const sx = lineSex(l)
+                        return sx == null ? <span className="text-gray-300">—</span>
+                          : <Badge color={sx === 'M' ? 'orange' : sx === 'F' ? 'blue' : 'gray'}>{sx}</Badge>
+                      })()}</Td>
                       <Td right>{l.boxes ?? '—'}</Td>
                       <Td right>{l.boxes_female ?? '—'}</Td>
                       <Td right>{l.boxes_male ?? '—'}</Td>
