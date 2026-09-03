@@ -45,7 +45,11 @@ const CB: React.FC<{ checked: boolean; indeterminate?: boolean; onChange: () => 
 const emptyForm = () => ({
   expense_date: today(), farm_id: '', flock_id: '',
   category: 'maintenance', description: '', vendor: '',
-  amount: '', payment_mode: 'cash', reference_no: '', remarks: ''
+  amount: '', payment_mode: 'cash', reference_no: '', remarks: '',
+  // Which imprest actually paid. Blank means the site's own cash, which is what
+  // the balance derives anyway -- fill it only when ANOTHER imprest paid, such
+  // as Mandal settling a bill for a site.
+  cash_account_id: ''
 })
 
 export const FarmExpensesPage: React.FC = () => {
@@ -65,6 +69,15 @@ export const FarmExpensesPage: React.FC = () => {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [importing, setImporting] = useState(false)
+
+  const { data: cashAccounts } = useQuery({
+    queryKey: ['cash_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_accounts')
+        .select('id,name').eq('is_active', true).order('sort_order')
+      return data ?? []
+    }
+  })
 
   const [form, setForm] = useState(emptyForm())
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
@@ -137,6 +150,7 @@ export const FarmExpensesPage: React.FC = () => {
         vendor:       row.vendor ?? '',
         amount:       row.amount?.toString() ?? '',
         payment_mode: row.payment_mode ?? 'cash',
+        cash_account_id: row.cash_account_id ?? '',
         reference_no: row.reference_no ?? '',
         remarks:      row.remarks ?? '',
       })
@@ -159,6 +173,7 @@ export const FarmExpensesPage: React.FC = () => {
         vendor:        form.vendor || null,
         amount:        parseFloat(form.amount),
         payment_mode:  form.payment_mode || null,
+        cash_account_id: form.cash_account_id || null,
         reference_no:  form.reference_no || null,
         remarks:       form.remarks || null,
       }
@@ -190,6 +205,8 @@ export const FarmExpensesPage: React.FC = () => {
         party_name: payload.vendor, reference_no: payload.reference_no,
         amount_in: 0, amount_out: payload.amount,
         payment_mode: payload.payment_mode || 'cash',
+        // Explicit imprest wins over the site-derived default.
+        cash_account_id: payload.cash_account_id || null,
         remarks: payload.remarks,
         farm_expense_id: savedId,
       })
@@ -500,6 +517,13 @@ export const FarmExpensesPage: React.FC = () => {
           <FormRow>
             <Input label="Amount (₹)" required type="number" step="0.01" value={form.amount} onChange={e => s('amount', e.target.value)} />
             <Select label="Payment Mode" options={PAYMENT_MODES} value={form.payment_mode} onChange={e => s('payment_mode', e.target.value)} />
+          </FormRow>
+          <FormRow>
+            <Select label="Paid from (Imprest)" value={form.cash_account_id}
+              onChange={e => s('cash_account_id', e.target.value)}
+              options={[{ value: '', label: "— The site's own cash (default) —" },
+                ...(cashAccounts ?? []).map((a: any) => ({ value: a.id, label: a.name }))]}
+              hint="Only fill this when a DIFFERENT imprest paid — Mandal or HO settling a site's bill. Leave blank and it comes out of the site's own cash." />
           </FormRow>
           <FormRow>
             <Input label="Vendor / Contractor" placeholder="Name" value={form.vendor} onChange={e => s('vendor', e.target.value)} />

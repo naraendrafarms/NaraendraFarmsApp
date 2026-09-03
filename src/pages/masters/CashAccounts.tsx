@@ -6,7 +6,7 @@ import {
   Card, Button, Input, Select, Modal, Table, Th, Td, Badge,
   Spinner, EmptyState, CardHeader, DateInput,
 } from '@/components/ui'
-import { Plus, Edit2, Wallet } from 'lucide-react'
+import { Plus, Edit2, Wallet, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { moduleLevel } from '@/lib/auth'
 
@@ -42,6 +42,8 @@ export const CashAccounts: React.FC = () => {
   const qc = useQueryClient()
   const canEdit = moduleLevel('masters') === 'full'
 
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [deleteRows, setDeleteRows] = useState<any[] | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({
@@ -109,6 +111,41 @@ export const CashAccounts: React.FC = () => {
     onError: (e: any) => toast.error(e.message),
   })
 
+  // An account with entries is NOT deletable: the entries would lose their
+  // holder and the cash would vanish from every balance. Deactivating keeps the
+  // history and stops new entries, which is what "no longer used" really means.
+  const delMut = useMutation({
+    mutationFn: async () => {
+      const targets = deleteRows ?? []
+      const holding = targets.filter((r: any) => Number(r.txn_count ?? 0) > 0)
+      if (holding.length) {
+        throw new Error(
+          `${holding.map((r: any) => r.name).join(', ')} still hold entries. ` +
+          'Deactivate instead — deleting would detach those entries from any account.')
+      }
+      const { error } = await supabase.from('cash_accounts')
+        .delete().in('id', targets.map((r: any) => r.cash_account_id))
+      if (error) throw new Error(friendlyDbError(error))
+      return targets.length
+    },
+    onSuccess: (n) => {
+      toast.success(`Deleted ${n} account${n === 1 ? '' : 's'}`)
+      qc.invalidateQueries({ queryKey: ['cash_account_balances'] })
+      qc.invalidateQueries({ queryKey: ['cash_accounts_master'] })
+      setSel(new Set()); setDeleteRows(null)
+    },
+    onError: (e: any) => { toast.error(e.message); setDeleteRows(null) },
+  })
+
+  const ids = (rows ?? []).map((r: any) => r.cash_account_id)
+  const allSel = ids.length > 0 && ids.every((id: string) => sel.has(id))
+  const toggle = (id: string) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSel(p => {
+    const n = new Set(p)
+    allSel ? ids.forEach((id: string) => n.delete(id)) : ids.forEach((id: string) => n.add(id))
+    return n
+  })
+
   const totalBal = (rows ?? []).reduce((a: number, r: any) => a + Number(r.balance ?? 0), 0)
   const anyTxns = (rows ?? []).some((r: any) => Number(r.txn_count ?? 0) > 0)
 
@@ -118,7 +155,15 @@ export const CashAccounts: React.FC = () => {
         title="Cash Imprest Accounts"
         subtitle="Who is physically holding company cash — HO, Mandal, and each person's imprest"
         action={canEdit
-          ? <Button icon={<Plus size={16} />} onClick={() => open()}>Add Account</Button>
+          ? <div className="flex gap-2">
+              {sel.size > 0 && (
+                <Button variant="outline" size="sm" icon={<Trash2 size={16} />}
+                  onClick={() => setDeleteRows((rows ?? []).filter((r: any) => sel.has(r.cash_account_id)))}>
+                  Delete {sel.size}
+                </Button>
+              )}
+              <Button icon={<Plus size={16} />} onClick={() => open()}>Add Account</Button>
+            </div>
           : <Badge color="gray">View only</Badge>} />
 
       {!anyTxns && (
@@ -173,6 +218,8 @@ export const CashAccounts: React.FC = () => {
             <div className="overflow-x-auto">
               <Table>
                 <thead><tr>
+                  {canEdit && <Th><input type="checkbox" checked={allSel} onChange={toggleAll}
+                    className="rounded border-gray-300 text-brand-600" /></Th>}
                   <Th>Account</Th><Th>Type</Th>
                   <Th right>Opening</Th><Th>Opening Date</Th>
                   <Th right>Received</Th><Th right>Paid</Th><Th right>Balance</Th>
@@ -180,7 +227,10 @@ export const CashAccounts: React.FC = () => {
                 </tr></thead>
                 <tbody>
                   {rows.map((r: any) => (
-                    <tr key={r.cash_account_id} className="hover:bg-gray-50">
+                    <tr key={r.cash_account_id} className={`hover:bg-gray-50 ${sel.has(r.cash_account_id) ? 'bg-blue-50' : ''}`}>
+                      {canEdit && <Td><input type="checkbox" checked={sel.has(r.cash_account_id)}
+                        onChange={() => toggle(r.cash_account_id)}
+                        className="rounded border-gray-300 text-brand-600" /></Td>}
                       <Td>{r.name}</Td>
                       <Td><Badge color={TYPE_COLOR[r.acct_type] ?? 'gray'}>
                         {ACCT_TYPES.find(t => t.value === r.acct_type)?.label ?? r.acct_type}</Badge></Td>
@@ -193,15 +243,20 @@ export const CashAccounts: React.FC = () => {
                       <Td>{r.is_active ? <Badge color="green">Active</Badge> : <Badge color="gray">Inactive</Badge>}</Td>
                       {canEdit && (
                         <Td>
-                          <button onClick={() => open(r)} className="text-brand-600 hover:text-brand-800">
-                            <Edit2 size={14} />
-                          </button>
+                          <div className="flex gap-2">
+                            <button onClick={() => open(r)} className="text-brand-600 hover:text-brand-800">
+                              <Edit2 size={14} />
+                            </button>
+                            <button onClick={() => setDeleteRows([r])} className="text-red-500 hover:text-red-700">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </Td>
                       )}
                     </tr>
                   ))}
                   <tr className="bg-gray-50 font-semibold">
-                    <Td colSpan={6}>TOTAL cash held across all imprests</Td>
+                    <Td colSpan={canEdit ? 7 : 6}>TOTAL cash held across all imprests</Td>
                     <Td right>{rupee(totalBal)}</Td>
                     <Td colSpan={canEdit ? 3 : 2}></Td>
                   </tr>
@@ -211,6 +266,31 @@ export const CashAccounts: React.FC = () => {
           </Card>
         </>
       )}
+
+      <Modal open={!!deleteRows} onClose={() => setDeleteRows(null)} title="Delete imprest account">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700">
+            Delete <strong>{(deleteRows ?? []).map((r: any) => r.name).join(', ')}</strong>?
+          </p>
+          {(deleteRows ?? []).some((r: any) => Number(r.txn_count ?? 0) > 0) ? (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+              One or more of these still hold cash book entries, so they cannot be deleted —
+              the entries would lose their holder and that cash would disappear from every
+              balance. <strong>Untick Active</strong> on the account instead: the history stays
+              and no new entry can be added to it.
+            </div>
+          ) : (
+            <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-sm text-gray-700">
+              These hold no entries, so nothing is lost. Any entry added later at a site whose
+              imprest is gone would fall back to HO Imprest.
+            </div>
+          )}
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="outline" onClick={() => setDeleteRows(null)}>Cancel</Button>
+            <Button loading={delMut.isPending} onClick={() => delMut.mutate()}>Delete</Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={showForm} onClose={() => setShowForm(false)}
         title={editing ? 'Edit Imprest Account' : 'Add Imprest Account'}>

@@ -82,7 +82,16 @@ export const ImprestLedger: React.FC = () => {
     if (!acctId && accounts?.length) setAcctId(accounts[0].cash_account_id)
   }, [accounts, acctId])
 
-  const acct = (accounts ?? []).find((a: any) => a.cash_account_id === acctId) as any
+  // A pseudo-account for rows that belong to no imprest: Head Office and Feed
+  // Mill have no site imprest, and the derivation only falls back to HO Imprest
+  // when the site is BLANK -- so those rows land nowhere and their cash is in no
+  // balance at all. Listing them here, on the screen already used for imprests,
+  // rather than adding another page.
+  const UNASSIGNED = '__unassigned__'
+  const isUnassigned = acctId === UNASSIGNED
+  const acct = isUnassigned
+    ? { name: 'Not assigned to any imprest', opening_balance: 0 }
+    : (accounts ?? []).find((a: any) => a.cash_account_id === acctId) as any
 
   const qc = useQueryClient()
   const canEdit = moduleLevel('accounts') === 'full'
@@ -205,7 +214,8 @@ export const ImprestLedger: React.FC = () => {
       let q = supabase
         .from('v_imprest_entries')
         .select('cash_book_id,txn_date,created_at,txn_type,category,description,party_name,reference_no,amount_in,amount_out,payment_mode,farm_id,farm_name,derived')
-        .eq('cash_account_id', acctId)
+      q = acctId === UNASSIGNED ? q.is('cash_account_id', null) : q.eq('cash_account_id', acctId)
+      q = q
         // Cash only. cash_book also holds cheque, NEFT, RTGS and UPI rows, and
         // listing them buried 30 real cash entries under 692 bank payments at
         // Head Office. They never counted toward the balance either, so showing
@@ -227,6 +237,7 @@ export const ImprestLedger: React.FC = () => {
     enabled: !!acctId,
     queryFn: async () => {
       if (!from) return 0   // no From date means the list already starts at the beginning
+      if (acctId === UNASSIGNED) return 0
       const { data } = await supabase
         .from('v_imprest_entries').select('amount_in,amount_out,payment_mode')
         .eq('cash_account_id', acctId).lt('txn_date', from)
@@ -280,12 +291,14 @@ export const ImprestLedger: React.FC = () => {
             {withBalance.length > 0 && (
               <Button variant="outline" icon={<Download size={16} />} onClick={exportXlsx}>Export</Button>
             )}
-            {canEdit ? <>
+            {canEdit && !isUnassigned ? <>
               <Button variant="outline" icon={<ArrowLeftRight size={16} />} disabled={!acctId}
                 onClick={() => { setXfer(emptyTransfer()); setShowTransfer(true) }}>Transfer</Button>
               <Button icon={<Plus size={16} />} disabled={!acctId}
                 onClick={() => { setV(emptyVoucher()); setShowForm(true) }}>Add Voucher</Button>
-            </> : <Badge color="gray">View only</Badge>}
+            </> : isUnassigned
+              ? <Badge color="orange">Not an account — allocate these on the Cash Book</Badge>
+              : <Badge color="gray">View only</Badge>}
           </div>
         } />
 
@@ -312,7 +325,10 @@ export const ImprestLedger: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Select label="Imprest Account" value={acctId}
             onChange={e => setAcctId((e.target as HTMLSelectElement).value)}
-            options={(accounts ?? []).map((a: any) => ({ value: a.cash_account_id, label: a.name }))} />
+            options={[
+              ...(accounts ?? []).map((a: any) => ({ value: a.cash_account_id, label: a.name })),
+              { value: UNASSIGNED, label: '⚠ Not assigned to any imprest' },
+            ]} />
           <DateInput label="From" value={from} onChange={e => setFrom(e.target.value)} />
           <DateInput label="To" value={to} onChange={e => setTo(e.target.value)} />
         </div>
