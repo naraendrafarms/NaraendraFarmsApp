@@ -122,7 +122,18 @@ export const CashBookPage: React.FC = () => {
   const qc = useQueryClient()
   const importRef = useRef<HTMLInputElement>(null)
 
-  const TXN_TYPES    = useConfigOptions('txn_type', TXN_TYPES_FB)
+  // cash_book.txn_type is constrained to receipt/payment/contra in the
+  // database. The options table once held ONLY 'credit' and 'debit', so every
+  // choice in this dropdown was rejected on save and no manual voucher could be
+  // entered at all. Filter to what the database can actually store, and fall
+  // back if that leaves nothing -- a stray config row must never be able to
+  // block entry again.
+  const TXN_TYPES_RAW = useConfigOptions('txn_type', TXN_TYPES_FB)
+  const TXN_TYPES = useMemo(() => {
+    const allowed = new Set(['receipt', 'payment', 'contra'])
+    const ok = TXN_TYPES_RAW.filter(o => allowed.has(o.value))
+    return ok.length ? ok : TXN_TYPES_FB
+  }, [TXN_TYPES_RAW])
   const CATEGORIES   = useConfigOptions('cashbook_category', CATEGORIES_FB)
   const PAYMENT_MODES = useConfigOptions('payment_method', PAYMENT_MODES_FB)
 
