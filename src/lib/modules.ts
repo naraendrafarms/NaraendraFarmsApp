@@ -7,6 +7,7 @@ export type ModuleKey =
   | 'inventory' | 'attendance' | 'payroll' | 'masters' | 'reports_ops'
   | 'reports_financial' | 'accounts' | 'vhl' | 'planning' | 'admin'
   | 'line_master'
+  | 'line_entry'
 
 export const MODULES: { key: ModuleKey; label: string }[] = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -29,6 +30,7 @@ export const MODULES: { key: ModuleKey; label: string }[] = [
   // 'masters' would have handed those roles edit rights, since they hold
   // 'full' there (migration 1127 checked this against the live table).
   { key: 'line_master', label: 'Line Master (shed lines)' },
+  { key: 'line_entry', label: 'Line Daily Entry (eggs, mortality, feed)' },
 ]
 
 // Longest-prefix match against the current route path (no leading slash,
@@ -69,6 +71,9 @@ export const ROUTE_MODULES: Record<string, ModuleKey> = {
   // More specific prefix than 'masters', so longest-prefix wins and this page
   // is gated by line_master rather than by Masters as a whole.
   'masters/lines': 'line_master',
+  // Longest prefix wins, so this beats the general 'flocks' mapping and a shed
+  // supervisor reaches line entry without gaining any other flock screen.
+  'flocks/line-daily': 'line_entry',
 
   'reports/pl': 'reports_financial',
   'reports/costs': 'reports_financial',
