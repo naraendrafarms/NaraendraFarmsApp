@@ -22,6 +22,7 @@ import { ManpowerRequirement } from '@/pages/employees/ManpowerRequirement'
 import { BulkDailyEntry } from '@/pages/flocks/BulkDailyEntry'
 import { LineDailyEntry } from '@/pages/flocks/LineDailyEntry'
 import { LineReports } from '@/pages/flocks/LineReports'
+import { CashAccounts } from '@/pages/masters/CashAccounts'
 import { EggConversions } from '@/pages/flocks/EggConversions'
 import { HatchBatches } from '@/pages/flocks/HatchBatches'
 import { HatchAnalysis } from '@/pages/flocks/HatchAnalysis'
@@ -256,6 +257,7 @@ export const App: React.FC = () => {
             <Route path="masters/parties" element={<PartiesMaster />} />
             <Route path="masters/hatcheries" element={<HatcheriesMaster />} />
             <Route path="masters/vehicles" element={<VehiclesMaster />} />
+            <Route path="masters/cash-accounts" element={<CashAccounts />} />
             <Route path="masters/medicines" element={<MedicinesMaster />} />
             <Route path="masters/meters" element={<MetersMaster />} />
             <Route path="masters/vaccination" element={<VaccinationSchedulePage />} />

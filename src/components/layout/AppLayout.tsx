@@ -126,6 +126,7 @@ const NAV: NavItem[] = [
       { label: 'Hatcheries',           to: '/masters/hatcheries',  roles: ['admin', 'accounts'] },
       { label: 'Electricity Meters',   to: '/masters/meters',      roles: ['admin', 'accounts'] },
       { label: 'Vehicles',            to: '/masters/vehicles',     roles: ['admin', 'accounts'] },
+      { label: 'Cash Imprest Accounts', to: '/masters/cash-accounts', roles: ['admin', 'accounts'] },
     ]
   },
   {
