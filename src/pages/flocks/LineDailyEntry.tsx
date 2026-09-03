@@ -387,7 +387,7 @@ export const LineDailyEntry: React.FC = () => {
               value: s.id,
               label: `${s.farms?.name ?? ''} — Shed ${s.shed_no}${s.shed_name ? ` (${s.shed_name})` : ''}`,
             }))} />
-          <DateInput label="Date" value={date} onChange={setDate} />
+          <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
           <Select label="Side / Lines" value={sideFilter}
             onChange={e => setSideFilter((e.target as HTMLSelectElement).value)}
             options={[{ value: '', label: `All lines (${(allLines ?? []).length})` },

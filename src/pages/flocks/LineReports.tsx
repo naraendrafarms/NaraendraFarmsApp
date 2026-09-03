@@ -192,8 +192,8 @@ export const LineReports: React.FC = () => {
               value: s.id,
               label: `${s.farms?.name ?? ''} — Shed ${s.shed_no}${s.shed_name ? ` (${s.shed_name})` : ''}`,
             }))} />
-          <DateInput label="From" value={from} onChange={setFrom} />
-          <DateInput label="To" value={to} onChange={setTo} />
+          <DateInput label="From" value={from} onChange={e => setFrom(e.target.value)} />
+          <DateInput label="To" value={to} onChange={e => setTo(e.target.value)} />
           <Select label="Side / Lines" value={sideFilter}
             onChange={e => setSideFilter((e.target as HTMLSelectElement).value)}
             options={[{ value: '', label: 'All lines' },

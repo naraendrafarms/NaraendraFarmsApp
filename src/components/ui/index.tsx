@@ -53,7 +53,11 @@ interface DateInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
   hint?: string
   required?: boolean
   value?: string   // YYYY-MM-DD
-  onChange?: (e: any) => void
+  // Fires with a synthetic {target:{value}}, NOT the raw string, so callers
+  // must write onChange={e => setX(e.target.value)}. Typed rather than `any`
+  // so that passing a plain string setter is a compile error -- doing exactly
+  // that shipped a page that crashed with "s.split is not a function".
+  onChange?: (e: { target: { value: string } }) => void
 }
 
 function isoToDisplay(iso: string): string {

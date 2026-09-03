@@ -28,6 +28,10 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 // Date format DD/MM/YYYY — parses YYYY-MM-DD directly to avoid timezone shift
 export const fmtDate = (d: string | null | undefined): string => {
   if (!d) return '—'
+  // Guard the type as well as the value. A caller passing DateInput's event
+  // object instead of e.target.value used to take the whole page down here
+  // with "s.split is not a function"; a dash is a far better outcome.
+  if (typeof d !== 'string') return '—'
   const parts = d.split('T')[0].split('-')        // handle ISO timestamps too
   if (parts.length === 3) {
     const [y, m, day] = parts

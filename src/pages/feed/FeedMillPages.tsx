@@ -1807,7 +1807,7 @@ const StockAdjForm: React.FC<{ initial: any; farms: any[]; onSave: (d:any)=>void
     adjustment_kg:'', adjustment_type:'Opening', remarks:'',
     ...initial, farm_id: initial?.farm_id ?? ''
   })
-  const s = (k: string) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement>) => setForm((f:any) => ({...f,[k]:e.target.value}))
+  const s = (k: string) => (e: { target: { value: string } }) => setForm((f:any) => ({...f,[k]:e.target.value}))  // widened, not narrowed: a real ChangeEvent still satisfies this, and DateInput's synthetic event now does too
   function submit(e: React.FormEvent) {
     e.preventDefault()
     onSave({ ...form, adjustment_kg: Number(form.adjustment_kg), farm_id: form.farm_id || null })
@@ -2027,7 +2027,7 @@ const ExpenseForm: React.FC<{ initial: any; farms: any[]; onSave: (d:any) => voi
     expense_date: today(), category:'Other', description:'', amount:'', vendor_name:'', invoice_no:'', remarks:'',
     ...initial, farm_id: initial?.farm_id ?? ''
   })
-  const s = (k: string) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement>) => setForm((f: any) => ({...f, [k]: e.target.value}))
+  const s = (k: string) => (e: { target: { value: string } }) => setForm((f: any) => ({...f, [k]: e.target.value}))
   function submit(e: React.FormEvent) {
     e.preventDefault()
     onSave({ ...form, amount: Number(form.amount), farm_id: form.farm_id || null })
