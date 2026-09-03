@@ -40,6 +40,9 @@ export const UserManagement: React.FC = () => {
   const [form, setForm] = useState({
     full_name: '', email: '', password: '', role: 'viewer' as Role, farm_id: '', is_active: 'true'
   })
+  // Sheds a shed supervisor is allowed to work on. Many-to-many, so two people
+  // can hold the same shed and one person can hold several.
+  const [shedIds, setShedIds] = useState<string[]>([])
   const s = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const { data: farms } = useQuery({
@@ -47,12 +50,21 @@ export const UserManagement: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').eq('is_active', true).order('name'); return data ?? [] }
   })
 
+  const { data: sheds } = useQuery({
+    queryKey: ['sheds_for_supervisor'],
+    queryFn: async () => {
+      const { data } = await supabase.from('sheds')
+        .select('id,shed_no,shed_name,farms(name)').order('shed_no')
+      return data ?? []
+    }
+  })
+
   const { data: users, isLoading } = useQuery({
     queryKey: ['users_admin'],
     queryFn: async () => {
       const { data } = await supabase
         .from('profiles')
-        .select('*, farms(name,code)')
+        .select('*, farms(name,code), profile_sheds(shed_id)')
         .order('full_name')
       return data ?? []
     }
@@ -61,13 +73,27 @@ export const UserManagement: React.FC = () => {
   const openAdd = () => {
     setEditing(null)
     setForm({ full_name: '', email: '', password: '', role: 'viewer', farm_id: '', is_active: 'true' })
+    setShedIds([])
     setShowForm(true)
   }
 
   const openEdit = (u: any) => {
     setEditing(u)
     setForm({ full_name: u.full_name ?? '', email: u.email ?? '', password: '', role: u.role, farm_id: u.farm_id ?? '', is_active: u.is_active ? 'true' : 'false' })
+    setShedIds((u.profile_sheds ?? []).map((x: any) => x.shed_id))
     setShowForm(true)
+  }
+
+  // Replace the user's shed list wholesale: delete what is there, insert what
+  // is ticked. Simpler than diffing and cannot leave a stale row behind. Only
+  // meaningful for a shed supervisor, so any other role is cleared.
+  const syncSheds = async (userId: string, role: Role, ids: string[]) => {
+    const { error: delErr } = await supabase.from('profile_sheds').delete().eq('profile_id', userId)
+    if (delErr) throw delErr
+    if (role !== 'shed_supervisor' || ids.length === 0) return
+    const { error } = await supabase.from('profile_sheds')
+      .insert(ids.map(shed_id => ({ profile_id: userId, shed_id })))
+    if (error) throw error
   }
 
   const createMut = useMutation({
@@ -92,6 +118,7 @@ export const UserManagement: React.FC = () => {
         is_active: form.is_active === 'true',
       }, { onConflict: 'id' })
       if (profErr) throw profErr
+      await syncSheds(userId, form.role, shedIds)
     },
     onSuccess: () => { toast.success('User created!'); qc.invalidateQueries({ queryKey: ['users_admin'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
@@ -113,6 +140,7 @@ export const UserManagement: React.FC = () => {
         })
         if (pwErr) throw pwErr
       }
+      await syncSheds(editing.id, form.role, shedIds)
     },
     onSuccess: () => { toast.success('User updated!'); qc.invalidateQueries({ queryKey: ['users_admin'] }); setShowForm(false) },
     onError: (e: any) => toast.error(e.message)
@@ -243,6 +271,31 @@ export const UserManagement: React.FC = () => {
               hint="Site Incharge can only see data from this site" />
           )}
 
+
+          {form.role === 'shed_supervisor' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Assigned Sheds <span className="text-red-500">*</span>
+              </label>
+              <div className="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                {(sheds ?? []).map((sh: any) => (
+                  <label key={sh.id} className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 cursor-pointer">
+                    <input type="checkbox" className="rounded border-gray-300 text-brand-600"
+                      checked={shedIds.includes(sh.id)}
+                      onChange={e => setShedIds(prev =>
+                        e.target.checked ? [...prev, sh.id] : prev.filter(x => x !== sh.id))} />
+                    <span>{sh.farms?.name ?? ''} — Shed {sh.shed_no}{sh.shed_name ? ` (${sh.shed_name})` : ''}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                This person sees Line Daily Entry for these sheds only. Several people can be
+                assigned the same shed, and one person can hold several sheds.
+                {shedIds.length === 0 && <span className="text-amber-600"> With none ticked they will see no sheds at all.</span>}
+              </p>
+            </div>
+          )}
+
           <Select label="Status" options={[{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }]}
             value={form.is_active} onChange={e => s('is_active', e.target.value)} />
 
@@ -268,6 +321,12 @@ export const UserManagement: React.FC = () => {
             {form.role === 'site_incharge' && <>
               <p>✓ Enter daily records, HE dispatch, medicine for their site only</p>
               <p>✗ Cannot see other sites, salary, or masters</p>
+            </>}
+            {form.role === 'shed_supervisor' && <>
+              <p>✓ Line Daily Entry — eggs by round, morning/day mortality, feed, line transfers</p>
+              <p>✓ View Line Master (the lines and boxes), but cannot change it</p>
+              <p>✗ Only their assigned sheds — nothing at other sheds or sites</p>
+              <p>✗ No other screen at all: no daily records, flocks, accounts or masters</p>
             </>}
             {form.role === 'viewer' && <>
               <p>✓ View all reports and dashboards</p>

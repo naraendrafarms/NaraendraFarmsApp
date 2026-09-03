@@ -7,7 +7,7 @@ import {
   Card, CardHeader, Button, Select, Spinner, EmptyState, DateInput,
   Table, Th, Td, Badge,
 } from '@/components/ui'
-import { Save, Egg, HeartCrack, Wheat } from 'lucide-react'
+import { Save, Egg, HeartCrack, Wheat, Bird, ArrowLeftRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 // Line-wise daily entry, running in PARALLEL with Bulk Daily Entry.
@@ -32,6 +32,7 @@ import toast from 'react-hot-toast'
 type EggRow = { r1: string; r2: string; r3: string; r4: string }
 type MortRow = { mf: string; mm: string; df: string; dm: string; reason: string }
 type FeedRow = { f: string; m: string }
+type PlaceRow = { f: string; m: string }
 
 const ROUNDS = [1, 2, 3, 4] as const
 const n = (v: string) => (v.trim() === '' ? 0 : Number(v) || 0)
@@ -44,17 +45,21 @@ export const LineDailyEntry: React.FC = () => {
 
   const [shedId, setShedId] = useState('')
   const [date, setDate] = useState(today())
-  const [tab, setTab] = useState<'eggs' | 'mortality' | 'feed'>('eggs')
+  const [tab, setTab] = useState<'birds' | 'eggs' | 'mortality' | 'feed' | 'transfer'>('birds')
   const [feedTypeId, setFeedTypeId] = useState('')
 
   const [eggs, setEggs] = useState<Record<string, EggRow>>({})
   const [mort, setMort] = useState<Record<string, MortRow>>({})
   const [feed, setFeed] = useState<Record<string, FeedRow>>({})
+  const [place, setPlace] = useState<Record<string, PlaceRow>>({})
+  // One line-to-line move at a time. A move is a fact with its own date, not a
+  // grid to be edited, so it is added and listed rather than typed in place.
+  const [xfer, setXfer] = useState({ from: '', to: '', f: '', m: '', remarks: '' })
 
   // Only line-managed sheds. A shed that has not been switched on is not
   // offered at all, which is what keeps this additive.
   const { data: sheds } = useQuery({
-    queryKey: ['line_managed_sheds'],
+    queryKey: ['line_managed_sheds', profile?.id, profile?.role],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sheds')
@@ -62,7 +67,15 @@ export const LineDailyEntry: React.FC = () => {
         .eq('line_managed', true)
         .order('shed_no')
       if (error) throw error
-      return data ?? []
+      const all = data ?? []
+      // A shed supervisor works only on the sheds assigned to them. Several
+      // people can hold the same shed, so this is a plain membership test, not
+      // an ownership one. Every other role sees all line-managed sheds.
+      if (profile?.role !== 'shed_supervisor') return all
+      const { data: mine } = await supabase
+        .from('profile_sheds').select('shed_id').eq('profile_id', profile.id)
+      const allowed = new Set((mine ?? []).map((r: any) => r.shed_id))
+      return all.filter((sh: any) => allowed.has(sh.id))
     },
   })
 
@@ -86,7 +99,7 @@ export const LineDailyEntry: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('shed_lines')
-        .select('id,side,line_no,boxes,boxes_female,boxes_male')
+        .select('id,side,line_no,boxes,boxes_female,boxes_male,birds_per_box')
         .eq('shed_id', shedId).eq('is_active', true)
         .order('side').order('line_no')
       if (error) throw error
@@ -102,17 +115,23 @@ export const LineDailyEntry: React.FC = () => {
     queryKey: ['line_day', shedId, date, lineIds.length],
     enabled: !!shedId && lineIds.length > 0,
     queryFn: async () => {
-      const [prod, mo, fd, dr] = await Promise.all([
+      const [prod, mo, fd, dr, bal, pl, tr] = await Promise.all([
         supabase.from('line_production').select('*').in('line_id', lineIds).eq('record_date', date),
         supabase.from('line_mortality').select('*').in('line_id', lineIds).eq('record_date', date),
         supabase.from('line_feed').select('*').in('line_id', lineIds).eq('record_date', date),
         supabase.from('daily_records')
-          .select('total_eggs,mortality_female,mortality_male,feed_female_kg,feed_male_kg,flocks(flock_no)')
+          .select('flock_id,closing_female,closing_male,total_eggs,mortality_female,mortality_male,feed_female_kg,feed_male_kg,flocks(flock_no)')
           .eq('shed_id', shedId).eq('record_date', date).maybeSingle(),
+        supabase.from('v_line_balance').select('*').in('line_id', lineIds),
+        supabase.from('line_placements').select('*').in('line_id', lineIds),
+        supabase.from('line_transfers').select('*, from_line:from_line_id(side,line_no), to_line:to_line_id(side,line_no)')
+          .or(`from_line_id.in.(${lineIds.join(',')}),to_line_id.in.(${lineIds.join(',')})`)
+          .order('transfer_date', { ascending: false }).limit(50),
       ])
       return {
         prod: prod.data ?? [], mort: mo.data ?? [], feed: fd.data ?? [],
         shedDay: dr.data ?? null,
+        balance: bal.data ?? [], placements: pl.data ?? [], transfers: tr.data ?? [],
       }
     },
   })
@@ -154,11 +173,27 @@ export const LineDailyEntry: React.FC = () => {
       }
       if (r.feed_type_id) ft = r.feed_type_id
     }
+    const pz: Record<string, PlaceRow> = {}
+    for (const l of lines) pz[l.id] = { f: '', m: '' }
+    for (const r of existing?.placements ?? []) {
+      if (!pz[r.line_id]) continue
+      pz[r.line_id] = { f: r.female ? String(r.female) : '', m: r.male ? String(r.male) : '' }
+    }
+    setPlace(pz)
     setEggs(e); setMort(m); setFeed(f)
     if (ft) setFeedTypeId(ft)
   }, [lines, existing])
 
   // ── Totals, and the comparison against the shed's own figure ──────────────
+  // Current birds per line, from v_line_balance. Keyed by line so every tab can
+  // show what a line actually holds -- the thing that was missing when
+  // mortality could be typed against a line with no birds in it.
+  const balByLine = useMemo(() => {
+    const m: Record<string, any> = {}
+    for (const b of (existing?.balance ?? []) as any[]) m[b.line_id] = b
+    return m
+  }, [existing])
+
   const totals = useMemo(() => {
     let eggTotal = 0, mf = 0, mm = 0, df = 0, dm = 0, feedF = 0, feedM = 0
     for (const id of lineIds) {
@@ -166,8 +201,19 @@ export const LineDailyEntry: React.FC = () => {
       const m = mort[id]; if (m) { mf += n(m.mf); mm += n(m.mm); df += n(m.df); dm += n(m.dm) }
       const f = feed[id]; if (f) { feedF += n(f.f); feedM += n(f.m) }
     }
-    return { eggTotal, mf, mm, df, dm, mortF: mf + df, mortM: mm + dm, feedF, feedM }
-  }, [eggs, mort, feed, lineIds])
+    let curF = 0, curM = 0, capacity = 0, boxes = 0
+    for (const l of (lines ?? []) as any[]) {
+      const b = balByLine[l.id]
+      curF += b?.current_female ?? 0
+      curM += b?.current_male ?? 0
+      boxes += l.boxes ?? 0
+      capacity += (l.boxes ?? 0) * (l.birds_per_box ?? 0)
+    }
+    return { eggTotal, mf, mm, df, dm, mortF: mf + df, mortM: mm + dm, feedF, feedM,
+             curF, curM, capacity, boxes }
+  }, [eggs, mort, feed, lineIds, lines, balByLine])
+
+  const flockId = (existing?.shedDay as any)?.flock_id ?? null
 
   const shedDay = existing?.shedDay as any
   // A gap is SHOWN, never closed. Blank when the shed day has not been entered
@@ -179,6 +225,37 @@ export const LineDailyEntry: React.FC = () => {
     mutationFn: async () => {
       if (!canEdit) throw new Error('You have view-only access to line entry')
       const by = profile?.id ?? null
+
+      if (tab === 'birds') {
+        if (!flockId) throw new Error('No shed daily record for this date, so there is no flock to place birds against')
+        const rows: any[] = []
+        for (const id of lineIds) {
+          const pz = place[id]; if (!pz) continue
+          if (pz.f.trim() === '' && pz.m.trim() === '') continue
+          rows.push({ line_id: id, flock_id: flockId, placed_date: date,
+                      female: n(pz.f), male: n(pz.m), entered_by: by })
+        }
+        if (!rows.length) throw new Error('Nothing to save — no bird counts entered')
+        const { error } = await supabase.from('line_placements')
+          .upsert(rows, { onConflict: 'line_id,flock_id' })
+        if (error) throw error
+        return rows.length
+      }
+
+      if (tab === 'transfer') {
+        if (!flockId) throw new Error('No shed daily record for this date, so there is no flock to transfer')
+        if (!xfer.from || !xfer.to) throw new Error('Choose both the line moved from and the line moved to')
+        if (xfer.from === xfer.to) throw new Error('From and To cannot be the same line')
+        if (n(xfer.f) === 0 && n(xfer.m) === 0) throw new Error('Enter how many birds moved')
+        const { error } = await supabase.from('line_transfers').insert({
+          flock_id: flockId, transfer_date: date,
+          from_line_id: xfer.from, to_line_id: xfer.to,
+          female: n(xfer.f), male: n(xfer.m),
+          remarks: xfer.remarks.trim() || null, entered_by: by,
+        })
+        if (error) throw error
+        return 1
+      }
 
       if (tab === 'eggs') {
         const rows: any[] = []
@@ -237,7 +314,8 @@ export const LineDailyEntry: React.FC = () => {
       return rows.length
     },
     onSuccess: (count) => {
-      toast.success(`Saved ${count} line${count === 1 ? '' : 's'}`)
+      toast.success(tab === 'transfer' ? 'Transfer recorded' : `Saved ${count} line${count === 1 ? '' : 's'}`)
+      if (tab === 'transfer') setXfer({ from: '', to: '', f: '', m: '', remarks: '' })
       qc.invalidateQueries({ queryKey: ['line_day'] })
     },
     onError: (e: any) => toast.error(e.message),
@@ -273,7 +351,9 @@ export const LineDailyEntry: React.FC = () => {
         subtitle="Eggs by round, morning and day mortality, and feed — line by line. Runs alongside Bulk Daily Entry; nothing here changes the shed's daily record."
         action={canEdit
           ? <Button icon={<Save size={16} />} loading={save.isPending} onClick={() => save.mutate()}>
-              Save {tab === 'eggs' ? 'Eggs' : tab === 'mortality' ? 'Mortality' : 'Feed'}
+              {tab === 'transfer' ? 'Record Transfer'
+                : `Save ${tab === 'birds' ? 'Birds' : tab === 'eggs' ? 'Eggs'
+                    : tab === 'mortality' ? 'Mortality' : 'Feed'}`}
             </Button>
           : <Badge color="gray">View only</Badge>}
       />
@@ -304,7 +384,8 @@ export const LineDailyEntry: React.FC = () => {
       ) : (
         <Card padding={false}>
           <div className="flex border-b border-gray-100">
-            {([['eggs', 'Eggs', Egg], ['mortality', 'Mortality', HeartCrack], ['feed', 'Feed', Wheat]] as const)
+            {([['birds', 'Birds', Bird], ['eggs', 'Eggs', Egg], ['mortality', 'Mortality', HeartCrack],
+               ['feed', 'Feed', Wheat], ['transfer', 'Line Transfer', ArrowLeftRight]] as const)
               .map(([k, label, Icon]) => (
                 <button key={k} onClick={() => setTab(k)}
                   className={`px-4 py-2 text-sm font-medium flex items-center gap-1.5 border-b-2 -mb-px ${
@@ -315,6 +396,17 @@ export const LineDailyEntry: React.FC = () => {
           </div>
 
           <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex flex-wrap gap-x-6 gap-y-1">
+            {tab === 'birds' && <>
+              <Cmp label="Line birds F" line={totals.curF} shed={shedDay?.closing_female} />
+              <Cmp label="M" line={totals.curM} shed={shedDay?.closing_male} />
+              <div className="text-xs text-gray-500">
+                Capacity <strong>{totals.capacity.toLocaleString('en-IN')}</strong> birds
+                {' '}({totals.boxes.toLocaleString('en-IN')} boxes × birds per box)
+              </div>
+            </>}
+            {tab === 'transfer' && <div className="text-xs text-gray-500">
+              Moving birds from one line to another. Both lines' counts change; the shed total does not.
+            </div>}
             {tab === 'eggs' && <Cmp label="Line eggs" line={totals.eggTotal} shed={shedDay?.total_eggs} />}
             {tab === 'mortality' && <>
               <Cmp label="Line mortality F" line={totals.mortF} shed={shedDay?.mortality_female} />
@@ -340,16 +432,90 @@ export const LineDailyEntry: React.FC = () => {
             </div>
           )}
 
+          {tab === 'transfer' ? (
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Select label="From line" value={xfer.from}
+                  onChange={e => setXfer(x => ({ ...x, from: (e.target as HTMLSelectElement).value }))}
+                  options={[{ value: '', label: '— Select —' }, ...lines.map((l: any) => ({
+                    value: l.id,
+                    label: `${l.side}-${l.line_no} (${(balByLine[l.id]?.current_female ?? 0) + (balByLine[l.id]?.current_male ?? 0)} birds)`,
+                  }))]} />
+                <Select label="To line" value={xfer.to}
+                  onChange={e => setXfer(x => ({ ...x, to: (e.target as HTMLSelectElement).value }))}
+                  options={[{ value: '', label: '— Select —' }, ...lines.map((l: any) => ({
+                    value: l.id,
+                    label: `${l.side}-${l.line_no} (${(balByLine[l.id]?.current_female ?? 0) + (balByLine[l.id]?.current_male ?? 0)} birds)`,
+                  }))]} />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Female</label>
+                    <input type="number" inputMode="numeric" disabled={!canEdit} value={xfer.f}
+                      onChange={e => setXfer(x => ({ ...x, f: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Male</label>
+                    <input type="number" inputMode="numeric" disabled={!canEdit} value={xfer.m}
+                      onChange={e => setXfer(x => ({ ...x, m: e.target.value }))}
+                      className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Remarks</label>
+                  <input type="text" disabled={!canEdit} value={xfer.remarks}
+                    onChange={e => setXfer(x => ({ ...x, remarks: e.target.value }))}
+                    placeholder="optional"
+                    className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm" />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                Dated {fmtDate(date)} — the date box at the top. Any two lines can be chosen,
+                including lines in different sheds, because birds do move between sheds here.
+              </p>
+
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr>
+                    <Th>Date</Th><Th>From</Th><Th>To</Th>
+                    <Th right>Female</Th><Th right>Male</Th><Th>Remarks</Th>
+                  </tr></thead>
+                  <tbody>
+                    {(existing?.transfers ?? []).length === 0 ? (
+                      <tr><Td colSpan={6} className="text-gray-400 text-center py-4">
+                        No line transfers recorded for these lines yet
+                      </Td></tr>
+                    ) : (existing?.transfers ?? []).map((t: any) => (
+                      <tr key={t.id} className="hover:bg-gray-50">
+                        <Td>{fmtDate(t.transfer_date)}</Td>
+                        <Td>{t.from_line ? `${t.from_line.side}-${t.from_line.line_no}` : '—'}</Td>
+                        <Td>{t.to_line ? `${t.to_line.side}-${t.to_line.line_no}` : '—'}</Td>
+                        <Td right>{t.female || ''}</Td>
+                        <Td right>{t.male || ''}</Td>
+                        <Td className="text-xs text-gray-500">{t.remarks ?? ''}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
+            </div>
+          ) : (
           <div className="overflow-x-auto">
             <Table>
               <thead><tr>
                 <Th>Side</Th><Th>Line</Th><Th right>Boxes</Th>
+                {tab === 'birds' && <>
+                  <Th right>Birds/Box</Th><Th right>Capacity</Th>
+                  <Th right>Placed F</Th><Th right>Placed M</Th>
+                  <Th right>In</Th><Th right>Out</Th><Th right>Died</Th>
+                  <Th right>Now F</Th><Th right>Now M</Th>
+                </>}
                 {tab === 'eggs' && <>
                   <Th right>R1</Th><Th right>R2</Th><Th right>R3</Th><Th right>R4</Th><Th right>Total</Th>
                 </>}
                 {tab === 'mortality' && <>
                   <Th right>Morning F</Th><Th right>Morning M</Th>
-                  <Th right>Day F</Th><Th right>Day M</Th><Th right>Total</Th><Th>Reason</Th>
+                  <Th right>Day F</Th><Th right>Day M</Th><Th right>Total</Th><Th right>Birds Now</Th><Th>Reason</Th>
                 </>}
                 {tab === 'feed' && <><Th right>Female kg</Th><Th right>Male kg</Th><Th right>Total kg</Th></>}
               </tr></thead>
@@ -369,6 +535,33 @@ export const LineDailyEntry: React.FC = () => {
                       <Td><Badge color="blue">{l.side}</Badge></Td>
                       <Td>{l.line_no}</Td>
                       <Td right className="text-gray-500">{l.boxes ?? '—'}</Td>
+                      {tab === 'birds' && (() => {
+                        const b = balByLine[l.id]
+                        const pz = place[l.id] ?? { f: '', m: '' }
+                        const setP = (k: keyof PlaceRow, v: string) =>
+                          setPlace(p => ({ ...p, [l.id]: { ...p[l.id], [k]: v } }))
+                        const cap = (l.boxes ?? 0) * (l.birds_per_box ?? 0)
+                        const over = (b?.current_female ?? 0) + (b?.current_male ?? 0) > cap && cap > 0
+                        return <>
+                          <Td right className="text-gray-500">{l.birds_per_box ?? '—'}</Td>
+                          <Td right className={over ? 'text-amber-600 font-semibold' : 'text-gray-500'}>
+                            {cap || '—'}
+                          </Td>
+                          <Td right>
+                            <input type="number" inputMode="numeric" className={cell} disabled={!canEdit}
+                              value={pz.f} onChange={ev => setP('f', ev.target.value)} />
+                          </Td>
+                          <Td right>
+                            <input type="number" inputMode="numeric" className={cell} disabled={!canEdit}
+                              value={pz.m} onChange={ev => setP('m', ev.target.value)} />
+                          </Td>
+                          <Td right className="text-gray-500">{((b?.in_female ?? 0) + (b?.in_male ?? 0)) || ''}</Td>
+                          <Td right className="text-gray-500">{((b?.out_female ?? 0) + (b?.out_male ?? 0)) || ''}</Td>
+                          <Td right className="text-gray-500">{((b?.mort_female ?? 0) + (b?.mort_male ?? 0)) || ''}</Td>
+                          <Td right><strong>{b?.current_female ?? ''}</strong></Td>
+                          <Td right><strong>{b?.current_male ?? ''}</strong></Td>
+                        </>
+                      })()}
                       {tab === 'eggs' && <>
                         {ROUNDS.map(r => (
                           <Td key={r} right>
@@ -387,6 +580,10 @@ export const LineDailyEntry: React.FC = () => {
                           </Td>
                         ))}
                         <Td right><strong>{(n(m.mf) + n(m.mm) + n(m.df) + n(m.dm)) || ''}</strong></Td>
+                        <Td right className={(balByLine[l.id]?.current_female ?? 0) + (balByLine[l.id]?.current_male ?? 0) === 0
+                          ? 'text-amber-600' : 'text-gray-500'}>
+                          {(balByLine[l.id]?.current_female ?? 0) + (balByLine[l.id]?.current_male ?? 0) || 'no birds'}
+                        </Td>
                         <Td>
                           <input type="text" className="w-32 px-1 py-1 border border-gray-200 rounded text-sm"
                             disabled={!canEdit} value={m.reason} placeholder="optional"
@@ -410,6 +607,7 @@ export const LineDailyEntry: React.FC = () => {
               </tbody>
             </Table>
           </div>
+          )}
 
           <div className="px-4 py-2 border-t border-gray-100 text-xs text-gray-500">
             {shed?.farms?.name} — Shed {shed?.shed_no} · {lines.length} lines · {fmtDate(date)}.

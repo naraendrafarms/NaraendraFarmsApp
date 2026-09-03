@@ -34,7 +34,7 @@ export const LineMaster: React.FC = () => {
   const [deleteRow, setDeleteRow] = useState<any>(null)
   const [form, setForm] = useState({
     shed_id: '', side: 'A', line_no: '', boxes: '',
-    boxes_female: '', boxes_male: '',
+    boxes_female: '', boxes_male: '', birds_per_box: '2',
     capacity_female: '', capacity_male: '', is_provisional: true, remarks: '',
   })
   const s = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
@@ -106,6 +106,7 @@ export const LineMaster: React.FC = () => {
       shed_id: row.shed_id, side: row.side, line_no: String(row.line_no),
       boxes: row.boxes?.toString() ?? '',
       boxes_female: row.boxes_female?.toString() ?? '',
+      birds_per_box: row.birds_per_box?.toString() ?? '2',
       boxes_male: row.boxes_male?.toString() ?? '',
       capacity_female: row.capacity_female?.toString() ?? '',
       capacity_male: row.capacity_male?.toString() ?? '',
@@ -113,7 +114,7 @@ export const LineMaster: React.FC = () => {
       remarks: row.remarks ?? '',
     } : {
       shed_id: shedFilter || '', side: 'A', line_no: '', boxes: '',
-      boxes_female: '', boxes_male: '',
+      boxes_female: '', boxes_male: '', birds_per_box: '2',
       capacity_female: '', capacity_male: '', is_provisional: true, remarks: '',
     })
     setShowForm(true)
@@ -138,6 +139,7 @@ export const LineMaster: React.FC = () => {
         line_no: lineNo,
         boxes: split ? (bf ?? 0) + (bm ?? 0) : num(form.boxes),
         boxes_female: bf,
+        birds_per_box: num(form.birds_per_box) ?? 2,
         boxes_male: bm,
         capacity_female: num(form.capacity_female),
         capacity_male: num(form.capacity_male),
@@ -242,6 +244,7 @@ export const LineMaster: React.FC = () => {
                 <thead><tr>
                   <Th>Side</Th><Th>Line</Th><Th right>Boxes</Th>
                   <Th right>Boxes F</Th><Th right>Boxes M</Th>
+                  <Th right>Birds/Box</Th><Th right>Capacity</Th>
                   <Th right>Bird Cap F</Th><Th right>Bird Cap M</Th>
                   <Th>Status</Th><Th>Remarks</Th>{canEdit && <Th></Th>}
                 </tr></thead>
@@ -253,6 +256,8 @@ export const LineMaster: React.FC = () => {
                       <Td right>{l.boxes ?? '—'}</Td>
                       <Td right>{l.boxes_female ?? '—'}</Td>
                       <Td right>{l.boxes_male ?? '—'}</Td>
+                      <Td right className="text-gray-500">{l.birds_per_box ?? '—'}</Td>
+                      <Td right className="text-gray-500">{((l.boxes ?? 0) * (l.birds_per_box ?? 0)) || '—'}</Td>
                       <Td right>{l.capacity_female ?? '—'}</Td>
                       <Td right>{l.capacity_male ?? '—'}</Td>
                       <Td>{l.is_provisional
@@ -301,6 +306,9 @@ export const LineMaster: React.FC = () => {
             <Input label="Boxes Male" type="number" value={form.boxes_male}
               onChange={e => s('boxes_male', e.target.value)} placeholder="if sheet splits F/M" />
           </div>
+          <Input label="Birds per box" type="number" value={form.birds_per_box}
+            onChange={e => s('birds_per_box', e.target.value)}
+            hint="Capacity is boxes x this, worked out rather than typed. 2 at Agraharam." />
           <Input label="Boxes (total cages on this line)" type="number" value={form.boxes}
             onChange={e => s('boxes', e.target.value)}
             disabled={form.boxes_female.trim() !== '' || form.boxes_male.trim() !== ''}
