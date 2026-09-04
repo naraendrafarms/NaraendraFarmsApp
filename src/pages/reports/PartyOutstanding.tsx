@@ -8,7 +8,7 @@ import {
 import { Download, ChevronDown, ChevronRight, IndianRupee } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
-import { ReceivePaymentModal } from '@/pages/flocks/FlockSalesPages'
+import { ReceivePaymentModal, BulkReceiptModal } from '@/pages/flocks/FlockSalesPages'
 
 // ── FY helper ─────────────────────────────────────────────────────
 function fyRange(fy: string): [string, string] {
@@ -49,6 +49,8 @@ const DebtorsTab: React.FC = () => {
   const [expandedParty, setExpandedParty] = useState<string | null>(null)
   const [hideSettled, setHideSettled] = useState(true)
   const [receiptSale, setReceiptSale] = useState<any>(null)
+  // The party whose outstanding vouchers are being settled in one payment.
+  const [bulkParty, setBulkParty] = useState<any>(null)
 
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all_out'],
@@ -206,6 +208,7 @@ const DebtorsTab: React.FC = () => {
               <Th right>Invoices</Th>
               <Th right>Balance Due</Th>
               <Th>Latest Date</Th>
+              <Th></Th>
             </tr>
           </thead>
           <tbody>
@@ -219,10 +222,18 @@ const DebtorsTab: React.FC = () => {
                   <Td right>{p.invoices}</Td>
                   <Td right className="font-semibold text-green-700">{inr(p.totalAmt)}</Td>
                   <Td>{p.latestDate ? fmtDate(p.latestDate) : '—'}</Td>
+                  <Td right>
+                    {p.totalAmt > 0 && (
+                      <button className="text-xs text-green-700 font-medium hover:underline whitespace-nowrap"
+                        onClick={e => { e.stopPropagation(); setBulkParty(p) }}>
+                        Receive All
+                      </button>
+                    )}
+                  </Td>
                 </tr>
                 {expandedParty === p.partyId && (
                   <tr>
-                    <td colSpan={5} className="p-0 bg-gray-50">
+                    <td colSpan={6} className="p-0 bg-gray-50">
                       <div className="border-t border-gray-100">
                         <Table>
                           <thead>
@@ -280,6 +291,7 @@ const DebtorsTab: React.FC = () => {
                 <Td right>{grouped.reduce((s, p) => s + p.invoices, 0)}</Td>
                 <Td right className="text-green-700">{inr(grandTotal)}</Td>
                 <Td></Td>
+                <Td></Td>
               </tr>
             </tfoot>
           )}
@@ -297,6 +309,16 @@ const DebtorsTab: React.FC = () => {
         table={receiptSale?._table ?? 'he_dispatch'}
         onClose={() => setReceiptSale(null)}
         onSaved={() => { setReceiptSale(null); refetchAll() }}
+      />
+
+      <BulkReceiptModal
+        open={!!bulkParty}
+        partyId={bulkParty?.partyId ?? null}
+        heading={bulkParty ? `${bulkParty.partyName} · ${inr(bulkParty.totalAmt)} outstanding` : ''}
+        bankAccounts={bankAccounts ?? []}
+        farms={farms ?? []}
+        onClose={() => setBulkParty(null)}
+        onSaved={() => { setBulkParty(null); qc.invalidateQueries({ queryKey: ['bulk_receipt_vouchers'] }); refetchAll() }}
       />
     </div>
   )

@@ -47,6 +47,300 @@ async function extractTempReadings(file: File): Promise<number[]> {
   return rows.map(r => parseFloat(r[tempCol])).filter(n => !isNaN(n))
 }
 
+// ── Bulk Receipt Modal ────────────────────────────────────────────
+// ONE payment covering SEVERAL outstanding vouchers.
+//
+// Until now a buyer or employee handing over one lump sum against five unpaid
+// vouchers meant five trips through the Receive Payment window, re-picking the
+// same date and the same imprest each time -- and nothing stopped voucher 3
+// being tagged to a different tin than voucher 1. The tempting shortcut was
+// worse: entering the lump as a single voucher on the Imprest Ledger, which
+// writes a cash_book row with no link to any sale, so the five sales stay
+// Pending for ever and the cash is counted twice if they are later receipted
+// properly.
+//
+// The money is allocated OLDEST VOUCHER FIRST, which is how the outstanding
+// list is already read, and the last voucher the money reaches is marked
+// Partial when it runs out. Nothing is spread evenly: a part-paid voucher is a
+// real state, five half-paid ones is a mess nobody asked for.
+//
+// INSERT ONLY, never delete-then-reinsert. The single Receive Payment window
+// clears a sale''s prior ledger rows before writing the new one, which is right
+// when EDITING one payment but would wipe an earlier receipt here. Each bulk
+// receipt is its own cash_book row and amount_received accumulates, so a
+// voucher paid in three instalments carries three traceable rows.
+export const BulkReceiptModal: React.FC<{
+  open: boolean
+  partyId?: string | null
+  employeeId?: string | null
+  heading: string
+  bankAccounts: any[]
+  farms: any[]
+  onClose: () => void
+  onSaved: () => void
+}> = ({ open, partyId, employeeId, heading, bankAccounts, farms, onClose, onSaved }) => {
+  const [mode, setMode] = useState('Cash')
+  const [bankId, setBankId] = useState('')
+  const [cashFarmId, setCashFarmId] = useState('ho')
+  const [cashAccountId, setCashAccountId] = useState('')
+  const [date, setDate] = useState(today())
+  const [amount, setAmount] = useState('')
+  const [utr, setUtr] = useState('')
+  const [skipped, setSkipped] = useState<Record<string, boolean>>({})
+  const [saving, setSaving] = useState(false)
+
+  const { data: cashAccounts = [] } = useQuery({
+    queryKey: ['cash_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_accounts')
+        .select('id,name,acct_type,farm_id').eq('is_active', true).order('sort_order')
+      return data ?? []
+    },
+    enabled: open,
+  })
+
+  // Every voucher this payer still owes on, oldest first. Outstanding is
+  // amount - amount_received, the same definition Party Outstanding uses, so
+  // the two screens can never disagree about what is owed.
+  const { data: vouchers = [], isLoading } = useQuery({
+    queryKey: ['bulk_receipt_vouchers', partyId, employeeId],
+    enabled: open && !!(partyId || employeeId),
+    queryFn: async () => {
+      const out: any[] = []
+      const bal = (r: any) => Number(r.amount ?? 0) - Number(r.amount_received ?? 0)
+
+      let q = supabase.from('nhe_sales')
+        .select('id,sale_date,sale_type,dc_no,invoice_no,amount,amount_received,'
+          + 'payment_cash,payment_online,flock_id,party_id,flocks(flock_no),parties(name)')
+        .order('sale_date')
+      q = employeeId ? q.eq('employee_id', employeeId) : q.eq('party_id', partyId!)
+      const { data: ns, error: nsErr } = await q
+      if (nsErr) { toast.error(nsErr.message); return [] }
+      for (const r of (ns ?? []) as any[]) {
+        if (bal(r) > 0.005) out.push({ ...r, _table: 'nhe_sales', _date: r.sale_date,
+          _bal: bal(r), _type: r.sale_type, _ref: r.invoice_no ?? r.dc_no ?? '' })
+      }
+
+      // Hatching eggs go to buyers, never to an employee, so this half is
+      // skipped entirely for an employee rather than queried and thrown away.
+      if (partyId) {
+        const { data: hd } = await supabase.from('he_dispatch')
+          .select('id,dispatch_date,dc_no,invoice_no,amount,amount_received,'
+            + 'payment_cash,payment_online,flock_id,flocks(flock_no),parties(name)')
+          .eq('party_id', partyId).order('dispatch_date')
+        for (const r of (hd ?? []) as any[]) {
+          if (bal(r) > 0.005) out.push({ ...r, _table: 'he_dispatch', _date: r.dispatch_date,
+            _bal: bal(r), _type: 'he_sale', _ref: r.invoice_no ?? (r.dc_no != null ? String(r.dc_no) : '') })
+        }
+      }
+      return out.sort((a, b) => String(a._date).localeCompare(String(b._date)))
+    },
+  })
+
+  React.useEffect(() => { if (open) { setSkipped({}); setAmount(''); setDate(today()) } }, [open])
+
+  const chosen = (vouchers as any[]).filter((v: any) => !skipped[v.id])
+  const entered = parseFloat(amount) || 0
+  const allocation = React.useMemo(() => {
+    let left = entered
+    return chosen.map((v: any) => {
+      const take = Math.min(left, v._bal)
+      left = Math.max(0, left - take)
+      return { v, take }
+    })
+  }, [chosen, entered])
+  const allocated = allocation.reduce((s, a) => s + a.take, 0)
+  const leftOver = entered - allocated
+  const totalDue = chosen.reduce((s: number, v: any) => s + v._bal, 0)
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      if (entered <= 0) throw new Error('Enter the amount received')
+      if (allocated <= 0) throw new Error('Tick at least one voucher to receive against')
+      if (leftOver > 0.005) throw new Error(
+        `${inr(leftOver)} more than the vouchers ticked. Reduce the amount, or tick more vouchers.`)
+      if (mode !== 'Cash' && !bankId) throw new Error('Pick the bank account the money came into')
+
+      let posted = 0
+      for (const { v, take } of allocation) {
+        if (take <= 0.005) continue
+        const newReceived = Number(v.amount_received ?? 0) + take
+        const isCash = mode === 'Cash'
+        const update: any = {
+          amount_received: newReceived,
+          // A rounding tail must never leave a voucher reading Partial for
+          // half a paisa, so the comparison carries the same tolerance used
+          // to decide a voucher is outstanding at all.
+          payment_status: newReceived + 0.005 >= Number(v.amount ?? 0) ? 'Received' : 'Partial',
+          received_date: date,
+          payment_mode: isCash ? 'Cash' : mode,
+          payment_cash: Number(v.payment_cash ?? 0) + (isCash ? take : 0),
+          payment_online: Number(v.payment_online ?? 0) + (isCash ? 0 : take),
+          bank_account_id: isCash ? (v.bank_account_id ?? null) : bankId,
+          utr_ref: utr || null,
+          ...(v._table === 'nhe_sales' ? {
+            cash_farm_id: isCash ? (cashFarmId === 'ho' ? null : cashFarmId) : null,
+            cash_account_id: isCash ? (cashAccountId || null) : null,
+          } : {}),
+        }
+        const { error: upErr } = await supabase.from(v._table).update(update).eq('id', v.id)
+        if (upErr) throw new Error(upErr.message)
+
+        const { category, label } = nheCashCategory(v._type)
+        const flockLabel = v.flocks?.flock_no ? `F-${v.flocks.flock_no}` : ''
+        const description = [label, flockLabel, v._ref].filter(Boolean).join(' — ')
+        const sourceCol = v._table === 'he_dispatch'
+          ? { he_dispatch_id: v.id } : { nhe_sale_id: v.id }
+
+        if (isCash) {
+          const { error: cbErr } = await supabase.from('cash_book').insert({
+            txn_date: date, txn_type: 'receipt', category, description,
+            party_name: v.parties?.name ?? null,
+            farm_id: cashFarmId === 'ho' ? null : cashFarmId,
+            flock_id: v.flock_id ?? null,
+            reference_no: v._ref || null,
+            amount_in: take, amount_out: 0, payment_mode: 'cash',
+            cash_account_id: cashAccountId || null,
+            ...sourceCol,
+          })
+          if (cbErr) throw new Error('Cash Book entry failed: ' + cbErr.message)
+        } else {
+          const { error: btErr } = await supabase.from('bank_transactions').insert({
+            bank_account_id: bankId, txn_date: date, txn_type: 'Credit',
+            category: 'Sale Receipt', reference_no: utr || v._ref || null,
+            description, amount: take, party_id: v.party_id ?? partyId ?? null,
+            ...sourceCol,
+          })
+          if (btErr) throw new Error('Bank entry failed: ' + btErr.message)
+        }
+        posted++
+      }
+      toast.success(`Received ${inr(allocated)} against ${posted} voucher${posted === 1 ? '' : 's'}`)
+      onSaved()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!open) return null
+
+  const imprestOptions = (cashAccounts as any[]).map((a: any) => ({ value: a.id, label: a.name }))
+  const defaultImprestLabel = cashFarmId === 'ho'
+    ? ((cashAccounts as any[]).find((a: any) => a.acct_type === 'ho_imprest')?.name ?? 'Head Office') + ' (default)'
+    : ((cashAccounts as any[]).find((a: any) => a.farm_id === cashFarmId && a.acct_type === 'site_petty')?.name
+       ?? 'this site has no imprest') + ' (default)'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-900">Receive Against Several Vouchers</h3>
+            <p className="text-xs text-gray-500">{heading}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+        </div>
+
+        {isLoading ? <Spinner /> : (vouchers as any[]).length === 0 ? (
+          <p className="text-sm text-gray-500 py-6 text-center">Nothing outstanding for this payer.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Amount Received (₹)" type="number" step="0.01" value={amount}
+                onChange={e => setAmount(e.target.value)} placeholder={String(Math.round(totalDue))} />
+              <DateInput label="Date Received" value={date} onChange={e => setDate(e.target.value)} />
+              <Select label="Payment Mode" value={mode} onChange={e => setMode(e.target.value)}
+                options={['Cash', 'NEFT', 'RTGS', 'Bank Transfer', 'UPI', 'Cheque']} />
+              {mode === 'Cash' ? (
+                <Select label="Cash Location" value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
+                  options={[{ value: 'ho', label: 'Head Office' },
+                            ...farms.map((f: any) => ({ value: f.id, label: `${f.name} (Site)` }))]} />
+              ) : (
+                <Select label="Bank Account" placeholder="— Select bank —" value={bankId}
+                  onChange={e => setBankId(e.target.value)}
+                  options={bankAccounts.map((b: any) => ({ value: b.id,
+                    label: `${b.bank_name}${b.account_name ? ' — ' + b.account_name : ''}` }))} />
+              )}
+              {mode === 'Cash' && (
+                <div className="col-span-2">
+                  <Select label="Received into (Imprest)" placeholder={defaultImprestLabel}
+                    value={cashAccountId} onChange={e => setCashAccountId(e.target.value)}
+                    options={imprestOptions} />
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    One imprest for the whole receipt. Leave blank unless a person took the cash.
+                  </p>
+                </div>
+              )}
+              {mode !== 'Cash' && (
+                <Input label="UTR / Reference No" value={utr} onChange={e => setUtr(e.target.value)}
+                  placeholder="Transaction reference" />
+              )}
+            </div>
+
+            <div className="rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between px-3 py-2 bg-gray-50 text-xs font-semibold text-gray-600">
+                <span>{chosen.length} of {(vouchers as any[]).length} vouchers · Due {inr(totalDue)}</span>
+                <span>Allocated {inr(allocated)}{leftOver > 0.005 ? ` · ${inr(leftOver)} unallocated` : ''}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead><tr>
+                    <Th></Th><Th>Date</Th><Th>Type</Th><Th>Ref</Th><Th>Flock</Th>
+                    <Th right>Outstanding</Th><Th right>This Receipt</Th><Th right>Still Due</Th>
+                  </tr></thead>
+                  <tbody>
+                    {(vouchers as any[]).map((v: any) => {
+                      const take = allocation.find(a => a.v.id === v.id)?.take ?? 0
+                      const off = !!skipped[v.id]
+                      return (
+                        <tr key={v.id} className={`text-sm ${off ? 'opacity-40' : 'hover:bg-gray-50'}`}>
+                          <Td>
+                            <input type="checkbox" checked={!off}
+                              onChange={e => setSkipped(m => ({ ...m, [v.id]: !e.target.checked }))} />
+                          </Td>
+                          <Td className="text-xs">{fmtDate(v._date)}</Td>
+                          <Td className="text-xs">{v._table === 'he_dispatch' ? 'HE' : String(v._type ?? '').toUpperCase()}</Td>
+                          <Td className="text-xs">{v._ref || '—'}</Td>
+                          <Td className="text-xs">{v.flocks?.flock_no ? `F-${v.flocks.flock_no}` : '—'}</Td>
+                          <Td right className="text-xs">{inr(v._bal)}</Td>
+                          <Td right className={`text-xs font-semibold ${take > 0 ? 'text-green-700' : 'text-gray-300'}`}>
+                            {take > 0 ? inr(take) : '—'}</Td>
+                          <Td right className="text-xs">{inr(Math.max(0, v._bal - take))}</Td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </Table>
+              </div>
+              <p className="text-[10px] text-gray-500 px-3 py-2">
+                Allocated oldest voucher first. The last voucher the money reaches is marked
+                Partial when it runs out; the rest stay fully due.
+              </p>
+            </div>
+
+            {leftOver > 0.005 && (
+              <p className="text-xs text-red-600 font-medium">
+                {inr(leftOver)} more than the ticked vouchers can absorb — reduce the amount or tick more.
+              </p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
+              <Button onClick={save} loading={saving} className="flex-1"
+                disabled={allocated <= 0 || leftOver > 0.005}>
+                Receive {allocated > 0 ? inr(allocated) : ''}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Receive Payment Modal ─────────────────────────────────────────
 // Exported so Party Outstanding (Debtors tab) can reuse the exact same
 // receipt logic instead of duplicating Cash Book / Bank Ledger posting.
@@ -2355,6 +2649,8 @@ export const NHESales: React.FC = () => {
     }
   })
   const [showPartyDues, setShowPartyDues] = useState(false)
+  // { partyId | employeeId, heading } for the bulk receipt window, or null.
+  const [bulkFor, setBulkFor] = useState<any>(null)
 
   // Names the tin the cash will land in when the picker is left blank, so the
   // default is visible rather than something only the derivation knows.
@@ -3317,7 +3613,17 @@ export const NHESales: React.FC = () => {
                       <Td right className="text-xs">{inr(r.total)}</Td>
                       <Td right className="text-xs text-green-700">{inr(r.received)}</Td>
                       <Td right className={`text-xs font-semibold ${r.pending > 0 ? 'text-red-600' : 'text-gray-400'}`}>{inr(r.pending)}</Td>
-                      <Td><button className="text-xs text-brand-600 hover:underline" onClick={() => setEmpFilter(r.id)}>View</button></Td>
+                      <Td>
+                        <div className="flex gap-2 justify-end">
+                          <button className="text-xs text-brand-600 hover:underline" onClick={() => setEmpFilter(r.id)}>View</button>
+                          {r.pending > 0 && (
+                            <button className="text-xs text-green-700 font-medium hover:underline"
+                              onClick={() => setBulkFor({ employeeId: r.id, heading: `${r.emp_id ? r.emp_id + ' — ' : ''}${r.name} · ${inr(r.pending)} outstanding` })}>
+                              Receive
+                            </button>
+                          )}
+                        </div>
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -3337,7 +3643,7 @@ export const NHESales: React.FC = () => {
           {showPartyDues && (
             <div className="overflow-x-auto mt-2">
               <Table>
-                <thead><tr><Th>Party</Th><Th right>Vouchers</Th><Th right>Total</Th><Th right>Received</Th><Th right>Pending</Th></tr></thead>
+                <thead><tr><Th>Party</Th><Th right>Vouchers</Th><Th right>Total</Th><Th right>Received</Th><Th right>Pending</Th><Th></Th></tr></thead>
                 <tbody>
                   {partyDues!.map((r: any) => (
                     <tr key={r.id} className="hover:bg-gray-50 align-top">
@@ -3351,6 +3657,14 @@ export const NHESales: React.FC = () => {
                       <Td right className="text-xs">{inr(r.total)}</Td>
                       <Td right className="text-xs text-green-700">{inr(r.received)}</Td>
                       <Td right className={`text-xs font-semibold ${r.pending > 0 ? 'text-red-600' : 'text-gray-400'}`}>{inr(r.pending)}</Td>
+                      <Td right>
+                        {r.pending > 0 && (
+                          <button className="text-xs text-green-700 font-medium hover:underline"
+                            onClick={() => setBulkFor({ partyId: r.id, heading: `${r.name} · ${inr(r.pending)} outstanding` })}>
+                            Receive
+                          </button>
+                        )}
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -3601,6 +3915,28 @@ export const NHESales: React.FC = () => {
         onSaved={() => {
           setReceiptSale(null)
           qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+          qc.invalidateQueries({ queryKey: ['cash_book'] })
+          qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+        }}
+      />
+
+      <BulkReceiptModal
+        open={!!bulkFor}
+        partyId={bulkFor?.partyId ?? null}
+        employeeId={bulkFor?.employeeId ?? null}
+        heading={bulkFor?.heading ?? ''}
+        bankAccounts={bankAccounts ?? []}
+        farms={farmsNhe ?? []}
+        onClose={() => setBulkFor(null)}
+        onSaved={() => {
+          setBulkFor(null)
+          // The dues panels read their own queries, so both are refreshed
+          // alongside the sales list -- a receipt that does not visibly clear
+          // the due it just paid reads as a failed save.
+          qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+          qc.invalidateQueries({ queryKey: ['nhe_emp_dues'] })
+          qc.invalidateQueries({ queryKey: ['nhe_party_dues'] })
+          qc.invalidateQueries({ queryKey: ['bulk_receipt_vouchers'] })
           qc.invalidateQueries({ queryKey: ['cash_book'] })
           qc.invalidateQueries({ queryKey: ['bank_transactions'] })
         }}
