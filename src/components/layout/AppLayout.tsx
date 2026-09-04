@@ -151,6 +151,7 @@ const NAV: NavItem[] = [
       { label: 'Stock Statement',         to: '/reports/stock-statement' },
       { label: 'Site Invoice (Consolidated)', to: '/reports/site-invoice' },
       { label: 'Bird / Cull Sales Report',    to: '/reports/bird-sales' },
+      { label: 'Sales Analysis (all sales)',  to: '/reports/sales-analysis' },
       // Gated by line_entry, not the reports module, so a shed supervisor can
       // reach this one report without any other report opening up to them.
       { label: 'Line Reports (shed / line wise)', to: '/reports/lines' },

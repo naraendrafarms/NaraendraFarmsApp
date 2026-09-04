@@ -6,10 +6,11 @@ import {
   Sparkles, Clock, Receipt, FileText, Egg, Search, X, ListTodo, MessageCircle, Shield
 } from 'lucide-react'
 
-const LAST_UPDATED = '2026-09-03'
+const LAST_UPDATED = '2026-09-04'
 
 interface ChangeEntry { date: string; tag: 'New' | 'Fix' | 'Improved'; text: string }
 const CHANGELOG: ChangeEntry[] = [
+  { date: '2026-09-04', tag: 'New', text: 'REPORTS \u2192 SALES ANALYSIS: EVERY SALE IN ONE REPORT. Hatching and non-hatching eggs, birds, manure and the rest, read by vendor, flock, grade or type without leaving the page. Until now those four dimensions were spread over four screens and none carried more than two: the Sales Invoice Register has flock, party and type but only invoiced rows and no quantity, rate or grade; Egg Stock Balance splits JE/TE/BE quantity but has no party and no money; the Bird / Cull Sales Report is bird types only; GST Reports is a tax return. Picking a vendor and asking "how many A grade, how many B grade, how many invoices, and what about the JE and TE" could not be answered anywhere. It now can: choose the vendor and the summary gives invoices, sales, grade A/B/C and the HE, JE, TE, BE, bird, manure and other quantities side by side, with the full line-by-line detail underneath and both halves exportable to Excel. Group the summary by vendor, flock, sale type or month; filter by any combination of vendor, flock, type, financial year or date range, and choose whether employee sales are included \u2014 they are shown by default and marked, rather than silently dropped. ONE ROW IS ONE SALE LINE, so a sale billing JE and TE together appears as two rows while still counting as ONE invoice and ONE sale, and a filter can never split an amount it does not own. AMOUNT IS NOT SPLIT BY GRADE, on purpose: an HE rate is set per production date, so A and B eggs on the same line share one rate and no per-grade revenue exists in the data. Grade quantities are real and shown; grade revenue would have to be invented, and the note under the summary says so rather than leaving a plausible-looking blank.' },
   { date: '2026-09-03', tag: 'Fix', text: 'DEVELOPMENT TASKS: THE NIGHTLY HEALTH CHECK NO LONGER RAISES A NEW TASK EVERY NIGHT. Ten of the 44 open tasks were the same entry repeated — "Health check found 1 critical problem(s)" dated 25/08 through 03/09 — because the job only checked whether it had already raised one TODAY. They are collapsed into a single standing task, closed as duplicates rather than as fixed: the underlying rule is still failing (7 days where the bird count does not add up, the small Flock 20 import drifts confirmed earlier against the Excel). A new one can no longer be raised while an open one is sitting there. Four tasks that shipped today were also ticked off — line-wise daily entry, shed supervisors limited to their own sheds, the A/B/C/D box counts, and the imprest accounts — and "225 old bird sales carry no shed" was recounted to 233, which is what the check reports now. The Health Check page currently shows 22 rules run, 14 passing and 8 failing; that is the live figure to work from, not the task list.' },
   { date: '2026-09-03', tag: 'Improved', text: 'IMPREST LEDGER NOW LISTS CASH ONLY. The cash book also holds cheque, NEFT, RTGS and UPI entries, and the ledger was listing every one of them — HO Imprest showed 722 rows of which only 30 were actually cash, so 30 real cash entries were buried under about Rs 10 crore of bank payments (434 salary and 258 purchase payments, nearly all by bank). Those rows never counted toward the balance, so showing them served no purpose and only made the account unreadable. The ledger now lists cash entries only, matching what the balance has always counted; bank payments remain where they belong, in the Bank Ledger. NOTE ON SITE IMPRESTS: they hold EXPENSES as well as sales — 219 of the 340 site entries are expenses — which is correct, an imprest being all the cash a site takes in and pays out. That is why a rearing site such as Kethireddypally reads negative before its opening balance is set: Rs 1,918 of sales in against Rs 2,42,099 of expenses out.' },
   { date: '2026-09-03', tag: 'Fix', text: 'IMPREST LEDGER SHOWED NO VOUCHERS AT ALL — FIXED. Every imprest account came up empty whatever dates were chosen, while the balance cards above showed correct figures, which made it look as though the vouchers had gone. They had not: the list was asking the database for two things that cannot work against a view — a linked farm name, which needs a foreign key a view does not have, and sorting by a column the view never carried. Either one on its own fails the entire request and returns nothing. The view now carries the site name and the created time itself, so the list loads as a plain result with nothing to link. THE DATE BOXES ARE ALSO BLANK BY DEFAULT NOW: choosing an imprest shows EVERY voucher it holds, and you fill a From or To date only when you want to narrow it. A date default was hiding older entries and making a populated account look empty. Balances were never affected — they read a different view and were always right.' },
@@ -1652,6 +1653,7 @@ const SECTIONS: Section[] = [
         title: 'Key reports and where to find them',
         path: 'Reports (left nav)',
         steps: [
+          { text: 'Sales Analysis — every sale (HE and NHE) in one place, grouped by vendor, flock, grade or type.' },
           { text: 'Daily Summary — one-page view of all flocks for a selected date: production, HD%, feed, mortality.' },
           { text: 'Production Report — month-wise egg production per flock with trends.' },
           { text: 'P&L Report — revenue vs cost per flock.' },
@@ -1663,6 +1665,20 @@ const SECTIONS: Section[] = [
           { text: 'Party Outstanding — amount owed to/by each party.' },
           { text: 'GST Reports — GSTR-1, GSTR-3B, RCM Register, and Purchase GST tab for monthly filing.' },
           { text: 'TDS Receivable — all HE dispatches where TDS is applicable, rate-wise summary (Total TDS, TDS on Paid, TDS on Pending). Filter by date range and TDS %. Export to Excel.' },
+        ]
+      },
+      {
+        title: 'Sales Analysis — all sales by vendor, flock, grade and type',
+        path: 'Reports → Sales Analysis (all sales)',
+        steps: [
+          { text: 'Shows HE dispatches and NHE sales together. Nothing is entered here — it reads what the sales screens already saved.' },
+          { text: 'Pick a Vendor to answer "what has this buyer taken?" — the summary gives invoices, number of sales, grade A / B / C, and the HE, JE, TE, BE, bird, manure and other quantities, with the amount.' },
+          { text: 'Group Summary By switches the same figures between Vendor, Flock, Sale Type and Month. Grade A/B/C stay as columns in every grouping, so grade-wise is always visible.' },
+          { text: 'Filter by vendor, flock, sale type, financial year or a date range. Sold To decides whether employee sales are included — they are counted by default and marked "(employee)" in the detail.' },
+          { text: 'The detail table below is one row per SALE LINE: a sale billing JE and TE together is two rows, but still counts as one invoice and one sale in the summary.' },
+          { text: 'Export Summary and Export Detail both open straight in Excel.',
+            note: 'Grade A/B/C are hatching eggs only. JE, TE and BE are separate SALE TYPES, not grades, and have their own columns. Free eggs are counted in quantity but never in amount — they left the farm but were not billed. Invoices counts distinct invoice numbers; a sale with no invoice number still counts under Sales.',
+            warning: 'Amount is deliberately NOT split by grade. An HE rate is set per production date, so A and B eggs on the same line share one rate and no per-grade revenue exists in the data. Grade quantities are real; grade revenue would have to be invented.' },
         ]
       },
       {
