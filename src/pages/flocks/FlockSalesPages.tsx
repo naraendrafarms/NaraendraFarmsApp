@@ -57,6 +57,13 @@ export const ReceivePaymentModal: React.FC<{
   const [mode, setMode] = useState('Cash')
   const [bankId, setBankId] = useState('')
   const [cashFarmId, setCashFarmId] = useState('ho') // 'ho' = Head Office, or a farm UUID
+  // Which imprest actually took the cash. Blank means "the site's own tin",
+  // which is exactly what the derivation in migration 1159 already does, so an
+  // ordinary receipt is unchanged. It is only set when a PERSON took the money
+  // -- Mandal, Naraendra or Srinath collecting on a site's behalf -- because
+  // the location alone cannot say that, and without it the site's balance
+  // reads too high and the holder's too low.
+  const [cashAccountId, setCashAccountId] = useState('')
   const [date, setDate] = useState(today())
   const [amtReceived, setAmtReceived] = useState('')
   // Split receipt — part cash, part online. nhe_sales has carried
@@ -70,6 +77,16 @@ export const ReceivePaymentModal: React.FC<{
   const [status, setStatus] = useState('Received')
   const [saving, setSaving] = useState(false)
   const [selectedAdvanceId, setSelectedAdvanceId] = useState('')
+
+  const { data: cashAccounts = [] } = useQuery({
+    queryKey: ['cash_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_accounts')
+        .select('id,name,acct_type,farm_id').eq('is_active', true).order('sort_order')
+      return data ?? []
+    },
+    enabled: open,
+  })
 
   // Load available advance balance for this party
   const { data: partyAdvances = [] } = useQuery({
@@ -94,6 +111,9 @@ export const ReceivePaymentModal: React.FC<{
       // nhe_sales stores where cash was received; he_dispatch has no such
       // column so this falls back to Head Office.
       setCashFarmId(sale.cash_farm_id ?? 'ho')
+      // he_dispatch has no cash_account_id column, so this reads undefined
+      // there and falls back to the site derivation -- same as cash_farm_id.
+      setCashAccountId(sale.cash_account_id ?? '')
       setDate(sale.received_date ?? today())
       // Default to what's actually still owed — the invoice amount less any
       // TDS already deducted at source (shown as "Net receivable" when the
@@ -210,7 +230,11 @@ export const ReceivePaymentModal: React.FC<{
         // never back to the sale, so reopening this modal always fell back to
         // Head Office and the sale itself never recorded where cash came in.
         // he_dispatch has no such column, so only set it for nhe_sales.
-        ...(table === 'nhe_sales' ? { cash_farm_id: mode === 'Cash' ? (cashFarmId === 'ho' ? null : cashFarmId) : null } : {}),
+        ...(table === 'nhe_sales' ? {
+          cash_farm_id: mode === 'Cash' ? (cashFarmId === 'ho' ? null : cashFarmId) : null,
+          cash_account_id: (splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash')
+            ? (cashAccountId || null) : null,
+        } : {}),
         // Clear any prior advance link now that this receipt is cash/bank,
         // not an advance adjustment (the reversal above already restored
         // the advance's balance).
@@ -238,6 +262,7 @@ export const ReceivePaymentModal: React.FC<{
             flock_id: sale.flock_id ?? null,
             reference_no: sale.dc_no ?? sale.invoice_no ?? null,
             amount_in: splitCash, amount_out: 0, payment_mode: 'cash',
+            cash_account_id: cashAccountId || null,
             ...sourceCol,
           })
           if (cbErr) throw new Error('Payment saved but Cash Book entry failed: ' + cbErr.message)
@@ -268,6 +293,7 @@ export const ReceivePaymentModal: React.FC<{
           amount_in: amt,
           amount_out: 0,
           payment_mode: 'cash',
+          cash_account_id: cashAccountId || null,
           ...sourceCol,
         })
         if (cbErr) throw new Error('Payment saved but Cash Book entry failed: ' + cbErr.message)
@@ -297,6 +323,14 @@ export const ReceivePaymentModal: React.FC<{
     { value: 'ho', label: 'Head Office' },
     ...farms.map((f: any) => ({ value: f.id, label: `${f.name} (Site)` })),
   ]
+  const imprestOptions = (cashAccounts as any[]).map((a: any) => ({ value: a.id, label: a.name }))
+  // Naming the default rather than showing a blank box: the entry clerk should
+  // be able to see WHICH tin the cash will land in without knowing the rule.
+  const siteImprestOf = (farmId: string) =>
+    (cashAccounts as any[]).find((a: any) => a.farm_id === farmId && a.acct_type === 'site_petty')
+  const siteImprestLabel = cashFarmId === 'ho'
+    ? ((cashAccounts as any[]).find((a: any) => a.acct_type === 'ho_imprest')?.name ?? 'Head Office') + ' (default)'
+    : (siteImprestOf(cashFarmId)?.name ?? 'this site has no imprest') + ' (default)'
   const paymentModeOptions = [
     'Cash', 'NEFT', 'RTGS', 'Bank Transfer', 'UPI', 'Cheque',
     ...(totalAdvanceBalance > 0 ? ['Advance'] : []),
@@ -385,6 +419,16 @@ export const ReceivePaymentModal: React.FC<{
           {(splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash') && (
             <Select label="Cash Location" value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
               options={cashLocationOptions} />
+          )}
+          {(splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash') && (
+            <div>
+              <Select label="Received into (Imprest)" placeholder={siteImprestLabel}
+                value={cashAccountId} onChange={e => setCashAccountId(e.target.value)}
+                options={imprestOptions} />
+              <p className="text-[10px] text-gray-500 mt-0.5">
+                Leave blank unless a person took the cash — blank uses the location&rsquo;s own imprest.
+              </p>
+            </div>
           )}
           {(splitOn ? (parseFloat(onlineAmt) || 0) > 0 : (mode !== 'Cash' && mode !== 'Advance')) && (
             <Select label="Bank Account" placeholder="— Select bank —" value={bankId} onChange={e => setBankId(e.target.value)}
@@ -2156,6 +2200,7 @@ const EMPTY_NHE_FORM = {
   gross_weight_kg: '', tare_weight_kg: '', net_weight_kg: '',
   female_qty: '', female_weight_kg: '', male_qty: '', male_weight_kg: '',
   payment_cash: '', payment_online: '', cash_farm_id: 'ho', bank_account_id: '',
+  cash_account_id: '',
   remarks: '',
   is_employee_sale: false, employee_id: '', deduct_salary: false,
 }
@@ -2229,6 +2274,17 @@ export const NHESales: React.FC = () => {
     queryFn: async () => { const { data } = await supabase.from('farms').select('id,name,code').order('name'); return data ?? [] }
   })
 
+  // The imprest accounts, so a sale can say which tin actually took the cash
+  // rather than leaving it to be derived from the location alone.
+  const { data: cashAccountsNhe } = useQuery({
+    queryKey: ['cash_accounts_active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_accounts')
+        .select('id,name,acct_type,farm_id').eq('is_active', true).order('sort_order')
+      return data ?? []
+    }
+  })
+
   const { data: flocks } = useQuery({
     queryKey: ['flocks_all', farmId],
     queryFn: async () => {
@@ -2299,6 +2355,16 @@ export const NHESales: React.FC = () => {
     }
   })
   const [showPartyDues, setShowPartyDues] = useState(false)
+
+  // Names the tin the cash will land in when the picker is left blank, so the
+  // default is visible rather than something only the derivation knows.
+  const nheImprestLabel = (farmId: string) => {
+    const accts = (cashAccountsNhe ?? []) as any[]
+    if (!farmId || farmId === 'ho')
+      return (accts.find(a => a.acct_type === 'ho_imprest')?.name ?? 'Head Office') + ' (default)'
+    const site = accts.find(a => a.farm_id === farmId && a.acct_type === 'site_petty')
+    return (site?.name ?? 'this site has no imprest') + ' (default)'
+  }
 
   // Employee dues summary across ALL employee sales (vouchers, received,
   // pending) — same unbounded-history risk as partyDues above.
@@ -2599,6 +2665,10 @@ export const NHESales: React.FC = () => {
         vehicle_no: form.vehicle_no || null,
         is_employee_sale: form.is_employee_sale || false,
         employee_id: form.is_employee_sale && form.employee_id ? form.employee_id : null,
+        // Only when cash actually came in. Tagging a fully-online or unpaid
+        // sale with an imprest would put a tin's name on money it never held.
+        cash_account_id: (parseFloat(form.payment_cash) || 0) > 0
+          ? (form.cash_account_id || null) : null,
       }
       const cashAmt   = parseFloat(form.payment_cash)   || 0
       const onlineAmt = parseFloat(form.payment_online) || 0
@@ -2709,6 +2779,7 @@ export const NHESales: React.FC = () => {
           amount_in:    cashAmt,
           amount_out:   0,
           payment_mode: 'cash',
+          cash_account_id: form.cash_account_id || null,
           nhe_sale_id:  savedId,
         })
         if (cbErr) throw new Error('Sale saved, but Cash Book entry failed: ' + cbErr.message)
@@ -2933,6 +3004,7 @@ export const NHESales: React.FC = () => {
       payment_cash:    row.payment_cash ?? '',
       payment_online:  row.payment_online ?? '',
       cash_farm_id:    row.cash_farm_id ?? 'ho',
+      cash_account_id: row.cash_account_id ?? '',
       bank_account_id: row.bank_account_id ?? '',
       remarks: row.remarks ?? '',
       invoice_no: row.invoice_no ?? '',
@@ -3700,6 +3772,14 @@ export const NHESales: React.FC = () => {
                         ...(farmsNhe ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` }))
                       ]} />
                     <p className="text-[10px] text-blue-600 mt-0.5">Cash Book entry will be created automatically</p>
+                    <div className="mt-2">
+                      <Select label="Received into (Imprest)" placeholder={nheImprestLabel(form.cash_farm_id)}
+                        value={form.cash_account_id} onChange={e => sv('cash_account_id', e.target.value)}
+                        options={(cashAccountsNhe ?? []).map((a: any) => ({ value: a.id, label: a.name }))} />
+                      <p className="text-[10px] text-gray-500 mt-0.5">
+                        Leave blank unless a person took the cash &mdash; blank uses the location&rsquo;s own imprest.
+                      </p>
+                    </div>
                   </div>
                 )}
                 {(parseFloat(form.payment_online)||0) > 0 && (
@@ -3850,6 +3930,14 @@ export const NHESales: React.FC = () => {
                         ...(farmsNhe ?? []).map((f: any) => ({ value: f.id, label: `${f.name} (Site)` }))
                       ]} />
                     <p className="text-[10px] text-blue-600 mt-0.5">Cash Book entry will be created automatically</p>
+                    <div className="mt-2">
+                      <Select label="Received into (Imprest)" placeholder={nheImprestLabel(form.cash_farm_id)}
+                        value={form.cash_account_id} onChange={e => sv('cash_account_id', e.target.value)}
+                        options={(cashAccountsNhe ?? []).map((a: any) => ({ value: a.id, label: a.name }))} />
+                      <p className="text-[10px] text-gray-500 mt-0.5">
+                        Leave blank unless a person took the cash &mdash; blank uses the location&rsquo;s own imprest.
+                      </p>
+                    </div>
                   </div>
                 )}
                 {(parseFloat(form.payment_online)||0) > 0 && (
