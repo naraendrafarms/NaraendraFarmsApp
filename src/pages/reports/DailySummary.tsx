@@ -60,7 +60,7 @@ export const DailySummaryPage: React.FC = () => {
       if (!flockIds.length) return []
       const { data, error } = await supabase
         .from('daily_records')
-        .select('flock_id, shed_id, record_date, he_eggs, je_eggs, te_eggs, be_eggs, le_eggs, total_eggs, mortality_female, mortality_male, transfer_female, transfer_male, cull_female, cull_male, feed_female_kg, feed_male_kg, opening_female, opening_male, closing_female, closing_male, sheds(shed_no)')
+        .select('flock_id, shed_id, record_date, he_eggs, je_eggs, te_eggs, be_eggs, le_eggs, total_eggs, mortality_female, mortality_male, transfer_female, transfer_male, cull_female, cull_male, feed_female_kg, feed_male_kg, opening_female, opening_male, closing_female, closing_male, sheds(shed_no, farm_id)')
         .in('flock_id', flockIds)
         .in('record_date', [date, prevDate])
       if (error) { toast.error(error.message); return [] }
@@ -160,12 +160,23 @@ export const DailySummaryPage: React.FC = () => {
     return designations.map(d => `${d} — P:${site[d].p} H:${site[d].h}`)
   }
 
-  // A flock can have multiple daily_records rows for one date — one per shed.
-  const recordsByFlockDate = React.useMemo(() => {
+  // A flock can have several daily_records rows for one date -- one per shed --
+  // and those sheds can be at DIFFERENT SITES. Flock 22 sits at Kethireddypally
+  // and Agraharam Potlapally at once, and three of the four flocks with records
+  // span two sites, so this is the norm rather than an oddity.
+  //
+  // Grouping by flock alone, then labelling the block with the flock's single
+  // laying_farm_id, is what made Flock 22 appear only under Kethireddypally
+  // while Agraharam silently omitted birds that are physically there. Rows are
+  // keyed by flock AND site so each site's page shows its own sheds.
+  const keyOf = (flockId: string, siteId: string | null) => `${flockId}|${siteId ?? 'none'}`
+  const siteOfRow = (r: any) => (r.sheds as any)?.farm_id ?? null
+
+  const recordsByFlockSite = React.useMemo(() => {
     const m: Record<string, any[]> = {}
     for (const r of (records ?? [])) {
       if (r.record_date !== date) continue
-      ;(m[r.flock_id] ??= []).push(r)
+      ;(m[keyOf(r.flock_id, siteOfRow(r))] ??= []).push(r)
     }
     return m
   }, [records, date])
@@ -178,15 +189,18 @@ export const DailySummaryPage: React.FC = () => {
     }
     return m
   }, [records, prevDate])
-  const prevOverallHdByFlock = React.useMemo(() => {
+  // Per flock AND site too: comparing a site's HD today against the flock's
+  // whole-company HD yesterday would put a variance on the line that neither
+  // site actually moved.
+  const prevOverallHdByFlockSite = React.useMemo(() => {
     const sums: Record<string, { eggs: number; openF: number }> = {}
     for (const r of (records ?? [])) {
       if (r.record_date !== prevDate) continue
-      const s = sums[r.flock_id] ??= { eggs: 0, openF: 0 }
+      const s = sums[keyOf(r.flock_id, siteOfRow(r))] ??= { eggs: 0, openF: 0 }
       s.eggs += r.total_eggs ?? 0; s.openF += r.opening_female ?? 0
     }
     const out: Record<string, number | null> = {}
-    for (const [fid, s] of Object.entries(sums)) out[fid] = s.openF > 0 ? (s.eggs / s.openF) * 100 : null
+    for (const [k, s] of Object.entries(sums)) out[k] = s.openF > 0 ? (s.eggs / s.openF) * 100 : null
     return out
   }, [records, prevDate])
 
@@ -203,9 +217,21 @@ export const DailySummaryPage: React.FC = () => {
 
   const stdFor = (season: string | null, weekOfAge: number) => (stdCurves ?? []).find((s: any) => s.season === season && s.week_of_age === weekOfAge) ?? null
 
-  const buildFlockBlock = (f: any): { lines: string[]; stats: any } => {
-    const shedRows = recordsByFlockDate[f.id] ?? []
-    const farmName = (f.farms?.name ?? 'Unknown Site').toUpperCase()
+  const farmNameById = React.useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const s2 of ((farms ?? []) as any[])) m[s2.id] = s2.name
+    return m
+  }, [farms])
+
+  // One block = one flock AT ONE SITE. siteId null means the flock has no
+  // records for the date, in which case it still gets a single block under the
+  // site the flocks table names, so a flock never silently disappears.
+  const buildFlockBlock = (f: any, siteId: string | null): { lines: string[]; stats: any } => {
+    const shedRows = siteId === null
+      ? (recordsByFlockSite[keyOf(f.id, f.farm_id)] ?? [])
+      : (recordsByFlockSite[keyOf(f.id, siteId)] ?? [])
+    const blockSiteId = siteId ?? f.farm_id
+    const farmName = (farmNameById[blockSiteId] ?? f.farms?.name ?? 'Unknown Site').toUpperCase()
     const ageDays = daysBetween(f.placement_date, date)
     const ageWk = Math.floor(ageDays / 7), ageRem = ageDays % 7
 
@@ -220,7 +246,7 @@ export const DailySummaryPage: React.FC = () => {
     const jeEggs = sum('je_eggs'), teEggs = sum('te_eggs'), beEggs = sum('be_eggs'), leEggs = sum('le_eggs')
     const hePct = totalEggs > 0 ? (heEggs / totalEggs) * 100 : 0
     const todayHd = openF > 0 ? (totalEggs / openF) * 100 : 0
-    const prevHd = prevOverallHdByFlock[f.id]
+    const prevHd = prevOverallHdByFlockSite[keyOf(f.id, blockSiteId)]
     const std = stdFor(f.laying_season, ageWk)
 
     const lines: string[] = []
@@ -272,22 +298,49 @@ export const DailySummaryPage: React.FC = () => {
     lines.push(`             SPRAY`)
     const sprays = sprayByFlock[f.id] ?? []
     lines.push(...listOrNone(sprays.map((s: any) => `${s.vaccine_name ?? '—'}=${s.quantity ?? ''}${s.unit ?? ''}`)))
-    lines.push(...manpowerLines(f.farm_id))
-    return { lines, stats: { totalEggs, heEggs, hd: todayHd, mort: mortF + mortM, feed: feedF + feedM } }
+    lines.push(...manpowerLines(blockSiteId))
+    return { lines, stats: { totalEggs, heEggs, hd: todayHd, mort: mortF + mortM, feed: feedF + feedM,
+                             siteId: blockSiteId, siteName: farmNameById[blockSiteId] ?? f.farms?.name ?? '' } }
   }
-
-  const activeSiteIds = new Set((flocks ?? []).map((f: any) => f.farm_id).filter(Boolean))
-  const flocklessSitesAll = (farms ?? []).filter((s: any) => !activeSiteIds.has(s.id))
 
   const allBlocksAll = React.useMemo(() => {
     if (!flocks) return []
-    return (flocks as any[]).map(f => { const { lines, stats } = buildFlockBlock(f); return { flock: f, lines, stats } })
+    const out: { flock: any; siteId: string | null; lines: string[]; stats: any }[] = []
+    for (const f of (flocks as any[])) {
+      // The sites this flock actually had birds at today, from the sheds on its
+      // records -- not from its single laying_farm_id.
+      const sites = Array.from(new Set(
+        (records ?? [])
+          .filter((r: any) => r.record_date === date && r.flock_id === f.id)
+          .map((r: any) => siteOfRow(r))
+      ))
+      if (sites.length === 0) {
+        // No records today: one block under the site the flocks table names, so
+        // the flock still appears rather than vanishing from the summary.
+        const { lines, stats } = buildFlockBlock(f, null)
+        out.push({ flock: f, siteId: f.farm_id ?? null, lines, stats })
+      } else {
+        for (const siteId of sites) {
+          const { lines, stats } = buildFlockBlock(f, siteId)
+          out.push({ flock: f, siteId, lines, stats })
+        }
+      }
+    }
+    // Site first, then flock, so a site's pages sit together.
+    return out.sort((a, b) =>
+      String(a.stats.siteName).localeCompare(String(b.stats.siteName))
+      || String(a.flock.flock_no).localeCompare(String(b.flock.flock_no)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flocks, recordsByFlockDate, prevHdByShed, prevOverallHdByFlock, medByFlock, sprayByFlock, stdCurves, manpowerBySite, date])
+  }, [flocks, records, recordsByFlockSite, prevHdByShed, prevOverallHdByFlockSite, medByFlock, sprayByFlock, stdCurves, manpowerBySite, farmNameById, date])
+
+  // A site counts as active if a flock actually had birds there today, which is
+  // what allBlocksAll now knows; the flocks table's single site does not.
+  const activeSiteIds = new Set(allBlocksAll.map(b => b.siteId).filter(Boolean) as string[])
+  const flocklessSitesAll = (farms ?? []).filter((s: any) => !activeSiteIds.has(s.id))
 
   // Site filter — no selection means "All Sites"; otherwise only the
   // ticked sites are shown/copied/exported.
-  const allBlocks = siteIds.length ? allBlocksAll.filter(b => siteIds.includes(b.flock.farm_id)) : allBlocksAll
+  const allBlocks = siteIds.length ? allBlocksAll.filter(b => b.siteId && siteIds.includes(b.siteId)) : allBlocksAll
   const flocklessSites = siteIds.length ? flocklessSitesAll.filter((s: any) => siteIds.includes(s.id)) : flocklessSitesAll
 
   const siteOptions = ((farms ?? []) as any[]).map((s: any) => ({ value: s.id, label: s.name }))
@@ -296,7 +349,7 @@ export const DailySummaryPage: React.FC = () => {
     if (!allBlocks.length) { toast.error('No data to export'); return }
     exportCSV(`daily_summary_${date}.csv`,
       ['Flock', 'Site', 'HE Eggs', 'Total Eggs', 'HD %', 'Mortality', 'Feed (kg)'],
-      allBlocks.map(({ flock: f, stats }) => [f.flock_no, f.farms?.name ?? '', stats.heEggs, stats.totalEggs, stats.hd.toFixed(1), stats.mort, Math.round(stats.feed)])
+      allBlocks.map(({ flock: f, stats }) => [f.flock_no, stats.siteName ?? '', stats.heEggs, stats.totalEggs, stats.hd.toFixed(1), stats.mort, Math.round(stats.feed)])
     )
   }
 
@@ -333,11 +386,11 @@ export const DailySummaryPage: React.FC = () => {
         </div>
       </div>
 
-      {allBlocks.map(({ flock: f, lines }) => (
-        <Card key={f.id} padding={false}>
+      {allBlocks.map(({ flock: f, siteId, lines, stats }) => (
+        <Card key={`${f.id}|${siteId ?? 'none'}`} padding={false}>
           <div className="p-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="font-bold text-gray-900">Flock {f.flock_no} — {f.farms?.name ?? '—'}</span>
+              <span className="font-bold text-gray-900">Flock {f.flock_no} — {stats.siteName || f.farms?.name || '—'}</span>
             </div>
             <pre className="text-xs font-mono whitespace-pre-wrap bg-gray-50 rounded-lg p-3 overflow-x-auto">{lines.join('\n')}</pre>
           </div>
