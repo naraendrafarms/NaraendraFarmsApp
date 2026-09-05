@@ -14,13 +14,68 @@ import {
 import {
   Bird, Egg, TrendingUp, ArrowLeft, ChevronLeft, ChevronRight,
   Package, Truck, FlaskConical, ShoppingCart, Pencil, Trash2, X, Check,
-  Upload, Download, Plus
+  Upload, Download, Plus, Printer
 } from 'lucide-react'
+import * as XLSX from 'xlsx'
+import { printReport } from '@/lib/invoicePrint'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer
 } from 'recharts'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// Shed numbers are TEXT, so a plain sort puts shed 10 between 1 and 2. This
+// compares the numeric part when both sides have one and falls back to a plain
+// comparison otherwise, so 1,2,3,10,11 come out in that order and a lettered
+// shed still sorts sensibly. Rows with no shed sort last rather than first --
+// they are the flock-level rows (grade totals with no shed), and burying the
+// real sheds under them would be the same unreadable order in a new disguise.
+export function compareShedNo(a?: string | null, b?: string | null): number {
+  const av = (a ?? '').trim(), bv = (b ?? '').trim()
+  if (!av && !bv) return 0
+  if (!av) return 1
+  if (!bv) return -1
+  const an = parseFloat(av), bn = parseFloat(bv)
+  if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn
+  return av.localeCompare(bv, undefined, { numeric: true })
+}
+
+// Export and Print for whatever table sits below it. Every tab holds its own
+// data, so each passes its OWN rows -- exactly the rows on screen, in the order
+// on screen -- rather than one page-level export guessing which tab is active
+// and re-deriving the figures.
+//
+// Excel is a real .xlsx, not a CSV renamed: the owner opens these in Excel and
+// a CSV loses number formatting and long ids. Print goes through the shared
+// report layout used elsewhere in the app, so the header, logo and footer match
+// every other printed report and it saves to PDF from the browser dialog.
+const ExportBar: React.FC<{
+  title: string
+  subtitle?: string
+  headers: string[]
+  rows: (string | number | null | undefined)[][]
+  rightAlignFrom?: number
+  sheet?: string
+}> = ({ title, subtitle, headers, rows, rightAlignFrom, sheet }) => {
+  const empty = rows.length === 0
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers, ...rows]),
+      (sheet ?? 'Sheet1').slice(0, 31))
+    XLSX.writeFile(wb, `${title.replace(/[^a-zA-Z0-9]+/g, '_')}.xlsx`)
+  }
+  return (
+    <div className="flex justify-end gap-2">
+      <Button variant="outline" size="sm" icon={<Download size={14}/>}
+        disabled={empty} onClick={exportExcel}>Export Excel</Button>
+      <Button variant="outline" size="sm" icon={<Printer size={14}/>}
+        disabled={empty}
+        onClick={() => printReport({ title, subtitle, headers, rows, rightAlignFrom })}>
+        Print / PDF
+      </Button>
+    </div>
+  )
+}
 
 type BadgeColor = 'green' | 'yellow' | 'gray'
 function statusBadge(status: string): BadgeColor {
@@ -816,6 +871,14 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
       )}
 
       {Object.keys(monthly).length > 0 && (
+        <>
+        <ExportBar title={`Flock ${flock.flock_no} \u2014 Monthly Summary`} sheet="Monthly"
+          rightAlignFrom={1}
+          headers={['Month','Avg Birds','Total Eggs','HE Eggs','Gr A','Gr B','Gr C','Wastage','Mortality']}
+          rows={Object.entries(monthly).sort(([a],[b]) => a.localeCompare(b)).map(([month, d]: any) => [
+            month, d.days ? Math.round(d.birdDays / d.days) : 0, d.eggs, d.heEggs,
+            d.gradeA ?? '', d.gradeB ?? '', d.gradeC ?? '', d.waste ?? '', d.mort,
+          ])} />
         <Card padding={false}>
           <div className="p-4 pb-0">
             <p className="font-semibold text-gray-800 text-sm">Monthly Summary</p>
@@ -843,6 +906,7 @@ const OverviewTab: React.FC<{ flock: any }> = ({ flock }) => {
             </tbody>
           </Table>
         </Card>
+        </>
       )}
 
       <HDTrendChart flockId={flock.id} />
@@ -931,11 +995,22 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['flock_daily_records', flockId] }); qc.invalidateQueries({ queryKey: ['flock_daily_all', flockId] }); setSel(new Set()); setBulkConfirm(false) }
   })
 
+  // Newest date first, then site, then SHED IN ORDER. The query can only sort
+  // by columns of daily_records itself -- shed_no lives on the embedded sheds
+  // row -- so it fell back to ordering by id, a UUID, and sheds came out
+  // shuffled within a date (4, 2, 3, 1, 5...). Sorting here fixes the table,
+  // its pages and the export at once, because all three read this array.
   const filtered = (allRecords ?? []).filter((r: any) => {
     if (fFarm && r.farm_id !== fFarm) return false
     if (fFrom && r.record_date < fFrom) return false
     if (fTo   && r.record_date > fTo)   return false
     return true
+  }).sort((a: any, b: any) => {
+    const d = String(b.record_date).localeCompare(String(a.record_date))
+    if (d !== 0) return d
+    const site = String(a.farms?.code ?? '').localeCompare(String(b.farms?.code ?? ''))
+    if (site !== 0) return site
+    return compareShedNo((a.sheds as any)?.shed_no, (b.sheds as any)?.shed_no)
   })
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
@@ -981,6 +1056,28 @@ const DailyRecordsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
       {isLoading ? <Spinner /> : (
         <>
+          <ExportBar
+            title="Daily Records"
+            subtitle={`${filtered.length} record${filtered.length === 1 ? '' : 's'}`
+              + (fFrom || fTo ? ` \u00b7 ${fFrom ? fmtDate(fFrom) : 'start'} to ${fTo ? fmtDate(fTo) : 'today'}` : '')}
+            sheet="Daily Records"
+            rightAlignFrom={3}
+            headers={['Date','Site','Shed','Open F','Open M','Feed F kg','Feed M kg','Eggs','HD%',
+                      'HE','Gr A','Gr B','Gr C','HE%','Wastage','Mort F','Mort M','Close F','Close M','Age/Wk']}
+            rows={filtered.map((r: any) => [
+              fmtDate(r.record_date), r.farms?.code ?? '', (r.sheds as any)?.shed_no ?? '',
+              r.opening_female ?? 0, r.opening_male ?? 0,
+              r.feed_female_kg != null ? Number(r.feed_female_kg).toFixed(1) : '',
+              r.feed_male_kg != null ? Number(r.feed_male_kg).toFixed(1) : '',
+              r.total_eggs ?? 0, r.hd_pct != null ? pctFmt(r.hd_pct) : '',
+              r.he_eggs ?? 0,
+              r.he_grade_a ?? '', r.he_grade_b ?? '', r.he_grade_c ?? '',
+              r.he_pct != null ? pctFmt(r.he_pct) : '',
+              r.wastage_eggs ?? '',
+              r.mortality_female ?? 0, r.mortality_male ?? 0,
+              r.closing_female ?? 0, r.closing_male ?? 0,
+              r.age_weeks ?? '',
+            ])} />
           <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
           <Card padding={false}>
             <Table>
@@ -1199,6 +1296,14 @@ const BirdTransfersTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       {isLoading ? <Spinner /> : (
         <>
           <BulkBar count={sel.size} loading={bulkDelMut.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <ExportBar title="Bird Transfers" sheet="Transfers" rightAlignFrom={5}
+            subtitle={`${filtered.length} transfer${filtered.length === 1 ? '' : 's'}`}
+            headers={['Date','DC No','Grade','Gender','Vehicle','Boxes','Birds/Box','Total Birds','From','To']}
+            rows={filtered.map((t: any) => [
+              fmtDate(t.transfer_date), t.dc_no ?? '', t.grade ?? '', t.gender ?? '', t.vehicle_no ?? '',
+              t.no_of_boxes ?? 0, t.birds_per_box ?? 0, t.total_birds ?? 0,
+              t.from_farm?.code ?? '', t.to_farm?.code ?? '',
+            ])} />
           <Card padding={false}>
             <Table>
               <thead><tr>
@@ -1358,6 +1463,14 @@ const HEDispatchTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       {isLoading ? <Spinner /> : (
         <>
           <BulkBar count={sel.size} loading={bulkDelMutHE.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <ExportBar title="HE Dispatch" sheet="HE Dispatch" rightAlignFrom={4}
+            subtitle={`${dispatches.length} dispatch${dispatches.length === 1 ? '' : 'es'}`}
+            headers={['Date','Invoice','DC No','Party','Gr A','Gr B','Gr C','Total','Rate','Amount']}
+            rows={dispatches.map((d: any) => [
+              fmtDate(d.dispatch_date), d.invoice_no ?? '', d.dc_no ?? '', d.parties?.name ?? '',
+              d.grade_a ?? 0, d.grade_b ?? 0, d.grade_c ?? 0, d.total_dispatched ?? 0,
+              d.rate ?? '', d.amount ?? 0,
+            ])} />
           <Card padding={false}>
             <Table>
               <thead><tr>
@@ -1521,18 +1634,6 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
     return r > 0 ? r : null
   }
 
-  const handleExportFeed = () => {
-    const headers = 'date,sex,feed_type,kg,recipe_rate_per_kg,cost'
-    const lines = filtered.map((r: any) => {
-      const kg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
-      const rate = getFeedGrnRate(r.feed_type)
-      return [r.feed_date, r.sex, r.feed_type ?? '', kg, rate ?? '', rate != null ? Math.round(kg * rate * 100) / 100 : ''].join(',')
-    })
-    const blob = new Blob([headers + '\n' + lines.join('\n')], { type: 'text/csv' })
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
-    a.download = 'flock_feed.csv'; a.click()
-  }
-
   const filtered = (feedData ?? []).filter((r: any) => {
     if (fFrom && r.feed_date < fFrom) return false
     if (fTo   && r.feed_date > fTo)   return false
@@ -1586,9 +1687,6 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         </p>
         <div className="flex gap-2">
           <Button size="sm" icon={<Plus size={14}/>} onClick={() => setShowAllocForm(true)}>Add Feed Received</Button>
-          <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExportFeed}>
-            Export
-          </Button>
         </div>
       </div>
 
@@ -1623,6 +1721,17 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       )}
 
       {isLoading ? <Spinner /> : (
+        <>
+        <ExportBar title="Feed Entries" sheet="Feed" rightAlignFrom={3}
+          subtitle={`${filtered.length} entr${filtered.length === 1 ? 'y' : 'ies'}`}
+          headers={['Date','Sex','Feed Type','KG','Recipe Rate/kg','Cost (Recipe)']}
+          rows={filtered.map((r: any) => {
+            const grnRate = getFeedGrnRate(r.feed_type)
+            const totalKg = (r.female_kg ?? 0) + (r.male_kg ?? 0)
+            return [fmtDate(r.feed_date), r.sex ?? '', r.feed_type ?? '',
+                    Number(totalKg.toFixed(1)), grnRate != null ? Number(grnRate.toFixed(2)) : '',
+                    grnRate != null ? Number((grnRate * totalKg).toFixed(2)) : '']
+          })} />
         <Card padding={false}>
           <Table>
             <thead><tr>
@@ -1649,6 +1758,7 @@ const FeedTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           </Table>
           {filtered.length === 0 && <EmptyState icon={<Package size={32}/>} title="No feed records" />}
         </Card>
+        </>
       )}
 
       <Modal open={showAllocForm} onClose={() => setShowAllocForm(false)} title="Add Feed Received" size="md"
@@ -1814,6 +1924,15 @@ const MedicineTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       {isLoading ? <Spinner /> : (
         <>
           <BulkBar count={sel.size} loading={bulkDelMutMed.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <ExportBar title="Medicine Usage" sheet="Medicine" rightAlignFrom={2}
+            subtitle={`${filtered.length} entr${filtered.length === 1 ? 'y' : 'ies'}`}
+            headers={['Date','Medicine / Vaccine','Qty','Unit','Rate (Stock)','Excel Rate','Cost (Stock)']}
+            rows={filtered.map((r: any) => [
+              fmtDate(r.usage_date), r.medicines_master?.name ?? '', r.quantity ?? 0,
+              r.unit ?? r.medicines_master?.unit ?? '',
+              getRate(r.medicines_master?.item_id, r.medicines_master?.name ?? '') ?? '',
+              r.rate ?? '', calcCost(r),
+            ])} />
           <Card padding={false}>
             <Table>
               <thead><tr>
@@ -1957,6 +2076,15 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         <StatCard title="Records" value={filtered.length.toString()} icon={<ShoppingCart size={18}/>} color="text-blue-600" />
       </div>
       {isLoading ? <Spinner /> : (
+        <>
+        <ExportBar title="Egg Sales (NHE)" sheet="NHE Sales" rightAlignFrom={3}
+          subtitle={`${filtered.length} sale${filtered.length === 1 ? '' : 's'}`}
+          headers={['Date','DC No','Type','Qty','Unit','Rate','Amount']}
+          rows={filtered.map((r: any) => [
+            fmtDate(r.sale_date), r.dc_no ?? '',
+            NHE_TYPE_LABELS[r.sale_type] ?? r.sale_type ?? '',
+            r.quantity ?? 0, r.unit ?? '', r.rate ?? '', r.amount ?? 0,
+          ])} />
         <Card padding={false}>
           <Table>
             <thead><tr>
@@ -1994,6 +2122,7 @@ const NHESalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
           </Table>
           {filtered.length === 0 && <EmptyState icon={<Egg size={32}/>} title="No NHE egg sales" />}
         </Card>
+        </>
       )}
     </div>
   )
@@ -2109,6 +2238,14 @@ const CullSalesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
       {isLoading ? <Spinner /> : (
         <>
           <BulkBar count={sel.size} loading={bulkDelMutSales.isPending} onClear={() => setSel(new Set())} onDelete={() => setBulkConfirm(true)} />
+          <ExportBar title="Cull Sales" sheet="Cull Sales" rightAlignFrom={3}
+            subtitle={`${filtered.length} sale${filtered.length === 1 ? '' : 's'}`}
+            headers={['Date','DC No','Type','Qty','Unit','Rate','Amount']}
+            rows={filtered.map((r: any) => [
+              fmtDate(r.sale_date), r.dc_no ?? '',
+              CULL_TYPE_LABELS[r.sale_type] ?? r.sale_type ?? '',
+              r.quantity ?? 0, r.unit ?? '', r.rate ?? '', r.amount ?? 0,
+            ])} />
           <Card padding={false}>
             <Table>
               <thead><tr>
@@ -2272,6 +2409,18 @@ const ShedAllocationTab: React.FC<{ flock: any }> = ({ flock }) => {
   })
   const currentSheds = Object.values(latestByShed).filter((a: any) => (a.female_count + a.male_count) > 0)
 
+  // Same fix as Daily Records: the query can only order by allocated_date, so
+  // sheds arrived shuffled within a date. Newest date first, then site, then
+  // shed in natural order -- the table and the export both read this.
+  const orderedAllocations = [...(allocations ?? [])].sort((a: any, b: any) => {
+    const d = String(b.allocated_date).localeCompare(String(a.allocated_date))
+    if (d !== 0) return d
+    const site = String((a.sheds as any)?.farms?.code ?? '')
+      .localeCompare(String((b.sheds as any)?.farms?.code ?? ''))
+    if (site !== 0) return site
+    return compareShedNo((a.sheds as any)?.shed_no, (b.sheds as any)?.shed_no)
+  })
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-4 py-2 text-sm text-purple-700">
@@ -2334,6 +2483,16 @@ const ShedAllocationTab: React.FC<{ flock: any }> = ({ flock }) => {
       )}
 
       {isLoading ? <Spinner /> : (
+        <>
+        <ExportBar title="Shed Allocation" sheet="Shed Allocation" rightAlignFrom={4}
+          headers={['Date','Site','Shed','Shed Name','Type','Female','Male','Total','Notes']}
+          rows={orderedAllocations.map((a: any) => {
+            const sh = a.sheds as any
+            return [fmtDate(a.allocated_date), sh?.farms?.code ?? '', sh?.shed_no ?? '',
+                    sh?.shed_name ?? '', sh?.shed_type ?? '',
+                    a.female_count ?? 0, a.male_count ?? 0,
+                    (a.female_count ?? 0) + (a.male_count ?? 0), a.notes ?? '']
+          })} />
         <Card padding={false}>
           <Table>
             <thead><tr>
@@ -2342,7 +2501,7 @@ const ShedAllocationTab: React.FC<{ flock: any }> = ({ flock }) => {
               <Th>Notes</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {(allocations ?? []).map((a: any) => {
+              {orderedAllocations.map((a: any) => {
                 const sh = a.sheds as any
                 return (
                   <tr key={a.id} className="hover:bg-gray-50">
@@ -2364,6 +2523,7 @@ const ShedAllocationTab: React.FC<{ flock: any }> = ({ flock }) => {
           </Table>
           {(allocations ?? []).length === 0 && <EmptyState icon={<Bird size={32}/>} title="No shed allocations recorded" />}
         </Card>
+        </>
       )}
     </div>
   )
@@ -2416,6 +2576,16 @@ const HatchBatchesTab: React.FC<{ flockId: string }> = ({ flockId }) => {
         <StatCard title="Chicks Hatched" value={numFmt(totalHatched)} icon={<Bird size={18}/>} color="text-brand-600" />
         <StatCard title="Avg Hatchability" value={avgHatch != null ? `${avgHatch.toFixed(1)}%` : '—'} icon={<TrendingUp size={18}/>} color="text-purple-600" />
       </div>
+      <ExportBar title="Hatch Batches" sheet="Hatch Batches" rightAlignFrom={4}
+        subtitle={`${(batches ?? []).length} batch${(batches ?? []).length === 1 ? '' : 'es'}`}
+        headers={['Invoice','Hatchery','Setting Date','Hatch Date','Eggs Set','Hatched','Fertility%','Hatchability%']}
+        rows={(batches ?? []).map((b: any) => [
+          b.invoice_no ?? b.he_dispatch?.invoice_no ?? (b.he_dispatch?.dc_no ? `DC-${b.he_dispatch.dc_no}` : ''),
+          b.hatcheries?.name ?? b.hatchery_name ?? '',
+          fmtDate(b.setting_date), b.hatch_date ? fmtDate(b.hatch_date) : 'Pending',
+          b.eggs_set ?? 0, b.hatched_chicks ?? '',
+          b.fertility_pct ?? '', b.hatchability_pct ?? '',
+        ])} />
       <Card padding={false}>
         <Table>
           <thead><tr>
@@ -2472,6 +2642,13 @@ const EggConversionsTab: React.FC<{ flockId: string }> = ({ flockId }) => {
 
   return (
     <div className="space-y-4">
+      <ExportBar title="Egg Conversions" sheet="Egg Conversions" rightAlignFrom={2}
+        subtitle={`${(conversions ?? []).length} conversion${(conversions ?? []).length === 1 ? '' : 's'}`}
+        headers={['Date','From','From Qty','To','To Qty','Reason']}
+        rows={(conversions ?? []).map((c: any) => [
+          fmtDate(c.conversion_date), tl(c.from_type), c.from_qty ?? 0,
+          tl(c.to_type), c.to_qty ?? 0, c.reason ?? '',
+        ])} />
       <Card padding={false}>
         <Table>
           <thead><tr>
