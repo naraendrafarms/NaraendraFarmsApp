@@ -67,6 +67,11 @@ export const ImprestLedger: React.FC = () => {
   // empty. Either box can still be filled to narrow the view.
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  // Party/description search and category, the same two the Cash Book already
+  // offers, so "what did the Creta cost out of this tin" can be answered here.
+  // Both narrow the LIST only -- see the note on visibleRows below.
+  const [q, setQ] = useState('')
+  const [cat, setCat] = useState('')
 
   const { data: accounts } = useQuery({
     queryKey: ['cash_account_balances'],
@@ -268,8 +273,31 @@ export const ImprestLedger: React.FC = () => {
   const totOut = (rows ?? []).reduce((a: number, r: any) => a + Number(r.amount_out ?? 0), 0)
   const closing = openingForPeriod + totIn - totOut
 
+  // The search and category filters are applied AFTER the running balance has
+  // been walked over every row, so each row still shows the account's TRUE
+  // balance at that moment. Filtering before the walk would produce a column
+  // that looks like a balance but is a running total of whatever happened to
+  // match -- a number that belongs to no tin and reconciles with nothing.
+  //
+  // Opening and Closing therefore keep describing the whole account, and a
+  // separate Matching line is shown for the filtered set, rather than
+  // relabelling the account's figures to mean something narrower.
+  const filterOn = !!(q.trim() || cat)
+  const needle = q.trim().toLowerCase()
+  const visibleRows = withBalance.filter((r: any) => {
+    if (cat && (r.category ?? '') !== cat) return false
+    if (!needle) return true
+    // Party AND description, like the Cash Book box: a vehicle is sometimes
+    // written into the description rather than the party field, and a search
+    // that missed those would quietly under-report it.
+    return String(r.party_name ?? '').toLowerCase().includes(needle)
+        || String(r.description ?? '').toLowerCase().includes(needle)
+  })
+  const matchIn = visibleRows.reduce((a: number, r: any) => a + Number(r.amount_in ?? 0), 0)
+  const matchOut = visibleRows.reduce((a: number, r: any) => a + Number(r.amount_out ?? 0), 0)
+
   const exportXlsx = () => {
-    const out = withBalance.map((r: any) => ({
+    const out = visibleRows.map((r: any) => ({
       Date: fmtDate(r.txn_date), Type: r.txn_type, Category: r.category ?? '',
       Description: r.description, Party: r.party_name ?? '',
       Site: r.farm_name ?? '', Reference: r.reference_no ?? '',
@@ -322,7 +350,7 @@ export const ImprestLedger: React.FC = () => {
       </div>
 
       <Card>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           <Select label="Imprest Account" value={acctId}
             onChange={e => setAcctId((e.target as HTMLSelectElement).value)}
             options={[
@@ -331,6 +359,17 @@ export const ImprestLedger: React.FC = () => {
             ]} />
           <DateInput label="From" value={from} onChange={e => setFrom(e.target.value)} />
           <DateInput label="To" value={to} onChange={e => setTo(e.target.value)} />
+          <Input label="Party / Description search"
+            placeholder="e.g. Creta, diesel, Srinath…"
+            value={q} onChange={e => setQ(e.target.value)} />
+          <Select label="Category" placeholder="All categories"
+            options={CATEGORIES} value={cat} onChange={e => setCat(e.target.value)} />
+          <div className="flex items-end">
+            {filterOn && (
+              <button onClick={() => { setQ(''); setCat('') }}
+                className="text-xs text-brand-600 hover:underline">Clear search</button>
+            )}
+          </div>
         </div>
       </Card>
 
@@ -350,10 +389,29 @@ export const ImprestLedger: React.FC = () => {
             <span className="text-gray-400">cash only — bank payments are in the Bank Ledger</span>
           </div>
 
-          {withBalance.length === 0 ? (
+          {filterOn && (
+            <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 flex flex-wrap gap-x-6 gap-y-1 text-xs">
+              <span className="text-amber-800 font-medium">
+                Matching {visibleRows.length} of {withBalance.length} entries
+              </span>
+              <span className="text-gray-600">Received <strong className="text-green-700">₹{rupee(matchIn)}</strong></span>
+              <span className="text-gray-600">Paid <strong className="text-red-700">₹{rupee(matchOut)}</strong></span>
+              <span className="text-gray-500">
+                Opening and Closing above still describe the whole account; the Balance
+                column is the account's real running balance, not a total of these rows.
+              </span>
+            </div>
+          )}
+
+          {visibleRows.length === 0 ? (
             <div className="p-6">
-              <EmptyState title="No entries for this account"
-                subtitle="This account holds no cash book entries. An entry belongs to a site's imprest automatically, from where the cash was received; the Imprest Account box on the Cash Book form is only needed when the cash is NOT at a site — Head Office cash actually held by Mandal or by a person. If you have set a From or To date above, clear them to see every voucher." />
+              {filterOn ? (
+                <EmptyState title="Nothing matches this search"
+                  subtitle={`This account has ${withBalance.length} entr${withBalance.length === 1 ? 'y' : 'ies'} in the period, but none match the party/description search or category above. Clear the search to see them all.`} />
+              ) : (
+                <EmptyState title="No entries for this account"
+                  subtitle="This account holds no cash book entries. An entry belongs to a site's imprest automatically, from where the cash was received; the Imprest Account box on the Cash Book form is only needed when the cash is NOT at a site — Head Office cash actually held by Mandal or by a person. If you have set a From or To date above, clear them to see every voucher." />
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -364,11 +422,13 @@ export const ImprestLedger: React.FC = () => {
                   <Th right>Received</Th><Th right>Paid</Th><Th right>Balance</Th><Th>Mode</Th>
                 </tr></thead>
                 <tbody>
-                  <tr className="bg-gray-50">
-                    <Td colSpan={8}><em className="text-gray-500">Opening balance</em></Td>
-                    <Td right><strong>₹{rupee(openingForPeriod)}</strong></Td><Td></Td>
-                  </tr>
-                  {withBalance.map((r: any) => (
+                  {!filterOn && (
+                    <tr className="bg-gray-50">
+                      <Td colSpan={8}><em className="text-gray-500">Opening balance</em></Td>
+                      <Td right><strong>₹{rupee(openingForPeriod)}</strong></Td><Td></Td>
+                    </tr>
+                  )}
+                  {visibleRows.map((r: any) => (
                     <tr key={r.cash_book_id} className="hover:bg-gray-50">
                       <Td>{fmtDate(r.txn_date)}</Td>
                       <Td><Badge color={TYPE_COLOR[r.txn_type] ?? 'gray'}>{r.txn_type}</Badge></Td>
