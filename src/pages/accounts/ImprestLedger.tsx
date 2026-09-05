@@ -6,11 +6,12 @@ import {
   Card, CardHeader, Select, Spinner, EmptyState, DateInput,
   Table, Th, Td, Badge, Button, Modal, Input,
 } from '@/components/ui'
-import { Download, Wallet, Plus, ArrowLeftRight } from 'lucide-react'
+import { Download, Wallet, Plus, ArrowLeftRight, Printer } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { moduleLevel } from '@/lib/auth'
 import { friendlyDbError } from '@/lib/utils'
 import { recordTransfer, TRANSFER_QUERY_KEYS } from '@/lib/cashTransfer'
+import { printReport } from '@/lib/invoicePrint'
 import toast from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 
@@ -296,6 +297,33 @@ export const ImprestLedger: React.FC = () => {
   const matchIn = visibleRows.reduce((a: number, r: any) => a + Number(r.amount_in ?? 0), 0)
   const matchOut = visibleRows.reduce((a: number, r: any) => a + Number(r.amount_out ?? 0), 0)
 
+  const PRINT_HEADERS = ['Date','Type','Category','Description','Party','Site',
+                         'Reference','Received','Paid','Balance','Mode']
+  const printRows = () => visibleRows.map((r: any) => [
+    fmtDate(r.txn_date), r.txn_type, r.category ?? '', r.description,
+    r.party_name ?? '', r.farm_name ?? '', r.reference_no ?? '',
+    Number(r.amount_in ?? 0) ? rupee(r.amount_in) : '',
+    Number(r.amount_out ?? 0) ? rupee(r.amount_out) : '',
+    rupee(r.running), r.payment_mode ?? '',
+  ])
+
+  // The printed statement says which account, which period and -- when a search
+  // is on -- that it is a filtered extract, so a page handed to someone else
+  // cannot be mistaken for the account's full ledger.
+  const printLedger = () => printReport({
+    title: `Imprest Ledger — ${acct?.name ?? 'Account'}`,
+    subtitle: [
+      from || to ? `${from ? fmtDate(from) : 'start'} to ${to ? fmtDate(to) : 'today'}` : 'All dates',
+      filterOn ? `Filtered: ${visibleRows.length} of ${withBalance.length} entries`
+               : `Opening ₹${rupee(openingForPeriod)} · Closing ₹${rupee(closing)}`,
+      filterOn ? `Matching received ₹${rupee(matchIn)} · paid ₹${rupee(matchOut)}` : '',
+      'Cash only — bank payments are in the Bank Ledger',
+    ].filter(Boolean).join('  ·  '),
+    headers: PRINT_HEADERS,
+    rows: printRows(),
+    rightAlignFrom: 7,
+  })
+
   const exportXlsx = () => {
     const out = visibleRows.map((r: any) => ({
       Date: fmtDate(r.txn_date), Type: r.txn_type, Category: r.category ?? '',
@@ -316,9 +344,10 @@ export const ImprestLedger: React.FC = () => {
         subtitle="Each imprest account as its own cash book — what came in, what went out, what is held"
         action={
           <div className="flex gap-2">
-            {withBalance.length > 0 && (
-              <Button variant="outline" icon={<Download size={16} />} onClick={exportXlsx}>Export</Button>
-            )}
+            <Button variant="outline" icon={<Download size={16} />}
+              disabled={visibleRows.length === 0} onClick={exportXlsx}>Export</Button>
+            <Button variant="outline" icon={<Printer size={16} />}
+              disabled={visibleRows.length === 0} onClick={printLedger}>Print / PDF</Button>
             {canEdit && !isUnassigned ? <>
               <Button variant="outline" icon={<ArrowLeftRight size={16} />} disabled={!acctId}
                 onClick={() => { setXfer(emptyTransfer()); setShowTransfer(true) }}>Transfer</Button>
