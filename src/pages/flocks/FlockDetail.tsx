@@ -712,10 +712,23 @@ export const FlockDetail: React.FC = () => {
   const { data: otherExpenses } = useQuery({
     queryKey: ['flock_other_expenses', id],
     queryFn: async () => {
-      const { data } = await supabase.from('farm_expenses')
-        .select('expense_date,category,description,amount,farm_id,flock_id')
+      // v_flock_expense_allocation, not farm_expenses directly. Reading the
+      // table meant only expenses TAGGED to this flock counted, and 413 of the
+      // 417 carry no flock -- so every flock but 23 showed Rs 0 of other
+      // expenses while its site was plainly spending money.
+      //
+      // The view carries each expense already apportioned: 'direct' where the
+      // expense names this flock, 'site' where it names a site this flock had
+      // birds at that month (100% when it was the only flock there, split by
+      // bird-days when a site was genuinely shared), and 'spread' for Head
+      // Office and anything else with no birds at its own site that month.
+      //
+      // allocated_amount is THIS FLOCK'S SHARE; full_amount is the whole bill,
+      // kept so a figure can be traced back to the expense behind it.
+      const { data } = await supabase.from('v_flock_expense_allocation')
+        .select('expense_date,category,description,vendor,farm_id,flock_id,full_amount,allocated_amount,share,basis')
         .eq('flock_id', id!).order('expense_date')
-      return data ?? []
+      return (data ?? []).map((r: any) => ({ ...r, amount: Number(r.allocated_amount) || 0 }))
     },
   })
 
@@ -1232,6 +1245,14 @@ export const FlockDetail: React.FC = () => {
 
   const fExpenses = (otherExpenses ?? []).filter((e: any) => inFin(e.expense_date))
   const fOtherExpCost = fExpenses.reduce((s2: number, e: any) => s2 + (e.amount ?? 0), 0)
+  const fOtherExpByBasis = fExpenses.reduce((acc: any, e: any) => {
+    const k = e.basis ?? 'direct'; acc[k] = (acc[k] ?? 0) + (e.amount ?? 0); return acc
+  }, {} as Record<string, number>)
+  // Whether any of this flock's share came from a site it SHARED that month.
+  // A share below 100% is the only case where the figure is an apportionment
+  // rather than the site's whole bill, and the reader deserves to know which.
+  const fHasSharedSite = fExpenses.some((e: any) => e.basis === 'site' && Number(e.share) < 0.9999)
+
   const fOtherExpByCat = fExpenses.reduce((acc: any, e: any) => {
     const k = e.category || 'other'; acc[k] = (acc[k] ?? 0) + (e.amount ?? 0); return acc
   }, {} as Record<string, number>)
@@ -2696,6 +2717,20 @@ export const FlockDetail: React.FC = () => {
                       <td className="py-2 text-right font-medium">{inr(amt)}</td>
                     </tr>
                   ))}
+                  {fOtherExpCost > 0 && (
+                    <tr className="border-b border-gray-50">
+                      <td className="py-2 pl-4 text-xs text-gray-500" colSpan={2}>
+                        Of which:
+                        {' '}<strong>{inr(fOtherExpByBasis.direct ?? 0)}</strong> booked straight to this flock,
+                        {' '}<strong>{inr(fOtherExpByBasis.site ?? 0)}</strong> from its site&rsquo;s own spending,
+                        {' '}<strong>{inr(fOtherExpByBasis.spread ?? 0)}</strong> its share of Head Office and other
+                        shared costs.
+                        {fHasSharedSite
+                          ? ' A site held more than one flock in some months, so that site\u2019s spending is split between them by bird-days.'
+                          : ' Each site held only this flock in the months concerned, so its whole spending is carried here.'}
+                      </td>
+                    </tr>
+                  )}
                   <tr className="bg-orange-50/60">
                     <td className="py-2 font-semibold">Direct Cost (chick, feed, medicine, expenses)</td>
                     <td className="py-2 text-right font-semibold text-orange-700">{inr(fDirectCost)}</td>

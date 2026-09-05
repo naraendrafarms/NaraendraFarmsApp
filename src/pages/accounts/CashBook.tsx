@@ -897,8 +897,19 @@ export const CashBookPage: React.FC = () => {
             <Input label="Amount (₹)" type="number" step="0.01" placeholder="0.00" value={xferForm.amount} onChange={e => setXferForm(f => ({ ...f, amount: e.target.value }))} />
           </FormRow>
           <FormRow>
-            <Select label="From" options={xferLocationOptions} value={xferForm.fromLocation} onChange={e => setXferForm(f => ({ ...f, fromLocation: e.target.value }))} />
-            <Select label="To" options={xferLocationOptions} value={xferForm.toLocation} onChange={e => setXferForm(f => ({ ...f, toLocation: e.target.value }))} />
+            {/* A placeholder is not decoration here. Without one the Select
+                renders no empty option, and a browser <select> whose value
+                matches nothing DISPLAYS THE FIRST OPTION while React state
+                stays empty -- so both boxes appeared filled in, and saving
+                still failed with "Choose both From and To". The Imprest
+                Ledger's transfer always had this option, which is why only the
+                Cash Book was affected. */}
+            <Select label="From" placeholder="— Select source —" options={xferLocationOptions}
+              value={xferForm.fromLocation}
+              onChange={e => setXferForm(f => ({ ...f, fromLocation: e.target.value }))} />
+            <Select label="To" placeholder="— Select destination —" options={xferLocationOptions}
+              value={xferForm.toLocation}
+              onChange={e => setXferForm(f => ({ ...f, toLocation: e.target.value }))} />
           </FormRow>
           <Input label="Description" placeholder="e.g. Cash transfer from Kethireddypally to HO" value={xferForm.description} onChange={e => setXferForm(f => ({ ...f, description: e.target.value }))} />
         </div>
