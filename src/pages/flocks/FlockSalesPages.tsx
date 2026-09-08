@@ -3718,9 +3718,11 @@ export const NHESales: React.FC = () => {
     enabled: pageSaleIds.length > 0,
     queryFn: async () => {
       const { data } = await supabase.from('cash_book')
-        .select('nhe_sale_id,farm_id').in('nhe_sale_id', pageSaleIds)
-      const m: Record<string, string | null> = {}
-      for (const r of (data ?? []) as any[]) m[r.nhe_sale_id] = r.farm_id ?? null
+        .select('nhe_sale_id,farm_id,cash_account_id').in('nhe_sale_id', pageSaleIds)
+      const m: Record<string, { farm_id: string | null; cash_account_id: string | null }> = {}
+      for (const r of (data ?? []) as any[]) {
+        m[r.nhe_sale_id] = { farm_id: r.farm_id ?? null, cash_account_id: r.cash_account_id ?? null }
+      }
       return m
     },
   })
@@ -3981,26 +3983,36 @@ export const NHESales: React.FC = () => {
                 <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''} ${isBirdSale(s.sale_type) ? 'bg-orange-50/40' : ''}`}>
                   <Td><CB checked={sel.has(s.id)} onChange={() => toggle(s.id)}/></Td>
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
-                  {/* The site the SALE belongs to, which is known whether or
-                      not anyone has paid yet: the shed sits at one site, and
+                  {/* The site the SALE belongs to, and therefore the site
+                      answerable for the money: the shed sits at one site, and
                       the flock's own farm answers when no shed was recorded.
-                      Reading only the cash book left every unpaid sale blank,
-                      though its site was never in doubt. Where cash was taken
-                      at a DIFFERENT site than the sale's own, that is said
-                      underneath rather than silently replacing it. */}
+                      The buyer's own posting never enters into it. Known whether
+                      or not anyone has paid, so an unpaid sale is not blank.
+                      Underneath, the TIN is named only when the cash is not in
+                      the selling site's own imprest - which means a person took
+                      it on the site's behalf, the one case the picker exists
+                      for. Same derivation as migration 1184: an explicit account
+                      first, then the site's own, then Head Office. */}
                   <Td className="text-xs">{(() => {
                     const saleSite = s.sheds?.farm_id
                       ?? s.flocks?.laying_farm_id ?? s.flocks?.rearing_farm_id ?? null
-                    const nameOf = (id: string | null) =>
-                      id ? ((farmsNhe ?? []).find((f: any) => f.id === id)?.name ?? '—') : null
-                    const cashSite = s.id in (cashSiteOf as any) ? (cashSiteOf as any)[s.id] : undefined
-                    const cashLabel = cashSite === undefined ? null
-                      : cashSite ? nameOf(cashSite) : 'Head Office'
+                    const farmName = saleSite
+                      ? ((farmsNhe ?? []).find((f: any) => f.id === saleSite)?.name ?? null) : null
+                    const accts = (cashAccountsNhe ?? []) as any[]
+                    const sitePettyOf = (farmId: string | null) =>
+                      farmId ? accts.find(a => a.farm_id === farmId && a.acct_type === 'site_petty') : undefined
+                    const cb = (cashSiteOf as any)[s.id]
+                    const landsIn = cb
+                      ? (accts.find(a => a.id === cb.cash_account_id)
+                          ?? sitePettyOf(cb.farm_id)
+                          ?? accts.find(a => a.acct_type === 'ho_imprest'))
+                      : undefined
+                    const expected = sitePettyOf(saleSite)
                     return (
                       <>
-                        {nameOf(saleSite) ?? <span className="text-gray-400">—</span>}
-                        {cashLabel && cashSite !== saleSite && (
-                          <div className="text-[10px] text-amber-600">cash at {cashLabel}</div>
+                        {farmName ?? <span className="text-gray-400">—</span>}
+                        {landsIn && expected && landsIn.id !== expected.id && (
+                          <div className="text-[10px] text-amber-600">held in {landsIn.name}</div>
                         )}
                       </>
                     )
