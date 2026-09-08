@@ -455,6 +455,15 @@ export const ReceivePaymentModal: React.FC<{
         setCashAccountId(prev => prev || (cb.cash_account_id ?? ''))
         return
       }
+      // No receipt yet. The shed is the better guess than the flock, since a
+      // shed sits at one site and a flock can span two.
+      if (sale.shed_id) {
+        const { data: sh } = await supabase.from('sheds')
+          .select('farm_id').eq('id', sale.shed_id).limit(1)
+        if (cancelled) return
+        const shedFarm = (sh?.[0] as any)?.farm_id
+        if (shedFarm) { setCashFarmId(shedFarm); return }
+      }
       if (!sale.flock_id) { setCashFarmId(''); return }
       const { data: fl } = await supabase.from('flocks')
         .select('laying_farm_id,rearing_farm_id').eq('id', sale.flock_id).limit(1)
@@ -2768,20 +2777,29 @@ export const NHESales: React.FC = () => {
   })
 
   const [form, setForm] = useState<any>(EMPTY_NHE_FORM)
-  // The site a flock's cash would naturally be received at. Laying farm first,
-  // rearing farm as the fallback, same order the rest of the app uses.
+  // The site a sale's cash would naturally be received at. The SHED decides it
+  // when one is picked, because a shed sits at exactly one site and several
+  // flocks span two — Flock 22 lays at Agraharam Potlapally but rears at
+  // Kethireddypally, so the flock alone would answer with the wrong one half
+  // the time. The flock's own farms are the fallback for a sale with no shed.
   const siteOfFlock = (flockId: string): string => {
     const fl = (flocks ?? []).find((x: any) => x.id === flockId)
     return fl?.laying_farm_id ?? fl?.rearing_farm_id ?? ''
   }
+  const siteOfShed = (shedId: string): string =>
+    (saleSheds as any[]).find((sh: any) => sh.id === shedId)?.farm_id ?? ''
+  const defaultCashSite = (flockId: string, shedId: string): string =>
+    siteOfShed(shedId) || siteOfFlock(flockId)
   const sv = (k: string, v: string) => setForm((f: any) => {
     const nf = { ...f, [k]: v }
-    // Cash is received at the site whose birds were sold, not at Head Office.
-    // Follow the flock, but never overwrite a location the clerk chose by hand:
-    // only fill it when it is blank or still holds the previous flock's site.
-    if (k === 'flock_id') {
-      const prevSite = siteOfFlock(f.flock_id)
-      if (!f.cash_farm_id || f.cash_farm_id === prevSite) nf.cash_farm_id = siteOfFlock(v)
+    // Cash is received at the site whose birds or eggs were sold, not at Head
+    // Office. The shed decides it where one is picked, since a shed sits at one
+    // site and a flock can span two. Never overwrite a location chosen by hand:
+    // only refill it while it is blank or still holds the previous derived site.
+    if (k === 'flock_id' || k === 'shed_id') {
+      const prev = defaultCashSite(f.flock_id, f.shed_id)
+      const next = k === 'shed_id' ? defaultCashSite(f.flock_id, v) : defaultCashSite(v, f.shed_id)
+      if (!f.cash_farm_id || f.cash_farm_id === prev) nf.cash_farm_id = next
     }
     // Bird sale auto-calcs — Female Qty + Male Qty (whichever are filled) always
     // sum to the bird count; Gross − Tare gives Net Weight; Avg Weight/bird is
@@ -2946,11 +2964,11 @@ export const NHESales: React.FC = () => {
     queryFn: async () => {
       const seen = new Set<string>(); const out: any[] = []
       const add = (sh: any) => { if (sh && !seen.has(sh.id)) { seen.add(sh.id); out.push(sh) } }
-      const COLS = 'sheds(id,shed_no,shed_name)'
+      const COLS = 'sheds(id,shed_no,shed_name,farm_id)'
       const [fs, sa, tr] = await Promise.all([
         supabase.from('flock_sheds').select(`shed_id,${COLS}`).eq('flock_id', form.flock_id),
         supabase.from('shed_allocations').select(`shed_id,${COLS}`).eq('flock_id', form.flock_id),
-        supabase.from('flock_transfers').select('to_shed_id,sheds:to_shed_id(id,shed_no,shed_name)')
+        supabase.from('flock_transfers').select('to_shed_id,sheds:to_shed_id(id,shed_no,shed_name,farm_id)')
           .eq('flock_id', form.flock_id).not('to_shed_id', 'is', null),
       ])
       for (const r of (fs.data ?? [])) add((r as any).sheds)
@@ -3339,6 +3357,8 @@ export const NHESales: React.FC = () => {
     setEditing(null)
     setPeekInv(null)
     setForm({ ...EMPTY_NHE_FORM, flock_id: flockFilter, cash_farm_id: siteOfFlock(flockFilter) })
+    // A fresh form has no shed yet, so the flock's own site is the opening
+    // guess; picking a shed refines it through sv above.
     setNheLines([emptyNheLine()])
     setExtraBirdLines([])
     setShowForm(true)
