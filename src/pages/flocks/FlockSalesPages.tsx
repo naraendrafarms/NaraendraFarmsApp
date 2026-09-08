@@ -81,7 +81,9 @@ export const BulkReceiptModal: React.FC<{
 }> = ({ open, partyId, employeeId, heading, bankAccounts, farms, onClose, onSaved }) => {
   const [mode, setMode] = useState('Cash')
   const [bankId, setBankId] = useState('')
-  const [cashFarmId, setCashFarmId] = useState('ho')
+  // Blank, not 'ho': a bulk receipt can settle vouchers from several sites,
+  // so there is no site to derive from and the location must be chosen.
+  const [cashFarmId, setCashFarmId] = useState('')
   const [cashAccountId, setCashAccountId] = useState('')
   const [date, setDate] = useState(today())
   const [amount, setAmount] = useState('')
@@ -161,6 +163,9 @@ export const BulkReceiptModal: React.FC<{
       if (leftOver > 0.005) throw new Error(
         `${inr(leftOver)} more than the vouchers ticked. Reduce the amount, or tick more vouchers.`)
       if (mode !== 'Cash' && !bankId) throw new Error('Pick the bank account the money came into')
+      // Head Office is stored as a blank site, so an unchosen location and a
+      // real Head Office receipt would write the same row. Ask for it.
+      if (mode === 'Cash' && !cashFarmId) throw new Error('Choose where the cash was received — the site, or Head Office')
 
       let posted = 0
       for (const { v, take } of allocation) {
@@ -179,8 +184,11 @@ export const BulkReceiptModal: React.FC<{
           payment_online: Number(v.payment_online ?? 0) + (isCash ? 0 : take),
           bank_account_id: isCash ? (v.bank_account_id ?? null) : bankId,
           utr_ref: utr || null,
+          // Only cash_account_id: nhe_sales has NO cash_farm_id column, and
+          // sending one made PostgREST reject the whole update, so a cash
+          // receipt against an NHE sale could not save at all. The location
+          // belongs on the cash book row below, which is where it is read from.
           ...(v._table === 'nhe_sales' ? {
-            cash_farm_id: isCash ? (cashFarmId === 'ho' ? null : cashFarmId) : null,
             cash_account_id: isCash ? (cashAccountId || null) : null,
           } : {}),
         }
@@ -255,7 +263,8 @@ export const BulkReceiptModal: React.FC<{
               <Select label="Payment Mode" value={mode} onChange={e => setMode(e.target.value)}
                 options={['Cash', 'NEFT', 'RTGS', 'Bank Transfer', 'UPI', 'Cheque']} />
               {mode === 'Cash' ? (
-                <Select label="Cash Location" value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
+                <Select label="Cash Location" required placeholder="— Select location —"
+                  value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
                   options={[{ value: 'ho', label: 'Head Office' },
                             ...farms.map((f: any) => ({ value: f.id, label: `${f.name} (Site)` }))]} />
               ) : (
@@ -402,9 +411,12 @@ export const ReceivePaymentModal: React.FC<{
     if (sale) {
       setMode(sale.payment_mode ?? 'Cash')
       setBankId(sale.bank_account_id ?? '')
-      // nhe_sales stores where cash was received; he_dispatch has no such
-      // column so this falls back to Head Office.
-      setCashFarmId(sale.cash_farm_id ?? 'ho')
+      // NEITHER table stores the location — sale.cash_farm_id does not exist on
+      // nhe_sales any more than on he_dispatch, so this always read undefined
+      // and fell back to Head Office. The location lives on the cash book row;
+      // it is loaded below, with the flock's own site as the opening guess when
+      // no receipt has been recorded yet.
+      setCashFarmId('')
       // he_dispatch has no cash_account_id column, so this reads undefined
       // there and falls back to the site derivation -- same as cash_farm_id.
       setCashAccountId(sale.cash_account_id ?? '')
@@ -423,6 +435,35 @@ export const ReceivePaymentModal: React.FC<{
       setOnlineAmt(po ? String(po) : '')
     }
   }, [sale])
+
+  // The cash location, from the one place it is actually kept: the cash book row
+  // this sale or dispatch created. A row with no farm_id genuinely means Head
+  // Office, because that is how Head Office is written. With no row yet — a
+  // credit sale being receipted for the first time — open on the flock's own
+  // site, since that is where the cash almost always comes in.
+  React.useEffect(() => {
+    if (!open || !sale?.id) return
+    let cancelled = false
+    const linkCol = table === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id'
+    ;(async () => {
+      const { data } = await supabase.from('cash_book')
+        .select('farm_id,cash_account_id').eq(linkCol, sale.id).limit(1)
+      if (cancelled) return
+      if (data?.length) {
+        const cb: any = data[0]
+        setCashFarmId(cb.farm_id ?? 'ho')
+        setCashAccountId(prev => prev || (cb.cash_account_id ?? ''))
+        return
+      }
+      if (!sale.flock_id) { setCashFarmId(''); return }
+      const { data: fl } = await supabase.from('flocks')
+        .select('laying_farm_id,rearing_farm_id').eq('id', sale.flock_id).limit(1)
+      if (cancelled) return
+      const f: any = fl?.[0]
+      setCashFarmId(f?.laying_farm_id ?? f?.rearing_farm_id ?? '')
+    })()
+    return () => { cancelled = true }
+  }, [open, sale?.id, table])
 
   const handleSave = async () => {
     if (!sale) return
@@ -446,6 +487,13 @@ export const ReceivePaymentModal: React.FC<{
       // but invisible in both Cash Book and Bank Ledger).
       if (!isAdvance && !splitOn && mode !== 'Cash' && amt > 0 && status !== 'Pending' && !bankId) {
         throw new Error('Select a Bank Account for this payment mode, or it won\'t be recorded in any ledger')
+      }
+      // Head Office is written as a blank site, so an unchosen location and a
+      // real Head Office receipt would be the same row. Ask for it whenever
+      // cash is actually part of the receipt.
+      const cashPart = splitOn ? splitCash : (mode === 'Cash' ? amt : 0)
+      if (!isAdvance && cashPart > 0 && !cashFarmId) {
+        throw new Error('Choose where the cash was received — the site, or Head Office')
       }
 
       // Reverse any previous advance adjustment on THIS sale first — whether
@@ -520,12 +568,11 @@ export const ReceivePaymentModal: React.FC<{
         amount_received: amt || null,
         bank_account_id: splitOn ? (splitOnline > 0 ? bankId : null) : ((mode !== 'Cash' && bankId) ? bankId : null),
         utr_ref: utr || null,
-        // "Cash Received At (Location)" was written to the Cash Book entry but
-        // never back to the sale, so reopening this modal always fell back to
-        // Head Office and the sale itself never recorded where cash came in.
-        // he_dispatch has no such column, so only set it for nhe_sales.
+        // NO cash_farm_id here: nhe_sales does not have that column (nor does
+        // he_dispatch), and sending it made PostgREST reject the whole update,
+        // so a cash receipt could not save. The location is kept on the cash
+        // book row this receipt writes, and read back from there.
         ...(table === 'nhe_sales' ? {
-          cash_farm_id: mode === 'Cash' ? (cashFarmId === 'ho' ? null : cashFarmId) : null,
           cash_account_id: (splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash')
             ? (cashAccountId || null) : null,
         } : {}),
@@ -711,7 +758,8 @@ export const ReceivePaymentModal: React.FC<{
             </div>
           )}
           {(splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash') && (
-            <Select label="Cash Location" value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
+            <Select label="Cash Location" required placeholder="— Select location —"
+              value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
               options={cashLocationOptions} />
           )}
           {(splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash') && (
@@ -2493,7 +2541,11 @@ const EMPTY_NHE_FORM = {
   avg_weight_kg: '', total_weight_kg: '', rate_per_kg: '',
   gross_weight_kg: '', tare_weight_kg: '', net_weight_kg: '',
   female_qty: '', female_weight_kg: '', male_qty: '', male_weight_kg: '',
-  payment_cash: '', payment_online: '', cash_farm_id: 'ho', bank_account_id: '',
+  // Blank, not 'ho'. A select whose value matches none of its options displays
+  // the FIRST one, so defaulting to 'ho' made Head Office look chosen when
+  // nothing had been. It is filled from the flock's own site as soon as a
+  // flock is picked (see sv below).
+  payment_cash: '', payment_online: '', cash_farm_id: '', bank_account_id: '',
   cash_account_id: '',
   remarks: '',
   is_employee_sale: false, employee_id: '', deduct_salary: false,
@@ -2716,8 +2768,21 @@ export const NHESales: React.FC = () => {
   })
 
   const [form, setForm] = useState<any>(EMPTY_NHE_FORM)
+  // The site a flock's cash would naturally be received at. Laying farm first,
+  // rearing farm as the fallback, same order the rest of the app uses.
+  const siteOfFlock = (flockId: string): string => {
+    const fl = (flocks ?? []).find((x: any) => x.id === flockId)
+    return fl?.laying_farm_id ?? fl?.rearing_farm_id ?? ''
+  }
   const sv = (k: string, v: string) => setForm((f: any) => {
     const nf = { ...f, [k]: v }
+    // Cash is received at the site whose birds were sold, not at Head Office.
+    // Follow the flock, but never overwrite a location the clerk chose by hand:
+    // only fill it when it is blank or still holds the previous flock's site.
+    if (k === 'flock_id') {
+      const prevSite = siteOfFlock(f.flock_id)
+      if (!f.cash_farm_id || f.cash_farm_id === prevSite) nf.cash_farm_id = siteOfFlock(v)
+    }
     // Bird sale auto-calcs — Female Qty + Male Qty (whichever are filled) always
     // sum to the bird count; Gross − Tare gives Net Weight; Avg Weight/bird is
     // always derived (Net ÷ birds), never typed by hand; Amount = Net × Rate/kg.
@@ -2972,6 +3037,12 @@ export const NHESales: React.FC = () => {
       // account picked used to mark the sale Received while posting to no ledger.
       if (onlineAmt > 0 && !form.bank_account_id) {
         throw new Error('Select a Bank Account for the online payment, or it won\'t be recorded in any ledger')
+      }
+      // Head Office is stored as a blank site, so a location left unchosen and
+      // one genuinely received at Head Office would be the same row. Requiring
+      // the choice keeps a blank farm_id meaning Head Office and nothing else.
+      if (cashAmt > 0 && !form.cash_farm_id) {
+        throw new Error('Choose where the cash was received — the site, or Head Office')
       }
       if (bird) {
         payload.bird_sex       = form.bird_sex || null
@@ -3267,7 +3338,7 @@ export const NHESales: React.FC = () => {
     setNheDraftDismissed(false)
     setEditing(null)
     setPeekInv(null)
-    setForm({ ...EMPTY_NHE_FORM, flock_id: flockFilter })
+    setForm({ ...EMPTY_NHE_FORM, flock_id: flockFilter, cash_farm_id: siteOfFlock(flockFilter) })
     setNheLines([emptyNheLine()])
     setExtraBirdLines([])
     setShowForm(true)
@@ -3299,7 +3370,12 @@ export const NHESales: React.FC = () => {
       male_weight_kg:   row.male_weight_kg ?? '',
       payment_cash:    row.payment_cash ?? '',
       payment_online:  row.payment_online ?? '',
-      cash_farm_id:    row.cash_farm_id ?? 'ho',
+      // nhe_sales has NO cash_farm_id column — the location lives on the cash
+      // book row this sale created. Reading row.cash_farm_id was always
+      // undefined, so every edit reopened on Head Office whatever was chosen,
+      // and saving then wrote farm_id NULL and moved the cash off its site.
+      // Left blank here and filled from the cash book below.
+      cash_farm_id:    '',
       cash_account_id: row.cash_account_id ?? '',
       bank_account_id: row.bank_account_id ?? '',
       remarks: row.remarks ?? '',
@@ -3309,6 +3385,23 @@ export const NHESales: React.FC = () => {
       employee_id: row.employee_id ?? '',
       deduct_salary: false,
     })
+    // Where the cash actually went: the linked cash book row is the only place
+    // it is stored. A row with no farm_id genuinely means Head Office, since
+    // that is how Head Office is saved; no row at all means no cash, and the
+    // location box is not shown in that case anyway.
+    if (row.id) {
+      supabase.from('cash_book').select('farm_id,cash_account_id')
+        .eq('nhe_sale_id', row.id).limit(1)
+        .then(({ data }) => {
+          if (!data?.length) return
+          const cb: any = data[0]
+          setForm((f: any) => ({
+            ...f,
+            cash_farm_id: cb.farm_id ?? 'ho',
+            cash_account_id: f.cash_account_id || (cb.cash_account_id ?? ''),
+          }))
+        })
+    }
     // Check if a salary deduction exists for this sale and pre-tick the checkbox
     if (row.is_employee_sale && row.id) {
       supabase.from('employee_deductions')
@@ -3543,6 +3636,23 @@ export const NHESales: React.FC = () => {
   // paged, so the totals and the type summary always cover the whole set.
   const pg = usePagination(filtered.length, `${typeFilter}|${partyFilter}|${flockFilter}|${empFilter}|${payFilter}|${fromDate}|${toDate}`)
   const pageRows = filtered.slice(pg.from, pg.to)
+
+  // Where the cash for the rows on screen actually went. nhe_sales carries no
+  // location column, so the Site column read an undefined field and printed
+  // "Head Office" for every row; the cash book entry each sale created is the
+  // only place it is recorded. Fetched for the visible page only.
+  const pageSaleIds = pageRows.map((s: any) => s.id)
+  const { data: cashSiteOf = {} } = useQuery({
+    queryKey: ['nhe_cash_sites', pageSaleIds.join(',')],
+    enabled: pageSaleIds.length > 0,
+    queryFn: async () => {
+      const { data } = await supabase.from('cash_book')
+        .select('nhe_sale_id,farm_id').in('nhe_sale_id', pageSaleIds)
+      const m: Record<string, string | null> = {}
+      for (const r of (data ?? []) as any[]) m[r.nhe_sale_id] = r.farm_id ?? null
+      return m
+    },
+  })
 
   const saleIds = filtered.map((s: any) => s.id)
   const allSel  = saleIds.length > 0 && saleIds.every((id: string) => sel.has(id))
@@ -3799,13 +3909,16 @@ export const NHESales: React.FC = () => {
                 <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''} ${isBirdSale(s.sale_type) ? 'bg-orange-50/40' : ''}`}>
                   <Td><CB checked={sel.has(s.id)} onChange={() => toggle(s.id)}/></Td>
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
-                  {/* Where the cash was received, as typed on the form. This is
-                      the field that already existed; a second site column was
-                      added by mistake and has been removed. */}
+                  {/* Where the cash was received, read from the cash book row
+                      this sale created - the only place it is stored. No row
+                      means no cash came in, which is not the same as Head
+                      Office and must not be shown as it. */}
                   <Td className="text-xs">{
-                    s.cash_farm_id
-                      ? (farmsNhe ?? []).find((f: any) => f.id === s.cash_farm_id)?.name ?? '—'
-                      : <span className="text-gray-500">Head Office</span>
+                    !(s.id in (cashSiteOf as any))
+                      ? <span className="text-gray-400">—</span>
+                      : (cashSiteOf as any)[s.id]
+                        ? (farmsNhe ?? []).find((f: any) => f.id === (cashSiteOf as any)[s.id])?.name ?? '—'
+                        : <span className="text-gray-500">Head Office</span>
                   }</Td>
                   <Td className="text-xs">{fmtDate(s.sale_date)}</Td>
                   <Td className="text-xs">
@@ -4101,7 +4214,8 @@ export const NHESales: React.FC = () => {
                 </FormRow>
                 {(parseFloat(form.payment_cash)||0) > 0 && (
                   <div>
-                    <Select label="Cash Received At (Location)" value={form.cash_farm_id}
+                    <Select label="Cash Received At (Location)" required
+                      placeholder="— Select location —" value={form.cash_farm_id}
                       onChange={e => sv('cash_farm_id', e.target.value)}
                       options={[
                         { value: 'ho', label: 'Head Office' },
@@ -4259,7 +4373,8 @@ export const NHESales: React.FC = () => {
                 </FormRow>
                 {(parseFloat(form.payment_cash)||0) > 0 && (
                   <div>
-                    <Select label="Cash Received At (Location)" value={form.cash_farm_id}
+                    <Select label="Cash Received At (Location)" required
+                      placeholder="— Select location —" value={form.cash_farm_id}
                       onChange={e => sv('cash_farm_id', e.target.value)}
                       options={[
                         { value: 'ho', label: 'Head Office' },
