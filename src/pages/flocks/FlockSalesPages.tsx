@@ -2759,7 +2759,7 @@ export const NHESales: React.FC = () => {
       // single request is capped at 1000 rows by Supabase, so page through it
       // rather than silently stopping at 1000.
       const build = () => {
-        let q = supabase.from('nhe_sales').select('*, flocks(flock_no), sheds(shed_no), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
+        let q = supabase.from('nhe_sales').select('*, flocks(flock_no,laying_farm_id,rearing_farm_id), sheds(shed_no,farm_id), parties(name,address,contact), employees(name,emp_id), bank_accounts!nhe_sales_bank_account_id_fkey(bank_name,account_name), nhe_sale_lines(sale_type,quantity,rate,amount,free_qty)')
           .order('sale_date', { ascending: false })
         if (flockFilter) q = q.eq('flock_id', flockFilter)
         if (empFilter) q = q.eq('employee_id', empFilter)
@@ -3964,6 +3964,7 @@ export const NHESales: React.FC = () => {
               <Th><CB checked={allSel} indeterminate={someSel && !allSel} onChange={toggleAll}/></Th>
               <Th>Flock</Th><Th>Site</Th><Th>Date</Th><Th>Type</Th><Th>Party</Th>
               <Th right>Qty</Th><Th right>Wt (kg)</Th><Th right>₹/kg</Th><Th right>Amount</Th>
+              <Th right>Received</Th><Th right>Balance</Th>
               <Th>Payment</Th><Th>Vehicle No</Th><Th>DC No</Th><Th></Th>
             </tr></thead>
             <tbody>
@@ -3971,17 +3972,30 @@ export const NHESales: React.FC = () => {
                 <tr key={s.id} className={`hover:bg-gray-50 ${sel.has(s.id) ? 'bg-red-50' : ''} ${isBirdSale(s.sale_type) ? 'bg-orange-50/40' : ''}`}>
                   <Td><CB checked={sel.has(s.id)} onChange={() => toggle(s.id)}/></Td>
                   <Td><Badge color="green">F-{s.flocks?.flock_no}</Badge></Td>
-                  {/* Where the cash was received, read from the cash book row
-                      this sale created - the only place it is stored. No row
-                      means no cash came in, which is not the same as Head
-                      Office and must not be shown as it. */}
-                  <Td className="text-xs">{
-                    !(s.id in (cashSiteOf as any))
-                      ? <span className="text-gray-400">—</span>
-                      : (cashSiteOf as any)[s.id]
-                        ? (farmsNhe ?? []).find((f: any) => f.id === (cashSiteOf as any)[s.id])?.name ?? '—'
-                        : <span className="text-gray-500">Head Office</span>
-                  }</Td>
+                  {/* The site the SALE belongs to, which is known whether or
+                      not anyone has paid yet: the shed sits at one site, and
+                      the flock's own farm answers when no shed was recorded.
+                      Reading only the cash book left every unpaid sale blank,
+                      though its site was never in doubt. Where cash was taken
+                      at a DIFFERENT site than the sale's own, that is said
+                      underneath rather than silently replacing it. */}
+                  <Td className="text-xs">{(() => {
+                    const saleSite = s.sheds?.farm_id
+                      ?? s.flocks?.laying_farm_id ?? s.flocks?.rearing_farm_id ?? null
+                    const nameOf = (id: string | null) =>
+                      id ? ((farmsNhe ?? []).find((f: any) => f.id === id)?.name ?? '—') : null
+                    const cashSite = s.id in (cashSiteOf as any) ? (cashSiteOf as any)[s.id] : undefined
+                    const cashLabel = cashSite === undefined ? null
+                      : cashSite ? nameOf(cashSite) : 'Head Office'
+                    return (
+                      <>
+                        {nameOf(saleSite) ?? <span className="text-gray-400">—</span>}
+                        {cashLabel && cashSite !== saleSite && (
+                          <div className="text-[10px] text-amber-600">cash at {cashLabel}</div>
+                        )}
+                      </>
+                    )
+                  })()}</Td>
                   <Td className="text-xs">{fmtDate(s.sale_date)}</Td>
                   <Td className="text-xs">
                     {isBirdSale(s.sale_type) ? (
@@ -4025,6 +4039,18 @@ export const NHESales: React.FC = () => {
                       </div>
                     )}
                   </Td>
+                  {/* What has come in and what is still owed, on the line
+                      itself. The Payment chip alone could not answer "how much
+                      is left" without opening the sale. Nothing is owed on a
+                      sale recovered through salary, so that reads as settled. */}
+                  <Td right className="text-xs text-gray-600">
+                    {Number(s.amount_received ?? 0) > 0 ? inr(s.amount_received) : <span className="text-gray-400">—</span>}
+                  </Td>
+                  <Td right className="text-xs">{(() => {
+                    const bal = Number(s.amount ?? 0) - Number(s.amount_received ?? 0)
+                    if (bal <= 0.005) return <span className="text-gray-400">—</span>
+                    return <span className="text-orange-600 font-medium">{inr(bal)}</span>
+                  })()}</Td>
                   <Td className="text-xs">
                     {s.payment_status === 'Received'
                       ? <button onClick={() => setReceiptSale(s)} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium hover:bg-green-200">✓ {s.payment_mode ?? 'Paid'}{s.bank_accounts ? ` · ${s.bank_accounts.bank_name}` : ''}</button>
@@ -4060,6 +4086,9 @@ export const NHESales: React.FC = () => {
               <tfoot><tr className="bg-gray-50 font-semibold">
                 <Td colSpan={7}>TOTAL ({filtered.length} records)</Td>
                 <Td right className="text-green-700">{inr(filtered.reduce((sum: number, s: any) => sum + Number(s.amount ?? 0), 0))}</Td>
+                <Td right className="text-gray-700">{inr(filtered.reduce((sum: number, s: any) => sum + Number(s.amount_received ?? 0), 0))}</Td>
+                <Td right className="text-orange-600">{inr(filtered.reduce((sum: number, s: any) =>
+                  sum + Math.max(0, Number(s.amount ?? 0) - Number(s.amount_received ?? 0)), 0))}</Td>
                 <Td colSpan={4}></Td>
               </tr></tfoot>
             )}
