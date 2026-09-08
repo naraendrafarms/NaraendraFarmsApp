@@ -3073,13 +3073,31 @@ export const NHESales: React.FC = () => {
         payload.net_weight_kg   = parseFloat(form.net_weight_kg)   || null
         payload.female_qty        = parseInt(form.female_qty) || null
         payload.male_qty          = parseInt(form.male_qty) || null
-        payload.payment_cash   = cashAmt
-        payload.payment_online = onlineAmt
       }
       // Auto-set payment receipt fields when cash/online is filled
       if (cashAmt > 0 || onlineAmt > 0) {
-        payload.payment_status  = 'Received'
+        // The split belongs on EVERY sale, not only bird sales. It used to be
+        // written inside the bird branch above, so an egg sale stored no split
+        // at all: the cash/online breakdown never showed in the list and
+        // reopening the sale lost it.
+        payload.payment_cash    = cashAmt
+        payload.payment_online  = onlineAmt
         payload.amount_received = cashAmt + onlineAmt
+        // Received only when the money actually covers the bill. This said
+        // 'Received' for ANY amount, so Rs 30,000 against a Rs 36,996 sale read
+        // as fully paid and the Rs 6,996 still owed vanished from Party
+        // Outstanding. Same half-paisa tolerance the Receive Payment and Bulk
+        // Receipt paths already use, so a rounding tail cannot leave a fully
+        // settled sale reading Partial.
+        // An employee sale with "deduct from salary" ticked is settled by that
+        // deduction, not still owed - the remainder becomes an
+        // employee_deductions row further down. Counting it here keeps such a
+        // sale off the dues list instead of chasing money that is already
+        // coming out of the next payslip.
+        const salaryDeducted = (form.is_employee_sale && form.deduct_salary)
+          ? Math.max(0, (Number(finalAmt) || 0) - cashAmt - onlineAmt) : 0
+        payload.payment_status  = (cashAmt + onlineAmt + salaryDeducted) + 0.005 >= (Number(finalAmt) || 0)
+          ? 'Received' : 'Partial'
         payload.received_date   = form.sale_date
         payload.bank_account_id = onlineAmt > 0 && form.bank_account_id ? form.bank_account_id : null
         payload.payment_mode    = cashAmt > 0 && onlineAmt === 0 ? 'Cash'
@@ -3095,6 +3113,11 @@ export const NHESales: React.FC = () => {
         payload.received_date   = null
         payload.bank_account_id = null
         payload.payment_mode    = null
+        // The split is written on every sale now, so it has to be cleared here
+        // too - otherwise a sale whose payment was removed keeps showing the
+        // old cash figure under an amount it no longer has.
+        payload.payment_cash    = 0
+        payload.payment_online  = 0
       }
       // Editing a refunded sale wipes the refund's bank_transactions Debit row
       // (deleted unconditionally below by nhe_sale_id) — so the refund tracking
