@@ -3455,7 +3455,16 @@ export const NHESales: React.FC = () => {
             const shown = (parseFloat(f.payment_cash) || 0) + (parseFloat(f.payment_online) || 0)
             const received = Number(row.amount_received ?? 0)
             if (shown === 0 && received > 0) {
-              const cash = cb ? Math.min(Number(cb.amount_in ?? 0), received) : 0
+              // The cash book row is the best evidence, but it must never be the
+              // ONLY one: a missing row was treated as "so it was online", which
+              // put a cash receipt of Rs 43,029 into the Online box on a sale
+              // whose own payment_mode says Cash and which has no bank entry at
+              // all. The sale's own mode decides when there is no row to read.
+              const mode = String(row.payment_mode ?? '').toLowerCase()
+              const looksOnline = mode.includes('neft') || mode.includes('bank')
+                || mode.includes('upi') || mode.includes('cheque') || mode.includes('rtgs')
+              const cash = cb ? Math.min(Number(cb.amount_in ?? 0), received)
+                              : (looksOnline && row.bank_account_id ? 0 : received)
               if (cash > 0) nf.payment_cash = String(cash)
               const online = received - cash
               if (online > 0) nf.payment_online = String(online)
