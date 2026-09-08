@@ -73,6 +73,11 @@ export const ImprestLedger: React.FC = () => {
   // Both narrow the LIST only -- see the note on visibleRows below.
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('')
+  // Newest first on screen. The running balance still has to be WALKED oldest
+  // to newest -- it is the account's balance at each entry, not a total of the
+  // rows above it -- so only the finished list is reversed, never the query.
+  // Off for a printed statement, which reads oldest first like any passbook.
+  const [newestFirst, setNewestFirst] = useState(true)
 
   const { data: accounts } = useQuery({
     queryKey: ['cash_account_balances'],
@@ -294,6 +299,9 @@ export const ImprestLedger: React.FC = () => {
     return String(r.party_name ?? '').toLowerCase().includes(needle)
         || String(r.description ?? '').toLowerCase().includes(needle)
   })
+  // Reversed only now: after the balance was walked and after the filter, so
+  // every row keeps the balance it really had on its own date.
+  const listRows = newestFirst ? [...visibleRows].reverse() : visibleRows
   const matchIn = visibleRows.reduce((a: number, r: any) => a + Number(r.amount_in ?? 0), 0)
   const matchOut = visibleRows.reduce((a: number, r: any) => a + Number(r.amount_out ?? 0), 0)
 
@@ -325,7 +333,7 @@ export const ImprestLedger: React.FC = () => {
   })
 
   const exportXlsx = () => {
-    const out = visibleRows.map((r: any) => ({
+    const out = listRows.map((r: any) => ({
       Date: fmtDate(r.txn_date), Type: r.txn_type, Category: r.category ?? '',
       Description: r.description, Party: r.party_name ?? '',
       Site: r.farm_name ?? '', Reference: r.reference_no ?? '',
@@ -416,6 +424,10 @@ export const ImprestLedger: React.FC = () => {
               {from || to ? `${from ? fmtDate(from) : 'start'} – ${to ? fmtDate(to) : 'today'}` : 'all dates'}
             </span>
             <span className="text-gray-400">cash only — bank payments are in the Bank Ledger</span>
+            <button type="button" onClick={() => setNewestFirst(v => !v)}
+              className="ml-auto text-blue-600 hover:text-blue-800 font-medium">
+              {newestFirst ? 'Newest first ↓' : 'Oldest first ↑'} — click to flip
+            </button>
           </div>
 
           {filterOn && (
@@ -457,7 +469,7 @@ export const ImprestLedger: React.FC = () => {
                       <Td right><strong>₹{rupee(openingForPeriod)}</strong></Td><Td></Td>
                     </tr>
                   )}
-                  {visibleRows.map((r: any) => (
+                  {listRows.map((r: any) => (
                     <tr key={r.cash_book_id} className="hover:bg-gray-50">
                       <Td>{fmtDate(r.txn_date)}</Td>
                       <Td><Badge color={TYPE_COLOR[r.txn_type] ?? 'gray'}>{r.txn_type}</Badge></Td>

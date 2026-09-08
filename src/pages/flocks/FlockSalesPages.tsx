@@ -3436,13 +3436,32 @@ export const NHESales: React.FC = () => {
       supabase.from('cash_book').select('farm_id,cash_account_id')
         .eq('nhe_sale_id', row.id).limit(1)
         .then(({ data }) => {
-          if (!data?.length) return
-          const cb: any = data[0]
-          setForm((f: any) => ({
-            ...f,
-            cash_farm_id: cb.farm_id ?? 'ho',
-            cash_account_id: f.cash_account_id || (cb.cash_account_id ?? ''),
-          }))
+          // No cash book row is NOT nothing to do: an online-only receipt never
+          // creates one (it goes to bank_transactions), and its split needs
+          // rebuilding just the same.
+          const cb: any = data?.length ? data[0] : null
+          setForm((f: any) => {
+            const nf: any = { ...f }
+            if (cb) {
+              nf.cash_farm_id = cb.farm_id ?? 'ho'
+              nf.cash_account_id = f.cash_account_id || (cb.cash_account_id ?? '')
+            }
+            // A sale paid in cash but with NO split stored - every egg sale
+            // before today, 226 of them - opened with Cash Received showing 0.
+            // Saving from there looks like "the payment was removed": the sale
+            // goes back to Pending and this very cash book row is deleted, so a
+            // real receipt disappears from the site's imprest. The cash book row
+            // knows exactly what came in as cash, so use it.
+            const shown = (parseFloat(f.payment_cash) || 0) + (parseFloat(f.payment_online) || 0)
+            const received = Number(row.amount_received ?? 0)
+            if (shown === 0 && received > 0) {
+              const cash = cb ? Math.min(Number(cb.amount_in ?? 0), received) : 0
+              if (cash > 0) nf.payment_cash = String(cash)
+              const online = received - cash
+              if (online > 0) nf.payment_online = String(online)
+            }
+            return nf
+          })
         })
     }
     // Check if a salary deduction exists for this sale and pre-tick the checkbox

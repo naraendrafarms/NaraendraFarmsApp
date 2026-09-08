@@ -242,7 +242,35 @@ export const BulkDailyEntry: React.FC = () => {
     }
   })
 
-  const flockSheds = useMemo(() => [...(rawSheds ?? [])].sort(shedSort), [rawSheds])
+  // A shed the flock has left should stop offering itself. The three lists above
+  // are everywhere the flock has EVER been and never drop a shed once it empties,
+  // so Kethireddypally Shed 9 kept appearing after Flock 22 was sold and moved
+  // out of it on 06/09/2026. The test is the shed's own closing count on the last
+  // record BEFORE the date being entered: zero means the birds had already gone.
+  // Deliberately "before", not "on or before", so the emptying day itself can
+  // still be entered and back-dated, and a brooding shed stays available right up
+  // to the day its birds move to the grower shed.
+  const { data: emptyShedIds = [] } = useQuery({
+    queryKey: ['sheds_emptied_before', selectedFlock, date],
+    enabled: !!selectedFlock && !!date,
+    queryFn: async () => {
+      const { data } = await supabase.from('daily_records')
+        .select('shed_id,record_date,closing_female,closing_male')
+        .eq('flock_id', selectedFlock).lt('record_date', date)
+        .not('shed_id', 'is', null)
+        .order('record_date', { ascending: false })
+      const latest = new Map<string, number>()
+      for (const r of (data ?? []) as any[]) {
+        if (latest.has(r.shed_id)) continue          // rows arrive newest first
+        latest.set(r.shed_id, Number(r.closing_female ?? 0) + Number(r.closing_male ?? 0))
+      }
+      return [...latest.entries()].filter(([, n]) => n === 0).map(([id]) => id)
+    },
+  })
+
+  const flockSheds = useMemo(
+    () => [...(rawSheds ?? [])].filter((sh: any) => !emptyShedIds.includes(sh.id)).sort(shedSort),
+    [rawSheds, emptyShedIds])
 
   // A flock reared at one farm and laying at another can use the same shed
   // number at both sites (e.g. Flock 19's "Shed 1" at both Kethireddypally and
