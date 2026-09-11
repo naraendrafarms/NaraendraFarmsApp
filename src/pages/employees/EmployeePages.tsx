@@ -2830,6 +2830,15 @@ function calcPT(gross: number) {
   return 200
 }
 
+// PF exactly as the salary register works it out: 12 percent of EARNED BASIC,
+// and where the employee is on restricted PF the basic is capped at 15,000
+// first. The payslip used to take 12 percent of whatever sat in its Basic box -
+// which was the whole gross - and it never applied the cap, so PF on a payslip
+// came out at roughly double what was actually deducted.
+function pfOnBasic(basic: number, restrictPf: boolean) {
+  return Math.round((restrictPf ? Math.min(basic, 15000) : basic) * 0.12)
+}
+
 const EMPTY_CS = {
   company_name: 'Naraendra Farms', address_line1: '', address_line2: '',
   city: '', state: 'Andhra Pradesh', pincode: '', phone: '', email: '',
@@ -2837,7 +2846,7 @@ const EMPTY_CS = {
 }
 const EMPTY_SLIP = {
   days_worked: '', basic_salary: '', hra: '', da: '', ta: '',
-  special_allowance: '', other_allowance: '', ot_bonus: '', arrears: '',
+  special_allowance: '', other_allowance: '', extra_pay: '', ot_bonus: '', arrears: '',
   pf_employee: '', esi_employee: '', pt: '', tds: '',
   advance: '', hold: '', other_deduction: '', remarks: ''
 }
@@ -2904,6 +2913,7 @@ const PayslipView: React.FC<{
               {([['Basic Salary',n('basic_salary')],['HRA',n('hra')],n('da')?['DA',n('da')]:null,n('ta')?['TA',n('ta')]:null,
                 n('special_allowance')?['Special Allowance',n('special_allowance')]:null,
                 n('other_allowance')?['Other Allowance',n('other_allowance')]:null,
+                n('extra_pay')?['Extra Days Pay',n('extra_pay')]:null,
                 n('ot_bonus')?['OT / Bonus',n('ot_bonus')]:null,n('arrears')?['Arrears',n('arrears')]:null,
               ] as ([string,number]|null)[]).filter(Boolean).map(([l,v]:any)=>(
                 <tr key={l}><td className="py-1 px-2 border border-gray-200">{l}</td><td className="py-1 px-2 text-right border border-gray-200">{v.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
@@ -2946,7 +2956,7 @@ const PayslipView: React.FC<{
                 <th className="text-right py-1 px-2 font-semibold text-gray-600 border border-gray-200 text-[10px]">Amount (₹)</th>
               </tr></thead>
               <tbody>
-                {showEmprPF&&pfEmployer>0&&<tr><td className="py-1 px-2 border border-gray-200 text-[10px]">PF (Employer 12%)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{pfEmployer.toLocaleString('en-IN')}</td></tr>}
+                {showEmprPF&&pfEmployer>0&&<tr><td className="py-1 px-2 border border-gray-200 text-[10px]">PF (Employer)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{pfEmployer.toLocaleString('en-IN')}</td></tr>}
                 {showEmprESI&&esiEmployer>0&&<tr><td className="py-1 px-2 border border-gray-200 text-[10px]">ESI (Employer 3.25%)</td><td className="py-1 px-2 text-right border border-gray-200 text-[10px]">{esiEmployer.toLocaleString('en-IN')}</td></tr>}
               </tbody>
             </table>
@@ -2991,6 +3001,10 @@ export const PayslipGeneratorPage: React.FC = () => {
   const [csId, setCsId] = useState<string | null>(null)
   const [csEditing, setCsEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  // The employer shares as the register worked them out - EPS plus the EPF
+  // difference, and ESI employer. Null means there is no salary row for this
+  // month, so they are estimated from basic instead.
+  const [employerFromRegister, setEmployerFromRegister] = useState<{pf:number; esi:number}|null>(null)
   const [autoCalcPF, setAutoCalcPF] = useState(false)
   const [autoCalcESI, setAutoCalcESI] = useState(false)
   const [autoCalcPT, setAutoCalcPT] = useState(false)
@@ -3043,7 +3057,7 @@ export const PayslipGeneratorPage: React.FC = () => {
   const { data: employees } = useQuery({
     queryKey: ['employees_all'], queryFn: async () => {
       const { data } = await supabase.from('employees')
-        .select('id,emp_id,name,designation,farm_id,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,bank_name,account_no,ifsc,uan_no,esi_no,farms(name)')
+        .select('id,emp_id,name,designation,farm_id,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,restrict_pf,bank_name,account_no,ifsc,uan_no,esi_no,farms(name)')
         .eq('is_active', true).order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
     }
@@ -3073,32 +3087,78 @@ export const PayslipGeneratorPage: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase.from('salary_monthly')
         .select('*').eq('employee_id', empId).eq('month', month).maybeSingle()
-      // Shared split when no saved row exists (overrides → PF rule → floor split)
+      const restrictPf = !!(emp as any)?.restrict_pf
+
+      // THE PAYSLIP READS THE SALARY REGISTER. It does not work the figures out
+      // again. Every number below is the one already stored on the salary row,
+      // and Auto is switched OFF so nothing can overwrite it.
+      //
+      // What it used to do, and why it was wrong: it put data.earned_salary in
+      // the Basic box. earned_salary is TOTAL EARNING - basic plus HRA plus
+      // allowance plus extra-days pay - so "Basic" on the payslip was the whole
+      // gross, PF came out at 12 percent of gross instead of 12 percent of
+      // basic, the 15,000 restricted-PF cap was never applied, and because HRA
+      // was then added on top of a figure that already contained it, Gross
+      // Earnings counted HRA twice.
+      //
+      // The earnings lines are laid out so they add up to the register's Total
+      // Earning exactly: Basic + HRA + Allowance is the register's Gross, and
+      // Allowance is taken as the remainder of gross_salary so nothing typed
+      // into a salary row can fall off the payslip. OT/Bonus and Arrears are
+      // not added separately - the CSV salary import already folds them into
+      // gross_salary, and adding them again would count them twice.
+      if (data) {
+        const basic = Number(data.basic_salary ?? 0)
+        const hra = Number(data.hra ?? 0)
+        const allowance = Math.max(0, Number(data.gross_salary ?? 0) - basic - hra)
+        setAutoCalcPF(false); setAutoCalcESI(false); setAutoCalcPT(false)
+        setEmployerFromRegister({
+          pf: Number(data.employer_eps ?? 0) + Number(data.employer_epf_diff ?? 0),
+          esi: Number(data.esi_employer ?? 0),
+        })
+        setSlip({
+          days_worked: data.days_worked?.toString() ?? '',
+          basic_salary: basic.toString(), hra: hra.toString(),
+          da: '0', ta: '0', special_allowance: '0',
+          other_allowance: allowance.toString(),
+          extra_pay: (data.extra_pay ?? 0).toString(),
+          ot_bonus: '0', arrears: '0',
+          pf_employee: (data.pf_employee ?? 0).toString(),
+          esi_employee: (data.esi_employee ?? 0).toString(),
+          pt: (data.pt ?? 0).toString(),
+          tds: (data.tds ?? 0).toString(),
+          advance: (data.advance ?? 0).toString(),
+          hold: (data.hold ?? 0).toString(),
+          other_deduction: (data.other_deduction ?? 0).toString(),
+          remarks: data.remarks ?? ''
+        })
+        setReady(true)
+        return data
+      }
+
+      // No salary generated for this month yet. Fall back to the SAME rules the
+      // register uses - the shared basic/HRA split, PF on basic with the cap,
+      // ESI on basic, PT on the earning - so the two can never disagree, and
+      // leave Auto on because these are estimates until the salary is run.
       const comp = splitSalary(emp ?? {}, skillWages)
-      const basic = data ? (parseFloat(data.earned_salary ?? data.basic_salary ?? String(comp.basic)) || comp.basic) : comp.basic
-      const hra = data ? (parseFloat(data.hra ?? '0') || comp.hra) : comp.hra
-      const g = basic + hra
       const pfOn = !!(emp as any)?.pf_applicable
       const esiOn = !!(emp as any)?.esi_applicable
       const ptOn = !!(emp as any)?.pt_applicable
       setAutoCalcPF(pfOn); setAutoCalcESI(esiOn); setAutoCalcPT(ptOn)
+      setEmployerFromRegister(null)
       setSlip({
-        days_worked: data?.days_worked?.toString() ?? '',
-        basic_salary: basic.toString(), hra: hra.toString(),
-        da: '0', ta: '0', special_allowance: '0', other_allowance: '0',
-        ot_bonus: (data?.ot_bonus ?? 0).toString(),
-        arrears: (data?.arrears ?? 0).toString(),
-        pf_employee: pfOn ? Math.round(basic * 0.12).toString() : '0',
-        esi_employee: esiOn ? Math.ceil(basic * 0.0075).toString() : '0', // ESIC rounds both shares UP
-        pt: ptOn ? calcPT(g).toString() : '0',
-        tds: (data?.tds ?? 0).toString(),
-        advance: (data?.advance ?? 0).toString(),
-        hold: (data?.hold ?? 0).toString(),
-        other_deduction: '0',
-        remarks: data?.remarks ?? ''
+        ...EMPTY_SLIP,
+        basic_salary: comp.basic.toString(), hra: comp.hra.toString(),
+        da: '0', ta: '0', special_allowance: '0',
+        other_allowance: comp.allowance.toString(),
+        extra_pay: '0', ot_bonus: '0', arrears: '0',
+        pf_employee: pfOn ? pfOnBasic(comp.basic, restrictPf).toString() : '0',
+        esi_employee: esiOn ? Math.ceil(comp.basic * 0.0075).toString() : '0', // ESIC rounds both shares UP
+        pt: ptOn ? calcPT(comp.gross).toString() : '0',
+        tds: '0', advance: '0', hold: '0', other_deduction: '0', remarks: ''
       })
       setReady(true)
-      return data
+      return null
     }
   })
 
@@ -3111,22 +3171,27 @@ export const PayslipGeneratorPage: React.FC = () => {
   }, [emp, manualMode])
 
   const n = (k: keyof typeof EMPTY_SLIP) => parseFloat(slip[k] || '0')
-  const gross = n('basic_salary') + n('hra') + n('da') + n('ta') + n('special_allowance') + n('other_allowance') + n('ot_bonus') + n('arrears')
+  const gross = n('basic_salary') + n('hra') + n('da') + n('ta') + n('special_allowance') + n('other_allowance') + n('extra_pay') + n('ot_bonus') + n('arrears')
 
   React.useEffect(() => {
     if (!autoCalcPF && !autoCalcESI && !autoCalcPT) return
     setSlip(prev => ({
       ...prev,
-      pf_employee: autoCalcPF ? Math.round(parseFloat(prev.basic_salary||'0') * 0.12).toString() : prev.pf_employee,
+      pf_employee: autoCalcPF ? pfOnBasic(parseFloat(prev.basic_salary||'0'), !!(emp as any)?.restrict_pf).toString() : prev.pf_employee,
       esi_employee: autoCalcESI ? Math.ceil(parseFloat(prev.basic_salary||'0') * 0.0075).toString() : prev.esi_employee, // ESIC rounds both shares UP
       pt: autoCalcPT ? calcPT(gross).toString() : prev.pt,
     }))
-  }, [gross, slip.basic_salary, autoCalcPF, autoCalcESI, autoCalcPT])
+  }, [gross, slip.basic_salary, autoCalcPF, autoCalcESI, autoCalcPT, emp])
 
   const totalDed = n('pf_employee') + n('esi_employee') + n('pt') + n('tds') + n('advance') + n('hold') + n('other_deduction')
   const netSalary = gross - totalDed
-  const pfEmployer = autoCalcPF ? Math.round(n('basic_salary') * 0.12) : 0
-  const esiEmployer = autoCalcESI ? Math.ceil(n('basic_salary') * 0.0325) : 0 // ESIC rounds both shares UP
+  // Employer PF is EPS + EPF difference as the register stores it, not a flat
+  // 12 percent - those are the two figures the PF return is filed on, and under
+  // restricted PF a flat 12 percent of basic is not what was contributed.
+  const pfEmployer = employerFromRegister ? employerFromRegister.pf
+    : (autoCalcPF ? pfOnBasic(n('basic_salary'), !!(emp as any)?.restrict_pf) : 0)
+  const esiEmployer = employerFromRegister ? employerFromRegister.esi
+    : (autoCalcESI ? Math.ceil(n('basic_salary') * 0.0325) : 0) // ESIC rounds both shares UP
 
   const sv = (k: keyof typeof EMPTY_SLIP) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setSlip(prev => ({ ...prev, [k]: e.target.value }))
@@ -3160,6 +3225,7 @@ export const PayslipGeneratorPage: React.FC = () => {
     days_worked: n('days_worked') || null,
     basic_salary: n('basic_salary'), hra: n('hra'), da: n('da'), ta: n('ta'),
     special_allowance: n('special_allowance'), other_allowance: n('other_allowance'),
+    extra_pay: n('extra_pay'),
     ot_bonus: n('ot_bonus'), arrears: n('arrears'), gross_earnings: gross,
     pf_employee: n('pf_employee'), esi_employee: n('esi_employee'),
     pt: n('pt'), tds: n('tds'), advance: n('advance'), hold: n('hold'),
@@ -3225,6 +3291,7 @@ export const PayslipGeneratorPage: React.FC = () => {
       da: (row.da ?? 0).toString(), ta: (row.ta ?? 0).toString(),
       special_allowance: (row.special_allowance ?? 0).toString(),
       other_allowance: (row.other_allowance ?? 0).toString(),
+      extra_pay: (row.extra_pay ?? 0).toString(),
       ot_bonus: (row.ot_bonus ?? 0).toString(), arrears: (row.arrears ?? 0).toString(),
       pf_employee: (row.pf_employee ?? 0).toString(),
       esi_employee: (row.esi_employee ?? 0).toString(),
@@ -3234,6 +3301,7 @@ export const PayslipGeneratorPage: React.FC = () => {
       remarks: row.remarks ?? ''
     })
     setAutoCalcPF(false); setAutoCalcESI(false); setAutoCalcPT(false)
+    setEmployerFromRegister({ pf: Number(row.pf_employer ?? 0), esi: Number(row.esi_employer ?? 0) })
     setReady(true)
     setEditSlipId(row.id)
     setTab('generator')
@@ -3256,6 +3324,7 @@ export const PayslipGeneratorPage: React.FC = () => {
     days_worked: r.days_worked?.toString() ?? '', basic_salary: (r.basic_salary??0).toString(),
     hra: (r.hra??0).toString(), da: (r.da??0).toString(), ta: (r.ta??0).toString(),
     special_allowance: (r.special_allowance??0).toString(), other_allowance: (r.other_allowance??0).toString(),
+    extra_pay: (r.extra_pay??0).toString(),
     ot_bonus: (r.ot_bonus??0).toString(), arrears: (r.arrears??0).toString(),
     pf_employee: (r.pf_employee??0).toString(), esi_employee: (r.esi_employee??0).toString(),
     pt: (r.pt??0).toString(), tds: (r.tds??0).toString(), advance: (r.advance??0).toString(),
@@ -3485,6 +3554,7 @@ export const PayslipGeneratorPage: React.FC = () => {
                   <FldNum label="TA (Travel Allowance)" val={slip.ta} onChange={v=>setSlip(p=>({...p,ta:v}))}/>
                   <FldNum label="Special Allowance" val={slip.special_allowance} onChange={v=>setSlip(p=>({...p,special_allowance:v}))}/>
                   <FldNum label="Other Allowance" val={slip.other_allowance} onChange={v=>setSlip(p=>({...p,other_allowance:v}))}/>
+                  <FldNum label="Extra Days Pay" val={slip.extra_pay} onChange={v=>setSlip(p=>({...p,extra_pay:v}))}/>
                   <FldNum label="OT / Bonus" val={slip.ot_bonus} onChange={v=>setSlip(p=>({...p,ot_bonus:v}))}/>
                   <FldNum label="Arrears" val={slip.arrears} onChange={v=>setSlip(p=>({...p,arrears:v}))}/>
                   <FldNum label="Days Worked" val={slip.days_worked} onChange={v=>setSlip(p=>({...p,days_worked:v}))}/>
