@@ -145,6 +145,32 @@ export const SalaryRegisterPage: React.FC = () => {
     }
   })
 
+  // Money an employee sent BACK after being paid. It is recorded in the Bank
+  // Ledger as a credit carrying salary_return_for, so a salary and the return
+  // against it stay two separate facts - the payment really did leave the
+  // account, and this really did come back - which is what lets the ledger and
+  // the bank statement still agree line for line.
+  const { data: returnsBySalary } = useQuery({
+    queryKey: ['salary_returns', month],
+    enabled: !!month && (rows?.length ?? 0) > 0,
+    queryFn: async () => {
+      const ids = (rows ?? []).map((r: any) => r.id)
+      if (!ids.length) return {}
+      const { data } = await supabase.from('bank_transactions')
+        .select('salary_return_for,amount,txn_date')
+        .in('salary_return_for', ids)
+      const m: Record<string, { amount: number; last: string | null }> = {}
+      for (const t of (data ?? []) as any[]) {
+        const k = t.salary_return_for
+        if (!m[k]) m[k] = { amount: 0, last: null }
+        m[k].amount += Number(t.amount) || 0
+        if (!m[k].last || t.txn_date > m[k].last!) m[k].last = t.txn_date
+      }
+      return m
+    }
+  })
+  const returnedOf = (r: any) => (returnsBySalary as any)?.[r.id]?.amount ?? 0
+
   // Print/Export skip zero-salary rows (e.g. someone with no paid days that
   // month) — they'd just be blank/zero lines on the sheet otherwise.
   // The account filter must be applied ONCE, above everything that reads the
@@ -205,7 +231,7 @@ export const SalaryRegisterPage: React.FC = () => {
       'Gross Rate','Basic Rate','HRA Rate','Other Defray',
       'Basic Earned','HRA Earned','Other Earned','Gross Earned','Extra Pay','Total Earning',
       'PF Emp','ESI Emp','PT','TDS','Other Deduction','Advance',
-      'Net Salary',
+      'Net Salary','Returned',
       'Employer EPS','Employer EPF','ESI Employer','Admin Charges','EDLI','CTC',
       'Deposited Into','Account No','IFSC'
     ]
@@ -219,7 +245,7 @@ export const SalaryRegisterPage: React.FC = () => {
         R(r.gross_rate), R(r.basic_rate), R(r.hra_rate), R(r.other_defray),
         R(r.basic_salary), R(r.hra), R((r.gross_salary??0)-(r.basic_salary??0)-(r.hra??0)), R(r.gross_salary), R(r.extra_pay), R(r.total_earning),
         R(r.pf_employee), R(r.esi_employee), R(r.pt), R(r.tds), R(r.other_deduction), R(r.advance),
-        R(r.net_salary),
+        R(r.net_salary), R(returnedOf(r)),
         R(r.employer_eps), R(r.employer_epf_diff), R(r.esi_employer), R(r.admin_charges), R(r.edli_charge), R(r.monthly_ctc),
         dep?.holder ? `${dep.kind} — ${dep.holder.name}` : '—', dep?.holder?.account_no ?? '—', dep?.holder?.ifsc ?? '—'
       ]
@@ -395,6 +421,7 @@ export const SalaryRegisterPage: React.FC = () => {
                 <th className="px-2 py-2 text-right font-semibold text-red-600">Adv</th>
                 <th className="px-2 py-2 text-right font-semibold text-red-600">Other Ded</th>
                 <th className="px-2 py-2 text-right font-semibold text-green-800 bg-green-50">Net Salary</th>
+                <th className="px-2 py-2 text-right font-semibold text-amber-700">Returned</th>
                 <th className="px-2 py-2 text-right font-semibold text-purple-700">Empr EPS (8.33%)</th>
                 <th className="px-2 py-2 text-right font-semibold text-purple-700">Empr EPF (3.67%)</th>
                 <th className="px-2 py-2 text-right font-semibold text-purple-700">ESI (Empr)</th>
@@ -441,6 +468,10 @@ export const SalaryRegisterPage: React.FC = () => {
                         : inr(r.other_deduction??0)}
                     </td>
                     <td className="px-2 py-1.5 text-right font-bold text-green-800 bg-green-50">{inr(r.net_salary??0)}</td>
+                    <td className="px-2 py-1.5 text-right text-amber-700"
+                        title={returnedOf(r) > 0 ? 'Returned by the employee — recorded in Bank Ledger as a Salary Return credit' : undefined}>
+                      {returnedOf(r) > 0 ? inr(returnedOf(r)) : '—'}
+                    </td>
                     <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.employer_eps??0)}</td>
                     <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.employer_epf_diff??0)}</td>
                     <td className="px-2 py-1.5 text-right text-purple-700">{inr(r.esi_employer??0)}</td>
@@ -476,6 +507,9 @@ export const SalaryRegisterPage: React.FC = () => {
                 <td className="px-2 py-2 text-right text-red-500">{inr(totals.advance??0)}</td>
                 <td className="px-2 py-2 text-right text-red-500">{inr(totals.other_deduction??0)}</td>
                 <td className="px-2 py-2 text-right font-bold text-green-800 bg-green-100">{inr(totals.net_salary??0)}</td>
+                <td className="px-2 py-2 text-right text-amber-700">
+                  {inr(visibleRows.reduce((s: number, r: any) => s + returnedOf(r), 0))}
+                </td>
                 <td className="px-2 py-2 text-right text-purple-700">{inr(totals.employer_eps??0)}</td>
                 <td className="px-2 py-2 text-right text-purple-700">{inr(totals.employer_epf_diff??0)}</td>
                 <td className="px-2 py-2 text-right text-purple-700">{inr(totals.esi_employer??0)}</td>

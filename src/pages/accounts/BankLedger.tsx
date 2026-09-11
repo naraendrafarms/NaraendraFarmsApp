@@ -26,6 +26,11 @@ const EMPTY_FORM = {
   linked_nhe_sale_id: '',
   linked_he_dispatch_id: '',
   original_amount: '',
+  // Set only on a Salary Return credit. Deliberately NOT salary_monthly_id -
+  // the salary form deletes every bank row carrying that, so a return hung on
+  // it would vanish the next time the salary was edited.
+  salary_return_for: '',
+  salary_return_emp: '',
 }
 
 const EMPTY_ACCOUNT_FORM = {
@@ -868,7 +873,7 @@ export const BankLedgerPage: React.FC = () => {
       if (!selectedAccount) return Promise.resolve([])
       return fetchAllPages((from, to) => supabase
         .from('bank_transactions')
-        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type),linked_payment_id,nhe_sale_id,he_dispatch_id,settled_amount')
+        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type),linked_payment_id,nhe_sale_id,he_dispatch_id,settled_amount,salary_return_for')
         .eq('bank_account_id', selectedAccount)
         .gte('txn_date', fyRange(fy).start)
         .order('txn_date', { ascending: true })
@@ -1011,6 +1016,23 @@ export const BankLedgerPage: React.FC = () => {
     setShowModal(true)
   }
 
+  // Which salary each Salary Return credit reverses, looked up for the rows on
+  // screen only. Kept out of the main query deliberately - see the note there.
+  const { data: returnTargets } = useQuery({
+    queryKey: ['bank_txn_salary_return_targets', (transactions ?? []).length, selectedAccount],
+    enabled: (transactions ?? []).some((t: any) => t.salary_return_for),
+    queryFn: async () => {
+      const ids = Array.from(new Set((transactions ?? []).map((t: any) => t.salary_return_for).filter(Boolean)))
+      if (!ids.length) return {}
+      const { data } = await supabase.from('salary_monthly')
+        .select('id,month,net_salary,employee_id,employees!employee_id(name,emp_id)').in('id', ids)
+      const m: Record<string, any> = {}
+      for (const r of (data ?? []) as any[]) m[r.id] = r
+      return m
+    }
+  })
+  const returnTargetOf = (t: any) => t.salary_return_for ? (returnTargets as any)?.[t.salary_return_for] : null
+
   const openEdit = (t: any) => {
     setEditId(t.id)
     setForm({
@@ -1030,6 +1052,8 @@ export const BankLedgerPage: React.FC = () => {
       linked_nhe_sale_id: t.nhe_sale_id ?? '',
       linked_he_dispatch_id: t.he_dispatch_id ?? '',
       original_amount: t.amount != null ? String(t.amount) : '',
+      salary_return_for: t.salary_return_for ?? '',
+      salary_return_emp: String(returnTargetOf(t)?.employee_id ?? ''),
     })
     setShowModal(true)
   }
@@ -1055,6 +1079,8 @@ export const BankLedgerPage: React.FC = () => {
       description: form.description || null,
       amount,
       party_id: form.party_id || null,
+      salary_return_for: (form.category === 'Salary Return' && form.txn_type === 'Credit')
+        ? (form.salary_return_for || null) : null,
     }
     try {
       let newTxnId: string | null = null
@@ -1458,7 +1484,39 @@ export const BankLedgerPage: React.FC = () => {
     label: `${a.bank_name} — ${a.account_no}`,
   }))
 
-  const CATEGORIES = ['', 'Vendor Payment', 'Partner Remuneration', 'Salary', 'Electricity', 'Bank Charges', 'Cash Withdrawal', 'Customer Receipt', 'Other']
+  // Salaries actually PAID - the only ones a return can reverse. Loaded only
+  // when the Salary Return category is chosen, so it costs nothing otherwise.
+  const { data: paidSalaries } = useQuery({
+    queryKey: ['paid_salaries_for_return'],
+    enabled: form.category === 'Salary Return',
+    queryFn: async () => {
+      const { data } = await supabase.from('salary_monthly')
+        .select('id,month,net_salary,employee_id,paid_date,employees!employee_id!inner(name,emp_id)')
+        .eq('is_paid', true).order('month', { ascending: false }).limit(1000)
+      return data ?? []
+    }
+  })
+  const returnEmpOptions = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const r of (paidSalaries ?? []) as any[]) {
+      const e = r.employees
+      if (e) m[r.employee_id] = `${e.name}${e.emp_id ? ` (${e.emp_id})` : ''}`
+    }
+    return Object.entries(m).map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [paidSalaries])
+  const returnMonthOptions = useMemo(() =>
+    ((paidSalaries ?? []) as any[])
+      .filter(r => r.employee_id === form.salary_return_emp)
+      .map(r => ({
+        value: r.id,
+        label: `${new Date(r.month + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`
+             + ` — net ${inr(r.net_salary ?? 0)}${r.paid_date ? `, paid ${fmtDate(r.paid_date)}` : ''}`
+      })), [paidSalaries, form.salary_return_emp])
+
+  const CATEGORIES = ['', 'Vendor Payment', 'Partner Remuneration', 'Salary', 'Salary Return', 'Electricity', 'Bank Charges', 'Cash Withdrawal', 'Customer Receipt', 'Other']
+  // A Salary Return is money an employee sent BACK, so it is only ever a credit.
+  const isSalaryReturn = form.category === 'Salary Return' && form.txn_type === 'Credit'
 
   return (
     <div className="space-y-4">
@@ -1734,7 +1792,17 @@ export const BankLedgerPage: React.FC = () => {
                         </td>
                         <td className="px-3 py-2 text-gray-600">{t.category ?? '—'}</td>
                         <td className="px-3 py-2 text-gray-700">{(t.parties as any)?.name ?? '—'}</td>
-                        <td className="px-3 py-2 text-gray-700">{t.description ?? '—'}</td>
+                        <td className="px-3 py-2 text-gray-700">
+                          {t.description ?? '—'}
+                          {returnTargetOf(t) && (
+                            <span className="block text-[11px] text-blue-700">
+                              ↩ {returnTargetOf(t).employees?.name ?? 'Employee'}
+                              {' · '}
+                              {new Date(returnTargetOf(t).month + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}
+                              {' salary returned'}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-gray-500 text-xs">{t.reference_no ?? '—'}</td>
                         <td className="px-3 py-2 text-right text-red-600">
                           {t.txn_type === 'Debit' ? inr(t.amount) : ''}
@@ -1917,6 +1985,54 @@ export const BankLedgerPage: React.FC = () => {
             onChange={e => setForm(f => ({ ...f, category: (e.target as HTMLSelectElement).value }))}
             options={CATEGORIES.map(c => ({ value: c, label: c || '— Select —' }))}
           />
+          {form.category === 'Salary Return' && form.txn_type === 'Debit' && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              A salary return is money coming back IN. Set Type to Credit to link it to the salary it reverses.
+            </p>
+          )}
+          {isSalaryReturn && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5 space-y-2">
+              <p className="text-xs text-gray-600">
+                Link this to the salary it reverses. The original payment stays as it is — it really
+                left the account — and this credit records the money coming back, so the ledger and
+                the bank statement still match line for line.
+              </p>
+              <SearchableSelect
+                label="Employee who returned it"
+                placeholder={returnEmpOptions.length ? '— Select —' : 'No salary is marked Paid yet'}
+                options={returnEmpOptions}
+                value={form.salary_return_emp}
+                onChange={v => setForm(f => ({ ...f, salary_return_emp: v, salary_return_for: '' }))}
+              />
+              {form.salary_return_emp && (
+                <Select
+                  label="Salary month being returned"
+                  value={form.salary_return_for}
+                  onChange={e => {
+                    const id = (e.target as HTMLSelectElement).value
+                    const row = ((paidSalaries ?? []) as any[]).find(r => r.id === id)
+                    setForm(f => ({
+                      ...f,
+                      salary_return_for: id,
+                      // Only fill an empty box - a description already typed is the user's
+                      description: f.description || (row
+                        ? `Salary return — ${row.employees?.name ?? ''}, `
+                          + new Date(row.month + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+                        : f.description),
+                      amount: f.amount || (row?.net_salary != null ? String(row.net_salary) : f.amount),
+                    }))
+                  }}
+                  options={[{ value: '', label: '— Select the month —' }, ...returnMonthOptions]}
+                />
+              )}
+              {form.salary_return_for && (
+                <p className="text-xs text-gray-500">
+                  Amount and description are filled from that salary the first time — change either
+                  freely, a part return is fine.
+                </p>
+              )}
+            </div>
+          )}
           <Select
             label="Vendor / Party (optional — links this to your Parties master)"
             value={form.party_id}
