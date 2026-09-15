@@ -44,7 +44,6 @@ type PayRecord = {
   cheque_no: string | null
   remarks: string | null
   bank_account_id: string | null
-  cash_account_id: string | null
   is_opening: boolean | null
   advance_adjusted: number | null
   vendor_advance_id: string | null
@@ -59,7 +58,6 @@ type PayModal = {
   ref: string
   remarks: string
   bankAccountId: string
-  cashAccountId: string
   advanceId: string
 }
 
@@ -91,21 +89,20 @@ export const PendingPaymentsPage: React.FC = () => {
     vendor_name: '', party_id: '', invoice_no: '', po_no: '', grn_no: '', invoice_date: today(), grn_date: '',
     invoice_amount: '', tds_pct: '', tds_amount: '', discount_amount: '', paid_amount: '', pay_before_date: '', paid_date: '', credit_limit: '',
     payment_status: 'Pending', account_type: 'NEFT', utr_no: '', cheque_no: '', category: '', remarks: '', bank_account_id: '',
-    cash_account_id: '',
   })
   const [editForm, setEditForm] = useState(blankEditForm())
   const [editSaving, setEditSaving] = useState(false)
   const [editErr, setEditErr] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
-  const [bulkPayForm, setBulkPayForm] = useState({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '', cashAccountId: '' })
+  const [bulkPayForm, setBulkPayForm] = useState({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '' })
   const [bulkPaying, setBulkPaying] = useState(false)
 
   const { data: records, isLoading } = useQuery({
     queryKey: ['pending_payments_page'],
     queryFn: () => fetchAllPages<PayRecord>((from, to) => supabase
       .from('pending_payments')
-      .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id,cash_account_id,is_opening,advance_adjusted,vendor_advance_id')
+      .select('id,vendor_name,party_id,invoice_no,po_no,invoice_date,grn_no,grn_date,invoice_amount,tds_pct,tds_amount,net_payable,paid_amount,discount_amount,pay_before_date,paid_date,credit_limit,payment_status,category,account_type,utr_no,cheque_no,remarks,bank_account_id,is_opening,advance_adjusted,vendor_advance_id')
       .order('grn_date', { ascending: false })
       .order('id').range(from, to), 'Pending Payments', toast.error)
   })
@@ -185,20 +182,6 @@ export const PendingPaymentsPage: React.FC = () => {
       return data ?? []
     }
   })
-  // The imprest tins. A bill paid in cash came out of one of these, and until
-  // now there was nowhere to say which - so every cash payment derived to
-  // HO Imprest whatever site really paid.
-  const { data: cashAccounts } = useQuery({
-    queryKey: ['cash_accounts_list'],
-    queryFn: async () => {
-      const { data } = await supabase.from('cash_accounts')
-        .select('id,name,acct_type').eq('is_active', true).order('sort_order').order('name')
-      return data ?? []
-    }
-  })
-  const isCashMode = (mode: string) => (mode || '').trim().toLowerCase() === 'cash'
-  const cashAcctLabel = (a: any) =>
-    `${a.name}${a.acct_type === 'ho_imprest' ? ' (HO)' : a.acct_type === 'site_petty' ? ' (Site)' : ''}`
 
   const { data: parties } = useQuery({
     queryKey: ['parties_supp'],
@@ -276,7 +259,7 @@ export const PendingPaymentsPage: React.FC = () => {
   }
 
   const openPayModal = (r: PayRecord) => {
-    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), discountAmt: '', paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '', cashAccountId: r.cash_account_id ?? '', advanceId: '' })
+    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), discountAmt: '', paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '', advanceId: '' })
     setErr('')
   }
 
@@ -302,9 +285,6 @@ export const PendingPaymentsPage: React.FC = () => {
     const isAdvance = modal.mode === 'Advance'
     const isOpeningAdj = modal.mode === 'Opening Adjustment'
     if (amt > 0 && !isAdvance && !isOpeningAdj && modal.mode.toLowerCase() !== 'cash' && !modal.bankAccountId) { setErr('Select which bank account this is paid from'); return }
-    // Without a tin the cash_book row has neither an account nor a site, and the
-    // imprest derivation charges it to HO Imprest whatever site really paid.
-    if (amt > 0 && isCashMode(modal.mode) && !modal.cashAccountId) { setErr('Select which imprest the cash was paid from'); return }
     if (isAdvance && !modal.advanceId) { setErr('Select which advance to adjust against this bill'); return }
     setSaving(true); setErr('')
     try {
@@ -365,7 +345,6 @@ export const PendingPaymentsPage: React.FC = () => {
           remarks: modal.remarks || modal.record.remarks || null,
           payment_status: newStatus,
           bank_account_id: modal.mode.toLowerCase() !== 'cash' ? modal.bankAccountId : null,
-          cash_account_id: isCashMode(modal.mode) ? (modal.cashAccountId || null) : null,
         }).eq('id', modal.record.id)
         if (error) throw error
         // Every rupee actually paid — partial or final — lands in Cash Book
@@ -377,7 +356,6 @@ export const PendingPaymentsPage: React.FC = () => {
             invoiceNo: modal.record.invoice_no, grnNo: modal.record.grn_no,
             amount: amt, mode: modal.mode, date: modal.paidDate, ref: modal.ref, remarks: modal.remarks,
             bankAccountId: modal.bankAccountId, partyId: modal.record.party_id,
-            cashAccountId: modal.cashAccountId,
           })
         }
       }
@@ -417,7 +395,6 @@ export const PendingPaymentsPage: React.FC = () => {
     if (bills.length === 0) { toast.error('No unpaid bills selected'); return }
     const isOpeningAdj = bulkPayForm.mode === 'Opening Adjustment'
     if (!isOpeningAdj && bulkPayForm.mode.toLowerCase() !== 'cash' && !bulkPayForm.bankAccountId) { toast.error('Select which bank account this is paid from'); return }
-    if (!isOpeningAdj && isCashMode(bulkPayForm.mode) && !bulkPayForm.cashAccountId) { toast.error('Select which imprest the cash was paid from'); return }
     setBulkPaying(true)
     try {
       if (isOpeningAdj) {
@@ -437,7 +414,7 @@ export const PendingPaymentsPage: React.FC = () => {
         qc.invalidateQueries({ queryKey: ['pending_payments_open'] })
         toast.success(`Marked ${bills.length} bill(s) Paid — no Cash Book/Bank Ledger entry posted`)
         setSelectedIds(new Set())
-        setBulkPayForm({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '', cashAccountId: '' })
+        setBulkPayForm({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '' })
         return
       }
       const totalAmt = bills.reduce((s, r) => s + getBalance(r), 0)
@@ -470,7 +447,6 @@ export const PendingPaymentsPage: React.FC = () => {
           transaction_ref: tag,
           payment_status: 'Paid',
           bank_account_id: bulkPayForm.mode.toLowerCase() !== 'cash' ? bulkPayForm.bankAccountId : null,
-          cash_account_id: isCashMode(bulkPayForm.mode) ? (bulkPayForm.cashAccountId || null) : null,
         }).eq('id', bill.id)
         if (error) throw error
         // bankAccountId intentionally NOT passed here — the one shared
@@ -480,7 +456,6 @@ export const PendingPaymentsPage: React.FC = () => {
           paymentId: bill.id, vendorName: bill.vendor_name, invoiceNo: bill.invoice_no, grnNo: bill.grn_no,
           amount: balance, mode: bulkPayForm.mode, date: bulkPayForm.date, ref: bulkPayForm.ref,
           remarks: `Bulk payment batch (${bills.length} bills)`, partyId: bill.party_id,
-          cashAccountId: bulkPayForm.cashAccountId,
         })
         await syncSupplierInvoicePayment({
           invoiceNo: bill.invoice_no, vendorName: bill.vendor_name,
@@ -497,7 +472,7 @@ export const PendingPaymentsPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['bank_transactions'] })
       toast.success(`Marked ${bills.length} bill(s) Paid`)
       setSelectedIds(new Set())
-      setBulkPayForm({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '', cashAccountId: '' })
+      setBulkPayForm({ mode: 'NEFT', ref: '', date: today(), bankAccountId: '' })
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -536,7 +511,6 @@ export const PendingPaymentsPage: React.FC = () => {
       category: r.category ?? '',
       remarks: r.remarks ?? '',
       bank_account_id: r.bank_account_id ?? '',
-      cash_account_id: r.cash_account_id ?? '',
     })
     setEditErr('')
   }
@@ -553,9 +527,6 @@ export const PendingPaymentsPage: React.FC = () => {
   const handleEditSave = async () => {
     if (!editModal) return
     if (!editForm.vendor_name.trim()) { setEditErr('Vendor name is required'); return }
-    if (editForm.payment_status === 'Paid' && isCashMode(editForm.account_type) && !editForm.cash_account_id) {
-      setEditErr('Select which imprest the cash was paid from'); return
-    }
     if (editForm.payment_status === 'Paid' && needsBankAccount(editForm.account_type) && !editForm.bank_account_id) {
       setEditErr('Select which bank account this is paid from'); return
     }
@@ -628,7 +599,6 @@ export const PendingPaymentsPage: React.FC = () => {
         category: editForm.category || null,
         remarks: editForm.remarks || null,
         bank_account_id: needsBankAccount(editForm.account_type) ? (editForm.bank_account_id || null) : null,
-        cash_account_id: isCashMode(editForm.account_type) ? (editForm.cash_account_id || null) : null,
         // Paid Amount is now a direct field the user types — saved exactly
         // as entered, never derived from Net Payable minus Discount. That
         // auto-derivation used to silently recompute paid_amount from
@@ -679,7 +649,6 @@ export const PendingPaymentsPage: React.FC = () => {
           paymentId: savedId, vendorName: payload.vendor_name, invoiceNo: payload.invoice_no, grnNo: payload.grn_no,
           amount, mode: payload.account_type ?? 'NEFT', date: payload.paid_date || todayStr,
           ref: payload.utr_no || payload.cheque_no, remarks: payload.remarks, bankAccountId: payload.bank_account_id,
-          cashAccountId: payload.cash_account_id,
           partyId: payload.party_id,
         })
       } else if (oldStatus === 'Paid' && newStatus !== 'Paid') {
@@ -948,16 +917,6 @@ export const PendingPaymentsPage: React.FC = () => {
                 </select>
               </div>
             )}
-            {isCashMode(bulkPayForm.mode) && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-gray-500">Paid From Imprest</span>
-                <select value={bulkPayForm.cashAccountId} onChange={e => setBulkPayForm(f => ({ ...f, cashAccountId: e.target.value }))}
-                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm min-w-[160px]">
-                  <option value="">Select imprest…</option>
-                  {(cashAccounts ?? []).map((a: any) => <option key={a.id} value={a.id}>{cashAcctLabel(a)}</option>)}
-                </select>
-              </div>
-            )}
             <div className="flex flex-col gap-1">
               <span className="text-xs text-gray-500">Reference / UTR</span>
               <input value={bulkPayForm.ref} onChange={e => setBulkPayForm(f => ({ ...f, ref: e.target.value }))}
@@ -1168,21 +1127,6 @@ export const PendingPaymentsPage: React.FC = () => {
                       <option key={b.id} value={b.id}>{b.account_name ? `${b.account_name} — ` : ''}{b.bank_name}</option>
                     ))}
                   </select>
-                </div>
-              )}
-              {isCashMode(modal.mode) && (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">Paid From Imprest (which cash tin)</label>
-                  <select value={modal.cashAccountId} onChange={e => setModal(m => m ? { ...m, cashAccountId: e.target.value } : m)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">— Select imprest —</option>
-                    {(cashAccounts ?? []).map((a: any) => (
-                      <option key={a.id} value={a.id}>{cashAcctLabel(a)}</option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    Leave this unset and the payment counts against HO Imprest, not the site that paid.
-                  </p>
                 </div>
               )}
               <div>
@@ -1400,18 +1344,6 @@ export const PendingPaymentsPage: React.FC = () => {
                           <option value="">— Select account —</option>
                           {(bankAccounts ?? []).map((b: any) => (
                             <option key={b.id} value={b.id}>{b.account_name ? `${b.account_name} — ` : ''}{b.bank_name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                    {isCashMode(editForm.account_type) && (
-                      <div className="col-span-2">
-                        <label className="text-xs font-medium text-gray-600 block mb-1">Paid From Imprest (which cash tin)</label>
-                        <select value={editForm.cash_account_id} onChange={e => setEditForm(f => ({ ...f, cash_account_id: e.target.value }))}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                          <option value="">— Select imprest —</option>
-                          {(cashAccounts ?? []).map((a: any) => (
-                            <option key={a.id} value={a.id}>{cashAcctLabel(a)}</option>
                           ))}
                         </select>
                       </div>
