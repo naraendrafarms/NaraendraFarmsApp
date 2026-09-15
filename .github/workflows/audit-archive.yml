@@ -1,0 +1,41 @@
+name: Archive Audit Log
+
+# The owner's rule: 30 days of audit log stays in the database, the rest moves
+# to file storage. Undo (fn_undo_audit) reads the audit row IN the database, so
+# the recent window must stay; older history becomes a downloadable file.
+#
+# THE FARM'S OWN DATA IS NEVER TOUCHED. This reads and deletes from audit_log
+# only - the diary of changes, never the records themselves.
+#
+# ORDER IS THE WHOLE SAFETY OF THIS JOB: export, upload, VERIFY the upload by
+# downloading it back and comparing bytes, and only then delete. If any step
+# fails the job stops and NOTHING is deleted.
+
+on:
+  schedule:
+    - cron: '30 21 1 * *'   # 03:00 IST on the 1st of each month
+  workflow_dispatch:
+    inputs:
+      keep_days:
+        description: 'Days of audit log to keep in the database'
+        required: false
+        default: '30'
+      dry_run:
+        description: 'true = report only, delete nothing'
+        required: false
+        default: 'true'
+
+jobs:
+  archive:
+    name: Archive audit log older than the keep window
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Export, upload, verify, then delete
+        run: python3 scripts/archive_audit_log.py
+        env:
+          SUPABASE_MGMT_TOKEN: ${{ secrets.SUPABASE_MGMT_TOKEN }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
+          KEEP_DAYS: ${{ github.event.inputs.keep_days || '30' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
