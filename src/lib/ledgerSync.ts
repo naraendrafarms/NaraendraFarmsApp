@@ -13,7 +13,7 @@ export const toCbMode = (mode: string) => {
 export const postLedgerEntry = async (opts: {
   paymentId: string; vendorName: string; invoiceNo?: string | null; grnNo?: string | null
   amount: number; mode: string; date: string; ref?: string | null; remarks?: string | null
-  bankAccountId?: string | null; partyId?: string | null
+  bankAccountId?: string | null; partyId?: string | null; cashAccountId?: string | null
 }) => {
   if (opts.amount <= 0) return
   // Settling a bill against a vendor advance, or against an opening balance, is
@@ -37,6 +37,13 @@ export const postLedgerEntry = async (opts: {
     payment_mode: toCbMode(opts.mode),
     pending_payment_id: opts.paymentId,
     remarks: opts.remarks || null,
+    // WHICH cash tin the money left. Without it the imprest derivation -
+    // COALESCE(cash_account_id, the site's own imprest, HO Imprest) - fell all
+    // the way through and charged every cash bill payment to HO Imprest,
+    // whatever tin really paid. Only meaningful for cash: a bank payment is
+    // tracked by bank_account_id and must not be tagged to a tin.
+    cash_account_id: (opts.mode || '').trim().toLowerCase() === 'cash'
+      ? (opts.cashAccountId || null) : null,
   })
   // Non-cash payments also post to the specific bank account's ledger (in
   // addition to Cash Book, which stays the combined master ledger as
