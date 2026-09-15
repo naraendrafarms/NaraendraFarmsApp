@@ -115,53 +115,79 @@ If it cannot be verified, say so explicitly rather than proceeding on a guess.
 
 ---
 
-## LIVE DATA AND A LIVE APP ARE NEVER DISTURBED (NEVER CHANGE THIS)
-Added 15/09/2026, after the Pending Payments page was shipped with a column the
-database did not have yet. PostgREST rejected the whole query, the page showed
-"No records found" and Rs 0.00 outstanding, and for a few minutes it looked to
-the owner like every bill had been lost. Nothing had been — but nothing being
-lost is not the same as nothing going wrong.
+## DEVELOPMENT HAPPENS ON LIVE DATA — IT MUST NEVER BE LOST (NEVER CHANGE THIS)
+Added 15/09/2026 by the owner, after the Pending Payments page was shipped with
+a column the database did not have yet. PostgREST rejected the whole query, the
+page showed "No records found" and Rs 0.00 outstanding, and for a few minutes it
+looked as though every bill had gone. Nothing had — 328 bills were all there —
+but the owner had no way of knowing that from the screen.
 
-**The app is LIVE. People are working in it right now.** A page that errors, or
-shows zero where money should be, is a real failure even when the data is
-untouched.
+**THERE IS NO TEST DATABASE. There is no staging copy.** Every migration, every
+backfill, every new column runs against the farm's real books — real invoices,
+real salaries, real cash. A mistake here is not a broken build, it is the
+company's records. **Losing live data is the one failure that cannot be undone
+by trying again.**
 
-### Order of operations — never the other way round
-1. **Migration first.** Run it and READ the job log: the filename must match and
-   the verify SELECT must return what it should.
-2. **Only then push the code** that uses the new column or table.
-3. If the migration cannot be run yet — the runner is down, the workflow is
-   unreachable, anything — **DO NOT PUSH THE CODE.** Hold it, say so plainly,
-   and wait. Never push code that depends on something that does not exist yet.
+So the standing order is: *build carefully, break nothing, and if something does
+go wrong make sure the data survives it and can be put back.*
 
-A missing column is not a small slip. A column named in a SELECT breaks the
-whole page, not just the save — so "it will only affect saving" is not a safe
-assumption and must never be offered as reassurance.
+### 1. Nothing is lost — protect the data first
+- **Any migration that UPDATEs or DELETEs existing rows must first copy them**
+  into a backup table in the SAME migration, before the write. No backup, no
+  write. This is what made the Flock 20 batch links and the Rs 6,37,463 of
+  site receipts reversible exactly.
+- **Never DELETE where an UPDATE will do**, and never CASCADE where a trigger or
+  a nullable link will do.
+- Say **how many rows will change, and show them, BEFORE changing them.** Get a
+  yes (see ASK BEFORE CHANGING DATA above). A general remark is not a yes.
+- **Never let a fix for one thing silently destroy another.** Check what else
+  writes to the same table first — a delete-then-reinsert elsewhere will happily
+  erase rows this feature depends on. (The Salary Return link went in a column
+  of its own precisely because the salary form clears every bank row attached to
+  a salary, in eight places.)
+- Never delete or overwrite a live row just to make a feature work.
 
-### Recovery
-- The moment something is found broken, **restore service first** — revert the
-  code, get the page working again — and diagnose afterwards. Never leave a live
-  page broken while waiting for the owner to run something.
-- **Say what happened in plain words**: what broke, whether any data was lost
-  (say it explicitly — "nothing was deleted" is the first thing the owner needs
-  to hear), and what is being done about it.
-- **Never overstate what was verified.** If it was not measured, say so.
+### 2. A live app that errors is also a failure
+**People are working in the app right now.** A page that errors, or shows zero
+where money should be, is a real failure even when the data underneath is fine.
+- **Migration FIRST.** Run it and READ the job log — the filename must match and
+  the verify SELECT must return what it should.
+- **Only then push the code** that uses the new column or table.
+- **If the migration cannot be run — runner down, workflow unreachable, anything
+  — DO NOT PUSH THE CODE.** Hold it, say so plainly, and wait.
+- A missing column is not a small slip. A column named in a SELECT breaks the
+  WHOLE PAGE, not just the save — "it will only affect saving" is not a safe
+  assumption and must never be offered as reassurance.
 
-### Before any write to existing rows
-- Back the rows up in the same migration, so it can be reversed exactly.
-- Say how many rows will change and show them BEFORE changing them.
-- Get a yes. A general remark is not a yes (see the ASK BEFORE CHANGING DATA
-  rule above).
-- Never use DELETE where an UPDATE will do, and never CASCADE where a trigger
-  or a nullable link will do.
+### 3. Recovery — what to do the moment something looks wrong
+1. **STOP. Write nothing else.** Do not run another migration, do not "try a
+   fix". A second write on top of a bad one can destroy what was still
+   recoverable.
+2. **Restore service first** — revert the code, get the page working — then
+   diagnose. Never leave a live page broken while waiting for the owner to act.
+3. **MEASURE before saying anything.** COUNT the rows. Say explicitly whether
+   data was lost — "nothing was deleted, all 328 bills are there" is the first
+   thing the owner needs to hear, and it must be measured, not assumed.
+4. **Put it back, in this order:**
+   - the **backup table** the migration made (exact, same session — always the
+     first choice);
+   - **Admin Centre → Audit Log → Undo** — every change since 18/08/2026 stores
+     the row as it WAS and as it BECAME (`audit_log.old_data`), admin only,
+     and an undo is itself logged so it can be undone;
+   - the **nightly backup** — every table to CSV at 02:30 IST, kept 90 days as a
+     workflow artifact, plus a weekly snapshot committed to the repo (last 12).
+5. **Know the honest limit: this plan has NO point-in-time recovery.** The
+   database cannot be rolled back to an hour ago. The nightly export restores
+   YESTERDAY. That is exactly why rules 1 and 3.1 exist — by the time the
+   backup is the only option, a day's work is already gone.
+6. **Never overstate what was verified.** If it was not measured, say so.
 
 ### Never
 - Never push frontend code ahead of the migration it needs.
-- Never delete or overwrite a live row to make a feature work.
-- Never let a fix for one thing silently destroy another — check what else
-  writes to the same table first (a delete-then-reinsert elsewhere will happily
-  erase rows this feature depends on).
+- Never write to live rows without a backup taken first in the same migration.
+- Never run a second write to "fix" a suspected loss before measuring it.
 - Never report a change as done and verified without reading the job log.
+- Never tell the owner data is safe without having counted it.
 
 ---
 
