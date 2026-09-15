@@ -77,7 +77,12 @@ print(f"Range to archive: {stat['oldest']} -> {stat['newest']}\n")
 # together. Carrying the last (changed_at, id) forward keeps every page the
 # same cost, and it is stable even though rows are being written meanwhile,
 # because nothing new ever lands before the cutoff.
-rows, PAGE = [], 5000
+# 25,000 a page, not 5,000. The cost here is not the database - it is the
+# round trip to the management API, several seconds each way. 420,000 rows at
+# 5,000 a page is 84 round trips and took over ten minutes; at 25,000 it is 17.
+# Only the FIRST run is ever this big: once the backlog is archived, a month is
+# about 30,000 rows, which is two pages.
+rows, PAGE = [], 25000
 last_at, last_id = None, None
 while True:
     if last_at is None:
