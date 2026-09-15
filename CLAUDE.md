@@ -115,6 +115,56 @@ If it cannot be verified, say so explicitly rather than proceeding on a guess.
 
 ---
 
+## LIVE DATA AND A LIVE APP ARE NEVER DISTURBED (NEVER CHANGE THIS)
+Added 15/09/2026, after the Pending Payments page was shipped with a column the
+database did not have yet. PostgREST rejected the whole query, the page showed
+"No records found" and Rs 0.00 outstanding, and for a few minutes it looked to
+the owner like every bill had been lost. Nothing had been — but nothing being
+lost is not the same as nothing going wrong.
+
+**The app is LIVE. People are working in it right now.** A page that errors, or
+shows zero where money should be, is a real failure even when the data is
+untouched.
+
+### Order of operations — never the other way round
+1. **Migration first.** Run it and READ the job log: the filename must match and
+   the verify SELECT must return what it should.
+2. **Only then push the code** that uses the new column or table.
+3. If the migration cannot be run yet — the runner is down, the workflow is
+   unreachable, anything — **DO NOT PUSH THE CODE.** Hold it, say so plainly,
+   and wait. Never push code that depends on something that does not exist yet.
+
+A missing column is not a small slip. A column named in a SELECT breaks the
+whole page, not just the save — so "it will only affect saving" is not a safe
+assumption and must never be offered as reassurance.
+
+### Recovery
+- The moment something is found broken, **restore service first** — revert the
+  code, get the page working again — and diagnose afterwards. Never leave a live
+  page broken while waiting for the owner to run something.
+- **Say what happened in plain words**: what broke, whether any data was lost
+  (say it explicitly — "nothing was deleted" is the first thing the owner needs
+  to hear), and what is being done about it.
+- **Never overstate what was verified.** If it was not measured, say so.
+
+### Before any write to existing rows
+- Back the rows up in the same migration, so it can be reversed exactly.
+- Say how many rows will change and show them BEFORE changing them.
+- Get a yes. A general remark is not a yes (see the ASK BEFORE CHANGING DATA
+  rule above).
+- Never use DELETE where an UPDATE will do, and never CASCADE where a trigger
+  or a nullable link will do.
+
+### Never
+- Never push frontend code ahead of the migration it needs.
+- Never delete or overwrite a live row to make a feature work.
+- Never let a fix for one thing silently destroy another — check what else
+  writes to the same table first (a delete-then-reinsert elsewhere will happily
+  erase rows this feature depends on).
+- Never report a change as done and verified without reading the job log.
+
+---
+
 ## Rules to Follow Every Session
 
 ### 1. Migration Checklist (MANDATORY every time)
