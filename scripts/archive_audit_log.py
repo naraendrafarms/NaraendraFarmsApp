@@ -71,21 +71,33 @@ print(f"Range to archive: {stat['oldest']} -> {stat['newest']}\n")
 # 1. Export, oldest first, in pages. One statement returning half a million rows
 #    would be refused, and a truncated export followed by a delete would lose
 #    exactly the rows that never made it into the file.
-rows, page, PAGE = [], 0, 5000
+# KEYSET pagination, not OFFSET. OFFSET makes the database walk and discard
+# every earlier row on each page, so the cost grows with the square of the
+# table - at 420,000 rows the last pages take longer than all the first ones
+# together. Carrying the last (changed_at, id) forward keeps every page the
+# same cost, and it is stable even though rows are being written meanwhile,
+# because nothing new ever lands before the cutoff.
+rows, PAGE = [], 5000
+last_at, last_id = None, None
 while True:
+    if last_at is None:
+        where = f"changed_at < '{cutoff}'::timestamptz"
+    else:
+        where = (f"changed_at < '{cutoff}'::timestamptz AND "
+                 f"(changed_at, id) > ('{last_at}'::timestamptz, '{last_id}'::uuid)")
     batch = q(f"""
       SELECT id, table_name, record_id, action, user_id, user_email,
              changed_at, summary
-      FROM public.audit_log WHERE changed_at < '{cutoff}'::timestamptz
-      ORDER BY changed_at, id LIMIT {PAGE} OFFSET {page * PAGE}
+      FROM public.audit_log WHERE {where}
+      ORDER BY changed_at, id LIMIT {PAGE}
     """)
     if not batch:
         break
     rows.extend(batch)
+    last_at, last_id = batch[-1]["changed_at"], batch[-1]["id"]
     print(f"  exported {len(rows)} / {n}")
     if len(batch) < PAGE:
         break
-    page += 1
 
 if len(rows) != n:
     print(f"REFUSING TO CONTINUE: expected {n} rows, exported {len(rows)}.")
