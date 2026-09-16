@@ -1018,6 +1018,7 @@ export const VHLEggProductionPage: React.FC = () => {
 // ═══════════════════════════════════════════════════════════════
 type VhlShedRow = {
   opening_female: string; opening_male: string
+  received_female: string; received_male: string
   he_eggs: string; je_eggs: string; te_eggs: string; be_eggs: string; le_eggs: string
   wastage_he: string; wastage_je: string; wastage_te: string; wastage_be: string
   mortality_female: string; mortality_male: string
@@ -1029,6 +1030,7 @@ type VhlShedRow = {
 }
 const emptyVhlShedRow = (): VhlShedRow => ({
   opening_female: '', opening_male: '',
+  received_female: '', received_male: '',
   he_eggs: '', je_eggs: '', te_eggs: '', be_eggs: '', le_eggs: '',
   wastage_he: '', wastage_je: '', wastage_te: '', wastage_be: '',
   mortality_female: '', mortality_male: '',
@@ -1103,6 +1105,8 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
         row.wastage_je = ex.wastage_je?.toString() ?? ''
         row.wastage_te = ex.wastage_te?.toString() ?? ''
         row.wastage_be = ex.wastage_be?.toString() ?? ''
+        row.received_female = ex.received_female?.toString() ?? ''
+        row.received_male = ex.received_male?.toString() ?? ''
         row.mortality_female = ex.mortality_female?.toString() ?? ''
         row.mortality_male = ex.mortality_male?.toString() ?? ''
         row.feed_female_kg = ex.feed_female_kg?.toString() ?? ''
@@ -1129,13 +1133,14 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
 
   const setShed = (shedId: string, k: keyof VhlShedRow, v: string) => setShedRows(rows => {
     const r = { ...(rows[shedId] ?? emptyVhlShedRow()), [k]: v }
-    if (['opening_female','opening_male','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male'].includes(k)) {
+    if (['opening_female','opening_male','received_female','received_male','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male'].includes(k)) {
       const of_ = parseInt(r.opening_female) || 0, om = parseInt(r.opening_male) || 0
+      const rf = parseInt(r.received_female) || 0, rm = parseInt(r.received_male) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
       const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
       const mf = parseInt(r.mortality_female) || 0, mm = parseInt(r.mortality_male) || 0
-      r.closing_female = Math.max(0, of_ - tf - cf - mf).toString()
-      r.closing_male = Math.max(0, om - tm - cm - mm).toString()
+      r.closing_female = Math.max(0, of_ + rf - tf - cf - mf).toString()
+      r.closing_male = Math.max(0, om + rm - tm - cm - mm).toString()
     }
     return { ...rows, [shedId]: r }
   })
@@ -1152,13 +1157,15 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
       const ff = parseFloat(r.feed_female_kg) || 0, fm = parseFloat(r.feed_male_kg) || 0
       const tf = parseInt(r.transfer_female) || 0, tm = parseInt(r.transfer_male) || 0
       const cf = parseInt(r.cull_female) || 0, cm = parseInt(r.cull_male) || 0
-      const hasData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm
+      const rf = parseInt(r.received_female) || 0, rm = parseInt(r.received_male) || 0
+      const hasData = he || je || te || be || le || mf || mm || ff || fm || tf || tm || cf || cm || rf || rm
         || r.lighting_hrs || r.remarks || r.opening_female || r.opening_male || r.existingId
       if (!hasData) continue
       const intOrNull = (v: string) => v === '' || v == null || isNaN(parseInt(v)) ? null : parseInt(v)
       const payload = {
         flock_id: flockId, shed_id: shed.id, record_date: date,
         opening_female: intOrNull(r.opening_female), opening_male: intOrNull(r.opening_male),
+        received_female: rf, received_male: rm,
         he_eggs: he, je_eggs: je, te_eggs: te, be_eggs: be, le_eggs: le, total_eggs: he+je+te+be+le,
         wastage_he: parseInt(r.wastage_he) || null, wastage_je: parseInt(r.wastage_je) || null,
         wastage_te: parseInt(r.wastage_te) || null, wastage_be: parseInt(r.wastage_be) || null,
@@ -1181,12 +1188,12 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
   }
 
   const importRef = React.useRef<HTMLInputElement>(null)
-  const SHED_HEADERS = ['Shed No','Open F','Open M','Feed F kg','Feed Type F','Feed M kg','Feed Type M',
+  const SHED_HEADERS = ['Shed No','Open F','Open M','Recd F','Recd M','Feed F kg','Feed Type F','Feed M kg','Feed Type M',
     'Transfer F','Transfer M','Cull F','Cull M','Death F','Death M','HE','JE','TE','BE','LE',
     'Wastage HE','Wastage JE','Wastage TE','Wastage BE','Lighting Hrs','Remarks']
 
   const handleTemplate = () => downloadXlsxTemplate('vhl_bulk_daily_template.xlsx', SHED_HEADERS,
-    ['1','20800','2500','1200','L1','150','MALE','0','0','0','0','20','15','15000','0','0','300','0','','','','','16','OK (Closing auto-calculated)'])
+    ['1','20800','2500','0','0','1200','L1','150','MALE','0','0','0','0','20','15','15000','0','0','300','0','','','','','16','OK (Closing auto-calculated)'])
 
   const handleExport = () => {
     if (!flockId || !sheds?.length) { toast.error('Select a flock first'); return }
@@ -1194,6 +1201,7 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
       const r = shedRows[shed.id] ?? emptyVhlShedRow()
       return {
         'Shed No': shed.shed_no, 'Open F': r.opening_female, 'Open M': r.opening_male,
+        'Recd F': r.received_female, 'Recd M': r.received_male,
         'Feed F kg': r.feed_female_kg, 'Feed Type F': r.feed_type_f, 'Feed M kg': r.feed_male_kg, 'Feed Type M': r.feed_type_m,
         'Transfer F': r.transfer_female, 'Transfer M': r.transfer_male, 'Cull F': r.cull_female, 'Cull M': r.cull_male,
         'Death F': r.mortality_female, 'Death M': r.mortality_male,
@@ -1214,7 +1222,8 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
       const { headers, rows } = await parseFile(file)
       const idx = (n: string) => headers.findIndex(h => h.toLowerCase().trim() === n.toLowerCase())
       const ci = {
-        shed: idx('Shed No'), of: idx('Open F'), om: idx('Open M'), ff: idx('Feed F kg'), ftf: idx('Feed Type F'),
+        shed: idx('Shed No'), of: idx('Open F'), om: idx('Open M'), rf: idx('Recd F'), rm: idx('Recd M'),
+        ff: idx('Feed F kg'), ftf: idx('Feed Type F'),
         fm: idx('Feed M kg'), ftm: idx('Feed Type M'), trf: idx('Transfer F'), trm: idx('Transfer M'),
         cf: idx('Cull F'), cm: idx('Cull M'), df: idx('Death F'), dm: idx('Death M'),
         he: idx('HE'), je: idx('JE'), te: idx('TE'), be: idx('BE'), le: idx('LE'),
@@ -1236,6 +1245,7 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
           next[shed.id] = {
             ...cur,
             opening_female: g(ci.of) || cur.opening_female, opening_male: g(ci.om) || cur.opening_male,
+            received_female: g(ci.rf) || cur.received_female, received_male: g(ci.rm) || cur.received_male,
             feed_female_kg: g(ci.ff) || cur.feed_female_kg, feed_type_f: g(ci.ftf) || cur.feed_type_f,
             feed_male_kg: g(ci.fm) || cur.feed_male_kg, feed_type_m: g(ci.ftm) || cur.feed_type_m,
             transfer_female: g(ci.trf) || cur.transfer_female, transfer_male: g(ci.trm) || cur.transfer_male,
@@ -1317,6 +1327,8 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
                   <th className="px-2 py-2 text-left sticky left-0 bg-gray-50 z-10">Shed</th>
                   <th className="px-1 py-2 text-center">Open ♀</th>
                   <th className="px-1 py-2 text-center">Open ♂</th>
+                  <th className="px-1 py-2 text-center bg-green-50">Recd ♀</th>
+                  <th className="px-1 py-2 text-center bg-green-50">Recd ♂</th>
                   <th className="px-1 py-2 text-center">Feed ♀ kg</th>
                   <th className="px-1 py-2 text-center">Type ♀</th>
                   <th className="px-1 py-2 text-center">Feed ♂ kg</th>
@@ -1350,6 +1362,8 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
                       </td>
                       <td className="px-1 py-1">{numInput(r.opening_female, u('opening_female'))}</td>
                       <td className="px-1 py-1">{numInput(r.opening_male, u('opening_male'))}</td>
+                      <td className="px-1 py-1 bg-green-50/40">{numInput(r.received_female, u('received_female'))}</td>
+                      <td className="px-1 py-1 bg-green-50/40">{numInput(r.received_male, u('received_male'))}</td>
                       <td className="px-1 py-1">{numInput(r.feed_female_kg, u('feed_female_kg'))}</td>
                       <td className="px-1 py-1">
                         <input type="text" value={r.feed_type_f} onChange={e => u('feed_type_f')(e.target.value)} placeholder="type"
