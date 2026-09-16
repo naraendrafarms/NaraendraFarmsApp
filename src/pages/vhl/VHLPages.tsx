@@ -1639,6 +1639,11 @@ export const VHLDashboardPage: React.FC = () => {
   // shed-wise it showed NOTHING, and the flock looked like it had no history.
   // Selecting one now opens its full daily register here instead.
   const [openFlockId, setOpenFlockId] = useState('')
+  // Closed flocks are rightly kept out of the two ENTRY screens - nobody
+  // should write new daily rows against a closed flock. But the register
+  // below is a READ, and a flock's whole history disappearing the day it
+  // closes is not acceptable. This toggle brings them back, read-only.
+  const [showClosed, setShowClosed] = useState(false)
   const regDaysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return localYMD(d) }
   const [regFrom, setRegFrom] = useState(regDaysAgo(30))
   const [regTo, setRegTo] = useState(today())
@@ -1764,6 +1769,10 @@ export const VHLDashboardPage: React.FC = () => {
   }, [recentDaily])
 
   const activeFlocks = (flocks ?? []).filter((f: any) => f.status !== 'closed')
+  const closedFlocks = (flocks ?? []).filter((f: any) => f.status === 'closed')
+  const shownFlocks = showClosed ? [...activeFlocks, ...closedFlocks] : activeFlocks
+  // Total Birds stays on ACTIVE flocks only - a closed flock holds none, and
+  // folding them in would inflate the headline figure.
   const totalBirds = activeFlocks.reduce((s: number, f: any) => {
     const c = currentByFlock[f.id]
     return s + (c ? c.female + c.male : (f.total_placed_f ?? 0) + (f.total_placed_m ?? 0))
@@ -1796,18 +1805,37 @@ export const VHLDashboardPage: React.FC = () => {
         <StatCard title="Active VHL Flocks" value={activeFlocks.length} subtitle={`${(flocks ?? []).filter((f: any) => f.status === 'closed').length} closed`} icon={<Activity size={18}/>} color="text-blue-600" />
       </div>
 
-      {!activeFlocks.length ? (
-        <EmptyState icon={<Bird size={32}/>} title="No active VHL flocks" subtitle="Tag a flock as VHL Contract in Flock Management to see it here." />
+      {!shownFlocks.length ? (
+        <EmptyState icon={<Bird size={32}/>}
+          title={closedFlocks.length ? 'No active VHL flocks' : 'No VHL flocks'}
+          subtitle={closedFlocks.length
+            ? `${closedFlocks.length} closed flock${closedFlocks.length !== 1 ? 's' : ''} — turn on "Show closed" to see their records.`
+            : 'Tag a flock as VHL Contract in Flock Management to see it here.'}
+          action={closedFlocks.length
+            ? <Button size="sm" variant="outline" onClick={() => setShowClosed(true)}>Show closed</Button>
+            : undefined} />
       ) : (
         <Card>
-          <CardHeader title="Active VHL Flocks" />
+          <CardHeader title={showClosed ? 'VHL Flocks' : 'Active VHL Flocks'}
+            subtitle="Click a flock to see its daily records"
+            action={closedFlocks.length > 0 ? (
+              <button type="button" onClick={() => setShowClosed(v => !v)}
+                className={`text-xs px-2.5 py-1 rounded border font-medium ${showClosed
+                  ? 'bg-gray-100 border-gray-300 text-gray-700'
+                  : 'border-gray-300 text-gray-500 hover:bg-gray-50'}`}>
+                {showClosed ? '× Hide closed' : `+ Show closed (${closedFlocks.length})`}
+              </button>
+            ) : undefined} />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {activeFlocks.map((f: any) => {
+            {shownFlocks.map((f: any) => {
               const c = currentByFlock[f.id]
               return (
                 <div key={f.id} onClick={() => setOpenFlockId(openFlockId === f.id ? '' : f.id)}
                   title="Show this flock's daily records"
-                  className={`cursor-pointer text-left p-4 rounded-xl border transition-colors ${openFlockId === f.id ? 'border-brand-400 bg-brand-50/40 shadow-sm' : 'border-gray-100 hover:border-brand-300 hover:shadow-sm'}`}>
+                  className={`cursor-pointer text-left p-4 rounded-xl border transition-colors ${
+                    openFlockId === f.id ? 'border-brand-400 bg-brand-50/40 shadow-sm'
+                    : f.status === 'closed' ? 'border-gray-200 bg-gray-50/60 hover:border-gray-400'
+                    : 'border-gray-100 hover:border-brand-300 hover:shadow-sm'}`}>
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-lg font-bold text-gray-900">F-{f.flock_no}</span>
                     <Badge color={f.status === 'laying' ? 'green' : f.status === 'rearing' ? 'yellow' : 'gray'}>{f.status}</Badge>
@@ -1819,8 +1847,12 @@ export const VHLDashboardPage: React.FC = () => {
                   </div>
                   <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between">
                     <span className="text-xs text-gray-400">Placed: {fmtDate(f.placement_date)}</span>
-                    <button type="button" onClick={e => { e.stopPropagation(); goToDailyEntry(f.id) }}
-                      className="text-[11px] text-brand-600 hover:text-brand-800 font-medium">Entry screen →</button>
+                    {/* A closed flock is not in the entry screens' pickers, so
+                        the link would land on a page that cannot select it. */}
+                    {f.status !== 'closed' && (
+                      <button type="button" onClick={e => { e.stopPropagation(); goToDailyEntry(f.id) }}
+                        className="text-[11px] text-brand-600 hover:text-brand-800 font-medium">Entry screen →</button>
+                    )}
                   </div>
                 </div>
               )
