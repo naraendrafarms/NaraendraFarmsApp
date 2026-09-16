@@ -1082,6 +1082,10 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [shedRows, setShedRows] = useState<Record<string, VhlShedRow>>({})
   const [showWastage, setShowWastage] = useState(false)
+  // Sheds whose saved row had a blank Opening and has just been filled from
+  // the day before. Shown as a banner, because the screen now differs from
+  // what is stored until Save All is pressed.
+  const [carriedSheds, setCarriedSheds] = useState<string[]>([])
 
   // Flock-level medicine, mirroring the regular Bulk Daily Entry. It is a LIST
   // because more than one medicine can be given the same day (a vaccine and a
@@ -1160,13 +1164,24 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
   useEffect(() => {
     if (!sheds) return
     const rows: Record<string, VhlShedRow> = {}
+    const carried: string[] = []
     for (const shed of sheds as any[]) {
       const ex = (existingRows ?? []).find((r: any) => r.shed_id === shed.id)
       const prev = (prevRows ?? []).find((r: any) => r.shed_id === shed.id)
       const row = emptyVhlShedRow()
+      let didCarry = false
       if (ex) {
-        row.opening_female = ex.opening_female?.toString() ?? ''
-        row.opening_male = ex.opening_male?.toString() ?? ''
+        // A saved row with a BLANK Opening has no other source for it, and the
+        // screen would show it blank for ever - entering a date before the day
+        // preceding it exists always saves blank, which is exactly how Flock
+        // 24's 14/09 came to read 1600 instead of 3200. Offer the previous
+        // day's Closing instead. A real 0 is a number, not null, so a
+        // deliberate zero is never overwritten.
+        const carriedF = ex.opening_female == null && prev?.closing_female != null
+        const carriedM = ex.opening_male == null && prev?.closing_male != null
+        if (carriedF || carriedM) { didCarry = true; carried.push(shed.shed_no ?? shed.id) }
+        row.opening_female = ex.opening_female?.toString() ?? (carriedF ? prev.closing_female.toString() : '')
+        row.opening_male = ex.opening_male?.toString() ?? (carriedM ? prev.closing_male.toString() : '')
         row.he_eggs = ex.he_eggs?.toString() ?? ''
         row.je_eggs = ex.je_eggs?.toString() ?? ''
         row.te_eggs = ex.te_eggs?.toString() ?? ''
@@ -1197,9 +1212,19 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
         row.opening_female = prev.closing_female?.toString() ?? ''
         row.opening_male = prev.closing_male?.toString() ?? ''
       }
+      // Whenever Opening was carried in, Closing must be re-derived or the row
+      // would read open 1600 / recd 1600 / close 1600 - visibly not adding up.
+      if (didCarry) {
+        const n = (v: string) => parseInt(v) || 0
+        row.closing_female = Math.max(0, n(row.opening_female) + n(row.received_female)
+          - n(row.transfer_female) - n(row.cull_female) - n(row.mortality_female)).toString()
+        row.closing_male = Math.max(0, n(row.opening_male) + n(row.received_male)
+          - n(row.transfer_male) - n(row.cull_male) - n(row.mortality_male)).toString()
+      }
       rows[shed.id] = row
     }
     setShedRows(rows)
+    setCarriedSheds(carried)
   }, [sheds, existingRows, prevRows])
 
   // Populate the medicine list from whatever is already saved for this
@@ -1419,6 +1444,15 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
       </Card>
 
       {flockId && !sheds?.length && <EmptyState title="No sheds found for this flock's site" />}
+
+      {carriedSheds.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>Opening filled from the previous day.</strong> Shed {carriedSheds.join(', ')} had a saved
+          row with no Opening — usually because this date was entered before the day before it existed.
+          The previous day&apos;s Closing has been carried in and Closing re-worked, but{' '}
+          <strong>this is not stored until you press Save All.</strong>
+        </div>
+      )}
 
       {flockId && (sheds ?? []).length > 0 && (
         <Card padding={false}>
