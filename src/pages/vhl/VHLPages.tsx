@@ -11,6 +11,7 @@ import { Save, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Bird, Download, 
 import { StatCard } from '@/components/ui'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import toast from 'react-hot-toast'
+import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 import * as XLSX from 'xlsx'
 
@@ -544,6 +545,23 @@ export const VHLMedicineMasterPage: React.FC = () => {
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState({ name: '', unit: 'ml', is_active: true })
 
+  // The unit was free text here while every other unit box in the app
+  // (Items Master, Purchase Entry, the Bulk Daily Entry add-medicine popup)
+  // reads the configured list. Same source, so VHL stays in step with them.
+  const unitOptions = useConfigOptions('unit', [
+    { value: 'ml', label: 'ml' }, { value: 'Ltr', label: 'Ltr' }, { value: 'Gms', label: 'Gms' },
+    { value: 'kg', label: 'kg' }, { value: 'Dose', label: 'Dose' }, { value: 'Nos', label: 'Nos' },
+  ])
+  // A unit typed before this dropdown existed may not be in the configured
+  // list. Keep it as an option rather than silently blanking it on edit.
+  const unitSelectOptions = React.useMemo(() => {
+    const opts = unitOptions.map(o => ({ value: o.value, label: o.label }))
+    if (form.unit && !opts.some(o => o.value === form.unit)) {
+      opts.unshift({ value: form.unit, label: `${form.unit} (not in list)` })
+    }
+    return opts
+  }, [unitOptions, form.unit])
+
   const { data: meds, isLoading } = useQuery({
     queryKey: ['vhl_medicines'],
     queryFn: async () => { const { data } = await supabase.from('vhl_medicines').select('*').order('name'); return data ?? [] }
@@ -591,7 +609,16 @@ export const VHLMedicineMasterPage: React.FC = () => {
         <Card className="space-y-3">
           <FormRow cols={3}>
             <Input label="Name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-            <Input label="Unit" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} placeholder="ml, gm, Dose" />
+            <Select label="Unit" value={form.unit} options={unitSelectOptions}
+              onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
+            {/* Deleting is refused once usage rows reference a medicine, and the
+                message says to mark it Inactive instead - but there was no tick
+                to do it with. */}
+            <label className="flex items-center gap-2 text-sm text-gray-700 self-end pb-2">
+              <input type="checkbox" className="rounded" checked={form.is_active}
+                onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} />
+              Active
+            </label>
           </FormRow>
           <div className="flex gap-2">
             <Button onClick={() => saveMut.mutate()} loading={saveMut.isPending}>Save</Button>
@@ -643,8 +670,15 @@ export const VHLMedicineUsagePage: React.FC = () => {
   })
   const { data: meds } = useQuery({
     queryKey: ['vhl_medicines_all'],
-    queryFn: async () => { const { data } = await supabase.from('vhl_medicines').select('id,name,unit').order('name'); return data ?? [] }
+    queryFn: async () => { const { data } = await supabase.from('vhl_medicines').select('id,name,unit,is_active').order('name'); return data ?? [] }
   })
+  // Inactive medicines were still offered here, which made the Active tick on
+  // the master worth nothing. A retired medicine already chosen on the row
+  // being edited stays listed, so an old entry never opens blank.
+  const medOptions = React.useMemo(() => (meds ?? [])
+    .filter((m: any) => m.is_active !== false || m.id === form.vhl_medicine_id)
+    .map((m: any) => ({ value: m.id, label: m.is_active === false ? `${m.name} (inactive)` : m.name })),
+    [meds, form.vhl_medicine_id])
   const { data: rows, isLoading } = useQuery({
     queryKey: ['vhl_medicine_usage', flockId],
     queryFn: async () => {
@@ -701,7 +735,7 @@ export const VHLMedicineUsagePage: React.FC = () => {
           <div><label className="text-sm font-medium text-gray-700">Date</label><DateInput value={form.usage_date} onChange={e => setForm(f => ({ ...f, usage_date: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" /></div>
           <SearchableSelect label="Medicine" placeholder="Search medicine…" value={form.vhl_medicine_id}
             onChange={v => { const m = (meds ?? []).find((x: any) => x.id === v); setForm(f => ({ ...f, vhl_medicine_id: v, unit: m?.unit ?? f.unit })) }}
-            options={(meds ?? []).map((m: any) => ({ value: m.id, label: m.name }))} />
+            options={medOptions} />
           <Input label="Quantity" type="number" step="0.001" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} />
           <Input label="Unit" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
         </FormRow>
@@ -1049,6 +1083,14 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
   const [shedRows, setShedRows] = useState<Record<string, VhlShedRow>>({})
   const [showWastage, setShowWastage] = useState(false)
 
+  // Flock-level medicine, mirroring the regular Bulk Daily Entry. It is a LIST
+  // because more than one medicine can be given the same day (a vaccine and a
+  // supplement), each becoming its own vhl_medicine_usage row. Flock-level,
+  // not per shed: vhl_medicine_usage has no shed_id column, same as the
+  // regular medicine_usage table.
+  type VhlMedEntry = { key: string; med_id: string; med_qty: string; existingMedId: string | null }
+  const [medRows, setMedRows] = useState<VhlMedEntry[]>([{ key: 'm0', med_id: '', med_qty: '', existingMedId: null }])
+
   const { data: flocks } = useQuery({
     queryKey: ['vhl_flocks_active_bulk'],
     queryFn: async () => { const { data } = await supabase.from('flocks').select('id,flock_no,laying_farm_id,rearing_farm_id').eq('is_vhl_contract', true).neq('status', 'closed').order('flock_no'); return data ?? [] }
@@ -1070,6 +1112,35 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
     queryKey: ['vhl_bulk_existing', flockId, date],
     queryFn: async () => {
       const { data } = await supabase.from('vhl_daily_entry').select('*').eq('flock_id', flockId).eq('record_date', date)
+      return data ?? []
+    },
+    enabled: !!flockId && !!date
+  })
+
+  const { data: vhlMeds } = useQuery({
+    queryKey: ['vhl_medicines_bulk'],
+    queryFn: async () => { const { data } = await supabase.from('vhl_medicines').select('id,name,unit,is_active').order('name'); return data ?? [] }
+  })
+  // The unit is shown, never typed - it comes from the VHL Medicine Master,
+  // the same way the regular page takes it from Item Master. Typing it per
+  // row is how 585 of 615 regular usage rows ended up stamped 'ml'.
+  const unitForVhlMedicine = (medId: string | null | undefined): string | null => {
+    if (!medId) return null
+    const m: any = (vhlMeds as any[] ?? []).find((x: any) => x.id === medId)
+    return m?.unit || null
+  }
+  const vhlMedOptions = React.useMemo(() => {
+    const chosen = new Set(medRows.map(m => m.med_id).filter(Boolean))
+    return (vhlMeds ?? [])
+      .filter((m: any) => m.is_active !== false || chosen.has(m.id))
+      .map((m: any) => ({ value: m.id, label: m.is_active === false ? `${m.name} (inactive)` : m.name }))
+  }, [vhlMeds, medRows])
+
+  const { data: existingMedRows } = useQuery({
+    queryKey: ['vhl_bulk_med', flockId, date],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_medicine_usage').select('id,vhl_medicine_id,quantity')
+        .eq('flock_id', flockId).eq('usage_date', date)
       return data ?? []
     },
     enabled: !!flockId && !!date
@@ -1131,6 +1202,20 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
     setShedRows(rows)
   }, [sheds, existingRows, prevRows])
 
+  // Populate the medicine list from whatever is already saved for this
+  // flock/date, so editing a day shows what was given rather than a blank row.
+  useEffect(() => {
+    const rows = (existingMedRows ?? []) as any[]
+    setMedRows(rows.length
+      ? rows.map((mu, i) => ({ key: `m${i}`, med_id: mu.vhl_medicine_id ?? '', med_qty: mu.quantity?.toString() ?? '', existingMedId: mu.id }))
+      : [{ key: 'm0', med_id: '', med_qty: '', existingMedId: null }])
+  }, [existingMedRows])
+
+  const addMedRow = () => setMedRows(rows => [...rows, { key: `m${Date.now()}`, med_id: '', med_qty: '', existingMedId: null }])
+  const removeMedRow = (key: string) => setMedRows(rows => rows.filter(r => r.key !== key))
+  const updateMedRow = (key: string, field: 'med_id' | 'med_qty', val: string) =>
+    setMedRows(rows => rows.map(r => r.key === key ? { ...r, [field]: val } : r))
+
   const setShed = (shedId: string, k: keyof VhlShedRow, v: string) => setShedRows(rows => {
     const r = { ...(rows[shedId] ?? emptyVhlShedRow()), [k]: v }
     if (['opening_female','opening_male','received_female','received_male','transfer_female','transfer_male','cull_female','cull_male','mortality_female','mortality_male'].includes(k)) {
@@ -1181,10 +1266,34 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
         : await supabase.from('vhl_daily_entry').insert(payload)
       if (error) { console.error(error); errors++ } else saved++
     }
+
+    // Medicine - flock-level, so it saves once for the day rather than per
+    // shed. A row cleared back to blank DELETES the entry it came from,
+    // otherwise clearing it on screen would leave it in the database.
+    let medSaved = 0
+    for (const m of medRows) {
+      if (m.med_id && m.med_qty !== '') {
+        const medPayload = {
+          flock_id: flockId, usage_date: date, vhl_medicine_id: m.med_id,
+          quantity: parseFloat(m.med_qty) || 0, unit: unitForVhlMedicine(m.med_id),
+        }
+        const { error: me } = m.existingMedId
+          ? await supabase.from('vhl_medicine_usage').update(medPayload).eq('id', m.existingMedId)
+          : await supabase.from('vhl_medicine_usage').insert(medPayload)
+        if (me) { console.error(me); errors++ } else medSaved++
+      } else if (m.existingMedId) {
+        const { error: me } = await supabase.from('vhl_medicine_usage').delete().eq('id', m.existingMedId)
+        if (me) { console.error(me); errors++ }
+      }
+    }
+
     setSaving(false)
     qc.invalidateQueries({ queryKey: ['vhl_bulk_existing'] })
-    if (errors) toast.error(`Saved ${saved} shed(s), ${errors} failed`)
-    else toast.success(`Saved ${saved} shed record(s)`)
+    qc.invalidateQueries({ queryKey: ['vhl_bulk_med'] })
+    qc.invalidateQueries({ queryKey: ['vhl_medicine_usage'] })
+    const medNote = medSaved ? `, ${medSaved} medicine` : ''
+    if (errors) toast.error(`Saved ${saved} shed(s)${medNote}, ${errors} failed`)
+    else toast.success(`Saved ${saved} shed record(s)${medNote}`)
   }
 
   const importRef = React.useRef<HTMLInputElement>(null)
@@ -1403,6 +1512,48 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
                 })}
               </tbody>
             </table>
+          </div>
+        </Card>
+      )}
+
+      {flockId && (sheds ?? []).length > 0 && (
+        <Card padding={false}>
+          <div className="px-4 py-2 bg-amber-50 border-b border-amber-100">
+            <p className="text-sm font-semibold text-amber-800">Medicine (flock-level — applies to all sheds)</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              Saved with Save All. Records to the VHL Medicine Usage Log — VHL medicine never touches our own stock.
+            </p>
+          </div>
+          <div className="px-4 py-3 space-y-2">
+            {!vhlMeds?.length && (
+              <p className="text-xs text-gray-500">No VHL medicines yet — add them under VHL → Medicine Master first.</p>
+            )}
+            {medRows.map((m, i) => (
+              <div key={m.key} className="flex items-center gap-3 flex-wrap">
+                <div className="w-56">
+                  <SearchableSelect value={m.med_id} onChange={v => updateMedRow(m.key, 'med_id', v)}
+                    options={vhlMedOptions} placeholder="Search medicine…" />
+                </div>
+                <input type="number" min="0" step="0.001" value={m.med_qty} placeholder="qty" disabled={!m.med_id}
+                  onChange={e => updateMedRow(m.key, 'med_qty', e.target.value)}
+                  className="w-24 text-center border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:bg-gray-50 disabled:text-gray-300" />
+                <span className="text-xs text-gray-500 w-20">
+                  {m.med_id
+                    ? (unitForVhlMedicine(m.med_id) ?? <span className="text-amber-600" title="No unit set on this medicine in VHL Medicine Master">no unit</span>)
+                    : ''}
+                </span>
+                {medRows.length > 1 && (
+                  <button type="button" onClick={() => removeMedRow(m.key)}
+                    className="text-xs text-red-500 hover:text-red-700 px-1" title="Remove">✕</button>
+                )}
+                {i === medRows.length - 1 && (
+                  <button type="button" onClick={addMedRow}
+                    className="text-xs text-brand-600 hover:text-brand-800 font-medium px-2 py-1 rounded border border-brand-200 hover:bg-brand-50">
+                    + Add another
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </Card>
       )}
