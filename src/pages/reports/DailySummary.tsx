@@ -179,6 +179,48 @@ export const DailySummaryPage: React.FC = () => {
     enabled: flockIds.length > 0
   })
 
+  // Feed produced that day, by site. feed_transfers is deliberately NOT read:
+  // it holds one row in the whole table, from June, so a Despatch section
+  // would print "None" every day. feed_production_ingredients is not read
+  // either - 4,085 rows across 154 batches is about 27 ingredients each, and
+  // a day with two batches would add ~54 lines to a message meant to be read
+  // on a phone.
+  const { data: feedProduction } = useQuery({
+    queryKey: ['daily_summary_feed_production', date],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('feed_production_log')
+        .select('farm_id, quantity_kg, production_date, feed_formulas(formula_name, formula_code)')
+        .eq('production_date', date)
+      if (error) { toast.error(error.message); return [] }
+      return data ?? []
+    }
+  })
+
+  const feedProductionBySite = React.useMemo(() => {
+    const m: Record<string, { name: string; kg: number }[]> = {}
+    for (const r of ((feedProduction ?? []) as any[])) {
+      if (!r.farm_id) continue
+      const name = r.feed_formulas?.formula_name || r.feed_formulas?.formula_code || 'Unnamed formula'
+      const list = (m[r.farm_id] ??= [])
+      // Two batches of the same formula on one day read better as one line.
+      const found = list.find(x => x.name === name)
+      if (found) found.kg += Number(r.quantity_kg) || 0
+      else list.push({ name, kg: Number(r.quantity_kg) || 0 })
+    }
+    return m
+  }, [feedProduction])
+
+  const productionLines = (siteId: string): string[] => {
+    const rows = feedProductionBySite[siteId] ?? []
+    if (!rows.length) return []
+    const total = rows.reduce((t, r) => t + r.kg, 0)
+    return [
+      'PRODUCTION',
+      ...rows.map((r, i) => `${i + 1}.${r.name} = ${Math.round(r.kg).toLocaleString('en-IN')} kg`),
+      `Total produced: ${Math.round(total).toLocaleString('en-IN')} kg`,
+    ]
+  }
+
   const { data: stdCurves } = useQuery({
     queryKey: ['std_production_curve_all'],
     queryFn: async () => { const { data } = await supabase.from('std_production_curve').select('season,week_of_age,hen_week_pct,he_pct'); return data ?? [] }
@@ -236,7 +278,9 @@ export const DailySummaryPage: React.FC = () => {
   const manpowerLines = (siteId: string) => {
     const site = manpowerBySite[siteId] ?? {}
     const designations = Object.keys(site).sort((a, b) => orderFor(a) - orderFor(b) || a.localeCompare(b))
-    if (!designations.length) return ['(no employees mapped to this site)']
+    // No placeholder when a site has nobody mapped - an empty section is
+    // quieter than a line of apology in a message that goes out daily.
+    if (!designations.length) return []
     return designations.map(d => `${d} — P:${site[d].p} H:${site[d].h}`)
   }
 
@@ -436,7 +480,13 @@ export const DailySummaryPage: React.FC = () => {
   const copyAll = () => {
     const parts = allBlocks.map(b => b.lines.join('\n'))
     for (const site of flocklessSites) {
-      parts.push([site.name.toUpperCase(), '(no active flock)', ...manpowerLines(site.id)].join('\n'))
+      const prod = productionLines(site.id)
+      parts.push([
+        site.name.toUpperCase(),
+        `        Dt.${fmtDMY2(date)}`,
+        ...(prod.length ? prod : ['(no active flock)']),
+        ...manpowerLines(site.id),
+      ].join('\n'))
     }
     if (!parts.length) { toast.error('Nothing to copy for this site'); return }
     navigator.clipboard.writeText(parts.join('\n\n================================\n\n')).then(() => {
@@ -481,9 +531,16 @@ export const DailySummaryPage: React.FC = () => {
         <Card key={site.id} padding={false}>
           <div className="p-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="font-bold text-gray-900">{site.name} — no active flock</span>
+              <span className="font-bold text-gray-900">
+                {site.name}{productionLines(site.id).length ? '' : ' — no active flock'}
+              </span>
             </div>
-            <pre className="text-xs font-mono whitespace-pre-wrap bg-gray-50 rounded-lg p-3 overflow-x-auto">{[site.name.toUpperCase(), ...manpowerLines(site.id)].join('\n')}</pre>
+            <pre className="text-xs font-mono whitespace-pre-wrap bg-gray-50 rounded-lg p-3 overflow-x-auto">{[
+              site.name.toUpperCase(),
+              `        Dt.${fmtDMY2(date)}`,
+              ...productionLines(site.id),
+              ...manpowerLines(site.id),
+            ].join('\n')}</pre>
           </div>
         </Card>
       ))}
