@@ -38,7 +38,7 @@ export const DailySummaryPage: React.FC = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('flocks')
-        .select('id, flock_no, breed, status, placement_date, laying_season, rearing_farm_id, laying_farm_id, rearing_farm:farms!rearing_farm_id(name, code), laying_farm:farms!laying_farm_id(name, code)')
+        .select('id, flock_no, breed, status, placement_date, laying_season, is_vhl_contract, rearing_farm_id, laying_farm_id, rearing_farm:farms!rearing_farm_id(name, code), laying_farm:farms!laying_farm_id(name, code)')
         .in('status', ['rearing', 'laying'])
         .order('flock_no')
       if (error) { toast.error(error.message); return [] }
@@ -51,38 +51,118 @@ export const DailySummaryPage: React.FC = () => {
   })
 
   const flockIds = flocks?.map((f: any) => f.id) ?? []
+  // A VHL flock's daily figures live in vhl_daily_entry, NOT daily_records -
+  // measured: Flock 24 has 0 daily_records rows and 4 vhl_daily_entry rows.
+  // Reading only daily_records printed a whole block of zeros for it, which
+  // reads like a farm that did nothing. Each flock is asked of its own table.
+  const vhlFlockIds = (flocks ?? []).filter((f: any) => f.is_vhl_contract).map((f: any) => f.id)
+  const normalFlockIds = (flocks ?? []).filter((f: any) => !f.is_vhl_contract).map((f: any) => f.id)
 
   // Per-shed rows for the selected date AND the previous date (for the
   // shed-wise HD% +/- variance line), plus feed/eggs/mortality/birds.
-  const { data: records } = useQuery({
-    queryKey: ['daily_summary_records', date, prevDate, flockIds.join(',')],
+  const { data: drRecords } = useQuery({
+    queryKey: ['daily_summary_records', date, prevDate, normalFlockIds.join(',')],
     queryFn: async () => {
-      if (!flockIds.length) return []
+      if (!normalFlockIds.length) return []
       const { data, error } = await supabase
         .from('daily_records')
         .select('flock_id, shed_id, record_date, he_eggs, je_eggs, te_eggs, be_eggs, le_eggs, total_eggs, mortality_female, mortality_male, transfer_female, transfer_male, cull_female, cull_male, feed_female_kg, feed_male_kg, opening_female, opening_male, closing_female, closing_male, sheds(shed_no, farm_id)')
-        .in('flock_id', flockIds)
+        .in('flock_id', normalFlockIds)
         .in('record_date', [date, prevDate])
       if (error) { toast.error(error.message); return [] }
       return data ?? []
     },
-    enabled: flockIds.length > 0
+    enabled: normalFlockIds.length > 0
   })
+
+  // The VHL side of the same question.
+  const { data: vhlRecordsRaw } = useQuery({
+    queryKey: ['daily_summary_vhl_records', date, prevDate, vhlFlockIds.join(',')],
+    queryFn: async () => {
+      if (!vhlFlockIds.length) return []
+      const { data, error } = await supabase
+        .from('vhl_daily_entry')
+        .select('flock_id, shed_id, record_date, he_eggs, je_eggs, te_eggs, be_eggs, le_eggs, total_eggs, mortality_female, mortality_male, received_female, received_male, transfer_female, transfer_male, cull_female, cull_male, feed_female_kg, feed_male_kg, opening_female, opening_male, closing_female, closing_male, sheds(shed_no, farm_id)')
+        .in('flock_id', vhlFlockIds)
+        .in('record_date', [date, prevDate])
+      if (error) { toast.error(error.message); return [] }
+      return data ?? []
+    },
+    enabled: vhlFlockIds.length > 0
+  })
+
+  // Reshape VHL rows into exactly the shape daily_records rows have, so every
+  // calculation below stays one code path rather than two.
+  //
+  // The BIRDS line reads Op | Mort | Recv | C/s | Close, and on the regular
+  // side "Recv" comes from transfer_female (transfer IN) while VHL has a
+  // dedicated received_female and uses transfer_female for movement OUT. So:
+  //   Recv -> received_*            (birds in)
+  //   C/s  -> cull_* + transfer_*   (birds out - VHL's own trcull column is
+  //                                  exactly transfer + cull)
+  // which keeps Close = Op + Recv - Mort - C/s true, the same identity VHL
+  // itself computes closing with.
+  const vhlRecords = React.useMemo(() => {
+    const rows = (vhlRecordsRaw ?? []) as any[]
+    // A flock can hold BOTH per-shed rows and a flock-level grade-only row
+    // (shed_id null) for the same date. Counting both would double every egg,
+    // so shed rows win and the flock-level row is used only when a date has
+    // no shed rows at all.
+    const shedDates = new Set(rows.filter(r => r.shed_id).map(r => `${r.flock_id}|${r.record_date}`))
+    return rows
+      .filter(r => r.shed_id || !shedDates.has(`${r.flock_id}|${r.record_date}`))
+      .map(r => ({
+        ...r,
+        transfer_female: r.received_female ?? 0,
+        transfer_male: r.received_male ?? 0,
+        cull_female: (r.cull_female ?? 0) + (r.transfer_female ?? 0),
+        cull_male: (r.cull_male ?? 0) + (r.transfer_male ?? 0),
+      }))
+  }, [vhlRecordsRaw])
+
+  const records = React.useMemo(
+    () => [...((drRecords ?? []) as any[]), ...vhlRecords],
+    [drRecords, vhlRecords])
 
   // Medicine/Vaccine given that day — sanitizers split out into their own
   // "Water sanitation" section; everything else (medicine/vaccine/
   // supplement/etc.) goes under "MEDICINE & VACCINE".
-  const { data: medUsage } = useQuery({
-    queryKey: ['daily_summary_medicine', date, flockIds.join(',')],
+  const { data: medUsageRaw } = useQuery({
+    queryKey: ['daily_summary_medicine', date, normalFlockIds.join(',')],
     queryFn: async () => {
-      if (!flockIds.length) return []
+      if (!normalFlockIds.length) return []
       const { data } = await supabase.from('medicine_usage')
         .select('flock_id, quantity, unit, medicines_master(name,type)')
-        .in('flock_id', flockIds).eq('usage_date', date)
+        .in('flock_id', normalFlockIds).eq('usage_date', date)
       return data ?? []
     },
-    enabled: flockIds.length > 0
+    enabled: normalFlockIds.length > 0
   })
+
+  // VHL medicine is its own table too - measured: Flock 24 has 0 rows in
+  // medicine_usage and 3 in vhl_medicine_usage, which is why the report said
+  // "MEDICINE & VACCINE: None" for a day that had three.
+  const { data: vhlMedUsageRaw } = useQuery({
+    queryKey: ['daily_summary_vhl_medicine', date, vhlFlockIds.join(',')],
+    queryFn: async () => {
+      if (!vhlFlockIds.length) return []
+      const { data } = await supabase.from('vhl_medicine_usage')
+        .select('flock_id, quantity, unit, vhl_medicines(name)')
+        .in('flock_id', vhlFlockIds).eq('usage_date', date)
+      return data ?? []
+    },
+    enabled: vhlFlockIds.length > 0
+  })
+
+  // vhl_medicines has no type column, so VHL entries go under MEDICINE &
+  // VACCINE rather than being invented into a category that does not exist.
+  const medUsage = React.useMemo(() => [
+    ...((medUsageRaw ?? []) as any[]),
+    ...((vhlMedUsageRaw ?? []) as any[]).map(m => ({
+      flock_id: m.flock_id, quantity: m.quantity, unit: m.unit,
+      medicines_master: { name: m.vhl_medicines?.name ?? '—', type: 'medicine' },
+    })),
+  ], [medUsageRaw, vhlMedUsageRaw])
 
   // Spray-route vaccinations that day — best-effort source (no separate
   // "spray log" exists in the app; vaccination_records.route='spray' is
