@@ -1599,6 +1599,15 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
 export const VHLDashboardPage: React.FC = () => {
   const navigate = useNavigate()
   const goToDailyEntry = (flockId: string) => { localStorage.setItem('vhl_de_flock', flockId); navigate('/vhl/daily-entry') }
+
+  // Selecting a flock used to navigate straight to VHL Daily Entry, whose
+  // Recent Records list filters shed_id IS NULL - so for a flock entered
+  // shed-wise it showed NOTHING, and the flock looked like it had no history.
+  // Selecting one now opens its full daily register here instead.
+  const [openFlockId, setOpenFlockId] = useState('')
+  const regDaysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return localYMD(d) }
+  const [regFrom, setRegFrom] = useState(regDaysAgo(30))
+  const [regTo, setRegTo] = useState(today())
   const { data: flocks, isLoading } = useQuery({
     queryKey: ['vhl_dashboard_flocks'],
     queryFn: async () => {
@@ -1630,6 +1639,79 @@ export const VHLDashboardPage: React.FC = () => {
     },
     enabled: !!flocks?.length
   })
+
+  // Every daily row for the selected flock. Paged, because PostgREST caps a
+  // response at 1000 rows silently - a wide range would quietly go short.
+  const { data: regRows, isLoading: regLoading } = useQuery({
+    queryKey: ['vhl_flock_register', openFlockId, regFrom, regTo],
+    queryFn: async () => fetchAllPages<any>(
+      (from, to) => supabase.from('vhl_daily_entry')
+        .select('id,record_date,shed_id,opening_female,opening_male,received_female,received_male,feed_female_kg,feed_type_f,feed_male_kg,feed_type_m,transfer_female,transfer_male,cull_female,cull_male,mortality_female,mortality_male,he_eggs,je_eggs,te_eggs,be_eggs,le_eggs,total_eggs,closing_female,closing_male,lighting_hrs,remarks,sheds(shed_no,shed_name)')
+        .eq('flock_id', openFlockId).gte('record_date', regFrom).lte('record_date', regTo)
+        .order('record_date').order('shed_id').range(from, to),
+      'VHL flock register'),
+    enabled: !!openFlockId
+  })
+
+  const { data: regMeds } = useQuery({
+    queryKey: ['vhl_flock_register_med', openFlockId, regFrom, regTo],
+    queryFn: async () => {
+      const { data } = await supabase.from('vhl_medicine_usage')
+        .select('id,usage_date,quantity,unit,remarks,vhl_medicines(name)')
+        .eq('flock_id', openFlockId).gte('usage_date', regFrom).lte('usage_date', regTo)
+        .order('usage_date')
+      return data ?? []
+    },
+    enabled: !!openFlockId
+  })
+
+  const regTotals = React.useMemo(() => {
+    const t = { feedF: 0, feedM: 0, deathF: 0, deathM: 0, trF: 0, trM: 0, cullF: 0, cullM: 0,
+                recdF: 0, recdM: 0, he: 0, je: 0, te: 0, be: 0, le: 0, eggs: 0 }
+    for (const r of (regRows ?? []) as any[]) {
+      t.feedF += Number(r.feed_female_kg) || 0; t.feedM += Number(r.feed_male_kg) || 0
+      t.deathF += r.mortality_female ?? 0;      t.deathM += r.mortality_male ?? 0
+      t.trF += r.transfer_female ?? 0;          t.trM += r.transfer_male ?? 0
+      t.cullF += r.cull_female ?? 0;            t.cullM += r.cull_male ?? 0
+      t.recdF += r.received_female ?? 0;        t.recdM += r.received_male ?? 0
+      t.he += r.he_eggs ?? 0; t.je += r.je_eggs ?? 0; t.te += r.te_eggs ?? 0
+      t.be += r.be_eggs ?? 0; t.le += r.le_eggs ?? 0; t.eggs += r.total_eggs ?? 0
+    }
+    return t
+  }, [regRows])
+
+  const openFlock = (flocks ?? []).find((f: any) => f.id === openFlockId)
+
+  const exportRegister = () => {
+    const rows = (regRows ?? []) as any[]
+    if (!rows.length) { toast.error('Nothing to export for this range'); return }
+    const data = rows.map(r => ({
+      Date: r.record_date,
+      Shed: r.sheds?.shed_no ?? '(flock-level)',
+      'Open F': r.opening_female ?? '', 'Open M': r.opening_male ?? '',
+      'Recd F': r.received_female ?? 0, 'Recd M': r.received_male ?? 0,
+      'Feed F kg': r.feed_female_kg ?? 0, 'Type F': r.feed_type_f ?? '',
+      'Feed M kg': r.feed_male_kg ?? 0, 'Type M': r.feed_type_m ?? '',
+      'Transfer F': r.transfer_female ?? 0, 'Transfer M': r.transfer_male ?? 0,
+      'Cull F': r.cull_female ?? 0, 'Cull M': r.cull_male ?? 0,
+      'Death F': r.mortality_female ?? 0, 'Death M': r.mortality_male ?? 0,
+      HE: r.he_eggs ?? 0, JE: r.je_eggs ?? 0, TE: r.te_eggs ?? 0, BE: r.be_eggs ?? 0, LE: r.le_eggs ?? 0,
+      'Total Eggs': r.total_eggs ?? 0,
+      'Close F': r.closing_female ?? '', 'Close M': r.closing_male ?? '',
+      Light: r.lighting_hrs ?? '', Remarks: r.remarks ?? '',
+    }))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Daily Records')
+    if ((regMeds ?? []).length) {
+      const med = (regMeds as any[]).map(m => ({
+        Date: m.usage_date, Medicine: m.vhl_medicines?.name ?? '', Quantity: m.quantity ?? 0,
+        Unit: m.unit ?? '', Remarks: m.remarks ?? '',
+      }))
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(med), 'Medicine')
+    }
+    XLSX.writeFile(wb, `VHL_Flock${openFlock?.flock_no}_Records_${regFrom}_to_${regTo}.xlsx`)
+    toast.success(`Exported ${rows.length} record(s)`)
+  }
 
   // Current birds per flock — sum of the latest date's rows (shed-wise or single, never both for the same date)
   const currentByFlock = React.useMemo(() => {
@@ -1689,8 +1771,9 @@ export const VHLDashboardPage: React.FC = () => {
             {activeFlocks.map((f: any) => {
               const c = currentByFlock[f.id]
               return (
-                <button key={f.id} onClick={() => goToDailyEntry(f.id)} title="Open Daily Entry for this flock"
-                  className="text-left p-4 rounded-xl border border-gray-100 hover:border-brand-300 hover:shadow-sm transition-colors">
+                <div key={f.id} onClick={() => setOpenFlockId(openFlockId === f.id ? '' : f.id)}
+                  title="Show this flock's daily records"
+                  className={`cursor-pointer text-left p-4 rounded-xl border transition-colors ${openFlockId === f.id ? 'border-brand-400 bg-brand-50/40 shadow-sm' : 'border-gray-100 hover:border-brand-300 hover:shadow-sm'}`}>
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-lg font-bold text-gray-900">F-{f.flock_no}</span>
                     <Badge color={f.status === 'laying' ? 'green' : f.status === 'rearing' ? 'yellow' : 'gray'}>{f.status}</Badge>
@@ -1700,11 +1783,158 @@ export const VHLDashboardPage: React.FC = () => {
                     <div className="flex justify-between"><span>Birds ♀</span><span className="font-medium text-gray-900">{(c?.female ?? f.total_placed_f ?? 0).toLocaleString('en-IN')}</span></div>
                     <div className="flex justify-between"><span>Birds ♂</span><span className="font-medium text-gray-900">{(c?.male ?? f.total_placed_m ?? 0).toLocaleString('en-IN')}</span></div>
                   </div>
-                  <div className="mt-3 pt-2 border-t border-gray-100 text-xs text-gray-400">Placed: {fmtDate(f.placement_date)}</div>
-                </button>
+                  <div className="mt-3 pt-2 border-t border-gray-100 flex items-center justify-between">
+                    <span className="text-xs text-gray-400">Placed: {fmtDate(f.placement_date)}</span>
+                    <button type="button" onClick={e => { e.stopPropagation(); goToDailyEntry(f.id) }}
+                      className="text-[11px] text-brand-600 hover:text-brand-800 font-medium">Entry screen →</button>
+                  </div>
+                </div>
               )
             })}
           </div>
+        </Card>
+      )}
+
+      {openFlockId && (
+        <Card padding={false}>
+          <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-end gap-3 justify-between">
+            <div>
+              <p className="font-semibold text-gray-800 text-sm">Flock {openFlock?.flock_no} — Daily Records</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Every recorded day, per shed. Feed, mortality, transfer, cull, eggs and lighting — the full row, not a summary.
+              </p>
+            </div>
+            <div className="flex items-end gap-2 flex-wrap">
+              <DateInput label="From" value={regFrom} onChange={e => setRegFrom(e.target.value)} />
+              <DateInput label="To" value={regTo} onChange={e => setRegTo(e.target.value)} />
+              <Button size="sm" variant="outline" icon={<Download size={14}/>} onClick={exportRegister}>Export</Button>
+              <Button size="sm" variant="secondary" onClick={() => setOpenFlockId('')}>Close</Button>
+            </div>
+          </div>
+
+          {regLoading ? <div className="p-6"><Spinner /></div>
+           : !(regRows ?? []).length ? (
+            <div className="p-6">
+              <EmptyState title="No records in this date range"
+                subtitle="Widen the From/To dates, or enter the days on VHL → Bulk (Shed-wise) Daily Entry." />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs whitespace-nowrap">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100 text-gray-500 uppercase tracking-wide">
+                    <th className="px-2 py-2 text-left sticky left-0 bg-gray-50 z-10">Date</th>
+                    <th className="px-2 py-2 text-left">Shed</th>
+                    <th className="px-2 py-2 text-right">Open ♀</th>
+                    <th className="px-2 py-2 text-right">Open ♂</th>
+                    <th className="px-2 py-2 text-right bg-green-50">Recd ♀</th>
+                    <th className="px-2 py-2 text-right bg-green-50">Recd ♂</th>
+                    <th className="px-2 py-2 text-right bg-amber-50">Feed ♀ kg</th>
+                    <th className="px-2 py-2 text-left bg-amber-50">Type ♀</th>
+                    <th className="px-2 py-2 text-right bg-amber-50">Feed ♂ kg</th>
+                    <th className="px-2 py-2 text-left bg-amber-50">Type ♂</th>
+                    <th className="px-2 py-2 text-right">Trf ♀</th>
+                    <th className="px-2 py-2 text-right">Trf ♂</th>
+                    <th className="px-2 py-2 text-right">Cull ♀</th>
+                    <th className="px-2 py-2 text-right">Cull ♂</th>
+                    <th className="px-2 py-2 text-right bg-red-50">Death ♀</th>
+                    <th className="px-2 py-2 text-right bg-red-50">Death ♂</th>
+                    <th className="px-2 py-2 text-right">HE</th>
+                    <th className="px-2 py-2 text-right">JE</th>
+                    <th className="px-2 py-2 text-right">TE</th>
+                    <th className="px-2 py-2 text-right">BE</th>
+                    <th className="px-2 py-2 text-right">LE</th>
+                    <th className="px-2 py-2 text-right">Total</th>
+                    <th className="px-2 py-2 text-right bg-blue-50">Close ♀</th>
+                    <th className="px-2 py-2 text-right bg-blue-50">Close ♂</th>
+                    <th className="px-2 py-2 text-right">Light</th>
+                    <th className="px-2 py-2 text-left">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(regRows as any[]).map((r, i) => (
+                    <tr key={r.id} className={`border-b border-gray-50 ${i % 2 ? 'bg-gray-50/40' : 'bg-white'}`}>
+                      <td className="px-2 py-1.5 font-medium sticky left-0 bg-inherit z-10">{fmtDate(r.record_date)}</td>
+                      <td className="px-2 py-1.5">{r.sheds?.shed_no ?? <span className="text-gray-400">flock-level</span>}</td>
+                      <td className="px-2 py-1.5 text-right">{r.opening_female ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-right">{r.opening_male ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-right bg-green-50/40">{r.received_female ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right bg-green-50/40">{r.received_male ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right bg-amber-50/40">{Number(r.feed_female_kg) || 0}</td>
+                      <td className="px-2 py-1.5 bg-amber-50/40">{r.feed_type_f ?? <span className="text-gray-300">—</span>}</td>
+                      <td className="px-2 py-1.5 text-right bg-amber-50/40">{Number(r.feed_male_kg) || 0}</td>
+                      <td className="px-2 py-1.5 bg-amber-50/40">{r.feed_type_m ?? <span className="text-gray-300">—</span>}</td>
+                      <td className="px-2 py-1.5 text-right">{r.transfer_female ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right">{r.transfer_male ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right">{r.cull_female ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right">{r.cull_male ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right bg-red-50/40">{r.mortality_female ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right bg-red-50/40">{r.mortality_male ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right">{r.he_eggs ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right">{r.je_eggs ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right">{r.te_eggs ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right">{r.be_eggs ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right">{r.le_eggs ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right font-medium">{r.total_eggs ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right bg-blue-50/40">{r.closing_female ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-right bg-blue-50/40">{r.closing_male ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-right">{r.lighting_hrs ?? '—'}</td>
+                      <td className="px-2 py-1.5 max-w-[160px] truncate" title={r.remarks ?? ''}>{r.remarks ?? ''}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-gray-100 font-semibold border-t border-gray-200">
+                    <td className="px-2 py-2 sticky left-0 bg-gray-100 z-10">TOTAL</td>
+                    <td className="px-2 py-2 text-gray-500">{(regRows ?? []).length} rows</td>
+                    <td className="px-2 py-2"></td><td className="px-2 py-2"></td>
+                    <td className="px-2 py-2 text-right">{regTotals.recdF}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.recdM}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.feedF.toFixed(2)}</td>
+                    <td className="px-2 py-2"></td>
+                    <td className="px-2 py-2 text-right">{regTotals.feedM.toFixed(2)}</td>
+                    <td className="px-2 py-2"></td>
+                    <td className="px-2 py-2 text-right">{regTotals.trF}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.trM}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.cullF}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.cullM}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.deathF}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.deathM}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.he}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.je}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.te}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.be}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.le}</td>
+                    <td className="px-2 py-2 text-right">{regTotals.eggs}</td>
+                    <td className="px-2 py-2"></td><td className="px-2 py-2"></td>
+                    <td className="px-2 py-2"></td><td className="px-2 py-2"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {(regMeds ?? []).length > 0 && (
+            <div className="px-4 py-3 border-t border-gray-100 bg-amber-50/30">
+              <p className="text-xs font-semibold text-amber-800 mb-2">Medicine in this range</p>
+              <table className="w-full text-xs">
+                <thead><tr className="text-gray-500 uppercase tracking-wide border-b border-amber-100">
+                  <th className="px-2 py-1 text-left">Date</th><th className="px-2 py-1 text-left">Medicine</th>
+                  <th className="px-2 py-1 text-right">Qty</th><th className="px-2 py-1 text-left">Unit</th>
+                  <th className="px-2 py-1 text-left">Remarks</th>
+                </tr></thead>
+                <tbody>
+                  {(regMeds as any[]).map(m => (
+                    <tr key={m.id} className="border-b border-amber-50">
+                      <td className="px-2 py-1">{fmtDate(m.usage_date)}</td>
+                      <td className="px-2 py-1">{m.vhl_medicines?.name ?? '—'}</td>
+                      <td className="px-2 py-1 text-right">{m.quantity ?? 0}</td>
+                      <td className="px-2 py-1">{m.unit ?? '—'}</td>
+                      <td className="px-2 py-1">{m.remarks ?? ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       )}
 
