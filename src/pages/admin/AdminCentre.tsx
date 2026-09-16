@@ -278,6 +278,14 @@ const FlockShedAssign: React.FC = () => {
     if(!shedsByFarm[farm]) shedsByFarm[farm]=[]
     shedsByFarm[farm].push(s)
   }
+  // The query orders shed_no as TEXT, which puts Shed 10 between Shed 1 and
+  // Shed 2. Sort each site's sheds by the NUMBER in the shed_no, keeping any
+  // non-numeric ones (a named shed) at the end in their own order.
+  const shedNum = (s:any) => { const n = parseInt(String(s.shed_no ?? '').replace(/\D/g,'')); return isNaN(n) ? Number.MAX_SAFE_INTEGER : n }
+  for(const k of Object.keys(shedsByFarm)){
+    shedsByFarm[k].sort((a:any,b:any)=> shedNum(a)-shedNum(b) || String(a.shed_no??'').localeCompare(String(b.shed_no??'')))
+  }
+  const farmGroups = Object.entries(shedsByFarm).sort((a,b)=>a[0].localeCompare(b[0]))
 
   return (
     <div className="space-y-4">
@@ -327,15 +335,18 @@ const FlockShedAssign: React.FC = () => {
             <div>
               <p className="text-sm font-medium text-gray-700 mb-2">Sheds <span className="text-gray-400">({shedIds.length} selected)</span></p>
               <div className="max-h-72 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
-                {Object.entries(shedsByFarm).map(([farm, farmSheds])=>(
-                  <div key={farm} className="p-2">
-                    <p className="text-xs font-semibold text-brand-700 mb-1">{farm}</p>
-                    <div className="space-y-1">
-                      {farmSheds.map((s:any)=>(
+                {farmGroups.map(([farm, farmSheds])=>(
+                  <div key={farm}>
+                    <p className="sticky top-0 z-10 bg-brand-50 border-b border-brand-100 text-xs font-semibold text-brand-700 px-2 py-1">
+                      {farm}
+                      <span className="font-normal text-brand-500"> · {(farmSheds as any[])[0]?.farms?.name ?? ''}</span>
+                    </p>
+                    <div className="space-y-1 p-2">
+                      {(farmSheds as any[]).map((s:any)=>(
                         <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 rounded px-1 py-0.5">
                           <input type="checkbox" checked={shedIds.includes(s.id)} onChange={()=>toggleShed(s.id)}
                             className="rounded border-gray-300 text-brand-600"/>
-                          <span>Shed {s.shed_no}{s.shed_name?' ('+s.shed_name+')':''}</span>
+                          <span><span className="text-gray-400">{farm} · </span>Shed {s.shed_no}{s.shed_name?' ('+s.shed_name+')':''}</span>
                         </label>
                       ))}
                     </div>
