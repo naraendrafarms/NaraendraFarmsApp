@@ -148,16 +148,27 @@ export const LineDailyEntry: React.FC<{ vhl?: boolean }> = ({ vhl = false }) => 
   // Everything already recorded for these lines on this date, plus the shed's
   // own daily_records row so the two can be shown side by side.
   const { data: existing } = useQuery({
-    queryKey: ['line_day', shedId, date, lineIds.length],
+    queryKey: ['line_day', shedId, date, lineIds.length, vhl],
     enabled: !!shedId && lineIds.length > 0,
     queryFn: async () => {
       const [prod, mo, fd, dr, bal, pl, tr] = await Promise.all([
         supabase.from('line_production').select('*').in('line_id', lineIds).eq('record_date', date),
         supabase.from('line_mortality').select('*').in('line_id', lineIds).eq('record_date', date),
         supabase.from('line_feed').select('*').in('line_id', lineIds).eq('record_date', date),
-        supabase.from('daily_records')
-          .select('flock_id,closing_female,closing_male,total_eggs,mortality_female,mortality_male,feed_female_kg,feed_male_kg,flocks(flock_no)')
-          .eq('shed_id', shedId).eq('record_date', date).maybeSingle(),
+        // A VHL flock's shed day is in vhl_daily_entry, NOT daily_records - the
+        // same split Daily Summary had to be taught. This lookup is not just
+        // the header: flock_id comes from it, and without one both Place
+        // birds and Transfer refuse outright, so getting the table wrong
+        // blocks line entry rather than merely blanking a label.
+        // Not maybeSingle: that throws if a shed-day ever has more than one
+        // row, and a thrown read would take the whole page down.
+        (vhl
+          ? supabase.from('vhl_daily_entry')
+              .select('flock_id,closing_female,closing_male,total_eggs,mortality_female,mortality_male,feed_female_kg,feed_male_kg,flocks(flock_no)')
+              .eq('shed_id', shedId).eq('record_date', date).limit(1)
+          : supabase.from('daily_records')
+              .select('flock_id,closing_female,closing_male,total_eggs,mortality_female,mortality_male,feed_female_kg,feed_male_kg,flocks(flock_no)')
+              .eq('shed_id', shedId).eq('record_date', date).limit(1)),
         supabase.from('v_line_balance').select('*').in('line_id', lineIds),
         supabase.from('line_placements').select('*').in('line_id', lineIds),
         supabase.from('line_transfers').select('*, from_line:from_line_id(side,line_no), to_line:to_line_id(side,line_no)')
@@ -166,7 +177,7 @@ export const LineDailyEntry: React.FC<{ vhl?: boolean }> = ({ vhl = false }) => 
       ])
       return {
         prod: prod.data ?? [], mort: mo.data ?? [], feed: fd.data ?? [],
-        shedDay: dr.data ?? null,
+        shedDay: (dr.data as any[])?.[0] ?? null,
         balance: bal.data ?? [], placements: pl.data ?? [], transfers: tr.data ?? [],
       }
     },
@@ -270,7 +281,9 @@ export const LineDailyEntry: React.FC<{ vhl?: boolean }> = ({ vhl = false }) => 
       const by = profile?.id ?? null
 
       if (tab === 'birds') {
-        if (!flockId) throw new Error('No shed daily record for this date, so there is no flock to place birds against')
+        if (!flockId) throw new Error(vhl
+          ? 'No VHL daily entry for this shed and date, so there is no flock to place birds against. Enter the day on VHL \u2192 Bulk (Shed-wise) Daily Entry first.'
+          : 'No shed daily record for this date, so there is no flock to place birds against')
         const rows: any[] = []
         for (const id of lineIds) {
           const pz = place[id]; if (!pz) continue
@@ -286,7 +299,9 @@ export const LineDailyEntry: React.FC<{ vhl?: boolean }> = ({ vhl = false }) => 
       }
 
       if (tab === 'transfer') {
-        if (!flockId) throw new Error('No shed daily record for this date, so there is no flock to transfer')
+        if (!flockId) throw new Error(vhl
+          ? 'No VHL daily entry for this shed and date, so there is no flock to transfer. Enter the day on VHL \u2192 Bulk (Shed-wise) Daily Entry first.'
+          : 'No shed daily record for this date, so there is no flock to transfer')
         if (!xfer.from || !xfer.to) throw new Error('Choose both the line moved from and the line moved to')
         if (xfer.from === xfer.to) throw new Error('From and To cannot be the same line')
         if (n(xfer.f) === 0 && n(xfer.m) === 0) throw new Error('Enter how many birds moved')
