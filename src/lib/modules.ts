@@ -75,6 +75,14 @@ export const ROUTE_MODULES: Record<string, ModuleKey> = {
   // supervisor reaches line entry without gaining any other flock screen.
   'flocks/line-daily': 'line_entry',
   'reports/lines': 'line_entry',
+  // The VHL line screens are the SAME components in VHL mode, so they are
+  // gated by the same modules - line entry by line_entry, the master by
+  // line_master. Without these they would fall back to the general 'vhl'
+  // mapping and a shed supervisor would lose the one screen they need, while
+  // anyone with VHL access would gain the line master.
+  'vhl/line-daily': 'line_entry',
+  'vhl/line-reports': 'line_entry',
+  'vhl/line-master': 'line_master',
 
   'reports/pl': 'reports_financial',
   'reports/costs': 'reports_financial',

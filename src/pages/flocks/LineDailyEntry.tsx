@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useVhlFarmIds, makeShedSiteFilter } from '@/hooks/useVhlFarmIds'
 import { today, fmtDate } from '@/lib/utils'
 import { useAuth, moduleLevel } from '@/lib/auth'
 import {
@@ -39,7 +40,12 @@ const ROUNDS = [1, 2, 3, 4] as const
 const n = (v: string) => (v.trim() === '' ? 0 : Number(v) || 0)
 const numOrNull = (v: string) => (v.trim() === '' ? null : Number(v))
 
-export const LineDailyEntry: React.FC = () => {
+export const LineDailyEntry: React.FC<{ vhl?: boolean }> = ({ vhl = false }) => {
+  // VHL sheds are kept on the VHL screens and off the ordinary ones, the same
+  // separation every other VHL page has. One component, two doors - a second
+  // screen showing the same thing would be worse than none.
+  const { vhlFarmIds, vhlFarmIdsLoading } = useVhlFarmIds()
+  const keepShed = makeShedSiteFilter(vhl, vhlFarmIds, vhlFarmIdsLoading)
   const qc = useQueryClient()
   const { profile } = useAuth()
   const canEdit = moduleLevel('line_entry') === 'full'
@@ -68,7 +74,7 @@ export const LineDailyEntry: React.FC = () => {
   // Only line-managed sheds. A shed that has not been switched on is not
   // offered at all, which is what keeps this additive.
   const { data: sheds } = useQuery({
-    queryKey: ['line_managed_sheds', profile?.id, profile?.role],
+    queryKey: ['line_managed_sheds', profile?.id, profile?.role, vhl, vhlFarmIds.join(',')],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sheds')
@@ -76,7 +82,7 @@ export const LineDailyEntry: React.FC = () => {
         .eq('line_managed', true)
         .order('shed_no')
       if (error) throw error
-      const all = data ?? []
+      const all = (data ?? []).filter((sh: any) => keepShed(sh.farm_id))
       // A shed supervisor works only on the sheds assigned to them. Several
       // people can hold the same shed, so this is a plain membership test, not
       // an ownership one. Every other role sees all line-managed sheds.

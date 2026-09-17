@@ -300,6 +300,11 @@ export const App: React.FC = () => {
             <Route path="vhl/egg-production" element={<VHLEggProductionPage />} />
             <Route path="vhl/medicine-master" element={<VHLMedicineMasterPage />} />
             <Route path="vhl/medicine-usage" element={<VHLMedicineUsagePage />} />
+            {/* Same components as the ordinary line screens, in VHL mode: VHL
+                sheds show here and nowhere else, ordinary sheds the reverse. */}
+            <Route path="vhl/line-daily" element={<LineDailyEntry vhl />} />
+            <Route path="vhl/line-master" element={<LineMaster vhl />} />
+            <Route path="vhl/line-reports" element={<LineReports vhl />} />
             <Route path="accounts/payment-planning" element={<PaymentPlanningPage />} />
             <Route path="accounts/cms-upload" element={<CMSUploadPage />} />
             <Route path="accounts/invoices" element={<InvoiceRegister />} />

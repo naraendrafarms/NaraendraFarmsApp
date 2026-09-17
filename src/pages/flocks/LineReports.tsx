@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useVhlFarmIds, makeShedSiteFilter } from '@/hooks/useVhlFarmIds'
 import { today, fmtDate } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
 import {
@@ -24,7 +25,9 @@ import * as XLSX from 'xlsx'
 
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : 0)
 
-export const LineReports: React.FC = () => {
+export const LineReports: React.FC<{ vhl?: boolean }> = ({ vhl = false }) => {
+  const { vhlFarmIds, vhlFarmIdsLoading } = useVhlFarmIds()
+  const keepShed = makeShedSiteFilter(vhl, vhlFarmIds, vhlFarmIdsLoading)
   const { profile } = useAuth()
   const [shedId, setShedId] = useState('')
   const [from, setFrom] = useState(() => {
@@ -35,11 +38,11 @@ export const LineReports: React.FC = () => {
   const [sideFilter, setSideFilter] = useState('')
 
   const { data: sheds } = useQuery({
-    queryKey: ['line_report_sheds', profile?.id, profile?.role],
+    queryKey: ['line_report_sheds', profile?.id, profile?.role, vhl, vhlFarmIds.join(',')],
     queryFn: async () => {
       const { data } = await supabase.from('sheds')
-        .select('id,shed_no,shed_name,farms(name)').eq('line_managed', true).order('shed_no')
-      const all = data ?? []
+        .select('id,shed_no,shed_name,farm_id,farms(name)').eq('line_managed', true).order('shed_no')
+      const all = (data ?? []).filter((sh: any) => keepShed(sh.farm_id))
       // A shed supervisor reports only on their own sheds, the same rule the
       // entry screen uses. Everyone else sees every line-managed shed.
       if (profile?.role !== 'shed_supervisor') return all

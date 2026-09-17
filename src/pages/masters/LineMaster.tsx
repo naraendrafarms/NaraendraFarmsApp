@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useVhlFarmIds, makeShedSiteFilter } from '@/hooks/useVhlFarmIds'
 import { friendlyDbError } from '@/lib/utils'
 import {
   Card, Button, Input, Select, Modal, Table, Th, Td, Badge,
@@ -24,7 +25,9 @@ import { lineSex } from '@/lib/lineSex'
 
 const SIDES = ['A', 'B', 'C', 'D']
 
-export const LineMaster: React.FC = () => {
+export const LineMaster: React.FC<{ vhl?: boolean }> = ({ vhl = false }) => {
+  const { vhlFarmIds, vhlFarmIdsLoading } = useVhlFarmIds()
+  const keepShed = makeShedSiteFilter(vhl, vhlFarmIds, vhlFarmIdsLoading)
   const qc = useQueryClient()
   const canEdit = moduleLevel('line_master') === 'full'
 
@@ -41,34 +44,36 @@ export const LineMaster: React.FC = () => {
   const s = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
 
   const { data: farms } = useQuery({
-    queryKey: ['farms_for_lines'],
+    queryKey: ['farms_for_lines', vhl, vhlFarmIds.join(',')],
     queryFn: async () => {
       const { data } = await supabase.from('farms').select('id,name').order('name')
-      return data ?? []
+      return (data ?? []).filter((f: any) => keepShed(f.id))
     },
   })
 
   const { data: sheds } = useQuery({
-    queryKey: ['sheds_for_lines', farmFilter],
+    queryKey: ['sheds_for_lines', farmFilter, vhl, vhlFarmIds.join(',')],
     queryFn: async () => {
       let q = supabase.from('sheds').select('id,shed_no,shed_name,farm_id,total_boxes,farms(name)')
       if (farmFilter) q = q.eq('farm_id', farmFilter)
       const { data } = await q
       // shed_no is TEXT, so sort numerically rather than as strings, otherwise
       // shed 10 sorts before shed 2.
-      return (data ?? []).sort((a: any, b: any) =>
+      return (data ?? []).filter((sh: any) => keepShed(sh.farm_id)).sort((a: any, b: any) =>
         (parseInt(a.shed_no, 10) || 0) - (parseInt(b.shed_no, 10) || 0))
     },
   })
 
   const { data: lines, isLoading } = useQuery({
-    queryKey: ['shed_lines', farmFilter, shedFilter],
+    queryKey: ['shed_lines', farmFilter, shedFilter, vhl, vhlFarmIds.join(',')],
     queryFn: async () => {
       let q = supabase.from('shed_lines')
         .select('*, sheds(shed_no,shed_name,farm_id,total_boxes,farms(name))')
       if (shedFilter) q = q.eq('shed_id', shedFilter)
       const { data } = await q
-      let rows = data ?? []
+      // Without this a VHL screen with no farm chosen would list every farm's
+      // lines, and an ordinary screen would list the VHL ones.
+      let rows = (data ?? []).filter((r: any) => keepShed(r.sheds?.farm_id))
       if (farmFilter && !shedFilter) rows = rows.filter((r: any) => r.sheds?.farm_id === farmFilter)
       return rows.sort((a: any, b: any) => {
         const fa = a.sheds?.farms?.name ?? '', fb = b.sheds?.farms?.name ?? ''
