@@ -1287,6 +1287,20 @@ export const HEDispatch: React.FC = () => {
   // Both are paged: a single flock can hold well over PostgREST's 1000-row cap
   // (Flock 19 alone has 1,681 daily rows), and a short read here would OVERSTATE
   // what is left and invite a double dispatch.
+  // Measured on the real books: oldest-first alone would start Flock 19 at
+  // 08/08/2025 - over a YEAR back - because grading exists for days that were
+  // never dispatched through the app. Eggs are held 15-25 days, so anything
+  // beyond a month cannot be real stock, and those rows would bury the days
+  // that matter. Default to the last 30 days of the dispatch date; the rest
+  // is still reachable, just not in the way.
+  const [showOlderDays, setShowOlderDays] = useState(false)
+  const HE_PICKER_WINDOW_DAYS = 30
+  const pickerCutoff = React.useMemo(() => {
+    const d = new Date((form.dispatch_date || today()) + 'T00:00:00')
+    d.setDate(d.getDate() - HE_PICKER_WINDOW_DAYS)
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  }, [form.dispatch_date])
+
   const { data: availability } = useQuery({
     queryKey: ['he_undispatched', form.flock_id, editing?.id ?? 'new'],
     enabled: !!form.flock_id && showForm,
@@ -1334,10 +1348,16 @@ export const HEDispatch: React.FC = () => {
   })
 
   // A date already on the form is not offered again.
-  const availableRows = React.useMemo(() => {
+  // Everything still owed, minus what is already on the form.
+  const allAvailable = React.useMemo(() => {
     const onForm = new Set(lines.map(l => l.prod_date).filter(Boolean))
     return (availability ?? []).filter(r => !onForm.has(r.prod_date))
   }, [availability, lines])
+  const olderRows = React.useMemo(
+    () => allAvailable.filter(r => r.prod_date < pickerCutoff), [allAvailable, pickerCutoff])
+  const availableRows = React.useMemo(
+    () => showOlderDays ? allAvailable : allAvailable.filter(r => r.prod_date >= pickerCutoff),
+    [allAvailable, showOlderDays, pickerCutoff])
 
   const takeDay = (r: { prod_date: string; a: number; b: number; c: number }) => {
     setLines(ls => {
@@ -2456,12 +2476,14 @@ export const HEDispatch: React.FC = () => {
           {/* Un-dispatched production, oldest first */}
           {form.flock_id && (
             <>
-              <Divider label="Eggs still to go out (oldest first)" />
+              <Divider label={`Eggs still to go out (oldest first${showOlderDays ? '' : `, last ${HE_PICKER_WINDOW_DAYS} days`})`} />
               {!availableRows.length ? (
                 <p className="text-xs text-gray-500 px-1">
                   {availability === undefined
                     ? 'Checking what is still un-dispatched…'
-                    : 'Nothing un-dispatched for this flock up to the dispatch date — every graded day is already on an invoice, or already on this form.'}
+                    : olderRows.length
+                      ? `Nothing un-dispatched in the last ${HE_PICKER_WINDOW_DAYS} days — but ${olderRows.length} older day(s) are still showing eggs owed.`
+                      : 'Nothing un-dispatched for this flock up to the dispatch date — every graded day is already on an invoice, or already on this form.'}
                 </p>
               ) : (
                 <div className="rounded-lg border border-amber-200 bg-amber-50/40 overflow-x-auto max-h-56 overflow-y-auto">
@@ -2496,18 +2518,36 @@ export const HEDispatch: React.FC = () => {
                   </table>
                 </div>
               )}
-              {availableRows.length > 0 && (
-                <div className="flex items-center gap-3 px-1">
+              <div className="flex items-center gap-3 px-1 flex-wrap">
+                {availableRows.length > 0 && (
                   <button type="button"
                     onClick={() => { availableRows.forEach(takeDay); toast.success(`Added ${availableRows.length} production day(s)`) }}
                     className="text-xs text-brand-600 hover:text-brand-800 font-medium">
                     + Take all {availableRows.length} day(s)
                   </button>
+                )}
+                {/* Older days stay reachable, but never in the way. On the real
+                    books these run back over a year, from grading that was
+                    never dispatched through the app - not eggs in a cold room. */}
+                {(olderRows.length > 0 || showOlderDays) && (
+                  <button type="button" onClick={() => setShowOlderDays(v => !v)}
+                    className="text-xs px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 font-medium">
+                    {showOlderDays
+                      ? `× Hide days older than ${HE_PICKER_WINDOW_DAYS} days`
+                      : `+ Show older (${olderRows.length})`}
+                  </button>
+                )}
+                {availableRows.length > 0 && (
                   <span className="text-[11px] text-gray-500">
                     Take fills the line with everything left on that day — reduce it if only part is going.
                   </span>
-                </div>
-              )}
+                )}
+                {showOlderDays && olderRows.length > 0 && (
+                  <span className="text-[11px] text-amber-700">
+                    Older days are usually production that was never dispatched through the app, not eggs still in stock — check before taking one.
+                  </span>
+                )}
+              </div>
             </>
           )}
 
