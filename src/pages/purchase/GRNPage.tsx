@@ -113,6 +113,7 @@ export const GRNPage: React.FC = () => {
   const [fCat, setFCat] = useState('')
   const [fItem, setFItem] = useState('')
   const [fParty, setFParty] = useState('')
+  const [fGrnNo, setFGrnNo] = useState('')
 
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<any>(null)
@@ -234,14 +235,18 @@ export const GRNPage: React.FC = () => {
       if (fCat && g.category !== fCat) return false
       if (fItem && !String(g.item_name ?? '').toLowerCase().includes(fItem.toLowerCase())) return false
       if (fParty && g.party_id !== fParty) return false
+      // Contains, not equals: a GRN number is often remembered in part, and
+      // it is stored as text so a numeric compare would miss any with a
+      // prefix or leading zeros.
+      if (fGrnNo && !String(g.grn_no ?? '').toLowerCase().includes(fGrnNo.toLowerCase())) return false
       return true
     })
-  }, [grns, fFrom, fTo, fFarm, fCat, fItem, fParty])
+  }, [grns, fFrom, fTo, fFarm, fCat, fItem, fParty, fGrnNo])
 
   // Render a page at a time — the underlying fetch/filter above still runs
   // over the full (capped) result set, this only limits how many rows paint
   // to the screen at once so a long GRN history doesn't render 2000 rows.
-  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, [fFrom, fTo, fFarm, fCat, fItem, fParty])
+  const { page, setPage, pageSize, setPageSize, totalPages, from, to } = usePagination(filtered.length, `${fFrom}|${fTo}|${fFarm}|${fCat}|${fItem}|${fParty}|${fGrnNo}`)
   const visibleRows = filtered.slice(from, to)
 
   const stats = useMemo(() => {
@@ -647,7 +652,13 @@ export const GRNPage: React.FC = () => {
       />
 
       <Card>
-        <div className="p-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="p-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+          <Input
+            label="GRN No."
+            placeholder="Search GRN no…"
+            value={fGrnNo}
+            onChange={e => setFGrnNo(e.target.value)}
+          />
           <DateInput label="From" value={fFrom} onChange={e => setFFrom(e.target.value)} />
           <DateInput label="To" value={fTo} onChange={e => setFTo(e.target.value)} />
           <Select

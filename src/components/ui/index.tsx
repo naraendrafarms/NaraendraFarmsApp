@@ -613,7 +613,13 @@ export function usePagination(totalItems: number, resetKey: unknown, initialPage
   const [pageSize, setPageSize] = React.useState(initialPageSize)
   const [page, setPage] = React.useState(1)
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
-  React.useEffect(() => { setPage(1) }, [resetKey, pageSize])
+  // resetKey is compared BY VALUE, not by identity. React compares effect
+  // dependencies by identity, so a caller passing an array literal - a brand
+  // new object every render - made this effect fire on EVERY render and snap
+  // the page back to 1. Clicking Next then did nothing at all, which is
+  // exactly what GRN did. Serialising here means no caller can reintroduce it.
+  const resetSig = Array.isArray(resetKey) ? resetKey.join('\u0001') : String(resetKey)
+  React.useEffect(() => { setPage(1) }, [resetSig, pageSize])
   React.useEffect(() => { if (page > totalPages) setPage(totalPages) }, [totalPages, page])
   const from = (page - 1) * pageSize
   const to = from + pageSize
