@@ -2388,9 +2388,18 @@ export const HEDispatch: React.FC = () => {
           {heDraftChecked && heDraft && !heDraftDismissed && (
             <Button variant="secondary" onClick={() => {
               const d = heDraft.data || {}
-              if (d.form) setForm((f: any) => ({ ...f, ...d.form }))
+              // A previewed invoice number must NOT come back with a draft.
+              // peekInv is component state and does not survive a reload, so a
+              // restored number would fail the equality check at Save and be
+              // written WITHOUT advancing the counter - the number goes on a
+              // real invoice while the series stands still, and the next
+              // Generate hands out the same number again. That is how HHF's
+              // counter fell 26 behind. Press Generate again after restoring.
+              if (d.form) setForm((f: any) => ({ ...f, ...d.form, invoice_no: '' }))
               if (d.lines?.length) setLines(d.lines)
+              setPeekInv(null)
               setHeDraftDismissed(true)
+              if (d.form?.invoice_no) toast('Draft restored — press Generate again for the invoice number', { duration: 7000 })
             }}>Restore Draft</Button>
           )}
           {!editing && <Button variant="secondary" onClick={() => {
@@ -4357,9 +4366,18 @@ export const NHESales: React.FC = () => {
           {nheDraftChecked && nheDraft && !nheDraftDismissed && (
             <Button variant="secondary" onClick={() => {
               const d = nheDraft.data || {}
-              if (d.form) setForm((f: any) => ({ ...f, ...d.form }))
+              // A previewed invoice number must NOT come back with a draft.
+              // peekInv is component state and does not survive a reload, so a
+              // restored number would fail the equality check at Save and be
+              // written WITHOUT advancing the counter - the number goes on a
+              // real invoice while the series stands still, and the next
+              // Generate hands out the same number again. That is how HHF's
+              // counter fell 26 behind. Press Generate again after restoring.
+              if (d.form) setForm((f: any) => ({ ...f, ...d.form, invoice_no: '' }))
               if (d.nheLines?.length) setNheLines(d.nheLines)
+              setPeekInv(null)
               setNheDraftDismissed(true)
+              if (d.form?.invoice_no) toast('Draft restored — press Generate again for the invoice number', { duration: 7000 })
             }}>Restore Draft</Button>
           )}
           <Button variant="secondary" onClick={() => { setShowForm(false); setEditing(null); setNheLines([emptyNheLine()]) }}>Cancel</Button>
