@@ -1294,11 +1294,17 @@ export const HEDispatch: React.FC = () => {
       const [graded, taken] = await Promise.all([
         fetchAllPages<any>((f, t) => supabase.from('daily_records')
           .select('record_date,he_grade_a,he_grade_b,he_grade_c')
-          .eq('flock_id', form.flock_id).order('record_date').range(f, t),
+          // .order('id') is the tie-breaker. Paging with .range() on a column
+          // that is not unique gives an unstable order between pages, so rows
+          // sharing a date can come back TWICE or be SKIPPED at a page
+          // boundary - which would corrupt the remaining figures below, most
+          // likely by overstating what is left, and that is what causes a
+          // double dispatch.
+          .eq('flock_id', form.flock_id).order('record_date').order('id').range(f, t),
           'Graded production', toast.error),
         fetchAllPages<any>((f, t) => supabase.from('he_dispatch_lines')
           .select('dispatch_id,prod_date,grade_a,grade_b,grade_c')
-          .eq('flock_id', form.flock_id).order('prod_date').range(f, t),
+          .eq('flock_id', form.flock_id).order('prod_date').order('id').range(f, t),
           'Dispatched lines', toast.error),
       ])
       // daily_records holds one row PER SHED per date, so a date's graded total
