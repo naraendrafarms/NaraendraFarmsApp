@@ -1272,6 +1272,19 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
         || r.lighting_hrs || r.remarks || r.opening_female || r.opening_male || r.existingId
       if (!hasData) continue
       const intOrNull = (v: string) => v === '' || v == null || isNaN(parseInt(v)) ? null : parseInt(v)
+      // Closing is normally worked out as you type, but that only fires when a
+      // field CHANGES. A shed whose Opening carried forward from yesterday and
+      // was never touched saved with a BLANK closing - and the flock's total
+      // then under-reported by that whole shed. Flock 24 Shed 4 on 17/09 lost
+      // 5,370 birds from the day's total that way. So when Closing is blank
+      // but an Opening exists, save what the grid would have shown.
+      const closeOr = (closing: string, open: string, recd: number, tr: number, cu: number, mo: number) => {
+        const typed = intOrNull(closing)
+        if (typed !== null) return typed
+        const o2 = intOrNull(open)
+        if (o2 === null) return null
+        return Math.max(0, o2 + recd - tr - cu - mo)
+      }
       const payload = {
         flock_id: flockId, shed_id: shed.id, record_date: date,
         opening_female: intOrNull(r.opening_female), opening_male: intOrNull(r.opening_male),
@@ -1283,7 +1296,8 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
         feed_female_kg: ff, feed_type_f: r.feed_type_f || null, feed_male_kg: fm, feed_type_m: r.feed_type_m || null,
         transfer_female: tf, transfer_male: tm, cull_female: cf, cull_male: cm,
         trcull_female: tf + cf, trcull_male: tm + cm,
-        closing_female: intOrNull(r.closing_female), closing_male: intOrNull(r.closing_male),
+        closing_female: closeOr(r.closing_female, r.opening_female, rf, tf, cf, mf),
+        closing_male: closeOr(r.closing_male, r.opening_male, rm, tm, cm, mm),
         lighting_hrs: parseFloat(r.lighting_hrs) || null, remarks: r.remarks || null,
       }
       const { error } = r.existingId
