@@ -1276,16 +1276,32 @@ export const HEDispatch: React.FC = () => {
   }, [form, lines, showForm])
   // Preview next invoice number without consuming it (counter not changed)
   const genInvoice = async () => {
+    // Generating on a dispatch that ALREADY carries a filed invoice number
+    // takes a fresh number at Save and overwrites the old one - and the old
+    // number is then used by nothing, leaving a permanent hole in a series
+    // that has to tie out to Tally. Ask rather than do it silently.
+    if (editing?.invoice_no) {
+      const ok = window.confirm(
+        `This dispatch already has invoice ${editing.invoice_no}.\n\n` +
+        `Generating a new number will replace it and leave ${editing.invoice_no} ` +
+        `used by nothing - a gap in the series.\n\nGenerate anyway?`)
+      if (!ok) return
+    }
     setGenningInv(true)
     try {
       const { data, error } = await supabase.rpc('fn_peek_invoice', { p_code: invSeries })
       if (error) throw error
       s('invoice_no', data as string)
       setPeekInv(data as string)
-      toast.success(`Preview: ${data} — will be confirmed on Save`)
+      toast.success(`Preview: ${data} — the number is only taken on Save`)
     } catch (e: any) { toast.error(e.message) }
     finally { setGenningInv(false) }
   }
+
+  // A preview is not a reservation, so it must never outlive the thing it was
+  // previewed for. Changing the series after generating would otherwise consume
+  // from the NEW series while the box still showed the old series' number.
+  useEffect(() => { setPeekInv(null) }, [invSeries])
 
   // Totals from lines
   const lineTotal = (f: keyof DispLine) => lines.reduce((sum, l) => sum + (parseInt((l as any)[f]) || 0), 0)
@@ -1324,6 +1340,9 @@ export const HEDispatch: React.FC = () => {
         vehicle_type: row.vehicle_type ?? '', lorry_no: row.lorry_no ?? '',
         driver_phone: row.driver_phone ?? '', out_time: row.out_time ?? '', remarks: row.remarks ?? ''
       })
+      // Opening an existing dispatch must not inherit a preview generated for
+      // a different one - that is what made Save quietly re-number it.
+      setPeekInv(null)
       // Load existing lines for this dispatch
       supabase.from('he_dispatch_lines').select('*').eq('dispatch_id', row.id).order('prod_date')
         .then(({ data }) => {
@@ -1397,6 +1416,12 @@ export const HEDispatch: React.FC = () => {
         const { data: realInv, error: invErr } = await supabase.rpc('fn_next_invoice', { p_code: invSeries })
         if (invErr) throw invErr
         finalInvoiceNo = realInv as string
+        // The preview does not reserve. If someone else consumed that number in
+        // between, the saved one differs from what was on screen - say so
+        // rather than let a different number reach the books unremarked.
+        if (realInv && realInv !== peekInv) {
+          toast(`Invoice number taken: ${realInv} (the preview showed ${peekInv})`, { duration: 8000, icon: '\u26a0\ufe0f' })
+        }
       }
       const payload = {
         flock_id: form.flock_id, dispatch_date: form.dispatch_date,
@@ -2667,16 +2692,28 @@ export const NHESales: React.FC = () => {
   const [updateExisting, setUpdateExisting] = useState(false)
   const [peekInv, setPeekInv] = useState<string | null>(null)
   const genInvoice = async () => {
+    // Same guard as HE dispatch: re-generating over a filed number leaves the
+    // old one used by nothing, which is a hole in a series that ties to Tally.
+    if (editing?.invoice_no) {
+      const ok = window.confirm(
+        `This sale already has invoice ${editing.invoice_no}.\n\n` +
+        `Generating a new number will replace it and leave ${editing.invoice_no} ` +
+        `used by nothing - a gap in the series.\n\nGenerate anyway?`)
+      if (!ok) return
+    }
     setGenningInv(true)
     try {
       const { data, error } = await supabase.rpc('fn_peek_invoice', { p_code: invSeries })
       if (error) throw error
       setForm((f: any) => ({ ...f, invoice_no: data as string }))
       setPeekInv(data as string)
-      toast.success(`Preview: ${data} — will be confirmed on Save`)
+      toast.success(`Preview: ${data} — the number is only taken on Save`)
     } catch (e: any) { toast.error(e.message) }
     finally { setGenningInv(false) }
   }
+
+  // A preview is not a reservation, so it must not survive a series change.
+  useEffect(() => { setPeekInv(null) }, [invSeries])
 
   const hasFilter = !!(flockFilter || empFilter || payFilter || fromDate || toDate)
 
@@ -3009,6 +3046,9 @@ export const NHESales: React.FC = () => {
         const { data: realInv, error: invErr } = await supabase.rpc('fn_next_invoice', { p_code: invSeries })
         if (invErr) throw invErr
         finalInvoiceNo = realInv as string
+        if (realInv && realInv !== peekInv) {
+          toast(`Invoice number taken: ${realInv} (the preview showed ${peekInv})`, { duration: 8000, icon: '\u26a0\ufe0f' })
+        }
       }
       // For egg sales: aggregate qty from lines, rate stored per-line.
       // Free eggs are added in here too — they physically leave stock exactly
@@ -3389,6 +3429,9 @@ export const NHESales: React.FC = () => {
   const openEdit = (row: any) => {
     setNheDraftDismissed(false)
     setEditing(row)
+    // A preview generated for a different sale must not follow this one into
+    // Save, where it would quietly re-number an invoice that is already filed.
+    setPeekInv(null)
     // Extra shed/sex lines are only offered on a fresh entry — editing an
     // existing sale edits that one row, same as it always has.
     setExtraBirdLines([])
