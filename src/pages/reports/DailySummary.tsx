@@ -66,7 +66,7 @@ export const DailySummaryPage: React.FC = () => {
       if (!normalFlockIds.length) return []
       const { data, error } = await supabase
         .from('daily_records')
-        .select('flock_id, shed_id, record_date, he_eggs, je_eggs, te_eggs, be_eggs, le_eggs, total_eggs, mortality_female, mortality_male, transfer_female, transfer_male, cull_female, cull_male, feed_female_kg, feed_male_kg, opening_female, opening_male, closing_female, closing_male, sheds(shed_no, farm_id)')
+        .select('flock_id, farm_id, shed_id, record_date, he_eggs, je_eggs, te_eggs, be_eggs, le_eggs, total_eggs, mortality_female, mortality_male, transfer_female, transfer_male, cull_female, cull_male, feed_female_kg, feed_male_kg, opening_female, opening_male, closing_female, closing_male, sheds(shed_no, farm_id)')
         .in('flock_id', normalFlockIds)
         .in('record_date', [date, prevDate])
       if (error) { toast.error(error.message); return [] }
@@ -294,7 +294,27 @@ export const DailySummaryPage: React.FC = () => {
   // while Agraharam silently omitted birds that are physically there. Rows are
   // keyed by flock AND site so each site's page shows its own sheds.
   const keyOf = (flockId: string, siteId: string | null) => `${flockId}|${siteId ?? 'none'}`
-  const siteOfRow = (r: any) => (r.sheds as any)?.farm_id ?? null
+
+  // A flock's own site, for rows that cannot name one themselves.
+  const flockFarmById = React.useMemo(() => {
+    const m: Record<string, string | null> = {}
+    for (const f of ((flocks ?? []) as any[])) m[f.id] = f.farm_id ?? null
+    return m
+  }, [flocks])
+
+  // A row with NO SHED has no shed to take a site from. It used to resolve to
+  // null, and null then counted as a site of its own - so a day holding both
+  // shed rows and the flock-level HE grade row drew a SECOND block. That block
+  // then looked its rows up under the flock's own farm, which is the same farm
+  // as the first block, so it printed the SAME figures again: Flock 20 appeared
+  // twice on 17/09, identical, not empty. Measured: 630 shed-less rows across
+  // flocks 19, 20 and 22, from 08/08/2025 to 17/09/2026.
+  //
+  // vhl_daily_entry has no farm_id column, so a VHL row falls through to its
+  // flock's site - which is why the flock map exists rather than just reading
+  // r.farm_id.
+  const siteOfRow = (r: any) =>
+    (r.sheds as any)?.farm_id ?? r.farm_id ?? flockFarmById[r.flock_id] ?? null
 
   const recordsByFlockSite = React.useMemo(() => {
     const m: Record<string, any[]> = {}
