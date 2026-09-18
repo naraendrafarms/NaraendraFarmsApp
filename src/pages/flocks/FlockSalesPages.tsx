@@ -1342,30 +1342,77 @@ export const HEDispatch: React.FC = () => {
         .map(([prod_date, g]) => ({ prod_date, a: Math.max(0, g.a), b: Math.max(0, g.b), c: Math.max(0, g.c) }))
         // Nothing left on that day, and nothing produced after the dispatch
         // date - eggs cannot go out before they are laid.
-        .filter(r => (r.a + r.b + r.c) > 0 && r.prod_date <= form.dispatch_date)
+        // The dispatch-date cut-off is NOT applied here: form.dispatch_date is
+        // not part of this query's key, so changing the date would never
+        // refetch and the list would keep the old cut-off. It is applied where
+        // the rows are filtered for display instead, which is always live.
+        .filter(r => (r.a + r.b + r.c) > 0)
         .sort((x, y) => x.prod_date.localeCompare(y.prod_date))
     },
   })
 
-  // A date already on the form is not offered again.
-  // Everything still owed, minus what is already on the form.
+  // Everything still owed, NET OF WHAT IS ALREADY ON THE FORM.
+  //
+  // A part-taken day used to vanish from the panel entirely, so taking a day
+  // and then zeroing its C left those C eggs owed with nothing on screen
+  // saying so - you would only find out on the next dispatch. Now the day
+  // stays, showing the balance that is still owed after the form.
+  //
+  // The dispatch-date cut-off lives here too, so it follows the date box live.
   const allAvailable = React.useMemo(() => {
-    const onForm = new Set(lines.map(l => l.prod_date).filter(Boolean))
-    return (availability ?? []).filter(r => !onForm.has(r.prod_date))
-  }, [availability, lines])
+    const onForm: Record<string, { a: number; b: number; c: number }> = {}
+    for (const l of lines) {
+      if (!l.prod_date) continue
+      const t = (onForm[l.prod_date] ??= { a: 0, b: 0, c: 0 })
+      t.a += parseInt(l.grade_a) || 0
+      t.b += parseInt(l.grade_b) || 0
+      t.c += parseInt(l.grade_c) || 0
+    }
+    const cutoffTo = form.dispatch_date || today()
+    return (availability ?? [])
+      .filter(r => r.prod_date <= cutoffTo)
+      .map(r => {
+        const t = onForm[r.prod_date]
+        if (!t) return r
+        return { prod_date: r.prod_date,
+                 a: Math.max(0, r.a - t.a), b: Math.max(0, r.b - t.b), c: Math.max(0, r.c - t.c) }
+      })
+      .filter(r => (r.a + r.b + r.c) > 0)
+  }, [availability, lines, form.dispatch_date])
   const olderRows = React.useMemo(
     () => allAvailable.filter(r => r.prod_date < pickerCutoff), [allAvailable, pickerCutoff])
   const availableRows = React.useMemo(
     () => showOlderDays ? allAvailable : allAvailable.filter(r => r.prod_date >= pickerCutoff),
     [allAvailable, showOlderDays, pickerCutoff])
 
-  const takeDay = (r: { prod_date: string; a: number; b: number; c: number }) => {
+  // which: 'all' takes every grade left on the day, or a single grade so a
+  // dispatch of only A and B does not mean adding the day then clearing C.
+  const takeDay = (r: { prod_date: string; a: number; b: number; c: number },
+                   which: 'all' | 'a' | 'b' | 'c' = 'all') => {
+    const want = {
+      a: which === 'all' || which === 'a' ? r.a : 0,
+      b: which === 'all' || which === 'b' ? r.b : 0,
+      c: which === 'all' || which === 'c' ? r.c : 0,
+    }
+    if (!(want.a + want.b + want.c)) return
+    const add = (cur: string, n: number) => n ? String((parseInt(cur) || 0) + n) : cur
     setLines(ls => {
+      // Already on the form? Add to that line rather than making a second one
+      // for the same production date.
+      const existing = ls.findIndex(l => l.prod_date === r.prod_date)
+      if (existing >= 0) {
+        return ls.map((l, i) => i === existing ? {
+          ...l,
+          grade_a: add(l.grade_a, want.a),
+          grade_b: add(l.grade_b, want.b),
+          grade_c: add(l.grade_c, want.c),
+        } : l)
+      }
       // The first line of a fresh form is an empty placeholder; fill it rather
       // than leaving a blank row above the real ones.
       const blank = ls.findIndex(l => !l.grade_a && !l.grade_b && !l.grade_c)
-      const filled = { prod_date: r.prod_date, grade_a: r.a ? String(r.a) : '',
-                       grade_b: r.b ? String(r.b) : '', grade_c: r.c ? String(r.c) : '', rate: '' }
+      const filled = { prod_date: r.prod_date, grade_a: want.a ? String(want.a) : '',
+                       grade_b: want.b ? String(want.b) : '', grade_c: want.c ? String(want.c) : '', rate: '' }
       if (blank >= 0) return ls.map((l, i) => i === blank ? { ...l, ...filled } : l)
       return [...ls, filled]
     })
@@ -2502,9 +2549,20 @@ export const HEDispatch: React.FC = () => {
                       {availableRows.map(r => (
                         <tr key={r.prod_date} className="border-t border-amber-100">
                           <td className="px-3 py-1 text-xs font-medium">{fmtDate(r.prod_date)}</td>
-                          <td className="px-3 py-1 text-xs text-right">{r.a || '—'}</td>
-                          <td className="px-3 py-1 text-xs text-right">{r.b || '—'}</td>
-                          <td className="px-3 py-1 text-xs text-right">{r.c || '—'}</td>
+                          {/* Each grade is takeable on its own - a dispatch of
+                              only A and B should not mean adding the whole day
+                              and then clearing C by hand. */}
+                          {(['a','b','c'] as const).map(g => (
+                            <td key={g} className="px-3 py-1 text-xs text-right">
+                              {r[g]
+                                ? <button type="button" onClick={() => takeDay(r, g)}
+                                    title={`Take ${r[g].toLocaleString('en-IN')} grade ${g.toUpperCase()} from ${fmtDate(r.prod_date)}`}
+                                    className="underline decoration-dotted underline-offset-2 hover:text-brand-700 hover:decoration-solid font-medium">
+                                    {r[g].toLocaleString('en-IN')}
+                                  </button>
+                                : <span className="text-gray-300">—</span>}
+                            </td>
+                          ))}
                           <td className="px-3 py-1 text-xs text-right font-medium">{(r.a + r.b + r.c).toLocaleString('en-IN')}</td>
                           <td className="px-2 py-1">
                             <button type="button" onClick={() => takeDay(r)}
@@ -2521,7 +2579,7 @@ export const HEDispatch: React.FC = () => {
               <div className="flex items-center gap-3 px-1 flex-wrap">
                 {availableRows.length > 0 && (
                   <button type="button"
-                    onClick={() => { availableRows.forEach(takeDay); toast.success(`Added ${availableRows.length} production day(s)`) }}
+                    onClick={() => { availableRows.forEach(r => takeDay(r)); toast.success(`Added ${availableRows.length} production day(s)`) }}
                     className="text-xs text-brand-600 hover:text-brand-800 font-medium">
                     + Take all {availableRows.length} day(s)
                   </button>
@@ -2539,7 +2597,8 @@ export const HEDispatch: React.FC = () => {
                 )}
                 {availableRows.length > 0 && (
                   <span className="text-[11px] text-gray-500">
-                    Take fills the line with everything left on that day — reduce it if only part is going.
+                    Click a single A, B or C figure to take just that grade — or Take for the whole day.
+                    A part-taken day stays listed with what is still owed.
                   </span>
                 )}
                 {showOlderDays && olderRows.length > 0 && (
