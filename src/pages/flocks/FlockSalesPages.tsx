@@ -1274,6 +1274,77 @@ export const HEDispatch: React.FC = () => {
     saveHeDraft({ form, lines })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form, lines, showForm])
+  // ── Un-dispatched graded production, oldest first ──────────────────────────
+  // Eggs are graded on the day they are laid and sit for a while before going
+  // out, so a dispatch draws on several past production days. Typing those
+  // dates and quantities by hand gave no way to see what was still owed, and
+  // nothing stopped the same day's eggs going out twice or being stranded.
+  //
+  // Remaining = what was GRADED that day, less what previous dispatches have
+  // already taken from that day, per grade.
+  //   graded    daily_records.he_grade_a / _b / _c  (migration 045)
+  //   dispatched he_dispatch_lines                  (migration 046)
+  // Both are paged: a single flock can hold well over PostgREST's 1000-row cap
+  // (Flock 19 alone has 1,681 daily rows), and a short read here would OVERSTATE
+  // what is left and invite a double dispatch.
+  const { data: availability } = useQuery({
+    queryKey: ['he_undispatched', form.flock_id, editing?.id ?? 'new'],
+    enabled: !!form.flock_id && showForm,
+    queryFn: async () => {
+      const [graded, taken] = await Promise.all([
+        fetchAllPages<any>((f, t) => supabase.from('daily_records')
+          .select('record_date,he_grade_a,he_grade_b,he_grade_c')
+          .eq('flock_id', form.flock_id).order('record_date').range(f, t),
+          'Graded production', toast.error),
+        fetchAllPages<any>((f, t) => supabase.from('he_dispatch_lines')
+          .select('dispatch_id,prod_date,grade_a,grade_b,grade_c')
+          .eq('flock_id', form.flock_id).order('prod_date').range(f, t),
+          'Dispatched lines', toast.error),
+      ])
+      // daily_records holds one row PER SHED per date, so a date's graded total
+      // is the sum of its sheds - reading a single row would undercount a
+      // multi-shed flock badly.
+      const byDate: Record<string, { a: number; b: number; c: number }> = {}
+      for (const r of graded) {
+        const k = r.record_date
+        const g = (byDate[k] ??= { a: 0, b: 0, c: 0 })
+        g.a += r.he_grade_a ?? 0; g.b += r.he_grade_b ?? 0; g.c += r.he_grade_c ?? 0
+      }
+      // When EDITING, this dispatch's own lines must not count as already gone,
+      // or its own eggs would look dispatched by somebody else.
+      for (const d of taken) {
+        if (editing?.id && d.dispatch_id === editing.id) continue
+        const g = byDate[d.prod_date]
+        if (!g) continue
+        g.a -= d.grade_a ?? 0; g.b -= d.grade_b ?? 0; g.c -= d.grade_c ?? 0
+      }
+      return Object.entries(byDate)
+        .map(([prod_date, g]) => ({ prod_date, a: Math.max(0, g.a), b: Math.max(0, g.b), c: Math.max(0, g.c) }))
+        // Nothing left on that day, and nothing produced after the dispatch
+        // date - eggs cannot go out before they are laid.
+        .filter(r => (r.a + r.b + r.c) > 0 && r.prod_date <= form.dispatch_date)
+        .sort((x, y) => x.prod_date.localeCompare(y.prod_date))
+    },
+  })
+
+  // A date already on the form is not offered again.
+  const availableRows = React.useMemo(() => {
+    const onForm = new Set(lines.map(l => l.prod_date).filter(Boolean))
+    return (availability ?? []).filter(r => !onForm.has(r.prod_date))
+  }, [availability, lines])
+
+  const takeDay = (r: { prod_date: string; a: number; b: number; c: number }) => {
+    setLines(ls => {
+      // The first line of a fresh form is an empty placeholder; fill it rather
+      // than leaving a blank row above the real ones.
+      const blank = ls.findIndex(l => !l.grade_a && !l.grade_b && !l.grade_c)
+      const filled = { prod_date: r.prod_date, grade_a: r.a ? String(r.a) : '',
+                       grade_b: r.b ? String(r.b) : '', grade_c: r.c ? String(r.c) : '', rate: '' }
+      if (blank >= 0) return ls.map((l, i) => i === blank ? { ...l, ...filled } : l)
+      return [...ls, filled]
+    })
+  }
+
   // Preview next invoice number without consuming it (counter not changed)
   const genInvoice = async () => {
     // Generating on a dispatch that ALREADY carries a filed invoice number
@@ -2366,6 +2437,64 @@ export const HEDispatch: React.FC = () => {
               </div>
             </div>
           </FormRow>
+
+          {/* Un-dispatched production, oldest first */}
+          {form.flock_id && (
+            <>
+              <Divider label="Eggs still to go out (oldest first)" />
+              {!availableRows.length ? (
+                <p className="text-xs text-gray-500 px-1">
+                  {availability === undefined
+                    ? 'Checking what is still un-dispatched…'
+                    : 'Nothing un-dispatched for this flock up to the dispatch date — every graded day is already on an invoice, or already on this form.'}
+                </p>
+              ) : (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/40 overflow-x-auto max-h-56 overflow-y-auto">
+                  <table className="text-sm w-full">
+                    <thead className="bg-amber-100/60 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold text-amber-900">Prod Date</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold text-green-700">A left</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold text-blue-700">B left</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold text-orange-700">C left</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold text-gray-700">Total</th>
+                        <th className="px-2 py-1.5 w-20"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {availableRows.map(r => (
+                        <tr key={r.prod_date} className="border-t border-amber-100">
+                          <td className="px-3 py-1 text-xs font-medium">{fmtDate(r.prod_date)}</td>
+                          <td className="px-3 py-1 text-xs text-right">{r.a || '—'}</td>
+                          <td className="px-3 py-1 text-xs text-right">{r.b || '—'}</td>
+                          <td className="px-3 py-1 text-xs text-right">{r.c || '—'}</td>
+                          <td className="px-3 py-1 text-xs text-right font-medium">{(r.a + r.b + r.c).toLocaleString('en-IN')}</td>
+                          <td className="px-2 py-1">
+                            <button type="button" onClick={() => takeDay(r)}
+                              className="text-[11px] px-2 py-0.5 rounded border border-amber-400 text-amber-800 hover:bg-amber-100 font-medium">
+                              Take
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {availableRows.length > 0 && (
+                <div className="flex items-center gap-3 px-1">
+                  <button type="button"
+                    onClick={() => { availableRows.forEach(takeDay); toast.success(`Added ${availableRows.length} production day(s)`) }}
+                    className="text-xs text-brand-600 hover:text-brand-800 font-medium">
+                    + Take all {availableRows.length} day(s)
+                  </button>
+                  <span className="text-[11px] text-gray-500">
+                    Take fills the line with everything left on that day — reduce it if only part is going.
+                  </span>
+                </div>
+              )}
+            </>
+          )}
 
           {/* Production Lines */}
           <Divider label="Production Date Lines (one row per production date)" />
