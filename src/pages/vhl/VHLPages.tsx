@@ -1255,6 +1255,44 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
     return { ...rows, [shedId]: r }
   })
 
+  // Column totals across the flock's sheds, and the bird check. The regular
+  // Bulk Daily Entry has had both for months; this grid had neither, so a
+  // mistyped shed could only be found by adding the column up by eye.
+  const shedTotals = React.useMemo(() => {
+    const t = { openF: 0, openM: 0, recdF: 0, recdM: 0, feedF: 0, feedM: 0,
+                trF: 0, trM: 0, cullF: 0, cullM: 0, mortF: 0, mortM: 0,
+                he: 0, je: 0, te: 0, be: 0, le: 0,
+                wHe: 0, wJe: 0, wTe: 0, wBe: 0, closeF: 0, closeM: 0, light: 0 }
+    const n = (v: string) => parseInt(v) || 0
+    const f = (v: string) => parseFloat(v) || 0
+    for (const shed of (sheds ?? []) as any[]) {
+      const r = shedRows[shed.id]
+      if (!r) continue
+      t.openF += n(r.opening_female); t.openM += n(r.opening_male)
+      t.recdF += n(r.received_female); t.recdM += n(r.received_male)
+      t.feedF += f(r.feed_female_kg);  t.feedM += f(r.feed_male_kg)
+      t.trF += n(r.transfer_female);   t.trM += n(r.transfer_male)
+      t.cullF += n(r.cull_female);     t.cullM += n(r.cull_male)
+      t.mortF += n(r.mortality_female); t.mortM += n(r.mortality_male)
+      t.he += n(r.he_eggs); t.je += n(r.je_eggs); t.te += n(r.te_eggs)
+      t.be += n(r.be_eggs); t.le += n(r.le_eggs)
+      t.wHe += n(r.wastage_he); t.wJe += n(r.wastage_je)
+      t.wTe += n(r.wastage_te); t.wBe += n(r.wastage_be)
+      t.closeF += n(r.closing_female); t.closeM += n(r.closing_male)
+      t.light += f(r.lighting_hrs)
+    }
+    return t
+  }, [sheds, shedRows])
+
+  const totalEggs = shedTotals.he + shedTotals.je + shedTotals.te + shedTotals.be + shedTotals.le
+  // Closing must equal Opening + Received less everything that left. Closing is
+  // computed as you type but stays EDITABLE, so a hand-typed figure can drift -
+  // this is what says so out loud rather than letting it reach the books.
+  const birdCheckF = (shedTotals.openF + shedTotals.recdF - shedTotals.trF
+                      - shedTotals.cullF - shedTotals.mortF) - shedTotals.closeF
+  const birdCheckM = (shedTotals.openM + shedTotals.recdM - shedTotals.trM
+                      - shedTotals.cullM - shedTotals.mortM) - shedTotals.closeM
+
   const handleSave = async () => {
     if (!flockId || !date) { toast.error('Select flock and date'); return }
     setSaving(true)
@@ -1501,6 +1539,7 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
                   <th className="px-1 py-2 text-center">TE</th>
                   <th className="px-1 py-2 text-center">BE</th>
                   <th className="px-1 py-2 text-center">LE</th>
+                  <th className="px-1 py-2 text-center bg-gray-100 font-bold">Total</th>
                   {showWastage && <><th className="px-1 py-2 text-center bg-red-50">Wst HE</th><th className="px-1 py-2 text-center bg-red-50">Wst JE</th><th className="px-1 py-2 text-center bg-red-50">Wst TE</th><th className="px-1 py-2 text-center bg-red-50">Wst BE</th></>}
                   <th className="px-1 py-2 text-center bg-blue-50">Close ♀</th>
                   <th className="px-1 py-2 text-center bg-blue-50">Close ♂</th>
@@ -1542,6 +1581,11 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
                       <td className="px-1 py-1">{numInput(r.te_eggs, u('te_eggs'))}</td>
                       <td className="px-1 py-1">{numInput(r.be_eggs, u('be_eggs'))}</td>
                       <td className="px-1 py-1">{numInput(r.le_eggs, u('le_eggs'))}</td>
+                      <td className="px-1 py-1 text-center text-sm font-semibold bg-gray-50">
+                        {(() => { const n = (v: string) => parseInt(v) || 0
+                          const tot = n(r.he_eggs)+n(r.je_eggs)+n(r.te_eggs)+n(r.be_eggs)+n(r.le_eggs)
+                          return tot ? tot.toLocaleString('en-IN') : '—' })()}
+                      </td>
                       {showWastage && <>
                         <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_he, u('wastage_he'))}</td>
                         <td className="px-1 py-1 bg-red-50/30">{numInput(r.wastage_je, u('wastage_je'))}</td>
@@ -1559,7 +1603,68 @@ export const VHLBulkDailyEntryPage: React.FC = () => {
                   )
                 })}
               </tbody>
+              {/* Column totals, the same check the regular Bulk Daily Entry has */}
+              {(sheds ?? []).length > 1 && (
+                <tfoot>
+                  <tr className="bg-brand-50 border-t-2 border-brand-200 text-xs font-semibold text-brand-800">
+                    <td className="px-2 py-1.5 sticky left-0 bg-brand-50 z-10">TOTAL</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.openF || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.openM || '—'}</td>
+                    <td className="px-1 py-1.5 text-center bg-green-50">{shedTotals.recdF || '—'}</td>
+                    <td className="px-1 py-1.5 text-center bg-green-50">{shedTotals.recdM || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.feedF ? shedTotals.feedF.toFixed(1) : '—'}</td>
+                    <td className="px-1 py-1.5 text-center text-gray-400">—</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.feedM ? shedTotals.feedM.toFixed(1) : '—'}</td>
+                    <td className="px-1 py-1.5 text-center text-gray-400">—</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.trF || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.trM || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.cullF || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.cullM || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.mortF || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.mortM || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.he || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.je || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.te || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.be || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.le || '—'}</td>
+                    <td className="px-1 py-1.5 text-center font-bold bg-gray-100">{totalEggs ? totalEggs.toLocaleString('en-IN') : '—'}</td>
+                    {showWastage && <>
+                      <td className="px-1 py-1.5 text-center bg-red-50">{shedTotals.wHe || '—'}</td>
+                      <td className="px-1 py-1.5 text-center bg-red-50">{shedTotals.wJe || '—'}</td>
+                      <td className="px-1 py-1.5 text-center bg-red-50">{shedTotals.wTe || '—'}</td>
+                      <td className="px-1 py-1.5 text-center bg-red-50">{shedTotals.wBe || '—'}</td>
+                    </>}
+                    <td className="px-1 py-1.5 text-center bg-blue-50">{shedTotals.closeF || '—'}</td>
+                    <td className="px-1 py-1.5 text-center bg-blue-50">{shedTotals.closeM || '—'}</td>
+                    <td className="px-1 py-1.5 text-center">{shedTotals.light ? shedTotals.light.toFixed(1) : '—'}</td>
+                    <td className="px-1 py-1.5"></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
+          </div>
+
+          {/* Does the day balance? Closing stays editable, so a hand-typed
+              figure can drift away from the movement that explains it. */}
+          <div className="px-4 py-3 border-t border-gray-100 flex flex-wrap items-center gap-3">
+            <span className="text-xs text-gray-500">
+              Open {shedTotals.openF}+{shedTotals.openM} &nbsp;+ Recd {shedTotals.recdF}+{shedTotals.recdM}
+              &nbsp;− Transfer/Cull/Death &nbsp;= Close {shedTotals.closeF}+{shedTotals.closeM}
+            </span>
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg border ${
+              birdCheckF === 0 && birdCheckM === 0
+                ? 'bg-green-100 border-green-300 text-green-800'
+                : 'bg-red-100 border-red-300 text-red-800'}`}>
+              {birdCheckF === 0 && birdCheckM === 0
+                ? '✓ Birds balance'
+                : `Out by ${birdCheckF !== 0 ? `${birdCheckF > 0 ? '+' : ''}${birdCheckF} ♀` : ''}${birdCheckF !== 0 && birdCheckM !== 0 ? ', ' : ''}${birdCheckM !== 0 ? `${birdCheckM > 0 ? '+' : ''}${birdCheckM} ♂` : ''} — Closing does not match the movement`}
+            </span>
+            {totalEggs > 0 && (
+              <span className="text-xs text-gray-600">
+                Eggs: HE {shedTotals.he} · JE {shedTotals.je} · TE {shedTotals.te} · BE {shedTotals.be} · LE {shedTotals.le}
+                &nbsp;= <strong>{totalEggs.toLocaleString('en-IN')}</strong>
+              </span>
+            )}
           </div>
         </Card>
       )}
