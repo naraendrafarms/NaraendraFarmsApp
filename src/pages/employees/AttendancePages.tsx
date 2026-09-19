@@ -51,6 +51,11 @@ export const DailyAttendancePage: React.FC = () => {
   const [genderFilter, setGenderFilter] = useState('')
   const [localStatus, setLocalStatus] = useState<Record<string, string>>({})
   const [localOT, setLocalOT] = useState<Record<string, number>>({})
+  // Why someone was away, and whether the day was treated as paid. A register,
+  // not a ledger: the farm has no leave policy, so there is no entitlement to
+  // count against - only what actually happened, recorded.
+  const [localReason, setLocalReason] = useState<Record<string, string>>({})
+  const [localPaid, setLocalPaid] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkConfirm, setBulkConfirm] = useState(false)
@@ -129,7 +134,7 @@ export const DailyAttendancePage: React.FC = () => {
     queryFn: async () => {
       if (!empIds.length) return []
       const { data } = await supabase.from('attendance_daily')
-        .select('employee_id, status, ot_hours')
+        .select('employee_id, status, ot_hours, absence_reason, absence_paid')
         .in('employee_id', empIds)
         .eq('attendance_date', date)
       return data ?? []
@@ -155,12 +160,18 @@ export const DailyAttendancePage: React.FC = () => {
   React.useEffect(() => {
     const map: Record<string, string> = {}
     const otMap: Record<string, number> = {}
+    const reasonMap: Record<string, string> = {}
+    const paidMap: Record<string, boolean> = {}
     for (const r of (existing ?? [])) {
       map[r.employee_id] = r.status
       if (r.ot_hours) otMap[r.employee_id] = r.ot_hours
+      if (r.absence_reason) reasonMap[r.employee_id] = r.absence_reason
+      if (r.absence_paid) paidMap[r.employee_id] = true
     }
     setLocalStatus(map)
     setLocalOT(otMap)
+    setLocalReason(reasonMap)
+    setLocalPaid(paidMap)
   }, [existing, employees])
 
   const markAll = (status: string) => {
@@ -215,6 +226,10 @@ export const DailyAttendancePage: React.FC = () => {
         attendance_date: date,
         status: localStatus[e.id],
         ot_hours: localOT[e.id] ?? 0,
+        // Only an away day carries a reason or a paid marker. Writing them on a
+        // P would leave a stale "paid leave" on a day the man actually worked.
+        absence_reason: ['A', 'H'].includes(localStatus[e.id]) ? (localReason[e.id]?.trim() || null) : null,
+        absence_paid: ['A', 'H'].includes(localStatus[e.id]) ? !!localPaid[e.id] : false,
       }))
       const { error } = await supabase.from('attendance_daily').upsert(rows, { onConflict: 'employee_id,attendance_date' })
       if (error) throw error
@@ -342,6 +357,8 @@ export const DailyAttendancePage: React.FC = () => {
                   <Th>Designation</Th>
                   {STATUS_OPTIONS.map(s => <Th key={s}>{s}</Th>)}
                   <Th>OT Hrs</Th>
+                  <Th>Reason for absence</Th>
+                  <Th>Paid?</Th>
                 </tr>
               </thead>
               <tbody>
@@ -372,6 +389,27 @@ export const DailyAttendancePage: React.FC = () => {
                           className="w-14 border border-gray-300 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
                           title="Overtime hours (in addition to status)"
                         />
+                      </Td>
+                      {/* A reason and a paid marker only mean anything on a day
+                          somebody was away, so they appear only for A and H. */}
+                      <Td>
+                        {['A', 'H'].includes(cur) ? (
+                          <input type="text" value={localReason[e.id] ?? ''} disabled={isPaid}
+                            placeholder="e.g. sick, personal, festival"
+                            onChange={e2 => setLocalReason(prev => ({ ...prev, [e.id]: e2.target.value }))}
+                            className="w-44 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                            title="Why this person was away. Recorded only; it does not change pay." />
+                        ) : <span className="text-gray-300 text-xs">—</span>}
+                      </Td>
+                      <Td>
+                        {['A', 'H'].includes(cur) ? (
+                          <label className="flex items-center gap-1 text-xs text-gray-600" title="Records that this day was treated as PAID leave. It does not change the salary calculation.">
+                            <input type="checkbox" checked={!!localPaid[e.id]} disabled={isPaid}
+                              onChange={() => setLocalPaid(prev => ({ ...prev, [e.id]: !prev[e.id] }))}
+                              className="rounded" />
+                            paid
+                          </label>
+                        ) : <span className="text-gray-300 text-xs">—</span>}
                       </Td>
                     </tr>
                   )
@@ -1714,7 +1752,7 @@ export const AttendanceRangePage: React.FC = () => {
     enabled: empIds.length > 0 && !!from && !!to,
     queryFn: async () => fetchAllPages<any>(
       (a, b) => supabase.from('attendance_daily')
-        .select('employee_id, attendance_date, status, ot_hours')
+        .select('employee_id, attendance_date, status, ot_hours, absence_reason, absence_paid')
         .in('employee_id', empIds)
         .gte('attendance_date', from).lte('attendance_date', to)
         .order('attendance_date').order('id').range(a, b),
@@ -1738,12 +1776,22 @@ export const AttendanceRangePage: React.FC = () => {
   })
 
   const rows = useMemo(() => {
-    const blank = () => ({ P: 0, A: 0, H: 0, WO: 0, OT: 0, otHours: 0, earned: 0, advance: 0, net: 0, months: 0 })
+    // awayPaid / awayUnpaid split the A and H days by the marker entered on
+    // Daily Attendance. This is a REGISTER: it reports what was recorded and
+    // changes no pay - paid days below are still P + OT + half an H, exactly
+    // as before.
+    const blank = () => ({ P: 0, A: 0, H: 0, WO: 0, OT: 0, otHours: 0, earned: 0, advance: 0, net: 0, months: 0,
+                           awayPaid: 0, awayUnpaid: 0, reasons: [] as string[] })
     const m: Record<string, ReturnType<typeof blank>> = {}
     for (const r of att as any[]) {
       const e = (m[r.employee_id] ??= blank())
       if (r.status in e) (e as any)[r.status] += 1
       e.otHours += Number(r.ot_hours ?? 0)
+      if (r.status === 'A' || r.status === 'H') {
+        if (r.absence_paid) e.awayPaid += 1; else e.awayUnpaid += 1
+        const why = String(r.absence_reason ?? '').trim()
+        if (why && !e.reasons.includes(why)) e.reasons.push(why)
+      }
     }
     for (const s of salary as any[]) {
       const e = (m[s.employee_id] ??= blank())
@@ -1765,8 +1813,10 @@ export const AttendanceRangePage: React.FC = () => {
   const tot = rows.reduce((s, r) => ({
     P: s.P + r.P, A: s.A + r.A, H: s.H + r.H, WO: s.WO + r.WO, OT: s.OT + r.OT,
     otHours: s.otHours + r.otHours, paid: s.paid + paidDays(r),
+    awayPaid: s.awayPaid + r.awayPaid, awayUnpaid: s.awayUnpaid + r.awayUnpaid,
     earned: s.earned + r.earned, advance: s.advance + r.advance, net: s.net + r.net,
-  }), { P: 0, A: 0, H: 0, WO: 0, OT: 0, otHours: 0, paid: 0, earned: 0, advance: 0, net: 0 })
+  }), { P: 0, A: 0, H: 0, WO: 0, OT: 0, otHours: 0, paid: 0, awayPaid: 0, awayUnpaid: 0,
+        earned: 0, advance: 0, net: 0 })
 
   const farmOptions = (farms ?? []).map((f: any) => ({ value: f.id, label: f.name }))
 
@@ -1785,10 +1835,13 @@ export const AttendanceRangePage: React.FC = () => {
                  value={search} onChange={e => setSearch(e.target.value)} />
           <Button variant="ghost" size="sm" icon={<Download size={15} />} onClick={() =>
             exportCSV(`attendance_${from}_to_${to}.csv`,
-              ['Emp ID','Name','Site','Present','Absent','Half','Week Off','OT Days','OT Hours','Paid Days','Earned','Advance','Net'],
+              ['Emp ID','Name','Site','Present','Absent','Half','Week Off','OT Days','OT Hours','Paid Days',
+               'Away days marked paid','Away days unpaid','Reasons given','Earned','Advance','Net'],
               rows.map(r => [r.emp.emp_id, r.emp.name,
                 (farms ?? []).find((f: any) => f.id === r.emp.farm_id)?.name ?? '',
-                r.P, r.A, r.H, r.WO, r.OT, r.otHours, paidDays(r), r.earned, r.advance, r.net]))
+                r.P, r.A, r.H, r.WO, r.OT, r.otHours, paidDays(r),
+                r.awayPaid, r.awayUnpaid, r.reasons.join('; '),
+                r.earned, r.advance, r.net]))
           }>Export</Button>
         </div>
       </Card>
@@ -1801,6 +1854,7 @@ export const AttendanceRangePage: React.FC = () => {
                 <Th>Emp ID</Th><Th>Name</Th><Th>Site</Th>
                 <Th right>Present</Th><Th right>Absent</Th><Th right>Half</Th><Th right>Week Off</Th>
                 <Th right>OT Days</Th><Th right>OT Hrs</Th><Th right>Paid Days</Th>
+                <Th right>Away — paid</Th><Th right>Away — unpaid</Th><Th>Reason(s)</Th>
                 <Th right>Earned</Th><Th right>Advance</Th><Th right>Net Paid</Th>
               </tr></thead>
               <tbody>
@@ -1818,13 +1872,20 @@ export const AttendanceRangePage: React.FC = () => {
                     <Td right>{r.OT}</Td>
                     <Td right>{r.otHours || ''}</Td>
                     <Td right className="font-semibold">{paidDays(r)}</Td>
+                    <Td right className={r.awayPaid ? 'text-green-700' : 'text-gray-300'}>{r.awayPaid || '—'}</Td>
+                    <Td right className={r.awayUnpaid ? 'text-red-600' : 'text-gray-300'}>{r.awayUnpaid || '—'}</Td>
+                    <Td className="text-xs text-gray-500">
+                      <span className="block max-w-[14rem] truncate" title={r.reasons.join('; ')}>
+                        {r.reasons.join('; ') || '—'}
+                      </span>
+                    </Td>
                     <Td right>{r.earned ? inr(r.earned) : ''}</Td>
                     <Td right>{r.advance ? inr(r.advance) : ''}</Td>
                     <Td right className="font-semibold">{r.net ? inr(r.net) : ''}</Td>
                   </tr>
                 ))}
                 {rows.length === 0 && (
-                  <tr><Td colSpan={13} className="text-center text-gray-400 py-6">Nothing marked in this period.</Td></tr>
+                  <tr><Td colSpan={16} className="text-center text-gray-400 py-6">Nothing marked in this period.</Td></tr>
                 )}
               </tbody>
               {rows.length > 0 && (
@@ -1833,6 +1894,7 @@ export const AttendanceRangePage: React.FC = () => {
                     <Td colSpan={3}>{rows.length} employees</Td>
                     <Td right>{tot.P}</Td><Td right>{tot.A}</Td><Td right>{tot.H}</Td><Td right>{tot.WO}</Td>
                     <Td right>{tot.OT}</Td><Td right>{tot.otHours || ''}</Td><Td right>{tot.paid}</Td>
+                    <Td right>{tot.awayPaid}</Td><Td right>{tot.awayUnpaid}</Td><Td />
                     <Td right>{inr(tot.earned)}</Td><Td right>{inr(tot.advance)}</Td><Td right>{inr(tot.net)}</Td>
                   </tr>
                 </tfoot>
@@ -1842,6 +1904,9 @@ export const AttendanceRangePage: React.FC = () => {
           <p className="text-xs text-gray-500 px-3 py-2">
             Salary figures come from the monthly salary records whose month starts inside the range, so a part
             month is never counted twice. Paid days count a half day as a half, the same as the month grid.
+            Away — paid and Away — unpaid split the absent and half days by the marker entered on Daily
+            Attendance. They are a RECORD of what was decided and do not change any salary: Paid Days is
+            still Present + OT + half a Half day, exactly as before.
           </p>
         </Card>
       )}

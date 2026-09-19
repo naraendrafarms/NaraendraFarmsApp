@@ -59,6 +59,14 @@ export const ROUTE_MODULES: Record<string, ModuleKey> = {
   'inventory': 'inventory',
 
   'employees': 'payroll',
+  // The Statutory Compliance Center holds the PF ECR, the ESIC and PT files,
+  // the remittance tracker and every employee's Form 16 — the company's TAN
+  // and PAN, and each person's PAN and pay for the year. It is gated by
+  // 'admin' rather than 'payroll' so it is admin-only by default: hasModule
+  // short-circuits to true for admin, and for every other role it is hidden
+  // unless an admin has explicitly granted the Admin module. Longest prefix
+  // wins, so this beats the general 'employees' mapping above.
+  'employees/statutory': 'admin',
   // Attendance sub-routes override the payroll default below (more specific
   // prefix wins) — see resolveModuleForPath().
   'employees/attendance': 'attendance',

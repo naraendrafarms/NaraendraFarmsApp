@@ -92,7 +92,9 @@ const NAV: NavItem[] = [
       { label: 'Workforce Review', to: '/employees/workforce-review' },
       { label: 'Salary Register',  to: '/employees/salary-register' },
       { label: 'Salary CMS Export', to: '/employees/cms-export' },
-      { label: 'Statutory Compliance (TDS/GST/PF/ESI/PT)', to: '/employees/statutory' },
+      // Admin only — statutory returns, the company TAN/PAN and every
+      // employee's PAN and annual pay sit behind this one link.
+      { label: 'Statutory Compliance (TDS/GST/PF/ESI/PT)', to: '/employees/statutory', roles: ['admin'] },
       { label: 'Salary History',   to: '/employees/salary-history' },
       { label: 'Partner Remuneration', to: '/employees/partner-remuneration' },
       { label: 'Salary Entry',    to: '/employees/salary' },
