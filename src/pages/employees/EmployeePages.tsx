@@ -242,6 +242,31 @@ export const EmployeeList: React.FC = () => {
   })
   const spells = React.useMemo(() => groupSpells(spellRows), [spellRows])
   const editingSpells: Spell[] = editing ? (spells[editing.id] ?? []) : []
+  // Marking someone Left removes them from the lists, but it does NOT remove a
+  // salary row already written for a month AFTER they left - the bulk run
+  // upserts the people it can see and never deletes a row for someone who has
+  // dropped out, so a stale row just sits there and keeps showing on the
+  // registers and in the cost reports. Surfacing it here, at the moment the
+  // leaving date is set, rather than leaving it to be remembered.
+  //
+  // Only months STRICTLY AFTER the leaving month count: a man who left on the
+  // 15th has a legitimate salary row for that month.
+  const leavingMonthStart = form.leaving_date ? `${form.leaving_date.slice(0, 7)}-01` : null
+  const { data: salaryAfterLeaving = [] } = useQuery({
+    queryKey: ['salary_after_leaving', editing?.id ?? null, leavingMonthStart],
+    enabled: !!editing?.id && form.is_active === 'false' && !!leavingMonthStart,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('salary_monthly')
+        .select('id,month,net_salary,is_paid,paid_date')
+        .eq('employee_id', editing!.id)
+        .gt('month', leavingMonthStart!)
+        .order('month')
+      if (error) throw new Error(`Salary after leaving date: ${error.message}`)
+      return data ?? []
+    },
+  })
+  const paidAfterLeaving = (salaryAfterLeaving as any[]).filter(r => r.is_paid)
+
   const wasLeft = !!editing && editing.is_active === false
   const isRejoining = wasLeft && form.is_active === 'true'
 
@@ -796,6 +821,37 @@ export const EmployeeList: React.FC = () => {
                   A new stint starts on the rejoining date. The one he already finished is kept exactly as it is,
                   so the months he was away stay empty instead of being filled in.
                 </div>
+              )}
+            </div>
+          )}
+
+          {(salaryAfterLeaving as any[]).length > 0 && (
+            <div className={`rounded-lg border px-3 py-2 text-xs ${paidAfterLeaving.length ? 'border-red-300 bg-red-50 text-red-900' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+              <p className="font-semibold">
+                {(salaryAfterLeaving as any[]).length} salary row(s) exist for month(s) AFTER {fmtDate(form.leaving_date)}
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {(salaryAfterLeaving as any[]).map((r: any) => (
+                  <li key={r.id}>
+                    {MONTH_NAMES[parseInt(String(r.month).slice(5, 7)) - 1]} {String(r.month).slice(0, 4)} —{' '}
+                    {r.net_salary ? inr(r.net_salary) : '₹0'}{' '}
+                    {r.is_paid
+                      ? <strong>ALREADY MARKED PAID{r.paid_date ? ` on ${fmtDate(r.paid_date)}` : ''}</strong>
+                      : <span className="text-gray-500">not paid</span>}
+                  </li>
+                ))}
+              </ul>
+              {paidAfterLeaving.length > 0 ? (
+                <p className="mt-1">
+                  Money was recorded as paid for a month after he left. Do NOT simply delete this — check what
+                  actually happened first, and reverse it from HR &amp; Payroll → Salary Entry if it was wrong.
+                </p>
+              ) : (
+                <p className="mt-1">
+                  Setting the leaving date does not remove these, and neither will recalculating the month —
+                  the salary run never deletes a row for someone who has dropped off the list. Remove them in
+                  HR &amp; Payroll → Salary Entry, which also reverses any deductions and ledger entries they created.
+                </p>
               )}
             </div>
           )}
