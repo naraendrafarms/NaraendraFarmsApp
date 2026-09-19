@@ -2583,8 +2583,29 @@ export const ESIPFReportPage: React.FC = () => {
     onError: (e:any) => toast.error(e.message),
   })
 
+  // This page lists every salary row for the month, and nothing ever filtered
+  // on the applicability ticks - even though the query selects all three, so
+  // the intent was there. MEASURED 19/09/2026: 268 rows on the September page
+  // of which only 28 have ESI, PF or PT applicable, so 240 rows of zeros, and
+  // the same 240 went into the Export and the Print.
+  //
+  // The second clause is deliberate: anyone carrying a NON-ZERO amount is shown
+  // even when un-ticked, so this can never hide a real deduction if the figures
+  // and the tick ever disagree. It costs nothing today - measured: 0 employees
+  // carry a deduction without the tick, Rs 0 - but the guard is the point.
+  const applies = (r: any) => {
+    const e = r.employees ?? {}
+    return !!e.esi_applicable || !!e.pf_applicable || !!e.pt_applicable
+      || (r.esi_employee ?? 0) > 0 || (r.esi_employer ?? 0) > 0
+      || (r.pf_employee ?? 0) > 0 || (r.employer_eps ?? 0) > 0
+      || (r.employer_epf_diff ?? 0) > 0 || (r.admin_charges ?? 0) > 0
+      || (r.edli_charge ?? 0) > 0 || (r.pt ?? 0) > 0
+  }
+  const reportRows = (rows ?? []).filter(applies)
+  const hiddenCount = (rows ?? []).length - reportRows.length
+
   // Print/Export skip zero-salary rows (e.g. no paid days that month).
-  const payableRows = (rows??[]).filter((r:any)=>(r.gross_salary??0)>0)
+  const payableRows = reportRows.filter((r:any)=>(r.gross_salary??0)>0)
 
   const totals = payableRows.reduce((acc:any,r:any)=>{
     acc.esi_emp   += r.esi_employee??0
@@ -2671,7 +2692,7 @@ export const ESIPFReportPage: React.FC = () => {
               <Th right>Net</Th><Th>Paid</Th><Th></Th>
             </tr></thead>
             <tbody>
-              {(rows??[]).map((r:any)=>(
+              {reportRows.map((r:any)=>(
                 <tr key={r.id} className="hover:bg-gray-50">
                   <Td><span className="font-medium">{r.employees?.name}</span><span className="text-xs text-gray-400 ml-1">{r.employees?.emp_id}</span></Td>
                   <Td className="text-xs">{r.employees?.farms?.name}</Td>
@@ -2689,10 +2710,10 @@ export const ESIPFReportPage: React.FC = () => {
                   <Td><button onClick={()=>openEdit(r)} className="p-1 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600" title="Edit"><Edit2 size={12}/></button></Td>
                 </tr>
               ))}
-              {(rows??[]).length>0 && (
+              {reportRows.length>0 && (
                 <tr className="bg-gray-50 font-semibold">
-                  <Td colSpan={2}>Total ({rows?.length} employees)</Td>
-                  <Td right>{inr((rows??[]).reduce((s:number,r:any)=>s+(r.gross_salary??0),0))}</Td>
+                  <Td colSpan={2}>Total ({reportRows.length} employees)</Td>
+                  <Td right>{inr(reportRows.reduce((s:number,r:any)=>s+(r.gross_salary??0),0))}</Td>
                   <Td right>{inr(totals.esi_emp)}</Td>
                   <Td right>{inr(totals.esi_er)}</Td>
                   <Td right>{inr(totals.pf_emp)}</Td>
@@ -2701,13 +2722,28 @@ export const ESIPFReportPage: React.FC = () => {
                   <Td right>{inr(totals.admin)}</Td>
                   <Td right>{inr(totals.edli)}</Td>
                   <Td right>{inr(totals.pt)}</Td>
-                  <Td right className="text-green-700">{inr((rows??[]).reduce((s:number,r:any)=>s+(r.net_salary??0),0))}</Td>
+                  <Td right className="text-green-700">{inr(reportRows.reduce((s:number,r:any)=>s+(r.net_salary??0),0))}</Td>
                   <Td colSpan={2}></Td>
                 </tr>
               )}
             </tbody>
           </Table>
-          {!(rows??[]).length&&<EmptyState icon={<FileText size={32}/>} title="No data for selected month"/>}
+          {!reportRows.length && (
+            <EmptyState icon={<FileText size={32}/>}
+              title={(rows??[]).length
+                ? 'Nobody has ESI, PF or PT this month'
+                : 'No data for selected month'}
+              subtitle={(rows??[]).length
+                ? `${(rows??[]).length} employee(s) have salary for ${filterMonth}, but none of them has ESI, PF or Professional Tax applicable. Tick it on the employee under Employees if it should apply.`
+                : undefined} />
+          )}
+          {hiddenCount > 0 && (
+            <p className="text-xs text-gray-400 px-3 py-2">
+              {hiddenCount} employee(s) with salary this month are not shown: none has ESI, PF or Professional
+              Tax applicable, so every statutory column would be zero. Anyone carrying an actual deduction is
+              always listed, even if the tick is missing. The Export and the Print show the same {reportRows.length}.
+            </p>
+          )}
         </Card>
       )}
 
