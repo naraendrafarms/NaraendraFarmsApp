@@ -1324,14 +1324,26 @@ const _EG2 = ['ASST.SUPERVISOR-MALE','ASST.SUPERVISOR-FEMALE','SECURITY-MALE','D
 // When provided (from designation_extra_days table), it overrides the hard-coded EG1/EG2 rules.
 export type ExtraDaysConfig = Record<string, { ge15: number; lt15: number }>
 
-function calcExtraDaysM(designation: string|null|undefined, paidDays: number, cfg?: ExtraDaysConfig): number {
+function calcExtraDaysM(designation: string|null|undefined, paidDays: number,
+                        cfg?: ExtraDaysConfig, cfgLoaded?: boolean): number {
   if (!paidDays || !designation) return 0
   const d = designation.toUpperCase().trim()
   // DB-backed config (Admin Centre → Extra Days per Designation) is the single
-  // source of truth once loaded. A designation absent from it = 0 extra days, so
-  // deleting a row in admin actually removes the extra day.
+  // source of truth ONCE IT HAS LOADED, even if it is empty. A designation
+  // absent from it = 0 extra days, so deleting a row in admin actually removes
+  // the extra day.
+  //
+  // It used to decide that by asking whether the map had any keys, which reads
+  // "config loaded and empty" and "config failed to load" as the same thing —
+  // and in both cases fell through to the hard-coded lists below. Those lists
+  // hold 15 designations against the 17 configured, so a slow or failed load at
+  // the moment Save & Calculate was pressed would have paid the OLD built-in
+  // numbers, silently, with nothing on screen to say so. The callers now refuse
+  // to calculate until this has loaded, and pass that fact through here.
+  if (cfgLoaded) return cfg?.[d] ? (paidDays >= 15 ? cfg[d].ge15 : cfg[d].lt15) : 0
   if (cfg && Object.keys(cfg).length > 0) return cfg[d] ? (paidDays >= 15 ? cfg[d].ge15 : cfg[d].lt15) : 0
-  // Hard-coded fallback ONLY when the config hasn't loaded yet (network/empty).
+  // Hard-coded fallback, now only reachable where the config was never asked
+  // for at all. A real salary run can no longer land here.
   if (_EG1.includes(d)) return paidDays >= 15 ? 2 : 1
   if (_EG2.includes(d)) return paidDays >= 15 ? 1 : 0
   return 0
@@ -1383,12 +1395,12 @@ function useSkillWages() {
 function computeSalaryForEmp(emp: any, opts: {
   absentDays?: number; monthDays?: number; furtherAdvance?: number;
   otherDeduction?: number; advanceOpening?: number; vpf?: number; lwf?: number; tds?: number;
-  extraDaysConfig?: ExtraDaysConfig; skillWages?: SkillWageMap;
+  extraDaysConfig?: ExtraDaysConfig; extraDaysLoaded?: boolean; skillWages?: SkillWageMap;
 }) {
   const monthDays  = opts.monthDays ?? 30
   const absentDays = opts.absentDays ?? 0
   const paidDays   = Math.max(0, monthDays - absentDays)
-  const extraDays  = calcExtraDaysM(emp.designation, paidDays, opts.extraDaysConfig)
+  const extraDays  = calcExtraDaysM(emp.designation, paidDays, opts.extraDaysConfig, opts.extraDaysLoaded)
 
   const comp       = splitSalary(emp, opts.skillWages)
   const basicRate  = comp.basic
@@ -1449,12 +1461,19 @@ function computeSalaryForEmp(emp: any, opts: {
 }
 
 // ── Hook: extra-days-per-designation config (designation_extra_days table) ──
-function useExtraDaysConfig() {
-  const { data } = useQuery({
+// Returns the map AND whether it actually arrived. The caller needs both: an
+// empty map because nothing is configured and an empty map because the fetch
+// failed are completely different answers, and only one of them is safe to
+// calculate a salary from.
+// The query also used to drop its error on the floor, so a failed fetch looked
+// exactly like an empty table.
+function useExtraDaysConfig(): { map: ExtraDaysConfig; loaded: boolean } {
+  const { data, isSuccess } = useQuery({
     queryKey: ['designation_extra_days'],
     queryFn: async () => {
-      const { data } = await supabase.from('designation_extra_days')
+      const { data, error } = await supabase.from('designation_extra_days')
         .select('designation,extra_days_ge15,extra_days_lt15')
+      if (error) throw new Error(`Extra Days config: ${error.message}`)
       const map: ExtraDaysConfig = {}
       for (const r of (data ?? [])) {
         map[String(r.designation).toUpperCase().trim()] = {
@@ -1466,14 +1485,14 @@ function useExtraDaysConfig() {
     },
     staleTime: 5 * 60 * 1000,
   })
-  return data ?? {}
+  return { map: data ?? {}, loaded: isSuccess }
 }
 
 // ── SALARY ENTRY ──────────────────────────────────────────────────
 export const SalaryEntryPage: React.FC = () => {
   const qc = useQueryClient()
   const { map: skillWages } = useSkillWages()
-  const extraDaysConfig = useExtraDaysConfig()
+  const { map: extraDaysConfig, loaded: extraDaysLoaded } = useExtraDaysConfig()
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string|null>(null)
   const [origIsPaid, setOrigIsPaid] = useState(false)
@@ -1485,7 +1504,7 @@ export const SalaryEntryPage: React.FC = () => {
   // Uses the editable DB config (Admin Centre) — same source as the salary form,
   // so removing a designation there removes its extra day here too.
   const calcExtraDays = (designation: string|null|undefined, paidDays: number): number =>
-    calcExtraDaysM(designation, paidDays, extraDaysConfig)
+    calcExtraDaysM(designation, paidDays, extraDaysConfig, extraDaysLoaded)
 
   const blankForm = () => ({
     employee_id:'', month:'',
@@ -1764,6 +1783,11 @@ export const SalaryEntryPage: React.FC = () => {
   const mut=useMutation({
     mutationFn:async()=>{
       if(!form.employee_id||!form.month)throw new Error('Employee and month required')
+      // Same guard as Bulk Salary: extra days are worth real money and come
+      // from Admin Centre. Saving before that config arrives would bake the
+      // old hard-coded figures into this employee's salary row.
+      if(!extraDaysLoaded)
+        throw new Error('The Extra Days per Designation settings have not loaded yet. Wait a moment and save again — without them the extra days would fall back to old built-in figures.')
       if(form.is_paid==='true' && (form.payment_mode||'Cash').toLowerCase()!=='cash' && !form.bank_account_id)
         throw new Error('Select which bank account this is paid from')
       const n = (k: string) => parseFloat((form as any)[k]) || 0
@@ -3966,7 +3990,7 @@ export const BulkSalaryPage: React.FC = () => {
   const [tab, setTab] = useState<'attendance'|'salary'|'payment'>('attendance')
   const [filterFarm, setFilterFarm] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
-  const extraDaysConfig = useExtraDaysConfig()
+  const { map: extraDaysConfig, loaded: extraDaysLoaded } = useExtraDaysConfig()
   const { map: skillWages } = useSkillWages()
   const [absentMap, setAbsentMap] = useState<Record<string,string>>({})
   const [tdsMap, setTdsMap] = useState<Record<string,string>>({})
@@ -4251,6 +4275,18 @@ export const BulkSalaryPage: React.FC = () => {
   const saveAttendance = async () => {
     if (!employees?.length) { toast.error('No employees loaded'); return }
 
+    // Extra Days comes from Admin Centre → Extra Days per Designation, and it
+    // is worth real money - Rs 1,33,666 across 296 days in September. If that
+    // config has not arrived, the calculation would silently fall back to a
+    // hard-coded list of 15 designations against the 17 configured, paying the
+    // old built-in numbers with nothing on screen to say so. Better to refuse
+    // than to pay a wrong salary quietly.
+    if (!extraDaysLoaded) {
+      toast.error('The Extra Days per Designation settings have not loaded yet. Salaries are not calculated until they do, because without them the extra days would fall back to old built-in figures. Wait a moment and press again.',
+        { duration: 9000 })
+      return
+    }
+
     if (!monthEnded) {
       if (!isAdmin) {
         toast.error(
@@ -4295,6 +4331,7 @@ export const BulkSalaryPage: React.FC = () => {
           absentDays,
           monthDays: daysInMonth,
           extraDaysConfig,
+          extraDaysLoaded,
           skillWages,
           tds: parseFloat(tdsMap[emp.id] ?? '0') || 0,
           furtherAdvance: (advances as any)?.[emp.id] ?? 0,
