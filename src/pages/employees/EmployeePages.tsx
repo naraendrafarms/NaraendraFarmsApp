@@ -3832,6 +3832,7 @@ export const BulkSalaryPage: React.FC = () => {
   // The imported `today()` util (IST-aware) is shadowed by the `today` Date
   // above throughout this component — use this alias where a date string default is needed.
   const todayStr = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+  const { profile } = useAuth()
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`)
   const [tab, setTab] = useState<'attendance'|'salary'|'payment'>('attendance')
   const [filterFarm, setFilterFarm] = useState<string[]>([])
@@ -4099,8 +4100,45 @@ export const BulkSalaryPage: React.FC = () => {
     setTdsMap(tmap)
   }, [salaries, monthDate])
 
+  // A month that has not finished cannot give a true salary: the days still to
+  // come are unmarked, so nobody is absent for them and everyone computes at
+  // close to a full month. That is how September came out about 20% above
+  // August. Calculating anyway is sometimes legitimate (a final settlement, a
+  // dry run), so an admin may still do it — but never by accident, and never
+  // as something the cost reports will treat as real.
+  const monthEndStr = React.useMemo(() => {
+    const [y, m] = month.split('-').map(Number)
+    return `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`
+  }, [month])
+  const monthEnded = monthEndStr < todayStr()
+  const daysLeftInMonth = React.useMemo(() => {
+    if (monthEnded) return 0
+    const end = new Date(`${monthEndStr}T00:00:00`), now = new Date(`${todayStr()}T00:00:00`)
+    return Math.max(0, Math.round((end.getTime() - now.getTime()) / 86400000))
+  }, [monthEnded, monthEndStr])
+  const isAdmin = profile?.role === 'admin'
+  const provisionalCount = (salaries as any[] ?? []).filter((r: any) => r.provisional).length
+
   const saveAttendance = async () => {
     if (!employees?.length) { toast.error('No employees loaded'); return }
+
+    if (!monthEnded) {
+      if (!isAdmin) {
+        toast.error(
+          `${monthLabel} is not over — ${daysLeftInMonth} day(s) still to come and attendance is still being entered. ` +
+          `Salaries can be calculated from ${monthEndStr.slice(8)}/${monthEndStr.slice(5,7)} onwards. Ask an admin if this month must be run early.`,
+          { duration: 9000 })
+        return
+      }
+      const ok = window.confirm(
+        `${monthLabel} is NOT over.\n\n` +
+        `${daysLeftInMonth} day(s) are still to come and attendance is still being entered, so the days not yet ` +
+        `marked count as worked and every salary will come out close to a full month.\n\n` +
+        `These rows will be saved as PROVISIONAL and kept out of the cost reports until the month ends and you ` +
+        `calculate again.\n\nCalculate anyway?`)
+      if (!ok) return
+    }
+
     setSaving(true)
     try {
       const [yr, mn] = month.split('-')
@@ -4134,7 +4172,10 @@ export const BulkSalaryPage: React.FC = () => {
           otherDeduction: (deductions as any)?.[emp.id] ?? 0,
           advanceOpening: prevAdvClosing[emp.id] ?? 0,
         } as any)
-        return { employee_id: emp.id, month: monthDate, ...calc }
+        // Provisional when the month has not finished. Recalculating after it
+        // ends writes false here, so a month becomes real the moment it is
+        // properly run — nobody has to remember to clear a flag.
+        return { employee_id: emp.id, month: monthDate, ...calc, provisional: !monthEnded }
       })
       if (records.length) {
         const { error } = await supabase.from('salary_monthly').upsert(records, { onConflict: 'employee_id,month' })
@@ -4417,9 +4458,27 @@ export const BulkSalaryPage: React.FC = () => {
               <Button variant="outline" onClick={autoFillFromDaily}>📋 Auto-fill from Daily Attendance</Button>
               <Button variant="outline" onClick={exportAttendanceExcel}><Download size={14} className="mr-1"/>Export Excel</Button>
               <Button variant="outline" onClick={printAttendance}><Printer size={14} className="mr-1"/>Print</Button>
-              <Button onClick={saveAttendance} loading={saving}>Save & Calculate Salaries</Button>
+              <Button onClick={saveAttendance} loading={saving}
+                variant={!monthEnded && isAdmin ? 'outline' : undefined}
+                disabled={!monthEnded && !isAdmin}
+                title={!monthEnded && !isAdmin
+                  ? `${monthLabel} is not over — salaries can be calculated once the month ends`
+                  : undefined}>
+                Save &amp; Calculate Salaries
+              </Button>
             </div>
           </div>
+
+          {!monthEnded && (
+            <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-sm text-amber-900">
+              <strong>{monthLabel} is not over — {daysLeftInMonth} day(s) still to come.</strong>{' '}
+              Attendance for those days has not been entered, so they count as worked and every salary
+              would come out close to a full month. Calculate once the month has ended.
+              {isAdmin
+                ? ' As an admin you can still run it — it will ask you to confirm, and the rows are saved as PROVISIONAL and kept out of the cost reports until you calculate again after the month ends.'
+                : ' The button is disabled until then. If this month genuinely has to be run early, ask an admin.'}
+            </div>
+          )}
 
           {/* Info banner if daily attendance exists */}
           {dailyAtt && Object.keys(dailyAtt).length > 0 && (
@@ -4478,6 +4537,14 @@ export const BulkSalaryPage: React.FC = () => {
       {/* ── Tab 2: Salary Review ── */}
       {tab==='salary' && (
         <div className="space-y-4">
+          {provisionalCount > 0 && (
+            <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-sm text-amber-900">
+              <strong>PROVISIONAL — {provisionalCount} of these {salaries?.length ?? 0} rows were calculated before {monthLabel} ended.</strong>{' '}
+              The days not yet marked counted as worked, so these figures read high. They are kept OUT of Cost
+              Analysis and the financial-year total, so nothing here is being treated as real cost. Calculate
+              again once the month has ended and they become final automatically — nothing needs deleting.
+            </div>
+          )}
           <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-sm text-gray-600">{salaries?.length??0} employees · {monthLabel}</p>
             <Button variant="outline" icon={<Download size={14}/>} onClick={exportPayrollExcel}>Export Payroll Excel</Button>

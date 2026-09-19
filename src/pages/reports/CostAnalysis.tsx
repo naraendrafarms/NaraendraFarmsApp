@@ -177,6 +177,12 @@ export const SalaryCostPage: React.FC = () => {
           .select('month, earned_salary, net_salary, advance, tds, days_worked, employees!employee_id(farm_id, farms(code, name))')
           .gte('month', startDate)
           .lte('month', endDate)
+          // A salary calculated before its month ended is provisional, not
+          // cost: the days still to come are unmarked, so nobody is absent for
+          // them and everyone computes near a full month. Counting those would
+          // overstate the year. They come back in once the month is properly
+          // calculated, which clears the flag.
+          .eq('provisional', false)
           .order('month')
           .order('id').range(from, from + 999)
         if (!data || data.length === 0) break
@@ -339,7 +345,8 @@ export const CostOverviewPage: React.FC = () => {
         while (true) {
           const { data } = await supabase.from('salary_monthly')
             .select('net_salary').gte('month', `${y}-04-01`).lte('month', `${parseInt(y) + 1}-03-31`)
-            .range(from, from + 999)
+            .eq('provisional', false)   // same rule as the FY query above
+            .order('id').range(from, from + 999)
           if (!data || data.length === 0) break
           total += data.reduce((s: number, r: any) => s + (r.net_salary ?? 0), 0)
           if (data.length < 1000) break
