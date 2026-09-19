@@ -41,7 +41,7 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 , DateInput, SearchableSelect, MultiSelect } from '@/components/ui'
-import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3, Search } from 'lucide-react'
+import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3, Search, AlertTriangle } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 import { useAuth, can } from '@/lib/auth'
@@ -4129,6 +4129,51 @@ export const BulkSalaryPage: React.FC = () => {
     printReport({ title: 'Bulk Salary — Payroll', subtitle: month, headers, rows, rightAlignFrom: 3, footerRow: totRow })
   }
 
+  // Whose account the salary actually lands in — an explicit per-month override
+  // wins, then a shared-account holder, then the employee's own account. Same
+  // order exportKotakCMS resolves in, kept in one place so the warning below
+  // and the exported file can never disagree.
+  const resolveHolder = React.useCallback((r: any) => {
+    const emp = r.employees ?? {}
+    if (r.override_account_emp_id)
+      return { holder: (employees as any[] ?? []).find((e:any)=>e.id===r.override_account_emp_id) ?? null, kind: 'override' as const }
+    if ((emp.payment_mode ?? 'own_account') === 'shared_account')
+      return { holder: (employees as any[] ?? []).find((e:any)=>e.id===emp.shared_with_emp_id) ?? null, kind: 'shared' as const }
+    return { holder: emp, kind: 'own' as const }
+  }, [employees])
+
+  // Who silently falls out of the payment file. exportKotakCMS skips any row
+  // whose resolved account number is blank ("if (!acct) continue") and says
+  // nothing, so someone with no account still sits on this screen as a pending
+  // bank transfer while never reaching the bank. Measured 19/09/2026: 122 of
+  // 268 staff had no account number — Rs 14,34,405 of September — and the file
+  // still reported a healthy total for the other 146.
+  // Restricted to rows still pending: an already-paid row went out some other
+  // way and is not money waiting to move.
+  const unroutable = React.useMemo(() => (salaries as any[] ?? [])
+    .filter(r => ((r.employees?.payment_mode ?? 'own_account') !== 'cash' || r.override_account_emp_id))
+    .filter(r => (r.net_salary ?? 0) > 0 && !r.is_paid)
+    .map(r => {
+      const { holder, kind } = resolveHolder(r)
+      if (String(holder?.account_no ?? '').trim()) return null
+      const emp = r.employees ?? {}
+      const reason =
+        kind === 'override'
+          ? (holder ? `Override account (${holder.name}) has no account number`
+                    : 'Override account holder is not in the loaded list — clear the site filter')
+          : kind === 'shared'
+            ? (!emp.shared_with_emp_id ? 'Set to shared account but no holder chosen'
+               : holder ? `Shared account holder (${holder.name}) has no account number`
+                        : 'Shared account holder is not in the loaded list — clear the site filter')
+            : 'No account number on the employee'
+      return { id: r.id as string, emp, net: (r.net_salary ?? 0) as number, reason }
+    })
+    .filter(Boolean) as { id:string; emp:any; net:number; reason:string }[],
+    [salaries, resolveHolder])
+
+  const unroutableIds = React.useMemo(() => new Set(unroutable.map(u => u.id)), [unroutable])
+  const unroutableTotal = unroutable.reduce((s, u) => s + u.net, 0)
+
   const exportKotakCMS = () => {
     if (!salaries?.length) { toast.error('No salary data'); return }
     const payMap: Record<string,{name:string;ifsc:string;amount:number;empCodes:string[]}> = {}
@@ -4174,6 +4219,20 @@ export const BulkSalaryPage: React.FC = () => {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([cashHdr,...cashRows]), 'Cash Payments')
     }
 
+    // Anyone the CMS sheet above dropped for want of an account number gets a
+    // sheet of their own, so whoever uploads the file can see who was left out
+    // instead of trusting a bank total that quietly excludes them.
+    if (unroutable.length) {
+      const npHdr = ['Emp Code','Name','Site','Net Salary','Why not in the bank sheet']
+      const npRows: (string|number)[][] = unroutable.map(u => [
+        u.emp.emp_id ?? '', u.emp.name ?? '', u.emp.farms?.name ?? '', u.net, u.reason,
+      ])
+      npRows.push(['','TOTAL NOT PAID','', unroutableTotal, `${unroutable.length} employee(s)`])
+      const npWs = XLSX.utils.aoa_to_sheet([npHdr, ...npRows])
+      npWs['!cols'] = [{wch:14},{wch:26},{wch:22},{wch:14},{wch:52}]
+      XLSX.utils.book_append_sheet(wb, npWs, 'NOT PAYABLE')
+    }
+
     // Summary sheet
     const sumHdr = ['Employee Code','Employee Name','Payment Method','Account','Net Salary','Notes']
     const sumRows = (salaries as any[]).filter(r=>(r.net_salary??0)>0).map((r:any)=>{
@@ -4190,6 +4249,11 @@ export const BulkSalaryPage: React.FC = () => {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([sumHdr,...sumRows]), 'Payment Summary')
 
     XLSX.writeFile(wb, `Kotak_CMS_Salary_${month}.xlsx`)
+    if (unroutable.length) {
+      toast.error(
+        `${unroutable.length} employee(s) worth ${inr(unroutableTotal)} are NOT in this file — no account number. See the NOT PAYABLE sheet.`,
+        { duration: 8000 })
+    }
     toast.success(`CMS file downloaded · Bank total: ₹${total.toLocaleString('en-IN')}`)
   }
 
@@ -4375,6 +4439,56 @@ export const BulkSalaryPage: React.FC = () => {
             </div>
           </div>
 
+          {unroutable.length > 0 && (
+            <Card className="!bg-amber-50 !border-amber-300">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600"/>
+                <div className="min-w-0 w-full">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {unroutable.length} employee(s) worth {inr(unroutableTotal)} will NOT be in the payment file
+                  </p>
+                  <p className="text-xs text-amber-800 mt-1">
+                    They have no usable account number, so the Kotak CMS file leaves them out and its bank
+                    total covers only the rest. Set the account number on the employee, or set them to
+                    <strong> Shared (Other Employee Account)</strong> and name whose account to credit.
+                    Do not mark them Paid until that is done — no money has moved.
+                  </p>
+                  <div className="mt-2 max-h-56 overflow-auto rounded border border-amber-200 bg-white">
+                    <table className="w-full text-xs">
+                      <thead className="bg-amber-100/60 sticky top-0">
+                        <tr>
+                          <th className="text-left px-2 py-1 font-semibold text-amber-900">Code</th>
+                          <th className="text-left px-2 py-1 font-semibold text-amber-900">Name</th>
+                          <th className="text-left px-2 py-1 font-semibold text-amber-900">Site</th>
+                          <th className="text-right px-2 py-1 font-semibold text-amber-900">Net Salary</th>
+                          <th className="text-left px-2 py-1 font-semibold text-amber-900">Why</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {unroutable.map(u => (
+                          <tr key={u.id} className="border-t border-amber-100">
+                            <td className="px-2 py-1 font-mono font-bold text-brand-700">{u.emp.emp_id ?? '—'}</td>
+                            <td className="px-2 py-1 font-medium">{u.emp.name}</td>
+                            <td className="px-2 py-1 text-gray-500">{u.emp.farms?.name ?? '—'}</td>
+                            <td className="px-2 py-1 text-right font-semibold">{inr(u.net)}</td>
+                            <td className="px-2 py-1 text-gray-600">{u.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t border-amber-200 bg-amber-50 font-semibold">
+                          <td className="px-2 py-1" colSpan={3}>Total not payable ({unroutable.length})</td>
+                          <td className="px-2 py-1 text-right">{inr(unroutableTotal)}</td>
+                          <td/>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+
           <div>
             <h3 className="font-semibold text-gray-800 mb-3">Bank Transfers</h3>
             {paidSel.size > 0 && (
@@ -4418,7 +4532,8 @@ export const BulkSalaryPage: React.FC = () => {
                     const overrideHolder=r.override_account_emp_id?(employees as any[]??[]).find((e:any)=>e.id===r.override_account_emp_id):null
                     const holder=overrideHolder??(isShared?(employees as any[]??[]).find((e:any)=>e.id===emp.shared_with_emp_id):null)
                     return (
-                      <tr key={r.id} className={`hover:bg-gray-50 ${paidSel.has(r.id)?'bg-brand-50':''}`}>
+                      <tr key={r.id} className={`hover:bg-gray-50 ${paidSel.has(r.id)?'bg-brand-50':unroutableIds.has(r.id)?'bg-amber-50':''}`}
+                          title={unroutableIds.has(r.id)?'No usable account number — this row will not be in the payment file':undefined}>
                         <Td>{!r.is_paid && <input type="checkbox" checked={paidSel.has(r.id)}
                           onChange={()=>setPaidSel(s=>{const n=new Set(s); n.has(r.id)?n.delete(r.id):n.add(r.id); return n})} className="rounded" />}</Td>
                         <Td><span className="font-mono text-xs font-bold text-brand-700">{emp.emp_id??'—'}</span></Td>
