@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { Save, Download, ChevronLeft, ChevronRight, Plus, Trash2, Pencil, Printer, Upload } from 'lucide-react'
 import { useConfigOptions } from '@/hooks/useConfigOptions'
 import { fetchAllPages } from '@/lib/utils'
+import { loadSpells, groupSpells, employedOn, employedBetween } from '@/lib/employment'
 import { printReport, printAdvanceVoucher } from '@/lib/invoicePrint'
 import { parseFile, downloadXlsxTemplate } from '@/lib/parseFile'
 
@@ -62,10 +63,24 @@ export const DailyAttendancePage: React.FC = () => {
     }
   })
 
+  // Every stint ever recorded. Small table, loaded once and shared with the
+  // rule below, so this screen answers "was he employed that day" exactly as
+  // the Monthly grid and Bulk Salary do.
+  const { data: spellRows } = useQuery({
+    queryKey: ['employment_spells'],
+    queryFn: () => loadSpells(m => toast.error(m)),
+  })
+  const spells = React.useMemo(() => groupSpells(spellRows), [spellRows])
+
   const { data: employees } = useQuery({
+    // is_active is no longer a filter in the query — it is one input to the
+    // employment rule, applied below once the stints are known. Filtering on
+    // it here meant a man marked Left vanished from this screen altogether,
+    // so his days could not be entered even for the weeks he did work.
     queryKey: ['employees_by_farm', farmId],
     queryFn: async () => {
-      let q = supabase.from('employees').select('id,name,emp_id,designation,farm_id,gender').eq('is_active', true)
+      let q = supabase.from('employees')
+        .select('id,name,emp_id,designation,farm_id,gender,is_active,joining_date,leaving_date')
       if (farmId) q = q.eq('farm_id', farmId)
       const { data } = await q.order('emp_id', { ascending: true, nullsFirst: false })
       return data ?? []
@@ -75,9 +90,17 @@ export const DailyAttendancePage: React.FC = () => {
     // farm filter off when none is set.
   })
 
+  // Only people actually employed on the date being entered. Before this, an
+  // active employee appeared on every date including ones before he joined,
+  // which is how 333 days of attendance came to sit before their own joining
+  // dates. Anyone with no stint recorded falls back to how they behave today.
+  const employedToday = React.useMemo(
+    () => (employees ?? []).filter((e: any) => employedOn(e, spells[e.id], date)),
+    [employees, spells, date])
+
   // Client-side search + gender filter
   const q = search.trim().toLowerCase()
-  const visibleEmployees = (employees ?? []).filter((e: any) => {
+  const visibleEmployees = employedToday.filter((e: any) => {
     if (q && !(`${e.name ?? ''} ${e.emp_id ?? ''} ${e.designation ?? ''}`.toLowerCase().includes(q))) return false
     if (genderFilter && (e.gender ?? '') !== genderFilter) return false
     return true
@@ -113,6 +136,18 @@ export const DailyAttendancePage: React.FC = () => {
     },
     enabled: empIds.length > 0
   })
+
+  // A day may already hold attendance for someone the employment rule now
+  // hides — the 333 days dated before their own joining date, for instance.
+  // Hiding those rows silently would be its own fault, so they are named on
+  // screen instead. Nothing is deleted by this; it only reports.
+  const employedIdSet = React.useMemo(() => new Set(employedToday.map((e: any) => e.id)), [employedToday])
+  const savedButNotEmployed = React.useMemo(
+    () => (existing ?? [])
+      .filter((r: any) => !employedIdSet.has(r.employee_id))
+      .map((r: any) => (employees ?? []).find((e: any) => e.id === r.employee_id))
+      .filter(Boolean),
+    [existing, employedIdSet, employees])
 
   // Merge DB records into localStatus when data loads. Plain/blank by design —
   // an employee with no record stays unmarked (not silently defaulted to
@@ -284,6 +319,16 @@ export const DailyAttendancePage: React.FC = () => {
               <div className="ml-auto">
                 <Button size="sm" variant="danger" icon={<Trash2 size={14}/>} onClick={() => setBulkConfirm(true)}>Delete Selected ({sel.size})</Button>
               </div>
+            </div>
+          )}
+
+          {savedButNotEmployed.length > 0 && (
+            <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-sm text-amber-900">
+              <strong>{savedButNotEmployed.length} employee(s) already have attendance saved for this date but were not employed on it</strong>
+              {' '}— they are not shown below, so the day cannot be changed for them here.
+              Their stint says they had not joined yet, or had already left:{' '}
+              {savedButNotEmployed.map((e: any) => `${e.name} (${e.emp_id ?? '—'})`).join(', ')}.
+              Nothing has been deleted; fix the stint on the Employee List if the dates are wrong.
             </div>
           )}
 
@@ -1134,30 +1179,41 @@ export const MonthlyAttendanceGridPage: React.FC = () => {
     }
   })
 
-  const { data: employees = [], isLoading: empLoading } = useQuery({
-    queryKey: ['employees_att_grid', farmId, month],
+  const { data: spellRows } = useQuery({
+    queryKey: ['employment_spells'],
+    queryFn: () => loadSpells(m => toast.error(m)),
+  })
+  const spells = React.useMemo(() => groupSpells(spellRows), [spellRows])
+
+  const { data: allEmployees = [], isLoading: empLoading } = useQuery({
+    // gender is selected here on purpose: without it every helper fell into
+    // "gender not set" on the summary, which is what made 206 helpers look
+    // ungendered when the records were fine all along.
+    queryKey: ['employees_att_grid', farmId],
     queryFn: async () => {
-      const start = `${month}-01`
-      const end   = `${month}-${String(totalDays).padStart(2,'0')}`
-      // Currently-active employees always qualify. A resigned/deactivated
-      // employee also qualifies for any month they actually worked in
-      // (joining_date on/before month-end AND leaving_date on/after
-      // month-start, or no leaving_date recorded) — otherwise viewing a past
-      // month for someone who has since left silently dropped their row
-      // (and real attendance_daily/salary data with it) even though it's
-      // still in the database.
-      // gender is selected here on purpose: without it every helper fell into
-      // "gender not set" on the summary, which is what made 206 helpers look
-      // ungendered when the records were fine all along.
       let q = supabase.from('employees')
         .select('id,emp_id,name,designation,farm_id,gender,farms(name),is_active,joining_date,leaving_date')
-        .or(`is_active.eq.true,and(joining_date.lte.${end},or(leaving_date.is.null,leaving_date.gte.${start}))`)
         .order('emp_id', { ascending: true, nullsFirst: false })
       if (farmId) q = q.eq('farm_id', farmId)
       const { data } = await q
       return data ?? []
     }
   })
+
+  // Who was employed during this month. The old query let anyone through on
+  // is_active ALONE, so an active employee appeared in every month including
+  // ones before he joined — while Bulk Salary, which ignores is_active
+  // entirely, left him out of those same months. That disagreement is exactly
+  // why people showed in attendance but were missing from the salary month.
+  // Both screens now ask employedBetween(), so they cannot differ again.
+  // The month is filtered here rather than in the query, so the stints (which
+  // load separately) are always part of the answer — a value used inside a
+  // queryFn but missing from its key is its own kind of silent staleness.
+  const employees = React.useMemo(() => {
+    const start = `${month}-01`
+    const end   = `${month}-${String(totalDays).padStart(2,'0')}`
+    return (allEmployees as any[]).filter((e: any) => employedBetween(e, spells[e.id], start, end))
+  }, [allEmployees, spells, month, totalDays])
 
   // Once an employee's salary for this month has been marked paid
   // (salary_monthly.paid_date), their attendance for the whole month is

@@ -54,6 +54,7 @@ import { LogoChip } from '@/components/Logo'
 import { ifscError, accountNoError, aadhaarError } from '@/lib/validators'
 import { printReport, printColumnGrid } from '@/lib/invoicePrint'
 import { Printer } from 'lucide-react'
+import { loadSpells, groupSpells, employedBetween, openSpell, describeSpell, type Spell } from '@/lib/employment'
 
 // ── CSV export helper ─────────────────────────────────────────────
 function exportCSV(filename: string, headers: string[], rows: (string|number|null|undefined)[][]) {
@@ -150,7 +151,7 @@ export const EmployeeList: React.FC = () => {
   const [form, setForm] = useState({
     emp_id:'', name:'', designation:'', farm_id:'', department:'',
     base_salary:'', basic_rate:'', hra_rate:'', allowance_rate:'', skill_category:'', increment:'0', bank_name:'', bank_branch:'', account_no:'', ifsc:'',
-    joining_date:'', leaving_date:'', dob:'', gender:'', mobile:'', esi_no:'', pf_no:'',
+    joining_date:'', leaving_date:'', rejoin_date:'', dob:'', gender:'', mobile:'', esi_no:'', pf_no:'',
     uan_no:'', pan_no:'', aadhaar_no:'', is_active:'true',
     esi_applicable:'false', pf_applicable:'false', pt_applicable:'false',
     restrict_pf:'false', zone_area:'', emp_category:'', location_branch:'',
@@ -170,7 +171,7 @@ export const EmployeeList: React.FC = () => {
         increment: emp.increment?.toString()??'0',
         bank_name: emp.bank_name??'', bank_branch: emp.bank_branch??'',
         account_no: emp.account_no??'', ifsc: emp.ifsc??'',
-        joining_date: emp.joining_date??'', leaving_date: emp.leaving_date??'',
+        joining_date: emp.joining_date??'', leaving_date: emp.leaving_date??'', rejoin_date: '',
         dob: emp.dob??'', gender: emp.gender??'',
         mobile: emp.mobile??'', esi_no: emp.esi_no??'', pf_no: emp.pf_no??'',
         uan_no: emp.uan_no??'', pan_no: emp.pan_no??'', aadhaar_no: emp.aadhaar_no??'',
@@ -189,7 +190,7 @@ export const EmployeeList: React.FC = () => {
       setEditing(null)
       setForm({emp_id:'',name:'',designation:'',farm_id:'',department:'',
         base_salary:'',basic_rate:'',hra_rate:'',allowance_rate:'',skill_category:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
-        joining_date:'',leaving_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',
+        joining_date:'',leaving_date:'',rejoin_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',
         uan_no:'',pan_no:'',aadhaar_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
         restrict_pf:'false',zone_area:'',emp_category:'',location_branch:'',
         payment_mode:'own_account',shared_with_emp_id:''})
@@ -197,12 +198,36 @@ export const EmployeeList: React.FC = () => {
     setShowForm(true)
   }
 
+  // Every stint ever recorded, so the form knows which one a "mark left" would
+  // close and whether this person is coming back rather than starting fresh.
+  const { data: spellRows } = useQuery({
+    queryKey: ['employment_spells'],
+    queryFn: () => loadSpells(m => toast.error(m)),
+  })
+  const spells = React.useMemo(() => groupSpells(spellRows), [spellRows])
+  const editingSpells: Spell[] = editing ? (spells[editing.id] ?? []) : []
+  const wasLeft = !!editing && editing.is_active === false
+  const isRejoining = wasLeft && form.is_active === 'true'
+
   const mut = useMutation({
     mutationFn: async () => {
       if (!form.name || !form.farm_id) throw new Error('Name and site required')
       const ifscErr = ifscError(form.ifsc); if (ifscErr) throw new Error(ifscErr)
       const aadErr = aadhaarError(form.aadhaar_no); if (aadErr) throw new Error(aadErr)
       const acctErr = accountNoError(form.account_no); if (acctErr) throw new Error(acctErr)
+
+      // A stint has to have an end, or no month can tell whether he was here.
+      // That is why marking someone Left now asks for the date instead of just
+      // flipping a dropdown, and why coming back asks for one too.
+      const markingLeft = form.is_active === 'false'
+      if (markingLeft && !form.leaving_date)
+        throw new Error('Enter the date he left. Without it no month can tell whether he was working, and attendance and salary would disagree again.')
+      if (isRejoining && !form.rejoin_date)
+        throw new Error('Enter the date he rejoined. The earlier stint is kept exactly as it is and a new one starts from this date.')
+      const lastLeft = editingSpells.map(x => x.left_date).filter(Boolean).sort().pop()
+      if (isRejoining && lastLeft && form.rejoin_date <= String(lastLeft))
+        throw new Error(`The rejoining date must be after he left (${String(lastLeft)}).`)
+
       const payload = {
         emp_id: form.emp_id || null, name: form.name, designation: form.designation || null,
         farm_id: form.farm_id, department: form.department || null,
@@ -232,10 +257,67 @@ export const EmployeeList: React.FC = () => {
         payment_mode: form.payment_mode || 'own_account',
         shared_with_emp_id: form.shared_with_emp_id || null,
       }
-      if (editing) { const {error}=await supabase.from('employees').update(payload).eq('id',editing.id); if(error)throw error }
-      else { const {error}=await supabase.from('employees').insert(payload); if(error)throw error }
+      // Rejoining clears the leaving date on the employee record — that field
+      // now means "the stint he is in has ended", and he is in a new one. The
+      // stint he left is NOT touched, which is the whole point: the fact that
+      // he went is kept instead of being erased to make the months work.
+      const empPayload = isRejoining ? { ...payload, leaving_date: null } : payload
+
+      let empId = editing?.id as string | undefined
+      if (editing) {
+        const { error } = await supabase.from('employees').update(empPayload).eq('id', editing.id)
+        if (error) throw error
+      } else {
+        const { data, error } = await supabase.from('employees').insert(empPayload).select('id').single()
+        if (error) throw error
+        empId = data?.id
+      }
+      if (!empId) return
+
+      // Keep the stints in step with what was just saved.
+      const open = openSpell(editingSpells)
+      if (form.is_active === 'false') {
+        if (open) {
+          const { error } = await supabase.from('employment_spells')
+            .update({ left_date: form.leaving_date }).eq('id', open.id!)
+          if (error) throw error
+        } else {
+          const { error } = await supabase.from('employment_spells').insert({
+            employee_id: empId,
+            joined_date: form.joining_date || form.leaving_date,
+            left_date: form.leaving_date,
+            reason: 'Left',
+          })
+          if (error) throw error
+        }
+      } else if (isRejoining) {
+        const { error } = await supabase.from('employment_spells').insert({
+          employee_id: empId, joined_date: form.rejoin_date, left_date: null, reason: 'Rejoined',
+        })
+        if (error) throw error
+      } else if (!editingSpells.length && form.joining_date) {
+        // First time a joining date is put on someone who had none — the 230
+        // whose dates predate the app get their first stint here.
+        const { error } = await supabase.from('employment_spells').insert({
+          employee_id: empId,
+          joined_date: form.joining_date,
+          left_date: form.leaving_date || null,
+          reason: 'Opening stint',
+        })
+        if (error) throw error
+      } else if (open && form.joining_date && open.joined_date !== form.joining_date) {
+        // The joining date was corrected; move the stint he is currently in.
+        const { error } = await supabase.from('employment_spells')
+          .update({ joined_date: form.joining_date }).eq('id', open.id!)
+        if (error) throw error
+      }
     },
-    onSuccess: () => { toast.success('Saved!'); qc.invalidateQueries({queryKey:['employees']}); setShowForm(false) },
+    onSuccess: () => {
+      toast.success('Saved!')
+      qc.invalidateQueries({queryKey:['employees']})
+      qc.invalidateQueries({queryKey:['employment_spells']})
+      setShowForm(false)
+    },
     onError: (e:any) => toast.error(e.message)
   })
 
@@ -628,9 +710,33 @@ export const EmployeeList: React.FC = () => {
           </FormRow>
           <FormRow>
             <DateInput label="Joining Date" value={form.joining_date} onChange={e=>s('joining_date',e.target.value)} />
-            <DateInput label="Leaving Date" value={form.leaving_date} onChange={e=>s('leaving_date',e.target.value)} />
+            <DateInput label={form.is_active==='false' ? 'Leaving Date *' : 'Leaving Date'}
+              value={form.leaving_date} onChange={e=>s('leaving_date',e.target.value)} />
             <Select label="Status" options={[{value:'true',label:'Active'},{value:'false',label:'Left / Inactive'}]} value={form.is_active} onChange={e=>s('is_active',e.target.value)} />
+            {isRejoining && (
+              <DateInput label="Rejoining Date *" value={form.rejoin_date} onChange={e=>s('rejoin_date',e.target.value)} />
+            )}
           </FormRow>
+          {editing && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              <span className="font-semibold text-gray-700">Employment history: </span>
+              {editingSpells.length
+                ? editingSpells.map(sp => describeSpell(sp)).join('  ·  ')
+                : 'no stint recorded — he is treated as employed throughout, which is how the app behaved before stints existed. Entering a joining date above records his first one.'}
+              {form.is_active === 'false' && (
+                <div className="mt-1 text-amber-700">
+                  Marking him Left closes the stint he is in on the leaving date. He then drops out of attendance
+                  and out of the salary run from that date, and nothing is deleted.
+                </div>
+              )}
+              {isRejoining && (
+                <div className="mt-1 text-green-700">
+                  A new stint starts on the rejoining date. The one he already finished is kept exactly as it is,
+                  so the months he was away stay empty instead of being filled in.
+                </div>
+              )}
+            </div>
+          )}
           <Divider label="Bank Details" />
           <FormRow>
             <Input label="Bank Name" value={form.bank_name} onChange={e=>s('bank_name',e.target.value)} />
@@ -3759,31 +3865,40 @@ export const BulkSalaryPage: React.FC = () => {
     queryKey: ['bank_accounts_list'],
     queryFn: async () => { const { data } = await supabase.from('bank_accounts').select('id,account_name,bank_name').order('account_name'); return data ?? [] }
   })
-  const { data: employees } = useQuery({
-    // Keyed on the month too — the list must change when the month does.
-    queryKey: ['employees_bulk', filterFarm, month],
+  const { data: spellRows } = useQuery({
+    queryKey: ['employment_spells'],
+    queryFn: () => loadSpells(m => toast.error(m)),
+  })
+  const spells = React.useMemo(() => groupSpells(spellRows), [spellRows])
+
+  const { data: allEmployees } = useQuery({
+    queryKey: ['employees_bulk', filterFarm],
     queryFn: async () => {
-      const [yr, mn] = month.split('-').map(Number)
-      const start = `${month}-01`
-      const end   = `${month}-${String(new Date(yr, mn, 0).getDate()).padStart(2,'0')}`
-      // Only people actually employed during the SELECTED month. This used to
-      // filter on is_active alone and never looked at the month at all, so
-      // anyone on the payroll today appeared in every month — including staff
-      // who had not joined yet (confirmed: 8 employees who joined 01/08/2026
-      // were listed in, and had salary rows saved for, July 2026). The mirror
-      // image was just as wrong: anyone who has since left vanished from the
-      // months they genuinely worked.
-      // joining_date/leaving_date may be blank on older records, so a NULL is
-      // always treated as "no boundary" rather than excluding the person.
       let q = supabase.from('employees')
-        .select('id,emp_id,name,designation,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,joining_date,leaving_date,farms(name,code)')
-        .or(`joining_date.is.null,joining_date.lte.${end}`)
-        .or(`leaving_date.is.null,leaving_date.gte.${start}`)
+        .select('id,emp_id,name,designation,base_salary,basic_rate,hra_rate,allowance_rate,skill_category,esi_applicable,pf_applicable,pt_applicable,restrict_pf,zone_area,emp_category,location_branch,account_no,ifsc,bank_name,payment_mode,shared_with_emp_id,is_active,joining_date,leaving_date,farms(name,code)')
         .order('emp_id', { ascending: true, nullsFirst: false })
       if (filterFarm.length) q = q.in('farm_id', filterFarm)
       const { data } = await q; return data ?? []
     }
   })
+
+  // Only people actually employed during the SELECTED month. This once
+  // filtered on is_active alone and never looked at the month at all, so
+  // anyone on the payroll today appeared in every month — including staff who
+  // had not joined yet (confirmed: 8 employees who joined 01/08/2026 were
+  // listed in, and had salary rows saved for, July 2026). The mirror image was
+  // just as wrong: anyone who had since left vanished from months they
+  // genuinely worked.
+  // The rule now lives in one place and reads employment_spells, so a man who
+  // left in June and rejoined in September is in June and September and out of
+  // July and August, without anyone clearing a date. Blank dates and no stint
+  // still mean "no boundary", so nobody whose dates predate the app is lost.
+  const employees = React.useMemo(() => {
+    const [yr, mn] = month.split('-').map(Number)
+    const start = `${month}-01`
+    const end   = `${month}-${String(new Date(yr, mn, 0).getDate()).padStart(2,'0')}`
+    return (allEmployees as any[] ?? []).filter((e: any) => employedBetween(e, spells[e.id], start, end))
+  }, [allEmployees, spells, month])
   const { data: salaries, refetch: refetchSalaries } = useQuery({
     queryKey: ['bulk_salary', monthDate, filterFarm],
     queryFn: async () => {
