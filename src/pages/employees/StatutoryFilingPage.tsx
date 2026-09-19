@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { inr } from '@/lib/utils'
+import { inr, fetchAllPages } from '@/lib/utils'
 import { Card, SectionHeader, Button, Input, Spinner, Table, Th, Td, Badge } from '@/components/ui'
 import { Download, CheckCircle2, Pencil, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -244,6 +244,221 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
   )
 }
 
+// ── FORM 16 — PART B ──────────────────────────────────────────────────────────
+// Read only. Sums salary_monthly over a financial year and lays the figures out
+// as the Part B annexure. Nothing here writes, and none of the ESI / PF / PT /
+// EPS / EDLI arithmetic above or in computeSalaryForEmp is touched — this only
+// reads what those calculations already saved.
+//
+// TWO LIMITS, stated on the form itself rather than left to be discovered:
+//  * PART A CANNOT COME FROM ANY APP. It is downloaded from TRACES once the
+//    quarterly 24Q return is filed, and carries the government's own
+//    certificate number. This is Part B, the annexure the employer prepares.
+//  * The app holds no investment declarations - no 80C beyond the employee's
+//    own PF, no HRA proof, no housing loan interest, and no tax regime. So the
+//    figures here are what the EMPLOYER knows, and the tax computation itself
+//    is left to whoever files rather than invented from a guessed regime.
+
+const FY_LABEL = (startYear: number) => `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`
+const AY_LABEL = (startYear: number) => `${startYear + 1}-${String((startYear + 2) % 100).padStart(2, '0')}`
+
+const Form16PartB: React.FC = () => {
+  const now = new Date()
+  // Indian financial year runs 1 April to 31 March, so before April the current
+  // FY still started in the previous calendar year.
+  const [fyStart, setFyStart] = useState(now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1)
+  const [search, setSearch] = useState('')
+
+  const fyFrom = `${fyStart}-04-01`
+  const fyTo   = `${fyStart + 1}-03-31`
+
+  const { data: company } = useQuery({
+    queryKey: ['company_settings_form16'],
+    queryFn: async () => {
+      const { data } = await supabase.from('company_settings')
+        .select('company_name,address_line1,address_line2,tan_no,pan_no').limit(1).maybeSingle()
+      return data ?? null
+    }
+  })
+
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ['form16', fyFrom, fyTo],
+    queryFn: async () => {
+      const all = await fetchAllPages<any>((from, to) => supabase.from('salary_monthly')
+        .select('id,month,total_earning,gross_salary,earned_salary,pf_employee,pt,tds,tds_deposited,provisional,employees!employee_id!inner(id,name,emp_id,designation,pan_no,uan_no)')
+        .gte('month', fyFrom).lte('month', fyTo)
+        .order('month').order('id').range(from, to),
+        'Form 16', m => toast.error(m))
+
+      const byEmp: Record<string, any> = {}
+      for (const r of all) {
+        const e = r.employees ?? {}
+        // A month calculated before it ended is provisional and is not a real
+        // figure yet - counting it would overstate the year on a statutory
+        // document. It is counted separately so the form can say so.
+        const prov = !!r.provisional
+        const g = byEmp[e.id] ||= {
+          id: e.id, name: e.name ?? '', emp_id: e.emp_id ?? '', designation: e.designation ?? '',
+          pan: e.pan_no ?? '', uan: e.uan_no ?? '',
+          gross: 0, pf: 0, pt: 0, tds: 0, tdsDeposited: 0, months: 0, provisionalMonths: 0,
+        }
+        if (prov) { g.provisionalMonths++; continue }
+        g.months++
+        g.gross += Number(r.total_earning ?? r.gross_salary ?? r.earned_salary ?? 0)
+        g.pf    += Number(r.pf_employee ?? 0)
+        g.pt    += Number(r.pt ?? 0)
+        g.tds   += Number(r.tds ?? 0)
+        g.tdsDeposited += Number(r.tds_deposited ?? 0)
+      }
+      return Object.values(byEmp).sort((a: any, b: any) =>
+        String(a.emp_id).localeCompare(String(b.emp_id)) || String(a.name).localeCompare(String(b.name)))
+    }
+  })
+
+  const q = search.trim().toLowerCase()
+  const shown = (rows as any[]).filter(r => !q ||
+    [r.name, r.emp_id, r.pan].some(v => String(v ?? '').toLowerCase().includes(q)))
+
+  const missingPan = shown.filter(r => !String(r.pan ?? '').trim())
+  const withProvisional = shown.filter(r => r.provisionalMonths > 0)
+
+  const printOne = (r: any) => {
+    const chargeable = r.gross - r.pt
+    const co = company ?? ({} as any)
+    printReport({
+      title: 'FORM 16 — PART B (Annexure)',
+      subtitle:
+        `${r.name}${r.emp_id ? ` (${r.emp_id})` : ''}` +
+        `${r.designation ? ` · ${r.designation}` : ''}` +
+        ` · PAN ${r.pan || 'NOT ON RECORD'}` +
+        ` — Financial Year ${FY_LABEL(fyStart)}, Assessment Year ${AY_LABEL(fyStart)}` +
+        ` · Employer TAN ${co.tan_no || 'not set'} · Employer PAN ${co.pan_no || 'not set'}` +
+        ` · Period 01/04/${fyStart} to 31/03/${fyStart + 1} · ${r.months} month(s) of salary`,
+      headers: ['Particulars', 'Amount'],
+      rightAlignFrom: 1,
+      rows: [
+        ['1. Gross salary — section 17(1)', inr(r.gross)],
+        ['2. Less: allowances exempt under section 10', 'Not held by the employer — see note'],
+        ['3. Less: deduction under section 16(iii) — professional tax', inr(r.pt)],
+        ['4. Income chargeable under the head Salaries (1 − 3)', inr(chargeable)],
+        ['5. Deduction under Chapter VI-A — 80C, employee provident fund', inr(r.pf)],
+        ['6. Tax deducted at source on salary', inr(r.tds)],
+        ['7. Of which shown as deposited', inr(r.tdsDeposited)],
+        ['', ''],
+        ['NOTE — Part A is not produced here. It is downloaded from TRACES after the quarterly 24Q return is filed and carries the certificate number.', ''],
+        ['NOTE — The app holds no investment declarations: no 80C beyond the provident fund above, no HRA proof, no housing loan interest and no tax regime. Standard deduction and the tax on total income are therefore NOT computed here and must be completed by whoever files.', ''],
+        ...(r.provisionalMonths ? [[`NOTE — ${r.provisionalMonths} month(s) in this year are PROVISIONAL (calculated before the month ended) and are EXCLUDED from every figure above. Recalculate those months to include them.`, '']] : []),
+      ],
+      footerRow: ['Income chargeable under Salaries', inr(chargeable)],
+    })
+  }
+
+  const exportAll = () => {
+    if (!shown.length) { toast.error('Nothing to export'); return }
+    const co = company ?? ({} as any)
+    const headers = ['Emp Code','Name','Designation','Employee PAN','UAN','Months counted',
+      'Gross salary 17(1)','Professional tax 16(iii)','Income chargeable','80C — employee PF',
+      'TDS deducted','TDS shown deposited','Provisional months excluded']
+    const body = shown.map(r => [
+      r.emp_id, r.name, r.designation, r.pan || 'NOT ON RECORD', r.uan, r.months,
+      r.gross, r.pt, r.gross - r.pt, r.pf, r.tds, r.tdsDeposited, r.provisionalMonths,
+    ])
+    const ws = XLSX.utils.aoa_to_sheet([
+      [`FORM 16 PART B — ${co.company_name ?? 'Employer'} — FY ${FY_LABEL(fyStart)} (AY ${AY_LABEL(fyStart)})`],
+      [`Employer TAN ${co.tan_no ?? 'not set'} · Employer PAN ${co.pan_no ?? 'not set'}`],
+      ['Part A comes from TRACES, not from this app. No investment declarations are held, so standard deduction and tax on total income are not computed here.'],
+      [],
+      headers, ...body,
+    ])
+    ws['!cols'] = [{wch:14},{wch:26},{wch:18},{wch:14},{wch:16},{wch:14},
+      {wch:18},{wch:20},{wch:18},{wch:18},{wch:14},{wch:18},{wch:22}]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Form 16 Part B')
+    XLSX.writeFile(wb, `Form16_PartB_FY${FY_LABEL(fyStart)}.xlsx`)
+    toast.success(`Exported ${shown.length} employee(s)`)
+  }
+
+  const fyOptions = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i)
+
+  return (
+    <Card>
+      <SectionHeader title="Form 16 — Part B (Annexure)"
+        subtitle="Salary, professional tax, provident fund and TDS for a financial year, per employee" />
+
+      <div className="flex flex-wrap gap-3 items-end mb-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Financial Year</label>
+          <select value={fyStart} onChange={e => setFyStart(parseInt(e.target.value))}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            {fyOptions.map(y => <option key={y} value={y}>{FY_LABEL(y)} (AY {AY_LABEL(y)})</option>)}
+          </select>
+        </div>
+        <Input label="Search" value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Name, emp code or PAN…" className="w-56" />
+        <Button variant="outline" icon={<Download size={14} />} onClick={exportAll}>Export All (Excel)</Button>
+      </div>
+
+      <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 mb-3">
+        <strong>This is Part B only.</strong> Part A is downloaded from TRACES after the quarterly 24Q return is
+        filed — no app can produce it. And because no investment declarations are held here (nothing beyond the
+        employee's own PF, no HRA proof, no housing loan interest, no tax regime), the standard deduction and the
+        tax on total income are deliberately NOT computed — those are for whoever files, not for a guess.
+      </div>
+
+      {missingPan.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 mb-3">
+          <strong>{missingPan.length} employee(s) have no PAN on record</strong> — a Form 16 without a PAN is not
+          valid, and TDS without PAN attracts a higher rate. Add it in Employees:{' '}
+          {missingPan.slice(0, 12).map(r => r.name).join(', ')}{missingPan.length > 12 ? ', …' : ''}
+        </div>
+      )}
+
+      {withProvisional.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 mb-3">
+          <strong>{withProvisional.length} employee(s) have provisional month(s) in this year</strong> — months
+          calculated before they ended. They are EXCLUDED from every figure here, because a part-finished month is
+          not a real one and must never reach a statutory certificate. Recalculate those months to include them.
+        </div>
+      )}
+
+      {isLoading ? <div className="flex justify-center p-6"><Spinner size={24} /></div> : (
+        <Table>
+          <thead><tr>
+            <Th>Code</Th><Th>Name</Th><Th>PAN</Th><Th right>Months</Th>
+            <Th right>Gross 17(1)</Th><Th right>PT 16(iii)</Th><Th right>Chargeable</Th>
+            <Th right>80C — PF</Th><Th right>TDS</Th><Th></Th>
+          </tr></thead>
+          <tbody>
+            {shown.map((r: any) => (
+              <tr key={r.id} className={!String(r.pan ?? '').trim() ? 'bg-amber-50' : ''}>
+                <Td><span className="font-mono text-xs font-bold text-brand-700">{r.emp_id || '—'}</span></Td>
+                <Td className="font-medium">{r.name}</Td>
+                <Td className="text-xs font-mono">{r.pan || <span className="text-amber-700">no PAN</span>}</Td>
+                <Td right className="text-xs">{r.months}</Td>
+                <Td right>{inr(r.gross)}</Td>
+                <Td right>{inr(r.pt)}</Td>
+                <Td right className="font-semibold">{inr(r.gross - r.pt)}</Td>
+                <Td right>{inr(r.pf)}</Td>
+                <Td right>{inr(r.tds)}</Td>
+                <Td>
+                  <Button size="sm" variant="ghost" icon={<Printer size={13} />} onClick={() => printOne(r)}>
+                    Form 16
+                  </Button>
+                </Td>
+              </tr>
+            ))}
+            {!shown.length && (
+              <tr><Td colSpan={10} className="text-center text-gray-400 py-6">
+                No salary records for FY {FY_LABEL(fyStart)}{q ? ' matching this search' : ''}
+              </Td></tr>
+            )}
+          </tbody>
+        </Table>
+      )}
+    </Card>
+  )
+}
+
 export const StatutoryFilingPage: React.FC = () => {
   const now = new Date()
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
@@ -439,6 +654,8 @@ export const StatutoryFilingPage: React.FC = () => {
           </Card>
         </div>
       )}
+      <Form16PartB />
+
       <p className="text-xs text-gray-400">Rows with ⚠ are missing UAN / IP number — add them in Employees so the upload file is valid. ECR uses the ₹15,000 EPS/EDLI ceiling; PF wage respects each employee's Restrict PF. GST Payable assumes no ITC is claimed on purchases (per company policy) — it is Output GST on sales plus RCM GST on purchases marked Reverse Charge.</p>
     </div>
   )
