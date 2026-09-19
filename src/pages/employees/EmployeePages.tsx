@@ -41,7 +41,7 @@ import {
   Card, CardHeader, Button, Input, Select, FormRow, Modal, Divider,
   Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState
 , DateInput, SearchableSelect, MultiSelect } from '@/components/ui'
-import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3, Search, AlertTriangle } from 'lucide-react'
+import { Plus, Users, IndianRupee, Edit2, Trash2, Merge, Download, Upload, FileText, BarChart3, Search, AlertTriangle, Eye } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 import { useAuth, can } from '@/lib/auth'
@@ -110,6 +110,33 @@ const BulkBar: React.FC<{ count: number; onDelete: () => void; onClear: () => vo
   )
 
 // ── EMPLOYEE LIST ────────────────────────────────────────────────
+// How the three salary payment routes read on a printout or an export. The
+// raw values are own_account / shared_account / cash (migration 166).
+// One labelled group inside the employee details view. A blank value is shown
+// as a dash rather than hidden, so "not entered" is visible instead of looking
+// like the field does not exist.
+const DetailBlock: React.FC<{ title: string; rows: [string, any][] }> = ({ title, rows }) => (
+  <div>
+    <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">{title}</p>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-gray-200 p-3">
+      {rows.map(([label, value]) => (
+        <div key={label} className="flex justify-between gap-3 border-b border-gray-100 last:border-0 py-0.5">
+          <span className="text-xs text-gray-500 shrink-0">{label}</span>
+          <span className={`text-xs text-right ${String(value ?? '').trim() ? 'font-medium text-gray-800' : 'text-gray-300'}`}>
+            {String(value ?? '').trim() || '—'}
+          </span>
+        </div>
+      ))}
+    </div>
+  </div>
+)
+
+const PAY_MODE_LABEL: Record<string, string> = {
+  own_account: 'Own Account',
+  shared_account: 'Shared (other employee)',
+  cash: 'Cash',
+}
+
 export const EmployeeList: React.FC = () => {
   const qc = useQueryClient()
   const { profile } = useAuth()
@@ -136,6 +163,15 @@ export const EmployeeList: React.FC = () => {
     }
   })
 
+  // Whose account a shared-salary employee is paid into. Named rather than
+  // shown as a raw id, which is meaningless on a printed list.
+  const holderName = (e: any) => {
+    if ((e.payment_mode ?? 'own_account') !== 'shared_account' || !e.shared_with_emp_id) return ''
+    const h = (employees as any[] ?? []).find((x: any) => x.id === e.shared_with_emp_id)
+    return h ? `${h.name}${h.emp_id ? ` (${h.emp_id})` : ''}` : 'holder not found'
+  }
+  const [viewEmp, setViewEmp] = useState<any>(null)
+
   const { data: employees, isLoading } = useQuery({
     queryKey: ['employees', farmFilter],
     queryFn: async () => {
@@ -152,7 +188,7 @@ export const EmployeeList: React.FC = () => {
     emp_id:'', name:'', designation:'', farm_id:'', department:'',
     base_salary:'', basic_rate:'', hra_rate:'', allowance_rate:'', skill_category:'', increment:'0', bank_name:'', bank_branch:'', account_no:'', ifsc:'',
     joining_date:'', leaving_date:'', rejoin_date:'', dob:'', gender:'', mobile:'', esi_no:'', pf_no:'',
-    uan_no:'', pan_no:'', aadhaar_no:'', is_active:'true',
+    uan_no:'', pan_no:'', aadhaar_no:'', voter_id:'', is_active:'true',
     esi_applicable:'false', pf_applicable:'false', pt_applicable:'false',
     restrict_pf:'false', zone_area:'', emp_category:'', location_branch:'',
     payment_mode:'own_account', shared_with_emp_id:'',
@@ -174,7 +210,7 @@ export const EmployeeList: React.FC = () => {
         joining_date: emp.joining_date??'', leaving_date: emp.leaving_date??'', rejoin_date: '',
         dob: emp.dob??'', gender: emp.gender??'',
         mobile: emp.mobile??'', esi_no: emp.esi_no??'', pf_no: emp.pf_no??'',
-        uan_no: emp.uan_no??'', pan_no: emp.pan_no??'', aadhaar_no: emp.aadhaar_no??'',
+        uan_no: emp.uan_no??'', pan_no: emp.pan_no??'', aadhaar_no: emp.aadhaar_no??'', voter_id: emp.voter_id??'',
         is_active: emp.is_active?'true':'false',
         esi_applicable: emp.esi_applicable?'true':'false',
         pf_applicable: emp.pf_applicable?'true':'false',
@@ -191,7 +227,7 @@ export const EmployeeList: React.FC = () => {
       setForm({emp_id:'',name:'',designation:'',farm_id:'',department:'',
         base_salary:'',basic_rate:'',hra_rate:'',allowance_rate:'',skill_category:'',increment:'0',bank_name:'',bank_branch:'',account_no:'',ifsc:'',
         joining_date:'',leaving_date:'',rejoin_date:'',dob:'',gender:'',mobile:'',esi_no:'',pf_no:'',
-        uan_no:'',pan_no:'',aadhaar_no:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
+        uan_no:'',pan_no:'',aadhaar_no:'',voter_id:'',is_active:'true',esi_applicable:'false',pf_applicable:'false',pt_applicable:'false',
         restrict_pf:'false',zone_area:'',emp_category:'',location_branch:'',
         payment_mode:'own_account',shared_with_emp_id:''})
     }
@@ -246,6 +282,9 @@ export const EmployeeList: React.FC = () => {
         uan_no: form.uan_no || null, pf_no: form.uan_no || null,
         pan_no: form.pan_no ? form.pan_no.toUpperCase() : null,
         aadhaar_no: form.aadhaar_no ? form.aadhaar_no.replace(/\D/g, '') : null,
+        // EPIC number. Stored as typed but upper-cased: a voter ID is letters
+        // then digits, and a lower-case one would not match a search or a scan.
+        voter_id: form.voter_id ? form.voter_id.trim().toUpperCase() : null,
         is_active: form.is_active === 'true',
         esi_applicable: form.esi_applicable === 'true',
         pf_applicable: form.pf_applicable === 'true',
@@ -465,15 +504,30 @@ export const EmployeeList: React.FC = () => {
   const byFarm = filteredEmps.reduce((acc:any,e:any)=>{ const k=e.farms?.name||'Unknown'; (acc[k]??=[]).push(e); return acc; },{})
   const designationsInData = Array.from(new Set((employees??[]).map((e:any)=>e.designation).filter(Boolean))) as string[]
 
+  // The export used to carry 24 of the 38 fields on an employee, so the pay
+  // structure, the statutory extras and the payment routing all had to be read
+  // off the screen one person at a time. It now carries everything the form
+  // captures, in the order the form asks for it.
   const exportEmployees = () => {
     exportCSV(`employees_${new Date().toISOString().slice(0,10)}.csv`,
-      ['emp_id','name','designation','department','site','gender','dob','mobile','aadhaar_no','pan_no','base_salary','increment','esi_no','uan_no','bank_name','bank_branch','account_no','ifsc','joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','status'],
+      ['emp_id','name','designation','department','site','skill_category','emp_category','zone_area','location_branch',
+       'gender','dob','mobile',
+       'aadhaar_no','pan_no','voter_id','esi_no','uan_no',
+       'base_salary','increment','basic_rate','hra_rate','allowance_rate',
+       'bank_name','bank_branch','account_no','ifsc','payment_mode','salary_deposited_into',
+       'joining_date','leaving_date','esi_applicable','pf_applicable','pt_applicable','restrict_pf','status'],
       filteredEmps.map((e:any)=>[
         e.emp_id, e.name, e.designation, e.department, e.farms?.name,
-        e.gender, e.dob, e.mobile, fmtAadhaar(e.aadhaar_no), e.pan_no, e.base_salary, e.increment,
-        e.esi_no, e.uan_no, e.bank_name, e.bank_branch, e.account_no, e.ifsc,
+        e.skill_category, e.emp_category, e.zone_area, e.location_branch,
+        e.gender, e.dob, e.mobile,
+        fmtAadhaar(e.aadhaar_no), e.pan_no, e.voter_id, e.esi_no, e.uan_no,
+        e.base_salary, e.increment, e.basic_rate, e.hra_rate, e.allowance_rate,
+        e.bank_name, e.bank_branch, e.account_no, e.ifsc,
+        PAY_MODE_LABEL[e.payment_mode ?? 'own_account'] ?? e.payment_mode,
+        holderName(e),
         e.joining_date, e.leaving_date,
         e.esi_applicable?'Yes':'No', e.pf_applicable?'Yes':'No', e.pt_applicable?'Yes':'No',
+        e.restrict_pf?'Yes':'No',
         e.is_active?'Active':'Left',
       ])
     )
@@ -483,9 +537,15 @@ export const EmployeeList: React.FC = () => {
     printReport({
       title: 'Employee List',
       subtitle: `${filteredEmps.length} employee(s)`,
-      headers: ['Emp ID','Name','Designation','Site','Gender','Mobile','Aadhaar','Base Salary','Status'],
-      rows: filteredEmps.map((e:any)=>[e.emp_id, e.name, e.designation, e.farms?.name, e.gender, e.mobile, fmtAadhaar(e.aadhaar_no), e.base_salary, e.is_active?'Active':'Left']),
-      rightAlignFrom: 7,
+      headers: ['Emp ID','Name','Designation','Site','Gender','DOB','Mobile','Aadhaar','PAN','Voter ID','UAN',
+                'Bank','Account No','IFSC','Joined','Base Salary','Status'],
+      rows: filteredEmps.map((e:any)=>[
+        e.emp_id, e.name, e.designation, e.farms?.name, e.gender,
+        e.dob ? fmtDate(e.dob) : '', e.mobile, fmtAadhaar(e.aadhaar_no), e.pan_no, e.voter_id, e.uan_no,
+        e.bank_name, e.account_no, e.ifsc,
+        e.joining_date ? fmtDate(e.joining_date) : '',
+        e.base_salary, e.is_active?'Active':'Left']),
+      rightAlignFrom: 15,
     })
   }
 
@@ -586,6 +646,7 @@ export const EmployeeList: React.FC = () => {
                   <Td><Badge color={e.is_active?'green':'gray'}>{e.is_active?'Active':'Left'}</Badge></Td>
                   <Td>
                     <div className="flex gap-1">
+                      <button title="View all details" onClick={()=>setViewEmp(e)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Eye size={13}/></button>
                       <button onClick={()=>openEdit(e)} className="p-1.5 rounded hover:bg-brand-50 text-gray-400 hover:text-brand-600"><Edit2 size={13}/></button>
                       <button onClick={()=>{setSel(new Set([e.id]));setBulkConfirm(true)}} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 size={13}/></button>
                       <AssignTaskButton small label="Task"
@@ -606,6 +667,7 @@ export const EmployeeList: React.FC = () => {
       {employees?.length===0 && <EmptyState icon={<Users size={32}/>} title="No employees yet" action={<Button onClick={()=>openEdit()} icon={<Plus size={16}/>}>Add Employee</Button>}/>}
 
       {bulkConfirm&&(
+
         <Modal open onClose={()=>setBulkConfirm(false)} title="Bulk Delete Employees" size="sm"
           footer={<><Button variant="secondary" onClick={()=>setBulkConfirm(false)}>Cancel</Button><Button variant="danger" loading={bulkDelMut.isPending} onClick={()=>bulkDelMut.mutate([...sel])}>Delete {sel.size} employees</Button></>}>
           <p className="text-sm text-gray-700">Permanently delete <strong>{sel.size} selected employees</strong>? This cannot be undone.</p>
@@ -753,6 +815,11 @@ export const EmployeeList: React.FC = () => {
               hint="12 digits" error={aadhaarError(form.aadhaar_no) ?? undefined} />
           </FormRow>
           <FormRow>
+            <Input label="Voter ID (EPIC No.)" value={form.voter_id}
+              onChange={e=>s('voter_id', e.target.value.toUpperCase().slice(0, 20))}
+              hint="As printed on the card, e.g. ABC1234567" />
+          </FormRow>
+          <FormRow>
             <Select label="Salary Payment Mode"
               options={[{value:'own_account',label:'Own Bank Account'},{value:'shared_account',label:'Shared (Other Employee Account)'},{value:'cash',label:'Cash'}]}
               value={form.payment_mode} onChange={e=>s('payment_mode',e.target.value)}/>
@@ -786,6 +853,68 @@ export const EmployeeList: React.FC = () => {
             value={form.emp_category} onChange={e=>s('emp_category',e.target.value)} />
         </div>
       </Modal>
+      {viewEmp && (
+        <Modal open={!!viewEmp} onClose={()=>setViewEmp(null)}
+          title={`${viewEmp.name}${viewEmp.emp_id ? ` — ${viewEmp.emp_id}` : ''}`} size="lg">
+          <div className="space-y-4 text-sm">
+            <p className="text-xs text-gray-400">
+              Every field held against this employee. A blank means it has not been entered yet, not that the
+              app lost it. Use Edit to fill anything missing.
+            </p>
+            <DetailBlock title="Who" rows={[
+              ['Employee code', viewEmp.emp_id],
+              ['Name', viewEmp.name],
+              ['Designation', viewEmp.designation],
+              ['Department', viewEmp.department],
+              ['Site', viewEmp.farms?.name],
+              ['Skill category', viewEmp.skill_category],
+              ['Employee category', viewEmp.emp_category],
+              ['Zone / area', viewEmp.zone_area],
+              ['Location / branch', viewEmp.location_branch],
+              ['Gender', viewEmp.gender],
+              ['Date of birth', viewEmp.dob ? fmtDate(viewEmp.dob) : ''],
+              ['Mobile', viewEmp.mobile],
+            ]}/>
+            <DetailBlock title="Identity" rows={[
+              ['Aadhaar', fmtAadhaar(viewEmp.aadhaar_no)],
+              ['PAN', viewEmp.pan_no],
+              ['Voter ID (EPIC)', viewEmp.voter_id],
+              ['UAN / PF number', viewEmp.uan_no || viewEmp.pf_no],
+              ['ESI / IP number', viewEmp.esi_no],
+            ]}/>
+            <DetailBlock title="Pay" rows={[
+              ['Base salary', viewEmp.base_salary ? inr(viewEmp.base_salary) : ''],
+              ['Increment', viewEmp.increment ? inr(viewEmp.increment) : ''],
+              ['Basic rate', viewEmp.basic_rate ? inr(viewEmp.basic_rate) : ''],
+              ['HRA rate', viewEmp.hra_rate ? inr(viewEmp.hra_rate) : ''],
+              ['Allowance rate', viewEmp.allowance_rate ? inr(viewEmp.allowance_rate) : ''],
+            ]}/>
+            <DetailBlock title="Bank and payment route" rows={[
+              ['Bank', viewEmp.bank_name],
+              ['Branch', viewEmp.bank_branch],
+              ['Account number', viewEmp.account_no],
+              ['IFSC', viewEmp.ifsc],
+              ['Payment route', PAY_MODE_LABEL[viewEmp.payment_mode ?? 'own_account'] ?? viewEmp.payment_mode],
+              ['Salary deposited into', holderName(viewEmp)],
+            ]}/>
+            <DetailBlock title="Statutory" rows={[
+              ['ESI applicable', viewEmp.esi_applicable ? 'Yes' : 'No'],
+              ['PF applicable', viewEmp.pf_applicable ? 'Yes' : 'No'],
+              ['PF restricted to Rs 15,000', viewEmp.restrict_pf ? 'Yes' : 'No'],
+              ['Professional tax applicable', viewEmp.pt_applicable ? 'Yes' : 'No'],
+            ]}/>
+            <DetailBlock title="Service" rows={[
+              ['Joining date', viewEmp.joining_date ? fmtDate(viewEmp.joining_date) : ''],
+              ['Leaving date', viewEmp.leaving_date ? fmtDate(viewEmp.leaving_date) : ''],
+              ['Status', viewEmp.is_active ? 'Active' : 'Left / Inactive'],
+            ]}/>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={()=>setViewEmp(null)}>Close</Button>
+              <Button onClick={()=>{ const x = viewEmp; setViewEmp(null); openEdit(x) }}>Edit</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
