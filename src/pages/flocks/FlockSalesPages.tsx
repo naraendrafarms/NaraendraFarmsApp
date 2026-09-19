@@ -1396,9 +1396,18 @@ export const HEDispatch: React.FC = () => {
     }
     if (!(want.a + want.b + want.c)) return
     const add = (cur: string, n: number) => n ? String((parseInt(cur) || 0) + n) : cur
+    // The same rate the rest of the form uses: the Association rate for that
+    // production date's week, the buyer's differential, and the age-banded
+    // tier where one applies. A line created by Take used to come out with a
+    // hard-coded blank rate, because the only two places that fill it are the
+    // prod_date onChange (which Take does not go through) and the buyer-change
+    // effect (which runs on the buyer changing, not on a line being added).
+    const sugg = suggestedRate(r.prod_date, form.party_id, form.flock_id)
+    const suggStr = sugg != null ? String(sugg) : ''
     setLines(ls => {
       // Already on the form? Add to that line rather than making a second one
-      // for the same production date.
+      // for the same production date. Its rate is left alone: taking more of a
+      // day already on the form must not re-price what was agreed for it.
       const existing = ls.findIndex(l => l.prod_date === r.prod_date)
       if (existing >= 0) {
         return ls.map((l, i) => i === existing ? {
@@ -1412,8 +1421,11 @@ export const HEDispatch: React.FC = () => {
       // than leaving a blank row above the real ones.
       const blank = ls.findIndex(l => !l.grade_a && !l.grade_b && !l.grade_c)
       const filled = { prod_date: r.prod_date, grade_a: want.a ? String(want.a) : '',
-                       grade_b: want.b ? String(want.b) : '', grade_c: want.c ? String(want.c) : '', rate: '' }
-      if (blank >= 0) return ls.map((l, i) => i === blank ? { ...l, ...filled } : l)
+                       grade_b: want.b ? String(want.b) : '', grade_c: want.c ? String(want.c) : '',
+                       rate: suggStr }
+      // Keep a rate already on the placeholder - picking the buyer fills it,
+      // and spreading `filled` over the row used to wipe it straight back out.
+      if (blank >= 0) return ls.map((l, i) => i === blank ? { ...l, ...filled, rate: l.rate || suggStr } : l)
       return [...ls, filled]
     })
   }
