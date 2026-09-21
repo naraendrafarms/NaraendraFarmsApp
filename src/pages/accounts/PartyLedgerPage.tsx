@@ -5,7 +5,8 @@ import { fmtDate, inr, currentFY, fyRange, FY_OPTIONS, fetchAllPages } from '@/l
 import {
   Card, SearchableSelect, Select, Table, Th, Td, Badge, SectionHeader, Spinner, EmptyState, DateInput
 } from '@/components/ui'
-import { Download } from 'lucide-react'
+import { Download, Printer } from 'lucide-react'
+import { printReport } from '@/lib/invoicePrint'
 import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 
@@ -99,14 +100,58 @@ export const PartyLedgerPage: React.FC = () => {
     })
   }, [rows, priorBalance])
 
-  const totalDebit = rows.reduce((s, r) => s + (r.debit ?? 0), 0)
-  const totalCredit = rows.reduce((s, r) => s + (r.credit ?? 0), 0)
-  const netBalance = priorBalance + totalDebit - totalCredit
-  const selectedParty = (parties as any[]).find(p => p.id === partyId)
+  // An opening balance that is only folded into the running balance, and never
+  // shown as a line, makes a statement nobody can check: the first row's
+  // Balance already carries an amount that appears nowhere on the page, and
+  // Debit minus Credit does not equal the closing balance. Anyone handed this
+  // and adding up the two columns gets a different number and, rightly,
+  // queries the whole thing.
+  //
+  // So carry it forward as a REAL line, on the Dr or Cr side according to which
+  // way it runs. The closing balance is unchanged - it was always
+  // priorBalance + debits - credits - but now the columns prove it.
+  //
+  // Distinct from the view's own 'Opening Balance' rows, which come from the
+  // opening_balances table: one of those dated inside the period still shows as
+  // its own line, and one dated before it is already inside priorBalance.
+  const openingRow = useMemo(() => {
+    if (!partyId || !fromDate) return null
+    return {
+      txn_date: fromDate,
+      txn_type: 'Opening Balance b/f',
+      ref_no: null as string | null,
+      narration: `Balance carried forward as on ${fmtDate(fromDate)}`,
+      debit: priorBalance > 0 ? priorBalance : 0,
+      credit: priorBalance < 0 ? -priorBalance : 0,
+      source_table: 'opening_bf',
+      balance: priorBalance,
+    }
+  }, [partyId, fromDate, priorBalance])
 
+  const statement = useMemo(
+    () => (openingRow ? [openingRow, ...ledger] : ledger),
+    [openingRow, ledger])
+
+  const totalDebit = statement.reduce((s, r) => s + (r.debit ?? 0), 0)
+  const totalCredit = statement.reduce((s, r) => s + (r.credit ?? 0), 0)
+  // Now a straight subtraction of the two printed columns, not a third input.
+  const netBalance = totalDebit - totalCredit
+  const selectedParty = (parties as any[]).find(p => p.id === partyId)
+  const periodLabel = `${fmtDate(fromDate)} to ${fmtDate(toDate)}`
+
+  const money = (v: number) => v
+    ? Math.abs(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : ''
+  const balLabel = (v: number) =>
+    `${Math.abs(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    + (v > 0 ? ' Dr' : v < 0 ? ' Cr' : '')
+
+  // Exports exactly what is on screen and on the printed statement - the
+  // opening balance line included, and a Totals row so the sheet reconciles
+  // on its own without anyone re-deriving it.
   const exportXlsx = () => {
-    if (!ledger.length) return toast.error('No data to export')
-    const ws = XLSX.utils.json_to_sheet(ledger.map(r => ({
+    if (!statement.length) return toast.error('No data to export')
+    const body = statement.map(r => ({
       Date: fmtDate(r.txn_date),
       Type: r.txn_type,
       'Ref No': r.ref_no ?? '',
@@ -114,10 +159,30 @@ export const PartyLedgerPage: React.FC = () => {
       Debit: r.debit || '',
       Credit: r.credit || '',
       Balance: r.balance,
-    })))
+    }))
+    body.push({
+      Date: '', Type: 'TOTALS', 'Ref No': '', Narration: periodLabel,
+      Debit: totalDebit || '', Credit: totalCredit || '', Balance: netBalance,
+    })
+    const ws = XLSX.utils.json_to_sheet(body)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Ledger')
     XLSX.writeFile(wb, `party_ledger_${selectedParty?.name ?? partyId}.xlsx`)
+  }
+
+  const printStatement = () => {
+    if (!statement.length) return toast.error('Nothing to print')
+    printReport({
+      title: 'Party Ledger',
+      subtitle: `${selectedParty?.name ?? ''} — ${periodLabel}`,
+      headers: ['Date', 'Type', 'Ref No', 'Narration', 'Debit (Dr)', 'Credit (Cr)', 'Balance'],
+      rows: statement.map(r => [
+        fmtDate(r.txn_date), r.txn_type, r.ref_no ?? '', r.narration || '',
+        money(r.debit), money(r.credit), balLabel(r.balance),
+      ]),
+      rightAlignFrom: 4,
+      footerRow: ['', 'TOTALS', '', '', money(totalDebit), money(totalCredit), balLabel(netBalance)],
+    })
   }
 
   const typeColor = (t: string): 'green' | 'red' | 'blue' | 'gray' => {
@@ -132,13 +197,21 @@ export const PartyLedgerPage: React.FC = () => {
         title="Party Ledger"
         subtitle="Complete account statement for any buyer — sales billed, advances received, payments"
         action={
-          ledger.length > 0 ? (
-            <button
-              onClick={exportXlsx}
-              className="flex items-center gap-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-            >
-              <Download size={14} /> Export Excel
-            </button>
+          statement.length > 0 ? (
+            <div className="flex gap-2">
+              <button
+                onClick={printStatement}
+                className="flex items-center gap-1 px-3 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+              >
+                <Printer size={14} /> Print
+              </button>
+              <button
+                onClick={exportXlsx}
+                className="flex items-center gap-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+              >
+                <Download size={14} /> Export Excel
+              </button>
+            </div>
           ) : undefined
         }
       />
@@ -199,7 +272,7 @@ export const PartyLedgerPage: React.FC = () => {
           <EmptyState title="Select a party to view their ledger" />
         ) : isLoading ? (
           <Spinner />
-        ) : ledger.length === 0 ? (
+        ) : statement.length === 0 ? (
           <EmptyState title="No transactions found for this party" />
         ) : (
           <div className="overflow-x-auto">
@@ -216,11 +289,12 @@ export const PartyLedgerPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {ledger.map((r, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
+                {statement.map((r, i) => (
+                  <tr key={i} className={r.source_table === 'opening_bf'
+                    ? 'bg-gray-50 italic' : 'hover:bg-gray-50'}>
                     <Td className="whitespace-nowrap">{fmtDate(r.txn_date)}</Td>
                     <Td>
-                      <Badge color={typeColor(r.txn_type)}>
+                      <Badge color={r.source_table === 'opening_bf' ? 'gray' : typeColor(r.txn_type)}>
                         {r.txn_type}
                       </Badge>
                     </Td>
@@ -240,7 +314,7 @@ export const PartyLedgerPage: React.FC = () => {
               </tbody>
               <tfoot>
                 <tr className="bg-gray-100 font-bold">
-                  <Td colSpan={4} className="text-right text-sm">Totals</Td>
+                  <Td colSpan={4} className="text-right text-sm">Totals (opening balance included)</Td>
                   <Td className="text-right text-red-600">{inr(totalDebit)}</Td>
                   <Td className="text-right text-green-700">{inr(totalCredit)}</Td>
                   <Td className={`text-right ${netBalance > 0 ? 'text-orange-600' : 'text-green-700'}`}>
