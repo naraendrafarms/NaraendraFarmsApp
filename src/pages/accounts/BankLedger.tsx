@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { inr, today, fmtDate, FY_OPTIONS, currentFY, fyRange, fyOfDate, fetchAllPages } from '@/lib/utils'
 import { Card, CardHeader, Button, Select, Input, Modal, DateInput, Spinner, EmptyState, SearchableSelect } from '@/components/ui'
-import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil, X, Printer } from 'lucide-react'
+import { Plus, Trash2, Download, Upload, CheckCircle2, AlertCircle, Link2, Pencil, X, Printer, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { ifscError, accountNoError } from '@/lib/validators'
 import { postLedgerEntry, clearLedgerEntries, toCbMode, syncSupplierInvoicePayment } from '@/lib/ledgerSync'
@@ -598,6 +598,10 @@ export const BankLedgerPage: React.FC = () => {
   }, [fy])
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_FORM })
+  // Typing to find one invoice among many in the settle picker. Held at
+  // component level because the picker is an inline block inside the JSX and
+  // cannot hold state of its own.
+  const [invoiceSearch, setInvoiceSearch] = useState('')
   const [editId, setEditId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   // "Save & Add Another" — lets several transactions be entered back-to-back
@@ -1019,6 +1023,7 @@ export const BankLedgerPage: React.FC = () => {
     setEditId(null)
     setForm({ ...EMPTY_FORM, bank_account_id: selectedAccount })
     setAddedThisSession([])
+    setInvoiceSearch('')
     setShowModal(true)
   }
 
@@ -1063,6 +1068,7 @@ export const BankLedgerPage: React.FC = () => {
       salary_return_for: t.salary_return_for ?? '',
       salary_return_emp: String(returnTargetOf(t)?.employee_id ?? ''),
     })
+    setInvoiceSearch('')
     setShowModal(true)
   }
 
@@ -2090,6 +2096,7 @@ export const BankLedgerPage: React.FC = () => {
             onChange={e => {
               const id = (e.target as HTMLSelectElement).value
               const p = (parties ?? []).find((x: any) => x.id === id)
+              setInvoiceSearch('')
               setForm(f => ({ ...f, party_id: id, settle_payment_id: '', settle_receivable_ids: [], description: !f.description && p ? p.name : f.description }))
             }}
             options={[{ value: '', label: '— None —' }, ...(parties ?? []).map((p: any) => ({ value: p.id, label: `${p.name} (${p.type})` }))]}
@@ -2198,6 +2205,21 @@ export const BankLedgerPage: React.FC = () => {
                 ? f.settle_receivable_ids.filter(k => k !== key)
                 : [...f.settle_receivable_ids, key],
             }))
+            // A buyer can have dozens of open invoices, and scrolling a 40-row
+            // box to find one is the wrong way to spend a minute. The search
+            // matches the whole label, so an invoice number, HE/NHE, or even
+            // an amount all find it.
+            //
+            // AN INVOICE ALREADY TICKED IS NEVER HIDDEN by the search. Filtering
+            // one out of sight while it is still going to be settled is how a
+            // receipt gets applied to an invoice nobody meant to touch - the
+            // count and the combined balance below would stop matching what is
+            // on screen.
+            const q = invoiceSearch.trim().toLowerCase()
+            const visibleOptions = q
+              ? settleReceivableOptions.filter(o =>
+                  o.label.toLowerCase().includes(q) || form.settle_receivable_ids.includes(o.value))
+              : settleReceivableOptions
             return (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2207,8 +2229,28 @@ export const BankLedgerPage: React.FC = () => {
                 {settleReceivableOptions.length === 0 ? (
                   <p className="text-xs text-gray-400 border border-gray-200 rounded-lg px-3 py-2">No open invoices for this party</p>
                 ) : (
+                  <>
+                    {settleReceivableOptions.length > 5 && (
+                      <div className="relative mb-1">
+                        <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          value={invoiceSearch}
+                          onChange={e => setInvoiceSearch(e.target.value)}
+                          placeholder={`Search ${settleReceivableOptions.length} invoices — number, HE/NHE or amount`}
+                          className="w-full border border-gray-300 rounded-lg pl-7 pr-7 py-1.5 text-sm"
+                        />
+                        {invoiceSearch && (
+                          <button type="button" onClick={() => setInvoiceSearch('')}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            title="Clear search">×</button>
+                        )}
+                      </div>
+                    )}
                   <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
-                    {settleReceivableOptions.map(opt => (
+                    {visibleOptions.length === 0 ? (
+                      <p className="text-xs text-gray-400 px-3 py-2">No invoice matches “{invoiceSearch}”</p>
+                    ) : visibleOptions.map(opt => (
                       <label key={opt.value} className={`flex items-center gap-2 px-3 py-2 text-sm border-b border-gray-100 last:border-b-0 cursor-pointer hover:bg-gray-50 ${form.settle_receivable_ids.includes(opt.value) ? 'bg-blue-50' : ''}`}>
                         <input
                           type="checkbox"
@@ -2220,6 +2262,13 @@ export const BankLedgerPage: React.FC = () => {
                       </label>
                     ))}
                   </div>
+                  {q && (
+                    <p className="text-[11px] text-gray-400 mt-1 px-1">
+                      Showing {visibleOptions.length} of {settleReceivableOptions.length}
+                      {form.settle_receivable_ids.length > 0 && ' — ticked invoices always stay listed'}
+                    </p>
+                  )}
+                  </>
                 )}
                 {form.settle_receivable_ids.length > 0 ? (
                   <div className="flex items-center justify-between text-xs mt-1 px-1">
