@@ -28,6 +28,9 @@ const EMPTY_FORM = {
   // Money paid to a party against no particular bill. Ticking this creates the
   // vendor_advances record as well, so the payment reaches their ledger.
   create_vendor_advance: false,
+  // True when the row ALREADY has an advance behind it, so editing it can
+  // never create a second one for the same payment.
+  already_advance: false,
   original_amount: '',
   // Set only on a Salary Return credit. Deliberately NOT salary_monthly_id -
   // the salary form deletes every bank row carrying that, so a return hung on
@@ -876,7 +879,7 @@ export const BankLedgerPage: React.FC = () => {
       if (!selectedAccount) return Promise.resolve([])
       return fetchAllPages((from, to) => supabase
         .from('bank_transactions')
-        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type),linked_payment_id,nhe_sale_id,he_dispatch_id,settled_amount,salary_return_for')
+        .select('id,txn_date,txn_type,category,reference_no,description,amount,created_at,party_id,parties(name,type),linked_payment_id,nhe_sale_id,he_dispatch_id,settled_amount,salary_return_for,vendor_advance_id')
         .eq('bank_account_id', selectedAccount)
         .gte('txn_date', fyRange(fy).start)
         .order('txn_date', { ascending: true })
@@ -1055,6 +1058,7 @@ export const BankLedgerPage: React.FC = () => {
       linked_nhe_sale_id: t.nhe_sale_id ?? '',
       linked_he_dispatch_id: t.he_dispatch_id ?? '',
       create_vendor_advance: false,
+      already_advance: !!t.vendor_advance_id,
       original_amount: t.amount != null ? String(t.amount) : '',
       salary_return_for: t.salary_return_for ?? '',
       salary_return_emp: String(returnTargetOf(t)?.employee_id ?? ''),
@@ -1253,7 +1257,12 @@ export const BankLedgerPage: React.FC = () => {
       }
 
       // A straight advance to a party, against no particular bill. Creates the
-      // vendor_advances row this bank entry pays for and tags the entry to it,
+      // vendor_advances row this bank entry pays for and tags the entry to it.
+      // Works on an edit as well as a new entry — gated on already_advance, not
+      // on editId, so an existing payment can be turned into an advance but
+      // never gets a second one. (Gating it on editId is what let a saved entry
+      // be given the Vendor Advance category and nothing else, leaving a bank
+      // row that looked done and reached no ledger.)
       // in the same shape the Vendor Advances page writes — so both routes
       // produce identical records and that page's edit/delete cleanup, which
       // finds bank rows by vendor_advance_id, still works on one made here.
@@ -1264,7 +1273,7 @@ export const BankLedgerPage: React.FC = () => {
       // carries any, so those go through Accounts → Vendor Advances, which has
       // the percentage, section and challan fields for it.
       let advanceCreated = false
-      if (txnId && !editId && form.create_vendor_advance && form.party_id && !form.settle_payment_id) {
+      if (txnId && !form.already_advance && form.create_vendor_advance && form.party_id && !form.settle_payment_id) {
         const partyName = (parties as any[] | undefined)?.find((p: any) => p.id === form.party_id)?.name ?? ''
         const { data: adv, error: advErr } = await supabase.from('vendor_advances').insert({
           advance_date: form.txn_date,
@@ -2129,7 +2138,7 @@ export const BankLedgerPage: React.FC = () => {
               their next bill. Hidden once a bill is picked — a payment is one
               or the other, never both. */}
           {form.txn_type === 'Debit' && form.party_id && !form.already_linked
-            && !form.settle_payment_id && !editId && (
+            && !form.settle_payment_id && !form.already_advance && (
             <label className="flex items-start gap-2 rounded border border-blue-200 bg-blue-50/50 p-2 cursor-pointer">
               <input type="checkbox" className="mt-0.5" checked={form.create_vendor_advance}
                 onChange={e => setForm(f => ({
@@ -2143,11 +2152,29 @@ export const BankLedgerPage: React.FC = () => {
                   Money paid to this party against no particular bill. The advance record is created
                   too, so it appears in their Party Ledger and can be adjusted against their next bill
                   in Pending Payments — the same as entering it on Accounts → Vendor Advances.
+                  {' '}Works on an entry already saved too: open it, tick this, and save.
                   For an advance with TDS deducted, use that page instead: there is no TDS field here,
                   and an advance with TDS is recorded gross while the bank entry shows net.
                 </span>
               </span>
             </label>
+          )}
+          {/* Picking the category and nothing else used to look like it did the
+              job and only renamed the row: a bank entry labelled Vendor Advance
+              with no advance record behind it, reaching no ledger. Say so
+              rather than let it look done. */}
+          {form.category === 'Vendor Advance' && !form.create_vendor_advance
+            && !form.already_advance && (
+            <p className="text-xs text-amber-600">
+              The category on its own only labels this entry. Tick “Record as a Vendor Advance” above
+              for the advance record to be created — without it nothing reaches the party's ledger.
+            </p>
+          )}
+          {form.already_advance && (
+            <p className="text-xs text-gray-500">
+              This entry already has a vendor advance behind it, so it cannot be recorded twice.
+              Change the advance itself on Accounts → Vendor Advances to keep the two in step.
+            </p>
           )}
           {form.txn_type === 'Credit' && form.party_id && (() => {
             const enteredAmount = parseFloat(form.amount) || 0
