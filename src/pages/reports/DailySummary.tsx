@@ -32,6 +32,54 @@ export const DailySummaryPage: React.FC = () => {
     return d.toISOString().slice(0, 10)
   }, [date])
 
+  // Hatching egg stock per flock per grade, as at the date. Same sources and
+  // the same conventions Reports - Egg Stock uses, so the two agree:
+  //   A = opening A + graded A - HE WASTAGE - dispatched A
+  //   B = opening B + graded B            - dispatched B
+  //   C = opening C + graded C            - dispatched C
+  // Wastage is recorded as one he figure rather than per grade, and the app
+  // already settled how to treat it - Egg Stock deducts it from Grade A
+  // (EggStock.tsx line 340) - so this follows that rule rather than inventing
+  // a second one. Closed flocks are included: a flock can close still holding
+  // eggs in the cold room.
+  const { data: heStock } = useQuery({
+    queryKey: ['ds_he_stock', date],
+    enabled: acctSel.includes('stock'),
+    queryFn: async () => {
+      const [flockRows, openingRows, daily, disp] = await Promise.all([
+        supabase.from('flocks').select('id,flock_no').order('flock_no').then(r => r.data ?? []),
+        supabase.from('egg_opening_stock').select('flock_id,he_grade_a,he_grade_b,he_grade_c').then(r => r.data ?? []),
+        fetchAllPages<any>((from, to) => supabase.from('daily_records')
+          .select('flock_id,he_grade_a,he_grade_b,he_grade_c,wastage_he')
+          .lte('record_date', date)
+          .order('id').range(from, to), 'Daily summary egg stock', m => toast.error(m)),
+        fetchAllPages<any>((from, to) => supabase.from('he_dispatch_lines')
+          .select('flock_id,grade_a,grade_b,grade_c,he_dispatch!inner(dispatch_date)')
+          .lte('he_dispatch.dispatch_date', date)
+          .order('id').range(from, to), 'Daily summary egg dispatch', m => toast.error(m)),
+      ])
+      const bal: Record<string, { a: number; b: number; c: number }> = {}
+      const g = (id: string) => (bal[id] ||= { a: 0, b: 0, c: 0 })
+      for (const o of openingRows) {
+        const x = g(o.flock_id)
+        x.a += o.he_grade_a ?? 0; x.b += o.he_grade_b ?? 0; x.c += o.he_grade_c ?? 0
+      }
+      for (const r of daily) {
+        const x = g(r.flock_id)
+        x.a += (r.he_grade_a ?? 0) - (r.wastage_he ?? 0)
+        x.b += r.he_grade_b ?? 0
+        x.c += r.he_grade_c ?? 0
+      }
+      for (const d of disp) {
+        const x = g(d.flock_id)
+        x.a -= d.grade_a ?? 0; x.b -= d.grade_b ?? 0; x.c -= d.grade_c ?? 0
+      }
+      return (flockRows as any[])
+        .map(f => ({ flock_no: f.flock_no, ...(bal[f.id] ?? { a: 0, b: 0, c: 0 }) }))
+        .filter(r => r.a || r.b || r.c)
+    },
+  })
+
   // ── ACCOUNTS BLOCKS, ALL AS AT THE SELECTED DATE ────────────────────────
   // Every figure below is rebuilt up to `date`, not read as "now": the summary
   // is routinely run for a past day, and a today's balance printed under
@@ -600,6 +648,7 @@ export const DailySummaryPage: React.FC = () => {
     { value: 'bank',    label: 'Bank Balance' },
     { value: 'imprest', label: 'Imprest Balances' },
     { value: 'recv',    label: 'Need to Receive' },
+    { value: 'stock',   label: 'Hatching Egg Stock' },
   ]
 
   const accountBlocks = React.useMemo(() => {
@@ -637,8 +686,21 @@ export const DailySummaryPage: React.FC = () => {
         `TOTAL       : ${inr(Math.round(recvRows.nheAmt + recvRows.heAmt))}`,
       ]})
     }
+    if (acctSel.includes('stock') && heStock) {
+      const n = (v: number) => Math.round(v).toLocaleString('en-IN')
+      const tot = heStock.reduce((x, r) => ({ a: x.a + r.a, b: x.b + r.b, c: x.c + r.c }), { a: 0, b: 0, c: 0 })
+      out.push({ key: 'stock', title: 'Hatching Egg Stock', lines: [
+        ...head('Hatching Egg Stock'),
+        ...(heStock.length
+          ? heStock.map(r => `Flock ${r.flock_no} : A ${n(r.a)}  B ${n(r.b)}  C ${n(r.c)}  = ${n(r.a + r.b + r.c)}`)
+          : ['No hatching egg stock on this date']),
+        ...(heStock.length > 1
+          ? [`TOTAL : A ${n(tot.a)}  B ${n(tot.b)}  C ${n(tot.c)}  = ${n(tot.a + tot.b + tot.c)}`]
+          : []),
+      ]})
+    }
     return out
-  }, [acctSel, bankRows, imprestRows, recvRows, date])
+  }, [acctSel, bankRows, imprestRows, recvRows, heStock, date])
 
   const handleExport = () => {
     if (!allBlocks.length) { toast.error('No data to export'); return }
@@ -659,11 +721,31 @@ export const DailySummaryPage: React.FC = () => {
         ...manpowerLines(site.id),
       ].join('\n'))
     }
-    for (const b of accountBlocks) parts.push(b.lines.join('\n'))
     if (!parts.length) { toast.error('Nothing to copy for this site'); return }
     navigator.clipboard.writeText(parts.join('\n\n================================\n\n')).then(() => {
       setCopied('all')
       toast.success('Copied to clipboard!')
+      setTimeout(() => setCopied(null), 3000)
+    })
+  }
+
+  // These blocks copy on their OWN, not with the farm summary. They were asked
+  // for as a separate thing on this page: the farm blocks go to site staff on
+  // WhatsApp, these are the owner's figures and are usually wanted by
+  // themselves.
+  const copyAccounts = () => {
+    if (!accountBlocks.length) { toast.error('Tick a block first'); return }
+    navigator.clipboard.writeText(accountBlocks.map(b => b.lines.join('\n')).join('\n\n')).then(() => {
+      setCopied('accounts')
+      toast.success('Copied!')
+      setTimeout(() => setCopied(null), 3000)
+    })
+  }
+
+  const copyOneBlock = (b: { key: string; lines: string[] }) => {
+    navigator.clipboard.writeText(b.lines.join('\n')).then(() => {
+      setCopied(b.key)
+      toast.success('Copied!')
       setTimeout(() => setCopied(null), 3000)
     })
   }
@@ -679,8 +761,6 @@ export const DailySummaryPage: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <MultiSelect options={siteOptions} value={siteIds} onChange={setSiteIds} placeholder="All Sites" className="w-44" />
-          <MultiSelect options={ACCOUNT_BLOCK_OPTIONS} value={acctSel} onChange={setAcctSel}
-            placeholder="Add money blocks" className="w-48" />
           <DateInput value={date} onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export</Button>
@@ -719,25 +799,61 @@ export const DailySummaryPage: React.FC = () => {
         </Card>
       ))}
 
-      {accountBlocks.map(b => (
-        <Card key={b.key} padding={false}>
-          <div className="p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-bold text-gray-900">{b.title}</span>
-              <span className="text-[11px] text-gray-400">as on {fmtDMY2(date)}</span>
-            </div>
-            <pre className="text-xs font-mono whitespace-pre-wrap bg-gray-50 rounded-lg p-3 overflow-x-auto">{b.lines.join('\n')}</pre>
+      {/* Accounts & Stock — its OWN section with its OWN copy, deliberately not
+          mixed into the farm blocks above or into their Copy button. The farm
+          summary goes to site staff on WhatsApp; these are the owner's
+          figures and are usually wanted on their own. */}
+      <div className="pt-2 border-t border-gray-200">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">Accounts &amp; Stock</h2>
+            <p className="text-[11px] text-gray-500">
+              Separate from the farm summary above — tick what you need, copy on its own.
+              Every figure is as on {fmtDMY2(date)}.
+            </p>
           </div>
-        </Card>
-      ))}
+          <div className="flex items-center gap-2">
+            <MultiSelect options={ACCOUNT_BLOCK_OPTIONS} value={acctSel} onChange={setAcctSel}
+              placeholder="Select blocks" className="w-48" />
+            <Button onClick={copyAccounts} size="sm"
+              variant={copied === 'accounts' ? 'secondary' : 'primary'}
+              disabled={!accountBlocks.length}>
+              {copied === 'accounts'
+                ? <><CheckCircle size={15} className="mr-1" />Copied!</>
+                : <><Copy size={15} className="mr-1" />Copy these</>}
+            </Button>
+          </div>
+        </div>
 
-      {acctSel.length > 0 && (
-        <p className="text-[11px] text-gray-400 px-1">
-          Money blocks are rebuilt as at {fmtDMY2(date)} — the bank balance uses that date's financial year
-          opening plus transactions up to that day, and Need to Receive counts only money actually received
-          by then. They are off unless ticked, because this summary is usually pasted into WhatsApp.
-        </p>
-      )}
+        {accountBlocks.length === 0 ? (
+          <Card><div className="p-6 text-center text-gray-400 text-sm">
+            Nothing selected. Tick Bank Balance, Imprest Balances, Need to Receive or Hatching Egg Stock above.
+          </div></Card>
+        ) : (
+          <div className="space-y-3">
+            {accountBlocks.map(b => (
+              <Card key={b.key} padding={false}>
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-gray-900">{b.title}</span>
+                    <button onClick={() => copyOneBlock(b)}
+                      className="text-[11px] text-brand-600 hover:text-brand-800 font-medium">
+                      {copied === b.key ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                  <pre className="text-xs font-mono whitespace-pre-wrap bg-gray-50 rounded-lg p-3 overflow-x-auto">{b.lines.join('\n')}</pre>
+                </div>
+              </Card>
+            ))}
+            <p className="text-[11px] text-gray-400 px-1">
+              Rebuilt as at {fmtDMY2(date)}, not as of now: the bank balance uses that date's financial year
+              opening plus transactions up to that day, Need to Receive counts only money actually received by
+              then, and egg stock follows the same rule as Reports → Egg Stock, where HE wastage comes off
+              Grade&nbsp;A.
+            </p>
+          </div>
+        )}
+      </div>
 
       {allBlocks.length === 0 && flocklessSites.length === 0 && (
         <Card><div className="p-8 text-center text-gray-400">No active flocks or sites found</div></Card>
