@@ -530,7 +530,21 @@ export const StatutoryFilingPage: React.FC = () => {
 
   const t = (arr: any[], k: string) => arr.reduce((s, r) => s + (r[k] || 0), 0)
   const pfPayableAmt  = t(pfRows, 'ee') + t(pfRows, 'eps') + t(pfRows, 'erDiff') + t(pfRows, 'admin') + t(pfRows, 'edli')
-  const esiPayableAmt = t(esiRows, 'esiEE') + t(esiRows, 'esiER')
+  // ESIC computes the EMPLOYER share once on the month's total wage, not per
+  // employee. The August 2026 contribution history shows Rs 9,556 on wages of
+  // Rs 2,94,009 (3.25% = 9,555.29, rounded up once); adding up the 23
+  // per-employee round-ups the app stores on salary_monthly gives Rs 9,568.
+  // The challan is the aggregate, so the aggregate is what is payable here.
+  // The EMPLOYEE share is per-IP and already matches the filing to the rupee,
+  // so it stays a straight sum of the stored values.
+  //
+  // Nothing is written back: the per-employee esi_employer on each salary row
+  // is the internal cost allocation and still feeds CTC, the Salary Register
+  // and the payslip. Only this page's payable figure uses the ESIC basis.
+  const esiWageTotal   = t(esiRows, 'basic')
+  const esiErChallan   = esiWageTotal > 0 ? Math.ceil(esiWageTotal * 0.0325) : 0
+  const esiErAllocated = t(esiRows, 'esiER')
+  const esiPayableAmt  = t(esiRows, 'esiEE') + esiErChallan
   const ptPayableAmt  = t(ptRows, 'pt')
 
   const liabilityAmounts: Record<LiabilityType, number> = {
@@ -632,9 +646,17 @@ export const StatutoryFilingPage: React.FC = () => {
                   <tr key={i}><Td className="text-xs">{r.esi_no || '⚠ no IP'}<div className="text-[10px] text-gray-400">{r.name} · {Math.ceil(r.days)}d</div></Td>
                     <Td right className="text-xs">{inr(r.basic)}</Td><Td right className="text-xs">{inr(r.esiEE)}</Td><Td right className="text-xs">{inr(r.esiER)}</Td></tr>
                 ))}
-                <tr className="bg-gray-50 font-semibold"><Td>Total</Td><Td right>{inr(t(esiRows,'basic'))}</Td><Td right>{inr(t(esiRows,'esiEE'))}</Td><Td right>{inr(t(esiRows,'esiER'))}</Td></tr>
+                <tr className="bg-gray-50 font-semibold"><Td>Total</Td><Td right>{inr(esiWageTotal)}</Td><Td right>{inr(t(esiRows,'esiEE'))}</Td><Td right>{inr(esiErChallan)}</Td></tr>
               </tbody>
             </Table>
+            {esiErChallan !== esiErAllocated && (
+              <p className="px-3 py-2 text-[11px] text-gray-500 border-t">
+                Employer total is 3.25% of the month's total wages, rounded up once — the way ESIC
+                computes the challan. The per-employee ER figures above are each rounded up
+                separately and add to {inr(esiErAllocated)}; that allocation is what CTC and the
+                Salary Register use.
+              </p>
+            )}
           </Card>
           <Card padding={false}>
             <div className="px-3 py-2 border-b">
