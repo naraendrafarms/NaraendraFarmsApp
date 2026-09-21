@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { Card, Button, Spinner, DateInput, MultiSelect } from '@/components/ui'
 import toast from 'react-hot-toast'
 import { Copy, CheckCircle, Download } from 'lucide-react'
-import { today as todayIST, daysBetween, exportCSV } from '@/lib/utils'
+import { today as todayIST, daysBetween, exportCSV, inr, fetchAllPages, fyOfDate, fyRange } from '@/lib/utils'
 
 const pad2 = (n: number) => Math.abs(n).toString().padStart(2, '0')
 const fmtDMY2 = (d: string) => { const [y, m, day] = d.split('-'); return `${day}.${m}.${y.slice(2)}` }
@@ -23,10 +23,115 @@ export const DailySummaryPage: React.FC = () => {
   const [date, setDate] = useState(today)
   const [siteIds, setSiteIds] = useState<string[]>([])
   const [copied, setCopied] = useState<string | null>(null)
+  // Money blocks are OFF unless ticked, deliberately. This summary gets pasted
+  // into WhatsApp for site staff; a bank balance and what customers owe are
+  // the owner's figures and should never ride along by default.
+  const [acctSel, setAcctSel] = useState<string[]>([])
   const prevDate = React.useMemo(() => {
     const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 1)
     return d.toISOString().slice(0, 10)
   }, [date])
+
+  // ── ACCOUNTS BLOCKS, ALL AS AT THE SELECTED DATE ────────────────────────
+  // Every figure below is rebuilt up to `date`, not read as "now": the summary
+  // is routinely run for a past day, and a today's balance printed under
+  // yesterday's heading would be a wrong number on a daily report.
+
+  // Kotak balance as at the date: the financial year OF THAT DATE, its opening
+  // balance, and only transactions up to and including the date. Same shape as
+  // Payment Planning's calculation (which matches Bank Ledger's own closing
+  // balance), with the upper date bound this one needs. Summed across every
+  // active Kotak account rather than picking the first.
+  const { data: bankRows } = useQuery({
+    queryKey: ['ds_bank_balance', date],
+    enabled: acctSel.includes('bank'),
+    queryFn: async () => {
+      const { data: accounts, error } = await supabase.from('bank_accounts')
+        .select('id,bank_name,account_name,opening_balance')
+        .ilike('bank_name', '%kotak%').eq('is_active', true)
+      if (error) throw new Error(error.message)
+      const fy = fyOfDate(date)
+      const { start } = fyRange(fy)
+      const out: { name: string; balance: number }[] = []
+      for (const acc of (accounts ?? [])) {
+        const { data: fyOpen } = await supabase.from('bank_fy_opening')
+          .select('opening_balance').eq('bank_account_id', acc.id).eq('fy', fy).maybeSingle()
+        const opening = fyOpen?.opening_balance != null ? Number(fyOpen.opening_balance) : (acc.opening_balance ?? 0)
+        const txns = await fetchAllPages<any>((from, to) => supabase.from('bank_transactions')
+          .select('txn_type,amount').eq('bank_account_id', acc.id)
+          .gte('txn_date', start).lte('txn_date', date)
+          .order('id').range(from, to), 'Daily summary bank balance', m => toast.error(m))
+        const credits = txns.filter(t => t.txn_type === 'Credit').reduce((x, t) => x + (t.amount ?? 0), 0)
+        const debits  = txns.filter(t => t.txn_type === 'Debit').reduce((x, t) => x + (t.amount ?? 0), 0)
+        out.push({ name: acc.account_name || acc.bank_name, balance: opening + credits - debits })
+      }
+      return out
+    },
+  })
+
+  // Imprest balances as at the date. Same rule v_cash_account_balance uses -
+  // opening balance plus receipts less payments, no lower bound - with the
+  // date ceiling added. The view itself cannot do this because it sums the
+  // whole cash book with no date filter at all.
+  const { data: imprestRows } = useQuery({
+    queryKey: ['ds_imprest_balance', date],
+    enabled: acctSel.includes('imprest'),
+    queryFn: async () => {
+      const { data: accts, error } = await supabase.from('cash_accounts')
+        .select('id,name,opening_balance,sort_order').eq('is_active', true).order('sort_order')
+      if (error) throw new Error(error.message)
+      const rows = await fetchAllPages<any>((from, to) => supabase.from('cash_book')
+        .select('cash_account_id,amount_in,amount_out')
+        .not('cash_account_id', 'is', null).lte('txn_date', date)
+        .order('id').range(from, to), 'Daily summary imprest', m => toast.error(m))
+      const by: Record<string, { i: number; o: number }> = {}
+      for (const r of rows) {
+        const g = (by[r.cash_account_id] ||= { i: 0, o: 0 })
+        g.i += r.amount_in ?? 0; g.o += r.amount_out ?? 0
+      }
+      const assigned = rows.length
+      return {
+        assigned,
+        accounts: (accts ?? []).map((a: any) => ({
+          name: a.name,
+          balance: (a.opening_balance ?? 0) + (by[a.id]?.i ?? 0) - (by[a.id]?.o ?? 0),
+        })),
+      }
+    },
+  })
+
+  // What was still owed to the farm ON that date: sales raised on or before it,
+  // less only the money that had actually come in by then. A receipt dated
+  // after the date does not count, which is what makes this as-at-date rather
+  // than as-of-now. NHE carries no TDS - the voucher has no such field - so
+  // only HE deducts it.
+  const { data: recvRows } = useQuery({
+    queryKey: ['ds_receivables', date],
+    enabled: acctSel.includes('recv'),
+    queryFn: async () => {
+      const [nhe, he] = await Promise.all([
+        fetchAllPages<any>((from, to) => supabase.from('nhe_sales')
+          .select('id,amount,amount_received,received_date')
+          .lte('sale_date', date)
+          .or('is_employee_sale.is.null,is_employee_sale.eq.false')
+          .order('id').range(from, to), 'Daily summary NHE receivable', m => toast.error(m)),
+        fetchAllPages<any>((from, to) => supabase.from('he_dispatch')
+          .select('id,amount,tds_amount,amount_received,received_date')
+          .lte('dispatch_date', date)
+          .order('id').range(from, to), 'Daily summary HE receivable', m => toast.error(m)),
+      ])
+      const owed = (r: any, tds = 0) => {
+        const paidByThen = r.received_date && r.received_date <= date ? (r.amount_received ?? 0) : 0
+        return Math.max(0, (r.amount ?? 0) - tds - paidByThen)
+      }
+      const nheOwed = nhe.map(r => owed(r)).filter(v => v > 0)
+      const heOwed  = he.map(r => owed(r, r.tds_amount ?? 0)).filter(v => v > 0)
+      return {
+        nheCount: nheOwed.length, nheAmt: nheOwed.reduce((a, b) => a + b, 0),
+        heCount: heOwed.length,   heAmt: heOwed.reduce((a, b) => a + b, 0),
+      }
+    },
+  })
 
   const { data: farms } = useQuery({
     queryKey: ['farms_daily_summary'],
@@ -489,6 +594,52 @@ export const DailySummaryPage: React.FC = () => {
 
   const siteOptions = ((farms ?? []) as any[]).map((s: any) => ({ value: s.id, label: s.name }))
 
+  // The ticked money blocks, as the same plain text lines every other block
+  // uses, so they copy into WhatsApp identically.
+  const ACCOUNT_BLOCK_OPTIONS = [
+    { value: 'bank',    label: 'Bank Balance' },
+    { value: 'imprest', label: 'Imprest Balances' },
+    { value: 'recv',    label: 'Need to Receive' },
+  ]
+
+  const accountBlocks = React.useMemo(() => {
+    const out: { key: string; title: string; lines: string[] }[] = []
+    const head = (t: string) => [t.toUpperCase(), `        Dt.${fmtDMY2(date)}`]
+
+    if (acctSel.includes('bank') && bankRows) {
+      const total = bankRows.reduce((a, b) => a + b.balance, 0)
+      out.push({ key: 'bank', title: 'Bank Balance', lines: [
+        ...head('Bank Balance'),
+        ...(bankRows.length
+          ? bankRows.map(b => `${b.name} : ${inr(Math.round(b.balance))}`)
+          : ['No active Kotak account found']),
+        ...(bankRows.length > 1 ? [`TOTAL : ${inr(Math.round(total))}`] : []),
+      ]})
+    }
+
+    if (acctSel.includes('imprest') && imprestRows) {
+      const total = imprestRows.accounts.reduce((a, b) => a + b.balance, 0)
+      out.push({ key: 'imprest', title: 'Imprest Balances', lines: [
+        ...head('Imprest Balances'),
+        ...imprestRows.accounts.map(a => `${a.name} : ${inr(Math.round(a.balance))}`),
+        `TOTAL : ${inr(Math.round(total))}`,
+        ...(imprestRows.assigned === 0
+          ? ['(no cash book entry is assigned to an imprest yet)']
+          : []),
+      ]})
+    }
+
+    if (acctSel.includes('recv') && recvRows) {
+      out.push({ key: 'recv', title: 'Need to Receive', lines: [
+        ...head('Need to Receive'),
+        `NHE Sales   : ${inr(Math.round(recvRows.nheAmt))}  (${recvRows.nheCount} bill)`,
+        `HE Dispatch : ${inr(Math.round(recvRows.heAmt))}  (${recvRows.heCount} bill)`,
+        `TOTAL       : ${inr(Math.round(recvRows.nheAmt + recvRows.heAmt))}`,
+      ]})
+    }
+    return out
+  }, [acctSel, bankRows, imprestRows, recvRows, date])
+
   const handleExport = () => {
     if (!allBlocks.length) { toast.error('No data to export'); return }
     exportCSV(`daily_summary_${date}.csv`,
@@ -508,6 +659,7 @@ export const DailySummaryPage: React.FC = () => {
         ...manpowerLines(site.id),
       ].join('\n'))
     }
+    for (const b of accountBlocks) parts.push(b.lines.join('\n'))
     if (!parts.length) { toast.error('Nothing to copy for this site'); return }
     navigator.clipboard.writeText(parts.join('\n\n================================\n\n')).then(() => {
       setCopied('all')
@@ -527,6 +679,8 @@ export const DailySummaryPage: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <MultiSelect options={siteOptions} value={siteIds} onChange={setSiteIds} placeholder="All Sites" className="w-44" />
+          <MultiSelect options={ACCOUNT_BLOCK_OPTIONS} value={acctSel} onChange={setAcctSel}
+            placeholder="Add money blocks" className="w-48" />
           <DateInput value={date} onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
           <Button variant="outline" size="sm" icon={<Download size={14}/>} onClick={handleExport}>Export</Button>
@@ -564,6 +718,26 @@ export const DailySummaryPage: React.FC = () => {
           </div>
         </Card>
       ))}
+
+      {accountBlocks.map(b => (
+        <Card key={b.key} padding={false}>
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-bold text-gray-900">{b.title}</span>
+              <span className="text-[11px] text-gray-400">as on {fmtDMY2(date)}</span>
+            </div>
+            <pre className="text-xs font-mono whitespace-pre-wrap bg-gray-50 rounded-lg p-3 overflow-x-auto">{b.lines.join('\n')}</pre>
+          </div>
+        </Card>
+      ))}
+
+      {acctSel.length > 0 && (
+        <p className="text-[11px] text-gray-400 px-1">
+          Money blocks are rebuilt as at {fmtDMY2(date)} — the bank balance uses that date's financial year
+          opening plus transactions up to that day, and Need to Receive counts only money actually received
+          by then. They are off unless ticked, because this summary is usually pasted into WhatsApp.
+        </p>
+      )}
 
       {allBlocks.length === 0 && flocklessSites.length === 0 && (
         <Card><div className="p-8 text-center text-gray-400">No active flocks or sites found</div></Card>
