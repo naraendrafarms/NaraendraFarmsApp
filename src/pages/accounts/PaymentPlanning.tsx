@@ -107,7 +107,15 @@ export const PaymentPlanningPage: React.FC = () => {
         // .in('payment_status', ['Pending', null]) silently excluded every
         // NULL-status row instead of catching it — use OR with IS NULL.
         fetchAllPages<any>((from, to) => supabase.from('nhe_sales')
-          .select('id,sale_date,sale_type,amount,tds_amount,amount_received,parties(name),flocks(flock_no)')
+          // nhe_sales has NO tds_amount column and never has - NHE sales carry
+          // no TDS, which is why the voucher has no TDS field either. Naming it
+          // here made PostgREST reject the WHOLE request, so this half returned
+          // empty and silently (no error handler is passed), dropping every
+          // outstanding NHE sale out of the receivables figure. Measured
+          // 21/09/2026: 77 rows, Rs 48,555. netDue below reads tds_amount with
+          // ?? 0, so NHE lands on 0 and he_dispatch - which really does have
+          // the column - is unaffected.
+          .select('id,sale_date,sale_type,amount,amount_received,parties(name),flocks(flock_no)')
           .or('payment_status.eq.Pending,payment_status.eq.Partial,payment_status.is.null')
           .or('is_employee_sale.is.null,is_employee_sale.eq.false')
           .order('sale_date', { ascending: false })
