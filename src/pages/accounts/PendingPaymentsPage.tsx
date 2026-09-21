@@ -61,6 +61,9 @@ type PayModal = {
   bankAccountId: string
   cashAccountId: string
   advanceId: string
+  // Several advances can settle one bill: the Maithri case needed
+  // Rs 1,407 + Rs 2,38,644 to reach Rs 2,40,051, and neither alone would do.
+  advanceIds: string[]
 }
 
 import toast from 'react-hot-toast'
@@ -76,6 +79,43 @@ const friendlyDbError = (e: any): string => {
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+
+// Give an advance-settled bill's money back to the advance(s) it came from.
+//
+// Prefers the per-advance rows, which say how much came from EACH. Falls back
+// to the single vendor_advance_id for bills settled before those rows existed,
+// so nothing about an old bill's behaviour changes.
+//
+// Without this, reverting a bill settled from two advances would hand the
+// whole advance_adjusted back to one of them: that advance over-refunded, the
+// other left permanently short of its own balance.
+async function refundAdvances(paymentId: string, fallbackAdvanceId: string | null, fallbackAmount: number) {
+  const { data: links } = await supabase.from('pending_payment_advances')
+    .select('advance_id,amount').eq('payment_id', paymentId)
+  const rows = (links ?? []) as any[]
+  if (rows.length) {
+    for (const l of rows) {
+      const { data: adv } = await supabase.from('vendor_advances')
+        .select('amount_used').eq('id', l.advance_id).maybeSingle()
+      if (adv) {
+        await supabase.from('vendor_advances').update({
+          amount_used: Math.max(0, (adv.amount_used ?? 0) - (l.amount ?? 0)),
+        }).eq('id', l.advance_id)
+      }
+    }
+    await supabase.from('pending_payment_advances').delete().eq('payment_id', paymentId)
+    return
+  }
+  if (fallbackAdvanceId && fallbackAmount > 0) {
+    const { data: adv } = await supabase.from('vendor_advances')
+      .select('amount_used').eq('id', fallbackAdvanceId).maybeSingle()
+    if (adv) {
+      await supabase.from('vendor_advances').update({
+        amount_used: Math.max(0, (adv.amount_used ?? 0) - fallbackAmount),
+      }).eq('id', fallbackAdvanceId)
+    }
+  }
+}
 
 export const PendingPaymentsPage: React.FC = () => {
   const qc = useQueryClient()
@@ -276,7 +316,7 @@ export const PendingPaymentsPage: React.FC = () => {
   }
 
   const openPayModal = (r: PayRecord) => {
-    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), discountAmt: '', paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '', cashAccountId: r.cash_account_id ?? '', advanceId: '' })
+    setModal({ record: r, paidAmt: fmt(getBalance(r)).replace(/,/g,''), discountAmt: '', paidDate: todayStr, mode: 'NEFT', ref: '', remarks: '', bankAccountId: '', cashAccountId: r.cash_account_id ?? '', advanceId: '', advanceIds: [] })
     setErr('')
   }
 
@@ -305,7 +345,16 @@ export const PendingPaymentsPage: React.FC = () => {
     // Without a tin the cash_book row has neither an account nor a site, and the
     // imprest derivation charges it to HO Imprest whatever site really paid.
     if (amt > 0 && isCashMode(modal.mode) && !modal.cashAccountId) { setErr('Select which imprest the cash was paid from'); return }
-    if (isAdvance && !modal.advanceId) { setErr('Select which advance to adjust against this bill'); return }
+    if (isAdvance && modal.advanceIds.length === 0) { setErr('Tick which advance(s) to adjust against this bill'); return }
+    if (isAdvance) {
+      const pool = (vendorAdvancesForModal ?? [])
+        .filter((a: any) => modal.advanceIds.includes(a.id))
+        .reduce((t: number, a: any) => t + (a.amount - a.amount_used), 0)
+      if (amt > pool + 0.01) {
+        setErr(`Only ₹${fmt(pool)} available on the advance(s) ticked — tick another or lower the amount`)
+        return
+      }
+    }
     setSaving(true); setErr('')
     try {
       const newPaid = (modal.record.paid_amount ?? 0) + amt
@@ -332,29 +381,60 @@ export const PendingPaymentsPage: React.FC = () => {
         // Deliberately no postLedgerEntry — an opening balance being cleared
         // isn't a new cash movement, so Cash Book/Bank Ledger stay untouched.
       } else if (isAdvance) {
-        const advance = (vendorAdvancesForModal ?? []).find((a: any) => a.id === modal.advanceId)
-        if (!advance) throw new Error('Advance not found')
-        const available = advance.amount - advance.amount_used
-        if (amt > available + 0.01) throw new Error(`Only ₹${fmt(available)} available on this advance`)
+        // Spread the amount across the ticked advances, oldest first, each
+        // taking at most what it still has. A bill can need more than one:
+        // Rs 1,407 + Rs 2,38,644 to reach Rs 2,40,051.
+        const picked = (vendorAdvancesForModal ?? [])
+          .filter((a: any) => modal.advanceIds.includes(a.id))
+          .sort((x: any, y: any) => String(x.advance_date).localeCompare(String(y.advance_date)))
+        if (!picked.length) throw new Error('Advance not found')
+        let left = amt
+        const used: { advance: any; take: number }[] = []
+        for (const a of picked) {
+          if (left <= 0.005) break
+          const take = Math.round(Math.min(a.amount - a.amount_used, left) * 100) / 100
+          if (take <= 0) continue
+          used.push({ advance: a, take })
+          left = Math.round((left - take) * 100) / 100
+        }
+        if (left > 0.01) throw new Error(`Rs ${fmt(left)} more than the ticked advances hold`)
+
         const { error } = await supabase.from('pending_payments').update({
           paid_amount: newPaid,
           discount_amount: newDiscount,
           paid_date: modal.paidDate,
           account_type: 'Advance',
-          transaction_ref: advance.reference_no || null,
+          // Several references would not fit one field, so it carries the
+          // first and the per-advance rows below carry the detail.
+          transaction_ref: used[0].advance.reference_no || null,
           remarks: modal.remarks || modal.record.remarks || null,
           payment_status: newStatus,
           bank_account_id: null,
           advance_adjusted: amt,
-          vendor_advance_id: advance.id,
+          // Kept for the historical single-advance behaviour and for anything
+          // still reading it; the per-advance rows are the real record.
+          vendor_advance_id: used[0].advance.id,
         }).eq('id', modal.record.id)
         if (error) throw error
         // Adjusting an advance against a bill is NOT a new cash movement — the
         // money already left when the advance itself was paid (VendorAdvancesPage
         // posted that Cash Book/Bank entry already) — so no postLedgerEntry here.
-        const { error: advErr } = await supabase.from('vendor_advances')
-          .update({ amount_used: advance.amount_used + amt }).eq('id', advance.id)
-        if (advErr) throw advErr
+
+        // How much came from WHICH advance. Without this a later reversal
+        // would hand the whole advance_adjusted back to vendor_advance_id
+        // alone, over-refunding one advance and leaving the rest overstated.
+        const { error: linkErr } = await supabase.from('pending_payment_advances').insert(
+          used.map(u => ({
+            payment_id: modal.record.id, advance_id: u.advance.id,
+            amount: u.take, adjusted_on: modal.paidDate,
+          })))
+        if (linkErr) throw new Error('Bill settled, but recording which advances paid it failed: ' + linkErr.message)
+
+        for (const u of used) {
+          const { error: advErr } = await supabase.from('vendor_advances')
+            .update({ amount_used: u.advance.amount_used + u.take }).eq('id', u.advance.id)
+          if (advErr) throw advErr
+        }
       } else {
         const { error } = await supabase.from('pending_payments').update({
           paid_amount: newPaid,
@@ -691,16 +771,10 @@ export const PendingPaymentsPage: React.FC = () => {
         // isAdvance branch increments when the bill is settled — otherwise
         // reverting the bill leaves that amount permanently locked out of
         // the advance's available balance.
-        if (!isNew && editModal.vendor_advance_id && (editModal.advance_adjusted ?? 0) > 0) {
-          const { data: advance } = await supabase.from('vendor_advances')
-            .select('amount_used').eq('id', editModal.vendor_advance_id).maybeSingle()
-          if (advance) {
-            await supabase.from('vendor_advances').update({
-              amount_used: Math.max(0, (advance.amount_used ?? 0) - (editModal.advance_adjusted ?? 0)),
-            }).eq('id', editModal.vendor_advance_id)
-            qc.invalidateQueries({ queryKey: ['vendor_advances'] })
-            qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
-          }
+        if (!isNew && (editModal.advance_adjusted ?? 0) > 0) {
+          await refundAdvances(editModal.id, editModal.vendor_advance_id, editModal.advance_adjusted ?? 0)
+          qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+          qc.invalidateQueries({ queryKey: ['vendor_advances_for_pay'] })
         }
       }
       // Keep Purchase Invoice Register in step with a Paid Amount edited here
@@ -752,13 +826,8 @@ export const PendingPaymentsPage: React.FC = () => {
       for (const r of toDelete) {
         if (r.payment_status !== 'Paid') continue
         await clearLedgerEntries(r.id)
-        if (r.vendor_advance_id && (r.advance_adjusted ?? 0) > 0) {
-          const { data: advance } = await supabase.from('vendor_advances').select('amount_used').eq('id', r.vendor_advance_id).maybeSingle()
-          if (advance) {
-            await supabase.from('vendor_advances').update({
-              amount_used: Math.max(0, (advance.amount_used ?? 0) - (r.advance_adjusted ?? 0)),
-            }).eq('id', r.vendor_advance_id)
-          }
+        if ((r.advance_adjusted ?? 0) > 0) {
+          await refundAdvances(r.id, r.vendor_advance_id, r.advance_adjusted ?? 0)
         }
       }
       const { error } = await supabase.from('pending_payments').delete().in('id', [...selectedIds])
@@ -1136,7 +1205,7 @@ export const PendingPaymentsPage: React.FC = () => {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Payment Mode</label>
-                <select value={modal.mode} onChange={e => setModal(m => m ? { ...m, mode: e.target.value, advanceId: '' } : m)}
+                <select value={modal.mode} onChange={e => setModal(m => m ? { ...m, mode: e.target.value, advanceId: '', advanceIds: [] } : m)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
                   {['NEFT', 'RTGS', 'IMPS', 'Cheque', 'Cash', 'UPI'].map(v => <option key={v}>{v}</option>)}
                   {(vendorAdvancesForModal ?? []).length > 0 && <option value="Advance">Advance (adjust against existing balance)</option>}
@@ -1148,14 +1217,47 @@ export const PendingPaymentsPage: React.FC = () => {
               </div>
               {modal.mode === 'Advance' && (
                 <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">Which advance to adjust</label>
-                  <select value={modal.advanceId} onChange={e => setModal(m => m ? { ...m, advanceId: e.target.value } : m)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">— Select advance —</option>
-                    {(vendorAdvancesForModal ?? []).map((a: any) => (
-                      <option key={a.id} value={a.id}>{fmtDate(a.advance_date)} — Available ₹{fmt(a.amount - a.amount_used)}{a.reference_no ? ` (${a.reference_no})` : ''}</option>
-                    ))}
-                  </select>
+                  <label className="text-xs font-medium text-gray-600 block mb-1">
+                    Which advance(s) to adjust — tick one or more
+                  </label>
+                  {(() => {
+                    const list = (vendorAdvancesForModal ?? [])
+                    const ticked = list.filter((a: any) => modal.advanceIds.includes(a.id))
+                    const pool = ticked.reduce((t: number, a: any) => t + (a.amount - a.amount_used), 0)
+                    const paying = parseFloat(modal.paidAmt) || 0
+                    const toggle = (id: string) => setModal(m => m ? {
+                      ...m,
+                      advanceIds: m.advanceIds.includes(id)
+                        ? m.advanceIds.filter(x => x !== id)
+                        : [...m.advanceIds, id],
+                    } : m)
+                    return (
+                      <>
+                        <div className="border border-gray-300 rounded-lg max-h-40 overflow-y-auto">
+                          {list.map((a: any) => (
+                            <label key={a.id}
+                              className={`flex items-center gap-2 px-3 py-2 text-sm border-b border-gray-100 last:border-b-0 cursor-pointer hover:bg-gray-50 ${modal.advanceIds.includes(a.id) ? 'bg-blue-50' : ''}`}>
+                              <input type="checkbox" className="rounded border-gray-300 text-blue-600"
+                                checked={modal.advanceIds.includes(a.id)}
+                                onChange={() => toggle(a.id)} />
+                              <span className="flex-1">
+                                {fmtDate(a.advance_date)} — Available ₹{fmt(a.amount - a.amount_used)}
+                                {a.reference_no ? ` (${a.reference_no})` : ''}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                        {ticked.length > 0 && (
+                          <p className={`text-xs mt-1 ${pool + 0.01 < paying ? 'text-amber-600' : 'text-gray-500'}`}>
+                            {ticked.length} ticked — ₹{fmt(pool)} available
+                            {pool + 0.01 < paying
+                              ? ` · ₹${fmt(paying - pool)} short of the ₹${fmt(paying)} being paid`
+                              : paying > 0 ? ` · covers the ₹${fmt(paying)} being paid, oldest advance used first` : ''}
+                          </p>
+                        )}
+                      </>
+                    )
+                  })()}
                 </div>
               )}
               {modal.mode !== 'Advance' && modal.mode.toLowerCase() !== 'cash' && (
