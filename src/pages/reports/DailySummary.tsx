@@ -47,7 +47,13 @@ export const DailySummaryPage: React.FC = () => {
     enabled: acctSel.includes('stock'),
     queryFn: async () => {
       const [flockRows, openingRows, daily, disp] = await Promise.all([
-        supabase.from('flocks').select('id,flock_no').order('flock_no').then(r => r.data ?? []),
+        // Closed flocks are EXCLUDED. Measured 21/09/2026: of 4 closed flocks
+        // only Flock 19 carried a balance, and it was Grade A MINUS 11,760 -
+        // more Grade A dispatched than was ever graded, an unreconciled tail
+        // from a flock that closed in June, not eggs in a cold room. Printing
+        // that as stock on a daily report would be printing a wrong number.
+        supabase.from('flocks').select('id,flock_no,status')
+          .neq('status', 'closed').order('flock_no').then(r => r.data ?? []),
         supabase.from('egg_opening_stock').select('flock_id,he_grade_a,he_grade_b,he_grade_c').then(r => r.data ?? []),
         fetchAllPages<any>((from, to) => supabase.from('daily_records')
           .select('flock_id,he_grade_a,he_grade_b,he_grade_c,wastage_he')
@@ -153,18 +159,27 @@ export const DailySummaryPage: React.FC = () => {
   // after the date does not count, which is what makes this as-at-date rather
   // than as-of-now. NHE carries no TDS - the voucher has no such field - so
   // only HE deducts it.
+  // Capped to the 30 days before the date. Older outstanding rows are counted
+  // but reported SEPARATELY rather than folded in: 200 of 237 HE dispatches
+  // have never been marked Received, so an all-time total is dominated by
+  // bookkeeping that was never closed off, not by money anybody is chasing.
+  const recvWindowStart = React.useMemo(() => {
+    const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() - 30)
+    return d.toISOString().slice(0, 10)
+  }, [date])
+
   const { data: recvRows } = useQuery({
-    queryKey: ['ds_receivables', date],
+    queryKey: ['ds_receivables', date, recvWindowStart],
     enabled: acctSel.includes('recv'),
     queryFn: async () => {
       const [nhe, he] = await Promise.all([
         fetchAllPages<any>((from, to) => supabase.from('nhe_sales')
-          .select('id,amount,amount_received,received_date')
+          .select('id,sale_date,amount,amount_received,received_date')
           .lte('sale_date', date)
           .or('is_employee_sale.is.null,is_employee_sale.eq.false')
           .order('id').range(from, to), 'Daily summary NHE receivable', m => toast.error(m)),
         fetchAllPages<any>((from, to) => supabase.from('he_dispatch')
-          .select('id,amount,tds_amount,amount_received,received_date')
+          .select('id,dispatch_date,amount,tds_amount,amount_received,received_date')
           .lte('dispatch_date', date)
           .order('id').range(from, to), 'Daily summary HE receivable', m => toast.error(m)),
       ])
@@ -172,11 +187,22 @@ export const DailySummaryPage: React.FC = () => {
         const paidByThen = r.received_date && r.received_date <= date ? (r.amount_received ?? 0) : 0
         return Math.max(0, (r.amount ?? 0) - tds - paidByThen)
       }
-      const nheOwed = nhe.map(r => owed(r)).filter(v => v > 0)
-      const heOwed  = he.map(r => owed(r, r.tds_amount ?? 0)).filter(v => v > 0)
+      const recent = (d: string | null) => !!d && d >= recvWindowStart
+      const tally = (rows: any[], dateKey: string, tdsOf: (r: any) => number) => {
+        let inAmt = 0, inCnt = 0, oldAmt = 0, oldCnt = 0
+        for (const r of rows) {
+          const v = owed(r, tdsOf(r))
+          if (v <= 0) continue
+          if (recent(r[dateKey])) { inAmt += v; inCnt++ } else { oldAmt += v; oldCnt++ }
+        }
+        return { inAmt, inCnt, oldAmt, oldCnt }
+      }
+      const n = tally(nhe, 'sale_date', () => 0)
+      const h = tally(he, 'dispatch_date', r => r.tds_amount ?? 0)
       return {
-        nheCount: nheOwed.length, nheAmt: nheOwed.reduce((a, b) => a + b, 0),
-        heCount: heOwed.length,   heAmt: heOwed.reduce((a, b) => a + b, 0),
+        nheCount: n.inCnt, nheAmt: n.inAmt,
+        heCount: h.inCnt,  heAmt: h.inAmt,
+        olderCount: n.oldCnt + h.oldCnt, olderAmt: n.oldAmt + h.oldAmt,
       }
     },
   })
@@ -681,9 +707,14 @@ export const DailySummaryPage: React.FC = () => {
     if (acctSel.includes('recv') && recvRows) {
       out.push({ key: 'recv', title: 'Need to Receive', lines: [
         ...head('Need to Receive'),
+        'Last 30 days',
         `NHE Sales   : ${inr(Math.round(recvRows.nheAmt))}  (${recvRows.nheCount} bill)`,
         `HE Dispatch : ${inr(Math.round(recvRows.heAmt))}  (${recvRows.heCount} bill)`,
         `TOTAL       : ${inr(Math.round(recvRows.nheAmt + recvRows.heAmt))}`,
+        ...(recvRows.olderCount
+          ? ['', `Older than 30 days : ${inr(Math.round(recvRows.olderAmt))}  (${recvRows.olderCount} bill)`,
+             '  — mostly never marked received, not chased money']
+          : []),
       ]})
     }
     if (acctSel.includes('stock') && heStock) {
@@ -692,7 +723,8 @@ export const DailySummaryPage: React.FC = () => {
       out.push({ key: 'stock', title: 'Hatching Egg Stock', lines: [
         ...head('Hatching Egg Stock'),
         ...(heStock.length
-          ? heStock.map(r => `Flock ${r.flock_no} : A ${n(r.a)}  B ${n(r.b)}  C ${n(r.c)}  = ${n(r.a + r.b + r.c)}`)
+          ? heStock.map(r => `Flock ${r.flock_no} : A ${n(r.a)}  B ${n(r.b)}  C ${n(r.c)}  = ${n(r.a + r.b + r.c)}`
+              + (r.a < 0 || r.b < 0 || r.c < 0 ? '  ** check: negative **' : ''))
           : ['No hatching egg stock on this date']),
         ...(heStock.length > 1
           ? [`TOTAL : A ${n(tot.a)}  B ${n(tot.b)}  C ${n(tot.c)}  = ${n(tot.a + tot.b + tot.c)}`]
