@@ -25,6 +25,9 @@ const EMPTY_FORM = {
   linked_payment_id: '',
   linked_nhe_sale_id: '',
   linked_he_dispatch_id: '',
+  // Money paid to a party against no particular bill. Ticking this creates the
+  // vendor_advances record as well, so the payment reaches their ledger.
+  create_vendor_advance: false,
   original_amount: '',
   // Set only on a Salary Return credit. Deliberately NOT salary_monthly_id -
   // the salary form deletes every bank row carrying that, so a return hung on
@@ -1051,6 +1054,7 @@ export const BankLedgerPage: React.FC = () => {
       linked_payment_id: t.linked_payment_id ?? '',
       linked_nhe_sale_id: t.nhe_sale_id ?? '',
       linked_he_dispatch_id: t.he_dispatch_id ?? '',
+      create_vendor_advance: false,
       original_amount: t.amount != null ? String(t.amount) : '',
       salary_return_for: t.salary_return_for ?? '',
       salary_return_emp: String(returnTargetOf(t)?.employee_id ?? ''),
@@ -1248,10 +1252,46 @@ export const BankLedgerPage: React.FC = () => {
         qc.invalidateQueries({ queryKey: ['he_dispatch'] })
       }
 
+      // A straight advance to a party, against no particular bill. Creates the
+      // vendor_advances row this bank entry pays for and tags the entry to it,
+      // in the same shape the Vendor Advances page writes — so both routes
+      // produce identical records and that page's edit/delete cleanup, which
+      // finds bank rows by vendor_advance_id, still works on one made here.
+      //
+      // TDS is deliberately not offered: an advance with TDS is recorded at
+      // GROSS while the bank entry shows NET, and getting that wrong would put
+      // the wrong figure in the party's ledger. Only 1 of 37 advances on record
+      // carries any, so those go through Accounts → Vendor Advances, which has
+      // the percentage, section and challan fields for it.
+      let advanceCreated = false
+      if (txnId && !editId && form.create_vendor_advance && form.party_id && !form.settle_payment_id) {
+        const partyName = (parties as any[] | undefined)?.find((p: any) => p.id === form.party_id)?.name ?? ''
+        const { data: adv, error: advErr } = await supabase.from('vendor_advances').insert({
+          advance_date: form.txn_date,
+          party_id: form.party_id,
+          amount,
+          payment_mode: 'bank_transfer',
+          reference_no: form.reference_no || null,
+          remarks: form.description || `Advance to ${partyName}`,
+          tds_pct: 0, tds_amount: 0, tds_section: null,
+        }).select('id').single()
+        if (advErr) throw new Error('Bank entry saved, but the Vendor Advance failed: ' + advErr.message)
+        const { error: advLinkErr } = await supabase.from('bank_transactions').update({
+          vendor_advance_id: adv.id,
+          category: form.category || 'Vendor Advance',
+        }).eq('id', txnId)
+        if (advLinkErr) throw new Error('Advance created, but linking it to this bank entry failed: ' + advLinkErr.message)
+        advanceCreated = true
+        qc.invalidateQueries({ queryKey: ['vendor_advances'] })
+        qc.invalidateQueries({ queryKey: ['party_ledger'] })
+        qc.invalidateQueries({ queryKey: ['party_ledger_prior_balance'] })
+      }
+
       const settled = !!(form.settle_payment_id || receivablesSettledCount > 0)
       toast.success(
         `${editId ? 'Updated' : 'Saved'}: ${form.txn_date} — ${form.txn_type} ${inr(amount)}` +
-        (settled ? ' — invoice settled' : '')
+        (settled ? ' — invoice settled' : '') +
+        (advanceCreated ? ' — vendor advance recorded' : '')
       )
       // A transaction dated outside the fiscal year currently selected in
       // the filter above saves correctly but was otherwise invisible until
@@ -1514,7 +1554,9 @@ export const BankLedgerPage: React.FC = () => {
              + ` — net ${inr(r.net_salary ?? 0)}${r.paid_date ? `, paid ${fmtDate(r.paid_date)}` : ''}`
       })), [paidSalaries, form.salary_return_emp])
 
-  const CATEGORIES = ['', 'Vendor Payment', 'Partner Remuneration', 'Salary', 'Salary Return', 'Electricity', 'Bank Charges', 'Cash Withdrawal', 'Customer Receipt', 'Other']
+  // 'Vendor Advance' is what the Vendor Advances page already writes on the
+  // bank row it creates, so the two routes produce the same category.
+  const CATEGORIES = ['', 'Vendor Payment', 'Vendor Advance', 'Partner Remuneration', 'Salary', 'Salary Return', 'Electricity', 'Bank Charges', 'Cash Withdrawal', 'Customer Receipt', 'Other']
   // A Salary Return is money an employee sent BACK, so it is only ever a credit.
   const isSalaryReturn = form.category === 'Salary Return' && form.txn_type === 'Credit'
 
@@ -2077,10 +2119,35 @@ export const BankLedgerPage: React.FC = () => {
                 value={form.settle_payment_id}
                 onChange={v => setForm(f => ({ ...f, settle_payment_id: v }))}
               />
-              {!form.settle_payment_id && (
-                <p className="text-xs text-amber-600 mt-1">Without picking a bill here, this stays a plain bank entry and won't show in that party's ledger.</p>
+              {!form.settle_payment_id && !form.create_vendor_advance && (
+                <p className="text-xs text-amber-600 mt-1">Without picking a bill here, or ticking Vendor Advance below, this stays a plain bank entry and won't show in that party's ledger.</p>
               )}
             </div>
+          )}
+          {/* No bill to settle because it is an advance: record it as one, so
+              the money reaches the party's ledger and can be adjusted against
+              their next bill. Hidden once a bill is picked — a payment is one
+              or the other, never both. */}
+          {form.txn_type === 'Debit' && form.party_id && !form.already_linked
+            && !form.settle_payment_id && !editId && (
+            <label className="flex items-start gap-2 rounded border border-blue-200 bg-blue-50/50 p-2 cursor-pointer">
+              <input type="checkbox" className="mt-0.5" checked={form.create_vendor_advance}
+                onChange={e => setForm(f => ({
+                  ...f,
+                  create_vendor_advance: e.target.checked,
+                  category: e.target.checked && !f.category ? 'Vendor Advance' : f.category,
+                }))} />
+              <span className="text-sm">
+                <span className="font-medium text-gray-800">Record as a Vendor Advance</span>
+                <span className="block text-xs text-gray-500 mt-0.5">
+                  Money paid to this party against no particular bill. The advance record is created
+                  too, so it appears in their Party Ledger and can be adjusted against their next bill
+                  in Pending Payments — the same as entering it on Accounts → Vendor Advances.
+                  For an advance with TDS deducted, use that page instead: there is no TDS field here,
+                  and an advance with TDS is recorded gross while the bank entry shows net.
+                </span>
+              </span>
+            </label>
           )}
           {form.txn_type === 'Credit' && form.party_id && (() => {
             const enteredAmount = parseFloat(form.amount) || 0

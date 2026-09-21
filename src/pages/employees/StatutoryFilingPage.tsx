@@ -60,6 +60,13 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
   const [paidViaPartner, setPaidViaPartner] = useState('')
   // Manual-entry liabilities (advance tax, late fee) have no computed source.
   const [manualAmount, setManualAmount] = useState('')
+  // What the challan was ACTUALLY deposited for. Until now only advance tax
+  // and late fee had an amount box at all; every other type was forced to the
+  // app's computed figure, so a challan paid a few rupees over or under could
+  // not be recorded anywhere. Pre-filled with the computed amount, so saving
+  // without touching it still means "paid exactly as computed".
+  const [paidAmount, setPaidAmount] = useState('')
+  const [remarksText, setRemarksText] = useState('')
   const period = month + '-01'
 
   // The payer can be a PARTY (Hitech Hatch Fresh Private Limited is one) or an
@@ -104,6 +111,10 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
     setPaidViaPartner(existing?.paid_via_party_id ? `party:${existing.paid_via_party_id}`
       : existing?.paid_via_partner_id ? `partner:${existing.paid_via_partner_id}` : '')
     setManualAmount(existing?.amount_due != null ? String(existing.amount_due) : '')
+    const computed = MANUAL_LIABILITIES.includes(t) ? (existing?.amount_due ?? 0) : (amounts[t] ?? 0)
+    setPaidAmount(existing?.amount_paid != null ? String(existing.amount_paid)
+      : (computed > 0 ? String(Math.round(computed)) : ''))
+    setRemarksText(existing?.remarks ?? '')
   }
 
   const saveRemittance = async (t: LiabilityType, status: 'Paid' | 'Pending') => {
@@ -124,6 +135,12 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
         ? paidViaPartner.slice(6) : null,
       paid_via_partner_id: status === 'Paid' && paidViaPartner.startsWith('partner:')
         ? paidViaPartner.slice(8) : null,
+      // What actually left, when it differs from what was computed. NULL means
+      // paid as computed, which is what every row written before this existed
+      // means. Cleared when reverting to Pending, like the challan and date.
+      amount_paid: status === 'Paid' && paidAmount !== ''
+        ? (parseFloat(paidAmount) || 0) : null,
+      remarks: status === 'Paid' ? (remarksText.trim() || null) : null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'liability_type,period' })
     if (error) { toast.error(error.message); return }
@@ -178,7 +195,22 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
                   <span className="font-medium text-sm">{meta.label}</span>
                   <div className="text-[10px] text-gray-400 max-w-xs">{meta.hint}</div>
                 </Td>
-                <Td right className="font-semibold text-sm">{inr(amt)}</Td>
+                <Td right className="font-semibold text-sm">
+                  {inr(amt)}
+                  {/* Only worth showing when it differs from what was computed
+                      AT THE TIME it was remitted - rec.amount_due - rather than
+                      from the live figure above, which keeps recalculating as
+                      salary data changes. */}
+                  {rec?.amount_paid != null
+                    && Math.round(rec.amount_paid) !== Math.round(rec.amount_due ?? 0) && (
+                    <div className={`text-[10px] font-normal mt-0.5 ${
+                      rec.amount_paid > (rec.amount_due ?? 0) ? 'text-orange-600' : 'text-blue-600'}`}>
+                      paid {inr(rec.amount_paid)}
+                      {' '}({rec.amount_paid > (rec.amount_due ?? 0) ? '+' : '−'}
+                      {inr(Math.abs(rec.amount_paid - (rec.amount_due ?? 0)))})
+                    </div>
+                  )}
+                </Td>
                 <Td className="text-xs text-gray-500">{meta.dueDay}</Td>
                 <Td>
                   {amt <= 0 ? <Badge color="gray">Nil</Badge>
@@ -193,7 +225,14 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
                           onChange={e => setManualAmount(e.target.value)}
                           className="w-28 text-xs mb-1" placeholder="Amount" />
                       )}
-                      <Input label="" value={challanNo} onChange={e => setChallanNo(e.target.value)} className="w-32 text-xs" placeholder="Challan/Ack No." />
+                      <Input label="" type="number" value={paidAmount}
+                        onChange={e => setPaidAmount(e.target.value)}
+                        className="w-32 text-xs mb-1" placeholder="Actually paid"
+                        title="What the challan was actually deposited for. Leave as it is if you paid exactly the amount shown." />
+                      <Input label="" value={challanNo} onChange={e => setChallanNo(e.target.value)} className="w-32 text-xs mb-1" placeholder="Challan/Ack No." />
+                      <Input label="" value={remarksText} onChange={e => setRemarksText(e.target.value)}
+                        className="w-32 text-xs" placeholder="Note (optional)"
+                        title="Why it differs - interest, a rounding difference, an earlier short payment" />
                     </Td>
                     <Td>
                       <Input label="" type="date" value={paidDate} onChange={e => setPaidDate(e.target.value)} className="w-36 text-xs" />
@@ -215,7 +254,12 @@ const RemittanceTracker: React.FC<{ month: string; amounts: Record<LiabilityType
                   </>
                 ) : (
                   <>
-                    <Td className="text-xs font-mono">{rec?.challan_no ?? '—'}</Td>
+                    <Td className="text-xs font-mono">
+                      {rec?.challan_no ?? '—'}
+                      {rec?.remarks && (
+                        <div className="text-[10px] font-sans text-gray-400 mt-0.5 max-w-[10rem]">{rec.remarks}</div>
+                      )}
+                    </Td>
                     <Td className="text-xs">
                       {rec?.paid_date ?? '—'}
                       {(rec?.paid_via_party_id || rec?.paid_via_partner_id) && (
