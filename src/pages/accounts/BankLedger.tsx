@@ -662,6 +662,43 @@ export const BankLedgerPage: React.FC = () => {
   // edit modal instead of a generic "already linked" note, so re-opening an
   // old entry tells you which bill/invoice it settled without having to go
   // find it in Pending Payments / NHE Sales / HE Dispatch yourself.
+  // EVERY invoice this receipt settled, with the amount applied to each.
+  // bank_transactions holds one nhe_sale_id and one he_dispatch_id, so the
+  // pointer columns alone can name only the first of each kind - a receipt
+  // covering several invoices showed one name beside a much larger settled
+  // total. bank_txn_settlements (migration 1321) records them all.
+  //
+  // Entries settled BEFORE that table existed have no rows here, so the older
+  // single-name display below stays as the fallback rather than showing
+  // nothing at all.
+  const { data: settledInvoices = [] } = useQuery({
+    queryKey: ['bank_txn_settlements', editId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('bank_txn_settlements')
+        .select('source,invoice_id,amount,settled_on')
+        .eq('bank_txn_id', editId)
+        .order('settled_on')
+      if (error) throw error
+      const rows = data ?? []
+      if (!rows.length) return []
+      const heIds = rows.filter((r: any) => r.source === 'he_dispatch').map((r: any) => r.invoice_id)
+      const nheIds = rows.filter((r: any) => r.source === 'nhe_sales').map((r: any) => r.invoice_id)
+      const [he, nhe] = await Promise.all([
+        heIds.length
+          ? supabase.from('he_dispatch').select('id,invoice_no,dc_no,payment_status').in('id', heIds)
+          : Promise.resolve({ data: [] as any[] }),
+        nheIds.length
+          ? supabase.from('nhe_sales').select('id,invoice_no,dc_no,payment_status').in('id', nheIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ])
+      const byId = new Map<string, any>()
+      for (const r of (he.data ?? [])) byId.set(r.id, r)
+      for (const r of (nhe.data ?? [])) byId.set(r.id, r)
+      return rows.map((r: any) => ({ ...r, inv: byId.get(r.invoice_id) ?? null }))
+    },
+    enabled: !!editId,
+  })
+
   const { data: linkedRefDetails } = useQuery({
     queryKey: ['bank_txn_linked_ref', form.linked_payment_id, form.linked_nhe_sale_id, form.linked_he_dispatch_id],
     queryFn: async () => {
@@ -1209,6 +1246,11 @@ export const BankLedgerPage: React.FC = () => {
         let allocatedThisSave = 0
         let firstNheId: string | null = null
         let firstHeId: string | null = null
+        // One row per invoice this receipt settled, with the amount applied to
+        // each. bank_transactions can hold only ONE nhe_sale_id and ONE
+        // he_dispatch_id, so a receipt covering several invoices could name
+        // just the first of each and the rest went unrecorded on screen.
+        const settlementLinks: { bank_txn_id: string; source: string; invoice_id: string; amount: number; settled_on: string }[] = []
         for (const key of form.settle_receivable_ids) {
           const [source, recvId] = key.split(':')
           const inv = (openReceivablesForParty ?? []).find((r: any) => r.source === source && r.id === recvId)
@@ -1240,6 +1282,10 @@ export const BankLedgerPage: React.FC = () => {
           }).eq('id', recvId)
           if (invErr) throw new Error('Invoice settle failed: ' + invErr.message)
           receivablesSettledCount++
+          settlementLinks.push({
+            bank_txn_id: txnId, source, invoice_id: recvId,
+            amount: settleAmt, settled_on: form.txn_date,
+          })
           if (source === 'he_dispatch') { if (!firstHeId) firstHeId = recvId }
           else if (!firstNheId) firstNheId = recvId
         }
@@ -1251,11 +1297,22 @@ export const BankLedgerPage: React.FC = () => {
         // the real source of truth for what was actually settled; the link
         // columns and settled_amount just let the UI/detail view show
         // something and know how much is left to allocate.
+        // Appended, never replaced: a later save settling another invoice adds
+        // to what this receipt has already paid rather than rewriting history.
+        if (settlementLinks.length) {
+          const { error: linkTableErr } = await supabase.from('bank_txn_settlements').insert(settlementLinks)
+          // The invoices themselves are already settled correctly at this
+          // point, so a failure here costs the on-screen detail, not the
+          // bookkeeping. Say so rather than throw and imply nothing happened.
+          if (linkTableErr) toast.error('Invoices settled, but recording which ones failed: ' + linkTableErr.message)
+        }
+
         const linkPayload: Record<string, any> = { settled_amount: (form.settled_amount || 0) + allocatedThisSave }
         if (firstNheId && !form.linked_nhe_sale_id) linkPayload.nhe_sale_id = firstNheId
         if (firstHeId && !form.linked_he_dispatch_id) linkPayload.he_dispatch_id = firstHeId
         const { error: btErr } = await supabase.from('bank_transactions').update(linkPayload).eq('id', txnId)
         if (btErr) throw new Error('Bank transaction link failed: ' + btErr.message)
+        qc.invalidateQueries({ queryKey: ['bank_txn_settlements'] })
         qc.invalidateQueries({ queryKey: ['receivables_open_for_party'] })
         qc.invalidateQueries({ queryKey: ['pending_receivables'] })
         qc.invalidateQueries({ queryKey: ['nhe_sales'] })
@@ -2108,7 +2165,22 @@ export const BankLedgerPage: React.FC = () => {
                   ₹{form.settled_amount.toLocaleString('en-IN')} of this entry already settled against invoice(s) so far.
                 </p>
               )}
-              {linkedRefDetails?.kind === 'bill' ? (
+              {settledInvoices.length > 0 ? (
+                <div className="space-y-0.5">
+                  {settledInvoices.map((r: any, i: number) => (
+                    <p key={i} className="text-xs text-gray-600">
+                      {r.source === 'he_dispatch' ? 'HE Dispatch' : 'NHE Sale'}
+                      {' — '}
+                      <strong>{r.inv?.invoice_no || (r.inv?.dc_no ? `DC ${r.inv.dc_no}` : 'invoice not found')}</strong>
+                      {' — '}{inr(r.amount ?? 0)} applied
+                      {r.inv?.payment_status ? ` (${r.inv.payment_status})` : ''}
+                    </p>
+                  ))}
+                  <p className="text-[11px] text-gray-400">
+                    {settledInvoices.length} invoice(s) settled by this entry
+                  </p>
+                </div>
+              ) : linkedRefDetails?.kind === 'bill' ? (
                 <p className="text-xs text-gray-600">
                   Linked to bill — <strong>{linkedRefDetails.vendor_name}</strong>
                   {linkedRefDetails.invoice_no ? `, Inv ${linkedRefDetails.invoice_no}` : ''}
@@ -2116,11 +2188,20 @@ export const BankLedgerPage: React.FC = () => {
                   {' — '}{inr(linkedRefDetails.net_payable ?? linkedRefDetails.invoice_amount ?? 0)} ({linkedRefDetails.payment_status ?? 'Pending'})
                 </p>
               ) : (linkedRefDetails?.kind === 'nhe' || linkedRefDetails?.kind === 'he') ? (
+                <>
                 <p className="text-xs text-gray-600">
                   Linked to {linkedRefDetails.kind === 'he' ? 'HE Dispatch' : 'NHE Sale'} — <strong>{(linkedRefDetails as any).parties?.name ?? ''}</strong>
                   {linkedRefDetails.invoice_no ? `, Inv ${linkedRefDetails.invoice_no}` : linkedRefDetails.dc_no ? `, DC ${linkedRefDetails.dc_no}` : ''}
                   {' — '}{inr(linkedRefDetails.amount ?? 0)} ({linkedRefDetails.payment_status ?? 'Pending'})
                 </p>
+                {form.settled_amount > (linkedRefDetails.amount ?? 0) && (
+                  <p className="text-[11px] text-amber-600 mt-0.5">
+                    This entry settled more than the invoice named above, and was recorded before the
+                    app kept a list of which invoices each receipt paid — so the others cannot be
+                    named here. The invoices themselves carry the correct receipts.
+                  </p>
+                )}
+                </>
               ) : (
                 <p className="text-xs text-gray-500">This transaction is already linked to a bill/invoice — already reflected in that party's ledger.</p>
               )}
