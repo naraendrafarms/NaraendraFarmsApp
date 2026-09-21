@@ -1109,6 +1109,68 @@ export const BankLedgerPage: React.FC = () => {
     setShowModal(true)
   }
 
+  // Undo a receipt linked to the wrong invoice.
+  //
+  // There was no way to do this at all: handleUnlink below only ever handled
+  // the PURCHASE side - it clears linked_payment_id and sets a vendor bill
+  // back to Pending - and never touched nhe_sale_id or he_dispatch_id. So a
+  // receipt attached to the wrong dispatch could not be detached from any
+  // screen in the app.
+  //
+  // Two separate actions on purpose, because they are not the same decision:
+  //   "Unlink only" detaches the bank entry and LEAVES the invoice alone -
+  //     right when the invoice's own figure is correct and only the pointer
+  //     was wrong.
+  //   "Unlink and reverse" also takes this entry's amount back off the
+  //     invoice - right when this receipt is what put the money there.
+  // The purchase side blanket-reverts to Pending, which would be wrong here:
+  // an invoice can have several receipts against it, and zeroing it would
+  // erase the others.
+  const unlinkReceipt = async (reverse: boolean) => {
+    if (!editId) return
+    const source = form.linked_he_dispatch_id ? 'he_dispatch' : 'nhe_sales'
+    const invId = form.linked_he_dispatch_id || form.linked_nhe_sale_id
+    const amt = parseFloat(form.amount) || 0
+    if (!window.confirm(reverse
+      ? `Unlink this entry AND take ${inr(amt)} back off that invoice's received amount?`
+      : 'Unlink this entry? The invoice keeps its recorded receipt exactly as it is.')) return
+    setSaving(true)
+    try {
+      // The per-invoice settlement links go with it, or they would name
+      // invoices against an entry that no longer settles anything.
+      await supabase.from('bank_txn_settlements').delete().eq('bank_txn_id', editId)
+      const { error } = await supabase.from('bank_transactions').update({
+        he_dispatch_id: null, nhe_sale_id: null, settled_amount: 0, match_status: 'waiting',
+      }).eq('id', editId)
+      if (error) throw error
+
+      if (reverse && invId) {
+        const { data: inv } = await supabase.from(source)
+          .select('amount,tds_amount,amount_received').eq('id', invId).maybeSingle()
+        if (inv) {
+          const newReceived = Math.round(Math.max(0, (inv.amount_received ?? 0) - amt) * 100) / 100
+          const net = Math.round(Math.max(0, (inv.amount ?? 0) - (inv.tds_amount ?? 0)) * 100) / 100
+          const payload: Record<string, any> = {
+            amount_received: newReceived,
+            payment_status: newReceived <= 0 ? 'Pending' : (newReceived >= net ? 'Received' : 'Partial'),
+          }
+          if (newReceived <= 0) payload.received_date = null
+          const { error: invErr } = await supabase.from(source).update(payload).eq('id', invId)
+          if (invErr) throw new Error('Unlinked, but reversing the invoice failed: ' + invErr.message)
+        }
+      }
+      toast.success(reverse ? 'Unlinked and the invoice reversed' : 'Unlinked - invoice left as it was')
+      qc.invalidateQueries({ queryKey: ['bank_transactions', selectedAccount] })
+      qc.invalidateQueries({ queryKey: ['bank_txn_settlements'] })
+      qc.invalidateQueries({ queryKey: ['he_dispatch'] })
+      qc.invalidateQueries({ queryKey: ['nhe_sales'] })
+      qc.invalidateQueries({ queryKey: ['receivables_open_for_party'] })
+      qc.invalidateQueries({ queryKey: ['party_ledger'] })
+      setShowModal(false)
+    } catch (e: any) { toast.error(e.message) }
+    setSaving(false)
+  }
+
   const handleSubmit = async () => {
     if (!selectedAccount) return
     if (!form.txn_date || !form.amount) {
@@ -2205,6 +2267,21 @@ export const BankLedgerPage: React.FC = () => {
               ) : (
                 <p className="text-xs text-gray-500">This transaction is already linked to a bill/invoice — already reflected in that party's ledger.</p>
               )}
+              {(form.linked_he_dispatch_id || form.linked_nhe_sale_id) && (
+                <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-gray-200">
+                  <button type="button" disabled={saving} onClick={() => unlinkReceipt(false)}
+                    className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-white disabled:opacity-50">
+                    Unlink only
+                  </button>
+                  <button type="button" disabled={saving} onClick={() => unlinkReceipt(true)}
+                    className="text-xs px-2 py-1 border border-red-300 text-red-700 rounded hover:bg-red-50 disabled:opacity-50">
+                    Unlink &amp; reverse receipt
+                  </button>
+                  <span className="text-[11px] text-gray-400 self-center">
+                    Reverse takes this entry's amount back off the invoice. Unlink only leaves the invoice untouched.
+                  </span>
+                </div>
+              )}
             </div>
           )}
           {form.txn_type === 'Debit' && form.party_id && !form.already_linked && (
@@ -2360,8 +2437,14 @@ export const BankLedgerPage: React.FC = () => {
                       </span>
                     )}
                   </div>
-                ) : (
+                ) : !form.already_linked ? (
                   <p className="text-xs text-amber-600 mt-1">Without picking an invoice here, this stays a plain bank entry and won't show in that party's ledger.</p>
+                ) : (
+                  /* It IS linked - saying it is not, directly under a box naming
+                     what it is linked to, is how a correct entry gets "fixed"
+                     into a wrong one. The picker stays: a receipt can settle a
+                     further invoice. */
+                  <p className="text-xs text-gray-400 mt-1">Already linked, shown above. Tick another invoice only if this same receipt also settles it.</p>
                 )}
               </div>
             )
