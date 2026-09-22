@@ -1664,6 +1664,58 @@ export const FlockDetail: React.FC = () => {
           subtitle="HE + NHE all sources" icon={<TrendingUp size={18}/>} color="text-green-700" />
       </div>
 
+      {/* What the book says this flock owes, in one line, at the top.
+          The lifetime figures sat only in the LAST row of the vs Standard tab,
+          which meant scrolling a 35-column table to answer "how many eggs
+          should this flock give us". Nothing here depends on how weeks are
+          numbered: it is the cumulative figure at the end of the curve. */}
+      {(() => {
+        if (!flock.laying_season) return (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">
+            <strong>No Laying Season set on this flock</strong>, so the Venco standard cannot be shown.
+            Set it on Edit (Summer or Winter) and the expected eggs per bird appear here.
+          </div>
+        )
+        const last = (stdCurve ?? []).filter((c: any) => c.cum_te_hh != null || c.cum_he_hh != null).slice(-1)[0]
+        if (!last) return (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">
+            No standard curve loaded for <strong>{flock.laying_season}</strong>. Import it from
+            HE Rate Register → STD Curve.
+          </div>
+        )
+        const firstWk = (stdCurve ?? []).find((c: any) => Number(c.hen_week_pct ?? 0) > 0)?.week_of_age
+        const HH   = Number(flock.total_placed_f ?? 0)
+        const teHh = last.cum_te_hh != null ? Number(last.cum_te_hh) : null
+        const heHh = last.cum_he_hh != null ? Number(last.cum_he_hh) : null
+        // Per HEN HOUSED, so it multiplies the females PLACED, not the live
+        // count - the curve already allows for depletion, and a depleted count
+        // would subtract mortality twice.
+        const teExp = teHh != null && HH ? Math.round(teHh * HH) : null
+        const heExp = heHh != null && HH ? Math.round(heHh * HH) : null
+        const share = (a: number, b: number | null) => b && b > 0 ? `${((a / b) * 100).toFixed(0)}%` : '—'
+        const n = (v: number) => v.toLocaleString('en-IN')
+        return (
+          <div className="rounded-lg border border-brand-200 bg-brand-50/60 px-4 py-2.5 text-xs text-gray-700 leading-relaxed">
+            <strong className="text-brand-700">Venco {flock.laying_season} standard, per hen housed:</strong>{' '}
+            {teHh != null && <><strong>{teHh.toFixed(2)}</strong> total eggs</>}
+            {teHh != null && heHh != null && ' and '}
+            {heHh != null && <><strong>{heHh.toFixed(2)}</strong> hatching eggs</>}
+            {firstWk != null ? ` over weeks ${firstWk}–${last.week_of_age}` : ` to week ${last.week_of_age}`}.
+            {HH > 0 && (teExp != null || heExp != null) && (
+              <> On <strong>{n(HH)}</strong> females placed that is{' '}
+                {teExp != null && <strong>{n(teExp)}</strong>}{teExp != null && ' total eggs'}
+                {teExp != null && heExp != null && ' and '}
+                {heExp != null && <strong>{n(heExp)}</strong>}{heExp != null && ' hatching eggs'} for the cycle.</>
+            )}
+            <span className="block mt-0.5 text-gray-500">
+              Recorded so far: {n(totalEggs)} eggs ({share(totalEggs, teExp)}) and {n(totalHE)} HE ({share(totalHE, heExp)}).
+              Flock is {ageWeeks} weeks old{last.week_of_age != null && ageWeeks > last.week_of_age
+                ? ` — past week ${last.week_of_age}, where the curve ends` : ''}.
+            </span>
+          </div>
+        )
+      })()}
+
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
         {(['overview','placements','daily','weekly','monthly','financial','costincome','transfers','std'] as const).map(t => (
