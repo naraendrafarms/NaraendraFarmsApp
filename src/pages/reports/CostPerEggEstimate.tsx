@@ -108,7 +108,7 @@ export const CostPerEggEstimate: React.FC = () => {
   const { data: nheSales } = useQuery({
     queryKey: ['cpe_nhe'],
     queryFn: () => fetchAllPages<any>((from, to) => supabase.from('nhe_sales')
-      .select('flock_id,amount').order('id').range(from, to), 'NHE sales', toast.error),
+      .select('flock_id,amount,sale_type').order('id').range(from, to), 'NHE sales', toast.error),
   })
 
   const { data: curve } = useQuery({
@@ -214,10 +214,24 @@ export const CostPerEggEstimate: React.FC = () => {
 
       const totEntered = lines.reduce((s, l) => s + l.entered, 0)
       const totEst     = lines.reduce((s, l) => s + l.estimated, 0)
-      const revenue = (heDispatch ?? []).filter((r: any) => r.flock_id === f.id)
-          .reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0)
-        + (nheSales ?? []).filter((r: any) => r.flock_id === f.id)
-          .reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0)
+
+      // ── income ────────────────────────────────────────────────────────────
+      // Income is NOT scaled. A sale is an invoice that either exists or does
+      // not; there is no "entered for 4 of 17 months" about money received, so
+      // inventing extra revenue to match the scaled costs would flatter the
+      // P&L exactly where it matters most. Both columns carry the same figure.
+      const heRev = (heDispatch ?? []).filter((r: any) => r.flock_id === f.id)
+        .reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0)
+      const nheRows = (nheSales ?? []).filter((r: any) => r.flock_id === f.id)
+      const nheRev = nheRows.reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0)
+      const nheByType: Record<string, number> = {}
+      for (const r of nheRows) {
+        const k = r.sale_type || 'other'
+        nheByType[k] = (nheByType[k] ?? 0) + Number(r.amount ?? 0)
+      }
+      const revenue = heRev + nheRev
+      const plEntered = revenue - totEntered
+      const plEst     = revenue - totEst
 
       const hens = Number(f.total_placed_f ?? 0)
       const last = (curve ?? []).filter((c: any) => c.season === f.laying_season)
@@ -225,7 +239,10 @@ export const CostPerEggEstimate: React.FC = () => {
 
       return {
         id: f.id, flock_no: f.flock_no, status: f.status, season: f.laying_season,
-        nMonths, lines, totEntered, totEst, eggs, he, revenue, hens,
+        nMonths, lines, totEntered, totEst, eggs, he, hens,
+        heRev, nheRev, nheByType, revenue, plEntered, plEst,
+        marginPctEntered: revenue > 0 ? (plEntered / revenue) * 100 : null,
+        marginPctEst:     revenue > 0 ? (plEst / revenue) * 100 : null,
         feedKg, feedKgUnpriced,
         cpeEntered: eggs > 0 ? totEntered / eggs : null,
         cpeEst:     eggs > 0 ? totEst / eggs : null,
@@ -250,10 +267,20 @@ export const CostPerEggEstimate: React.FC = () => {
       ['Line', 'As entered', 'Months of data', 'Estimated'],
       selected.lines.map((l: Line) => [l.label, Math.round(l.entered),
         fmtMonths(l, selected.nMonths), Math.round(l.estimated)])
-        .concat([['TOTAL', Math.round(selected.totEntered), `${selected.nMonths} months active`,
-                  Math.round(selected.totEst)],
-                 ['Cost per egg', selected.cpeEntered?.toFixed(2) ?? '', '',
-                  selected.cpeEst?.toFixed(2) ?? '']]))
+        .concat([
+          ['TOTAL COST', Math.round(selected.totEntered), `${selected.nMonths} months active`,
+            Math.round(selected.totEst)],
+          ['Cost per egg', selected.cpeEntered?.toFixed(2) ?? '', '', selected.cpeEst?.toFixed(2) ?? ''],
+          ['HE revenue', Math.round(selected.heRev), 'not scaled', Math.round(selected.heRev)],
+          ['Other sales (NHE)', Math.round(selected.nheRev), 'not scaled', Math.round(selected.nheRev)],
+          ['TOTAL INCOME', Math.round(selected.revenue), '', Math.round(selected.revenue)],
+          ['PROFIT / LOSS', Math.round(selected.plEntered), 'income - cost', Math.round(selected.plEst)],
+          ['Profit per egg',
+            selected.eggs > 0 ? (selected.plEntered / selected.eggs).toFixed(2) : '', '',
+            selected.eggs > 0 ? (selected.plEst / selected.eggs).toFixed(2) : ''],
+          ['Margin % of income',
+            selected.marginPctEntered?.toFixed(1) ?? '', '', selected.marginPctEst?.toFixed(1) ?? ''],
+        ]))
   }
 
   const printIt = () => {
@@ -264,15 +291,22 @@ export const CostPerEggEstimate: React.FC = () => {
       headers: ['Line', 'As entered', 'Months of data', 'Estimated'],
       rightAlignFrom: 1,
       rows: selected.lines.map((l: Line) => [l.label, inr(l.entered),
-        fmtMonths(l, selected.nMonths), inr(l.estimated)]),
-      footerRow: ['TOTAL COST', inr(selected.totEntered), '', inr(selected.totEst)],
+        fmtMonths(l, selected.nMonths), inr(l.estimated)]).concat([
+        ['TOTAL COST', inr(selected.totEntered), `${selected.nMonths} months active`, inr(selected.totEst)],
+        ['Cost per egg', selected.cpeEntered != null ? `Rs ${selected.cpeEntered.toFixed(2)}` : '—', '',
+          selected.cpeEst != null ? `Rs ${selected.cpeEst.toFixed(2)}` : '—'],
+        ['HE revenue', inr(selected.heRev), 'not scaled', inr(selected.heRev)],
+        ['Other sales (NHE)', inr(selected.nheRev), 'not scaled', inr(selected.nheRev)],
+        ['TOTAL INCOME', inr(selected.revenue), '', inr(selected.revenue)],
+      ]),
+      footerRow: ['PROFIT / LOSS', inr(selected.plEntered), 'income - cost', inr(selected.plEst)],
     })
   }
 
   return (
     <div className="space-y-5">
       <SectionHeader title="Cost per Egg — Estimate"
-        subtitle="What an egg cost once the WHOLE feed bill is priced and the part-entered months are filled in. Read only: nothing on this page is ever saved."
+        subtitle="Cost, income and profit per flock once the WHOLE feed bill is priced and the part-entered months are filled in. Read only: nothing on this page is ever saved."
         action={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" icon={<Printer size={14}/>} onClick={printIt}>Print</Button>
@@ -340,9 +374,74 @@ export const CostPerEggEstimate: React.FC = () => {
                     <Td />
                     <Td right className="text-red-700">{selected.cpeEst != null ? `Rs ${selected.cpeEst.toFixed(2)}` : 'no eggs yet'}</Td>
                     <Td className="text-xs font-normal text-gray-500">
-                      {selected.revPerEgg != null
-                        ? `sold at Rs ${selected.revPerEgg.toFixed(2)}/egg — margin Rs ${(selected.revPerEgg - (selected.cpeEst ?? 0)).toFixed(2)}`
-                        : 'a flock that has not laid has no cost per egg'}
+                      {selected.eggs > 0 ? 'what one egg cost to produce' : 'a flock that has not laid has no cost per egg'}
+                    </Td>
+                  </tr>
+
+                  {/* ── INCOME ──────────────────────────────────────────────
+                      Income is NOT scaled and both columns carry the same
+                      figure. A sale is an invoice that either exists or does
+                      not - there is no "entered for 4 of 17 months" about
+                      money received, and inventing revenue to match the
+                      scaled costs would flatter the P&L exactly where it
+                      matters most. */}
+                  <tr className="border-t-2 border-gray-300">
+                    <Td className="font-semibold pt-3">HE revenue</Td>
+                    <Td right className="pt-3">{inr(selected.heRev)}</Td>
+                    <Td className="text-gray-400 text-xs pt-3">not scaled</Td>
+                    <Td right className="pt-3">{inr(selected.heRev)}</Td>
+                    <Td className="text-xs text-gray-500 pt-3">hatching egg dispatches</Td>
+                  </tr>
+                  <tr>
+                    <Td className="font-semibold">Other sales (NHE)</Td>
+                    <Td right>{inr(selected.nheRev)}</Td>
+                    <Td className="text-gray-400 text-xs">not scaled</Td>
+                    <Td right>{inr(selected.nheRev)}</Td>
+                    <Td className="text-xs text-gray-500">
+                      {Object.keys(selected.nheByType).length
+                        ? Object.entries(selected.nheByType)
+                            .sort((a: any, b: any) => b[1] - a[1])
+                            .map(([k, v]: any) => `${k} ${inr(v)}`).join(' · ')
+                        : 'none'}
+                    </Td>
+                  </tr>
+                  <tr className="bg-blue-50 font-semibold">
+                    <Td>TOTAL INCOME</Td>
+                    <Td right className="text-blue-700">{inr(selected.revenue)}</Td>
+                    <Td />
+                    <Td right className="text-blue-700">{inr(selected.revenue)}</Td>
+                    <Td className="text-xs font-normal text-gray-500">
+                      {selected.revPerEgg != null ? `Rs ${selected.revPerEgg.toFixed(2)} per egg sold` : '—'}
+                    </Td>
+                  </tr>
+
+                  {/* ── PROFIT / LOSS ─────────────────────────────────────── */}
+                  <tr className="border-t-2 border-gray-300 font-bold">
+                    <Td className="pt-3">PROFIT / LOSS</Td>
+                    <Td right className={`pt-3 ${selected.plEntered >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                      {inr(selected.plEntered)}
+                    </Td>
+                    <Td className="text-gray-400 text-xs pt-3">income − cost</Td>
+                    <Td right className={`pt-3 ${selected.plEst >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                      {inr(selected.plEst)}
+                    </Td>
+                    <Td className="text-xs font-normal text-gray-500 pt-3">
+                      the estimate is the one to trust — the other omits 40% of the feed
+                    </Td>
+                  </tr>
+                  <tr className="bg-green-50/60 font-bold">
+                    <Td>PROFIT PER EGG</Td>
+                    <Td right className={selected.plEntered >= 0 ? 'text-green-700' : 'text-red-600'}>
+                      {selected.eggs > 0 ? `Rs ${(selected.plEntered / selected.eggs).toFixed(2)}` : '—'}
+                    </Td>
+                    <Td />
+                    <Td right className={selected.plEst >= 0 ? 'text-green-700' : 'text-red-600'}>
+                      {selected.eggs > 0 ? `Rs ${(selected.plEst / selected.eggs).toFixed(2)}` : '—'}
+                    </Td>
+                    <Td className="text-xs font-normal text-gray-500">
+                      {selected.marginPctEst != null
+                        ? `margin ${selected.marginPctEst.toFixed(1)}% of income (${selected.marginPctEntered?.toFixed(1)}% as entered)`
+                        : 'no income recorded yet'}
                     </Td>
                   </tr>
                 </tfoot>
@@ -359,7 +458,8 @@ export const CostPerEggEstimate: React.FC = () => {
                   <Th>Flock</Th><Th>Status</Th><Th right>Months</Th><Th right>Feed kg</Th>
                   <Th right>Unpriced kg</Th><Th right>Eggs</Th>
                   <Th right>Cost/egg entered</Th><Th right>Cost/egg estimated</Th>
-                  <Th right>Sold at</Th><Th right>Margin/egg</Th>
+                  <Th right>Income</Th><Th right>Sold at</Th><Th right>Profit/egg</Th>
+                  <Th right>PROFIT / LOSS</Th><Th right>Margin %</Th>
                   <Th right>Eggs/hen</Th><Th right>vs book</Th>
                 </tr></thead>
                 <tbody>
@@ -375,10 +475,19 @@ export const CostPerEggEstimate: React.FC = () => {
                       <Td right>{r.eggs ? r.eggs.toLocaleString('en-IN') : '—'}</Td>
                       <Td right>{r.cpeEntered != null ? `Rs ${r.cpeEntered.toFixed(2)}` : '—'}</Td>
                       <Td right className="font-medium text-red-700">{r.cpeEst != null ? `Rs ${r.cpeEst.toFixed(2)}` : '—'}</Td>
+                      <Td right className="text-blue-700">{r.revenue ? inr(r.revenue) : '—'}</Td>
                       <Td right>{r.revPerEgg != null ? `Rs ${r.revPerEgg.toFixed(2)}` : '—'}</Td>
                       <Td right className={r.revPerEgg != null && r.cpeEst != null
                         ? (r.revPerEgg - r.cpeEst >= 0 ? 'text-green-700 font-medium' : 'text-red-600 font-medium') : ''}>
                         {r.revPerEgg != null && r.cpeEst != null ? `Rs ${(r.revPerEgg - r.cpeEst).toFixed(2)}` : '—'}
+                      </Td>
+                      {/* On the ESTIMATED cost - the one that prices all the feed. */}
+                      <Td right className={`font-semibold ${r.plEst >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                        {inr(r.plEst)}
+                      </Td>
+                      <Td right className={r.marginPctEst != null
+                        ? (r.marginPctEst >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}>
+                        {r.marginPctEst != null ? `${r.marginPctEst.toFixed(1)}%` : '—'}
                       </Td>
                       <Td right>{r.eggsPerHen != null && r.eggsPerHen > 0 ? r.eggsPerHen.toFixed(1) : '—'}</Td>
                       <Td right>{r.eggsPerHen != null && r.eggsPerHen > 0 && r.stdTe
@@ -403,6 +512,13 @@ export const CostPerEggEstimate: React.FC = () => {
                 amount, so their estimates are a ceiling rather than a precise figure.</p>
               <p><strong>A line showing "no data" is missing from BOTH columns.</strong> Nothing can
                 be scaled up from nothing, and a made-up figure there would be worse than a gap.</p>
+              <p><strong>INCOME IS NEVER SCALED.</strong> A sale is an invoice that either exists or
+                does not — there is no "entered for 4 of 17 months" about money received. So both
+                columns carry the same income, and only the cost side moves. Inventing revenue to
+                match the scaled costs would flatter the profit exactly where it matters most.</p>
+              <p><strong>Read the ESTIMATED profit, not the entered one.</strong> The as-entered
+                profit is flattered by every cost that has not been keyed in — on Flock 20 that is
+                40% of the feed and two-thirds of the months of salary and power.</p>
             </div>
           </Card>
         </>
