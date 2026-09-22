@@ -231,7 +231,7 @@ export const FlockDashboard: React.FC = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from('flocks')
-        .select('id,flock_no,breed,placement_date,paid_female,paid_male,free_female,free_male,chick_rate,supplier,status,close_date,total_placed_f,total_placed_m,chick_cost,laying_season')
+        .select('id,flock_no,breed,placement_date,paid_female,paid_male,free_female,free_male,chick_rate,supplier,status,close_date,total_placed_f,total_placed_m,chick_cost')
         .eq('is_vhl_contract', false)
         .order('placement_date', { ascending: false })
       return data ?? []
@@ -265,21 +265,6 @@ export const FlockDashboard: React.FC = () => {
     ),
     enabled: !!flocks && flocks.length > 0
   })
-
-  // The Venco production standard, both seasons. 86 rows, so no paging.
-  // weekly_he_hh / cum_he_hh are HATCHING eggs per HEN HOUSED, which is why
-  // the multiplier below is total_placed_f and not today's live count.
-  const { data: stdCurve = [] } = useQuery({
-    queryKey: ['flock_dashboard_std_curve'],
-    queryFn: async () => {
-      const { data } = await supabase.from('std_production_curve')
-        .select('season,week_of_age,hen_week_pct,he_pct,weekly_he_hh,cum_he_hh')
-        .order('week_of_age')
-      return data ?? []
-    }
-  })
-
-  const [dashTab, setDashTab] = React.useState<'All Flocks' | 'Standard vs Actual'>('All Flocks')
 
   // First egg date per flock (earliest record_date where HE eggs > 0) —
   // unbounded across every flock/day, paged for the same reason as fcrStats
@@ -452,24 +437,6 @@ export const FlockDashboard: React.FC = () => {
     <div className="space-y-5">
       <SectionHeader title="Flock Management" subtitle={`${flocks?.length ?? 0} flocks`} />
 
-      <div className="border-b border-gray-200">
-        <nav className="flex gap-1">
-          {(['All Flocks', 'Standard vs Actual'] as const).map(t => (
-            <button key={t} onClick={() => setDashTab(t)}
-              className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
-                ${dashTab === t
-                  ? 'border-brand-600 text-brand-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
-              {t}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {dashTab === 'Standard vs Actual' ? (
-        <StdVsActualTab flocks={flocks ?? []} daily={fcrStats ?? []} curve={stdCurve as any[]} />
-      ) : (
-      <>
       {/* Company Summary Stats */}
       {summaryStats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -608,154 +575,6 @@ export const FlockDashboard: React.FC = () => {
           )
         })}
       </div>
-      </>
-      )}
-    </div>
-  )
-}
-
-// ── STANDARD vs ACTUAL ────────────────────────────────────────────────────────
-// How many hatching eggs the book says a flock should have produced, against
-// how many it actually did — for every flock at once.
-//
-// This is NOT what Flock Lifetime (vs Standard) already shows. That page
-// compares HD% and HE% — RATIOS — for ONE flock at a time. Neither answers
-// "how many HE eggs should we have received", which needs the per-hen standard
-// multiplied by the birds housed.
-//
-// The standard is per HEN HOUSED, so the multiplier is total_placed_f (the
-// females placed), never today's live count: the book already has depletion
-// built into its own curve, and multiplying by a depleted count would subtract
-// mortality twice.
-const StdVsActualTab: React.FC<{ flocks: any[]; daily: any[]; curve: any[] }> = ({ flocks, daily, curve }) => {
-  const [showClosed, setShowClosed] = React.useState(false)
-
-  const rows = React.useMemo(() => {
-    // Week 1 is the placement day and the six days after it — the same count
-    // Flock Lifetime uses, verified there against Flock 22's weekly reports.
-    const weekOf = (placed: string, on: Date) =>
-      Math.floor((on.getTime() - new Date(placed + 'T00:00:00').getTime()) / 86400000 / 7) + 1
-
-    const sevenAgo = new Date(); sevenAgo.setDate(sevenAgo.getDate() - 7)
-    const sevenStr = sevenAgo.toISOString().slice(0, 10)
-
-    const actual: Record<string, { all: number; last7: number }> = {}
-    for (const r of daily) {
-      const a = (actual[r.flock_id] ||= { all: 0, last7: 0 })
-      const he = Number(r.he_eggs ?? 0)
-      a.all += he
-      if (r.record_date >= sevenStr) a.last7 += he
-    }
-
-    const today = new Date()
-    return flocks
-      .filter(f => f.placement_date && (showClosed || (f.status ?? '') !== 'closed'))
-      .map(f => {
-        const wk = weekOf(f.placement_date, today)
-        const hens = Number(f.total_placed_f ?? 0)
-        const season = f.laying_season ?? null
-        const std = season
-          ? curve.find(c => c.season === season && c.week_of_age === wk) ?? null
-          : null
-        const a = actual[f.id] ?? { all: 0, last7: 0 }
-
-        // Why the book has nothing to say, when it has nothing to say. A blank
-        // with no reason reads as a broken page.
-        const minWk = curve.length ? Math.min(...curve.map(c => c.week_of_age)) : 24
-        const maxWk = curve.length ? Math.max(...curve.map(c => c.week_of_age)) : 66
-        const why = !season ? 'no laying season set on the flock'
-          : wk < minWk ? `not laying yet — the curve starts at week ${minWk}`
-          : wk > maxWk ? `past the curve, which ends at week ${maxWk}`
-          : std ? null : 'no row for this week in the curve'
-
-        const expWeek = std?.weekly_he_hh != null ? Number(std.weekly_he_hh) * hens : null
-        const expToDate = std?.cum_he_hh != null ? Number(std.cum_he_hh) * hens : null
-        return {
-          id: f.id, flock_no: f.flock_no, status: f.status ?? '—', wk, hens, season, why,
-          stdWeekPerHen: std?.weekly_he_hh != null ? Number(std.weekly_he_hh) : null,
-          stdCumPerHen: std?.cum_he_hh != null ? Number(std.cum_he_hh) : null,
-          expWeek, actWeek: a.last7,
-          varWeek: expWeek != null ? a.last7 - expWeek : null,
-          expToDate, actToDate: a.all,
-          varToDate: expToDate != null ? a.all - expToDate : null,
-        }
-      })
-      .sort((x, y) => String(x.flock_no).localeCompare(String(y.flock_no), undefined, { numeric: true }))
-  }, [flocks, daily, curve, showClosed])
-
-  const pctOf = (act: number, exp: number | null) =>
-    exp && exp > 0 ? `${((act / exp) * 100).toFixed(0)}%` : '—'
-  const varColour = (v: number | null) =>
-    v == null ? 'text-gray-400' : v >= 0 ? 'text-green-700' : 'text-red-600'
-
-  return (
-    <div className="space-y-3">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm text-blue-800">
-        Hatching eggs the Venco standard expects, against what was actually recorded.
-        The standard is per HEN HOUSED, so it is multiplied by the females placed — the
-        book's own curve already allows for depletion.
-        {' '}Maintained under Flocks → HE Rate Register → STD Production Curve.
-      </div>
-
-      <label className="flex items-center gap-2 text-sm text-gray-600">
-        <input type="checkbox" className="rounded border-gray-300" checked={showClosed}
-          onChange={e => setShowClosed(e.target.checked)} />
-        Include closed flocks
-      </label>
-
-      {rows.length === 0 ? (
-        <EmptyState title="No flocks with a placement date" />
-      ) : (
-        <div className="overflow-x-auto">
-          <Table>
-            <thead>
-              <tr>
-                <Th>Flock</Th><Th>Status</Th><Th right>Age (wk)</Th><Th>Season</Th>
-                <Th right>Hens housed</Th>
-                <Th right>Std HE/hen wk</Th><Th right>Expected wk</Th><Th right>Actual 7d</Th><Th right>Diff</Th>
-                <Th right>Std cum HE/hen</Th><Th right>Expected to date</Th><Th right>Actual to date</Th><Th right>Diff</Th><Th right>%</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <Td className="font-medium">F-{r.flock_no}</Td>
-                  <Td className="text-xs">{r.status}</Td>
-                  <Td right>{r.wk}</Td>
-                  <Td className="text-xs">{r.season ?? '—'}</Td>
-                  <Td right>{numFmt(r.hens)}</Td>
-                  {r.why ? (
-                    <Td colSpan={9} className="text-xs text-gray-400 italic">{r.why}</Td>
-                  ) : (
-                    <>
-                      <Td right className="text-xs">{r.stdWeekPerHen?.toFixed(2)}</Td>
-                      <Td right>{numFmt(Math.round(r.expWeek ?? 0))}</Td>
-                      <Td right>{numFmt(r.actWeek)}</Td>
-                      <Td right className={varColour(r.varWeek)}>
-                        {r.varWeek == null ? '—' : (r.varWeek >= 0 ? '+' : '') + numFmt(Math.round(r.varWeek))}
-                      </Td>
-                      <Td right className="text-xs">{r.stdCumPerHen?.toFixed(1)}</Td>
-                      <Td right>{numFmt(Math.round(r.expToDate ?? 0))}</Td>
-                      <Td right>{numFmt(r.actToDate)}</Td>
-                      <Td right className={varColour(r.varToDate)}>
-                        {r.varToDate == null ? '—' : (r.varToDate >= 0 ? '+' : '') + numFmt(Math.round(r.varToDate))}
-                      </Td>
-                      <Td right className={varColour(r.varToDate)}>{pctOf(r.actToDate, r.expToDate)}</Td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </div>
-      )}
-
-      <p className="text-xs text-gray-400">
-        "Actual to date" is every hatching egg recorded in Daily Records for that flock, and
-        "Expected to date" is the book's cumulative figure at the flock's CURRENT age — so the
-        two are comparable only once a flock has been laying. A flock past the end of the curve,
-        or not yet at its first laying week, shows the reason instead of a misleading zero.
-      </p>
     </div>
   )
 }
