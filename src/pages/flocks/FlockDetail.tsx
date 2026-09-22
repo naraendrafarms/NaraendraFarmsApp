@@ -800,6 +800,33 @@ export const FlockDetail: React.FC = () => {
 
   // Weekly Flock Report — dailyAggregated rolled up by week-of-age (this
   // flock's own week numbering from placement_date), one row per week.
+  // The curve keyed by week, so a row can look its standard up directly.
+  const curveByWeek = useMemo(() => {
+    const m: Record<number, any> = {}
+    for (const c of (stdCurve ?? []) as any[]) m[c.week_of_age] = c
+    return m
+  }, [stdCurve])
+  const HHf = Number(flock?.total_placed_f ?? 0)
+
+  // A standard cell, and the colour of the actual beside it. Green once the
+  // actual is at or above the book, red below - and inverted for the columns
+  // where LESS is better, like mortality. No standard means no colour: a grey
+  // figure says "nothing to compare", which a green one would not.
+  const stdCell = (v: any, suffix = '') =>
+    v == null ? '—' : `${Number(v)}${suffix}`
+  // Totals only the months the curve actually reaches; a dash where it reaches
+  // none, rather than a zero that would read as "the book expected nothing".
+  const stdTot = (rows: any[], key: string) => {
+    const have = (rows ?? []).filter((m: any) => m[key] != null)
+    if (have.length === 0) return '—'
+    return Math.round(have.reduce((a: number, m: any) => a + Number(m[key]), 0)).toLocaleString('en-IN')
+  }
+  const vsStd = (actual: number | null | undefined, std: any, lessIsBetter = false) => {
+    if (actual == null || std == null) return 'text-gray-700'
+    const ok = lessIsBetter ? actual <= Number(std) : actual >= Number(std)
+    return ok ? 'text-green-600' : 'text-red-500'
+  }
+
   const weeklyAgg = useMemo(() => {
     if (!flock?.placement_date) return []
     const map = new Map<number, any>()
@@ -817,6 +844,7 @@ export const FlockDetail: React.FC = () => {
           mortF: d.mortality_female ?? 0, mortM: d.mortality_male ?? 0,
           feedF: d.feed_female_kg ?? 0, feedM: d.feed_male_kg ?? 0,
           hdSum: openF > 0 ? eggs / openF : 0, hdCount: openF > 0 ? 1 : 0,
+          openFSum: openF,
           firstDate: d.record_date, lastDate: d.record_date,
           openF, openM: d.opening_male ?? 0, closeF: d.closing_female ?? 0, closeM: d.closing_male ?? 0,
         })
@@ -829,6 +857,7 @@ export const FlockDetail: React.FC = () => {
         ex.feedF += d.feed_female_kg ?? 0
         ex.feedM += d.feed_male_kg ?? 0
         if (openF > 0) { ex.hdSum += eggs / openF; ex.hdCount += 1 }
+        ex.openFSum += openF
         ex.lastDate = d.record_date
         ex.closeF = d.closing_female ?? ex.closeF
         ex.closeM = d.closing_male ?? ex.closeM
@@ -836,10 +865,32 @@ export const FlockDetail: React.FC = () => {
     }
     return Array.from(map.values()).sort((a, b) => a.weekNum - b.weekNum).map(w => ({
       ...w,
-      hdPct: w.hdCount > 0 ? w.hdSum / w.hdCount : null,
+      // WEIGHTED: the week's eggs over the week's bird-days, not the mean of
+      // each day's own rate. A plain mean diverges from the true rate whenever
+      // the bird count or the egg count moves within the week, and it is the
+      // weighted form that v_flock_summary, the Reports page and the vs
+      // Standard tab all use. Putting a standard beside the unweighted figure
+      // would have shown a gap that was partly arithmetic.
+      hdPct: w.openFSum > 0 ? w.totalEggs / w.openFSum : null,
       hePct: w.totalEggs > 0 ? w.totalHE / w.totalEggs : null,
+      // The Week column here IS the standard's week: both count COMPLETED
+      // weeks of age, so week N is matched to curve week N with nothing added.
+      std: curveByWeek[w.weekNum],
+      // The book's rates turned into the counts this flock should have hit.
+      // Per HEN HOUSED, so they multiply the females PLACED - the curve already
+      // allows for depletion and a live count would subtract mortality twice.
+      stdHE: curveByWeek[w.weekNum]?.weekly_he_hh != null && HHf
+        ? Number(curveByWeek[w.weekNum].weekly_he_hh) * HHf : null,
+      // Depletion is CUMULATIVE in the book, so a week's own standard loss is
+      // the step from the week before. Week 0 has no week before it.
+      stdMortF: (() => {
+        const a = curveByWeek[w.weekNum]?.cum_depletion_pct
+        const b = curveByWeek[w.weekNum - 1]?.cum_depletion_pct
+        if (a == null || !HHf) return null
+        return ((Number(a) - Number(b ?? 0)) / 100) * HHf
+      })(),
     }))
-  }, [dailyAggregated, flock?.placement_date])
+  }, [dailyAggregated, flock?.placement_date, curveByWeek, HHf])
 
   // displayDaily: reversed + date filtered (one row per date, aggregated across sheds)
   const displayDaily = useMemo(() => {
@@ -870,20 +921,25 @@ export const FlockDetail: React.FC = () => {
   const stdExportRows = useMemo(() => {
     if (!flock?.laying_season || !stdCurve || stdCurve.length === 0) return []
     const HH = flock.total_placed_f ?? 0
-    // flockAgeWeeks counts COMPLETED weeks, so the placement day and the six
-    // days after are its week 0 — correct for stating an age ("58w 4d"), wrong
-    // for the standard, which numbers the first week of life as week 1. The two
-    // conventions met here without anyone noticing, so standard week 24 was
-    // being compared against the flock's 25th week, and every row of the table
-    // was one week out. The shared helper is left alone because age display
-    // depends on it; the ordinal is made here, where the standard is matched.
-    const stdWeekOf = (date: string) => flockAgeWeeks(flock.placement_date, date) + 1
+    // The standard's week N means the birds have COMPLETED N weeks - confirmed
+    // by the owner 22/09/2026, and by the data: F-19 reaches 4.6% hen-day in
+    // its bucket 24 where the Summer curve says 5.0% at week 24, an almost
+    // exact match. flockAgeWeeks already counts completed weeks, so it IS the
+    // standard's week number and nothing is added to it.
+    //
+    // This previously added 1, on the belief that the curve numbered the first
+    // week of life as week 1. That put every row one week EARLY: standard week
+    // 24 was read against the flock's 24th week rather than its 24 completed
+    // weeks, which made a flock look a week behind the book throughout.
+    const stdWeekOf = (date: string) => flockAgeWeeks(flock.placement_date, date)
     type WeekAgg = { openFSum: number; totalEggs: number; heEggs: number; depletion: number }
     const weekly: Record<number, WeekAgg> = {}
     for (const d of (daily ?? [])) {
       if (!d.record_date) continue
       const wk = stdWeekOf(d.record_date)
-      if (wk < 1) continue
+      // Week 0 is a real week now (the placement week), so only pre-placement
+      // days are dropped.
+      if (wk < 0) continue
       const row = weekly[wk] ??= { openFSum: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
       row.openFSum += d.opening_female ?? 0
       row.totalEggs += d.total_eggs ?? 0
@@ -909,7 +965,7 @@ export const FlockDetail: React.FC = () => {
       const isLump = lines.length === 1
       for (const l of lines) {
         const wk = stdWeekOf(l.prod_date)
-        if (wk < 1) continue
+        if (wk < 0) continue
         const e = touch(wk)
         e.dispatched += lineEggs(l)
         if (isLump) e.lumped = true
@@ -921,7 +977,7 @@ export const FlockDetail: React.FC = () => {
         if (total <= 0) continue
         for (const l of lines) {
           const wk = stdWeekOf(l.prod_date)
-          if (wk < 1) continue
+          if (wk < 0) continue
           const share = lineEggs(l) / total
           const e = touch(wk)
           e.set += eggsSet * share
@@ -1305,7 +1361,44 @@ export const FlockDetail: React.FC = () => {
     const feedF = monthDaily.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0)
     const feedM = monthDaily.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0)
     const mortF = monthDaily.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
-    return { ...m, days: monthDaily.length, avgF, feedF, feedM, mortF }
+    // ── the standard for a CALENDAR month ────────────────────────────────
+    // The book has no monthly figure and cannot have one: a month spans about
+    // four and a third weeks of age and straddles the boundary between them.
+    // So it is built up DAY BY DAY - each day takes the standard of the week
+    // of age it falls in - which makes it exact rather than an approximation,
+    // and makes a short first or last month come out short rather than whole.
+    // Rates are weighted the same way their actual is: hen-day by the birds
+    // present, HE% by the eggs the book expects those birds to lay.
+    let sHdNum = 0, sHdDen = 0, sHeNum = 0, sHeDen = 0
+    let sEggs = 0, sHE = 0, sMortF = 0, sDays = 0
+    if (flock?.placement_date) {
+      for (const d of monthDaily) {
+        const c = curveByWeek[flockAgeWeeks(flock.placement_date, d.record_date)]
+        if (!c) continue
+        sDays++
+        const of = d.opening_female ?? 0
+        if (c.hen_week_pct != null && of > 0) { sHdNum += Number(c.hen_week_pct) * of; sHdDen += of }
+        // A day's share of the week's standard is a seventh of it.
+        const dayEggs = c.weekly_te_hh != null && HHf ? (Number(c.weekly_te_hh) / 7) * HHf : 0
+        sEggs += dayEggs
+        if (c.weekly_he_hh != null && HHf) sHE += (Number(c.weekly_he_hh) / 7) * HHf
+        if (c.he_pct != null && dayEggs > 0) { sHeNum += Number(c.he_pct) * dayEggs; sHeDen += dayEggs }
+        if (c.cum_depletion_pct != null && HHf) {
+          const prev = curveByWeek[flockAgeWeeks(flock.placement_date, d.record_date) - 1]
+          sMortF += ((Number(c.cum_depletion_pct) - Number(prev?.cum_depletion_pct ?? 0)) / 100) * HHf / 7
+        }
+      }
+    }
+    return { ...m, days: monthDaily.length, avgF, feedF, feedM, mortF,
+      // null, not zero, when the curve says nothing about this month - a zero
+      // standard would read as "the book expected none", which is not the same
+      // as "the book does not cover these weeks".
+      stdDays: sDays,
+      stdHdPct: sDays > 0 && sHdDen > 0 ? sHdNum / sHdDen : null,
+      stdHePct: sDays > 0 && sHeDen > 0 ? sHeNum / sHeDen : null,
+      stdEggs:  sDays > 0 && sEggs > 0 ? sEggs : null,
+      stdHE:    sDays > 0 && sHE > 0 ? sHE : null,
+      stdMortF: sDays > 0 ? sMortF : null }
   })
 
   // Aggregate the most recent date's records across all sheds
@@ -1374,22 +1467,32 @@ export const FlockDetail: React.FC = () => {
       case 'weekly':
         return {
           title: `Flock ${flock.flock_no} — Weekly Report`,
-          headers: ['Week','Date Range','Days Logged','Open ♀','Close ♀','Close ♂','Total Eggs','HD%','HE','HE%','Mort ♀','Mort ♂','Feed ♀','Feed ♂'],
+          headers: ['Week','Date Range','Days Logged','Open ♀','Close ♀','Close ♂','Total Eggs',
+                    'HD%','Std HD%','HE','Std HE','HE%','Std HE%','Mort ♀','Std Mort ♀','Mort ♂','Feed ♀','Feed ♂'],
           rightAlignFrom: 2,
           rows: weeklyAgg.map((w: any) => [
             w.weekNum < 0 ? 'Pre-placement' : `Week ${w.weekNum}`, `${fmtDate(w.firstDate)} – ${fmtDate(w.lastDate)}`, `${w.days}/7`,
-            w.openF, w.closeF, w.closeM, w.totalEggs, w.hdPct != null ? pct(w.hdPct,1) : '—',
-            w.totalHE, w.hePct != null ? pct(w.hePct,1) : '—', w.mortF || '—', w.mortM || '—', w.feedF, w.feedM,
+            w.openF, w.closeF, w.closeM, w.totalEggs,
+            w.hdPct != null ? pct(w.hdPct,1) : '—', w.std?.hen_week_pct != null ? `${w.std.hen_week_pct}%` : '—',
+            w.totalHE, w.stdHE != null ? Math.round(w.stdHE) : '—',
+            w.hePct != null ? pct(w.hePct,1) : '—', w.std?.he_pct != null ? `${w.std.he_pct}%` : '—',
+            w.mortF || '—', w.stdMortF != null ? Math.round(w.stdMortF) : '—',
+            w.mortM || '—', w.feedF, w.feedM,
           ]),
         }
       case 'monthly':
         return {
           title: `Flock ${flock.flock_no} — Monthly Report`,
-          headers: ['Month','Days','Eggs','HE','HE%','Avg Open ♀','Mort ♀','Feed ♀ kg','Feed ♂ kg'],
+          headers: ['Month','Days','Eggs','Std Eggs','HE','Std HE','HE%','Std HE%',
+                    'Avg Open ♀','Mort ♀','Std Mort ♀','Feed ♀ kg','Feed ♂ kg'],
           rightAlignFrom: 1,
           rows: monthlyRows.map((m: any) => [
-            m.month, m.days, m.eggs, m.he, m.eggs > 0 ? pct(m.he/m.eggs) : '—',
-            Math.round(m.avgF), m.mortF || '—', m.feedF, m.feedM,
+            m.month, m.days,
+            m.eggs, m.stdEggs != null ? Math.round(m.stdEggs) : '—',
+            m.he, m.stdHE != null ? Math.round(m.stdHE) : '—',
+            m.eggs > 0 ? pct(m.he/m.eggs) : '—', m.stdHePct != null ? `${m.stdHePct.toFixed(1)}%` : '—',
+            Math.round(m.avgF), m.mortF || '—', m.stdMortF != null ? Math.round(m.stdMortF) : '—',
+            m.feedF, m.feedM,
           ]),
         }
       case 'placements':
@@ -1999,9 +2102,13 @@ export const FlockDetail: React.FC = () => {
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">Close ♂</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">Total Eggs</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">HD%</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-400">Std</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">HE</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-400">Std</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">HE%</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-400">Std</th>
                   <th className="px-2 py-2 text-right font-semibold text-red-500">Mort ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-400">Std</th>
                   <th className="px-2 py-2 text-right font-semibold text-red-500">Mort ♂</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♀</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♂</th>
@@ -2017,17 +2124,22 @@ export const FlockDetail: React.FC = () => {
                     <td className="px-2 py-1.5 text-right">{w.closeF?.toLocaleString('en-IN')}</td>
                     <td className="px-2 py-1.5 text-right">{w.closeM?.toLocaleString('en-IN')}</td>
                     <td className="px-2 py-1.5 text-right font-medium">{w.totalEggs.toLocaleString('en-IN')}</td>
-                    <td className={`px-2 py-1.5 text-right ${(w.hdPct??0)>0.85?'text-green-600':'text-orange-500'}`}>{w.hdPct != null ? pct(w.hdPct, 1) : '—'}</td>
-                    <td className="px-2 py-1.5 text-right font-medium text-blue-600">{w.totalHE.toLocaleString('en-IN')}</td>
-                    <td className={`px-2 py-1.5 text-right ${(w.hePct??0)>0.88?'text-green-600':'text-orange-500'}`}>{w.hePct != null ? pct(w.hePct, 1) : '—'}</td>
-                    <td className="px-2 py-1.5 text-right text-red-500">{w.mortF > 0 ? w.mortF : '—'}</td>
+                    <td className={`px-2 py-1.5 text-right font-medium ${vsStd(w.hdPct != null ? w.hdPct * 100 : null, w.std?.hen_week_pct)}`}>{w.hdPct != null ? pct(w.hdPct, 1) : '—'}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-400">{stdCell(w.std?.hen_week_pct, '%')}</td>
+                    <td className={`px-2 py-1.5 text-right font-medium ${vsStd(w.totalHE, w.stdHE)}`}>{w.totalHE.toLocaleString('en-IN')}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-400">{w.stdHE != null ? Math.round(w.stdHE).toLocaleString('en-IN') : '—'}</td>
+                    <td className={`px-2 py-1.5 text-right font-medium ${vsStd(w.hePct != null ? w.hePct * 100 : null, w.std?.he_pct)}`}>{w.hePct != null ? pct(w.hePct, 1) : '—'}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-400">{stdCell(w.std?.he_pct, '%')}</td>
+                    {/* Fewer deaths than the book is GOOD, so this one is read the other way round. */}
+                    <td className={`px-2 py-1.5 text-right font-medium ${vsStd(w.mortF, w.stdMortF, true)}`}>{w.mortF > 0 ? w.mortF : '—'}</td>
+                    <td className="px-2 py-1.5 text-right text-gray-400">{w.stdMortF != null ? Math.round(w.stdMortF).toLocaleString('en-IN') : '—'}</td>
                     <td className="px-2 py-1.5 text-right text-red-500">{w.mortM > 0 ? w.mortM : '—'}</td>
                     <td className="px-2 py-1.5 text-right">{w.feedF.toLocaleString('en-IN')}</td>
                     <td className="px-2 py-1.5 text-right">{w.feedM.toLocaleString('en-IN')}</td>
                   </tr>
                 ))}
                 {weeklyAgg.length === 0 && (
-                  <tr><td colSpan={14} className="text-center text-gray-400 py-6">No daily records yet</td></tr>
+                  <tr><td colSpan={18} className="text-center text-gray-400 py-6">No daily records yet</td></tr>
                 )}
               </tbody>
             </table>
@@ -2040,8 +2152,12 @@ export const FlockDetail: React.FC = () => {
         <Card padding={false}>
           <Table>
             <thead><tr>
-              <Th>Month</Th><Th right>Days</Th><Th right>Eggs</Th><Th right>HE</Th>
-              <Th right>HE%</Th><Th right>Avg Open ♀</Th><Th right>Mort ♀</Th>
+              <Th>Month</Th><Th right>Days</Th>
+              <Th right>Eggs</Th><Th right>Std</Th>
+              <Th right>HE</Th><Th right>Std</Th>
+              <Th right>HE%</Th><Th right>Std</Th>
+              <Th right>Avg Open ♀</Th>
+              <Th right>Mort ♀</Th><Th right>Std</Th>
               <Th right>Feed ♀ kg</Th><Th right>Feed ♂ kg</Th>
             </tr></thead>
             <tbody>
@@ -2049,15 +2165,17 @@ export const FlockDetail: React.FC = () => {
                   <tr key={m.month} className="hover:bg-gray-50">
                     <Td className="font-medium">{m.month}</Td>
                     <Td right>{m.days}</Td>
-                    <Td right className="font-medium">{m.eggs.toLocaleString('en-IN')}</Td>
-                    <Td right className="text-blue-600 font-medium">{m.he.toLocaleString('en-IN')}</Td>
-                    <Td right>
-                      <span className={m.eggs > 0 && (m.he/m.eggs) > 0.88 ? 'text-green-600' : 'text-orange-500'}>
-                        {m.eggs > 0 ? pct(m.he/m.eggs) : '—'}
-                      </span>
+                    <Td right className={`font-medium ${vsStd(m.eggs, m.stdEggs)}`}>{m.eggs.toLocaleString('en-IN')}</Td>
+                    <Td right className="text-gray-400">{m.stdEggs != null ? Math.round(m.stdEggs).toLocaleString('en-IN') : '—'}</Td>
+                    <Td right className={`font-medium ${vsStd(m.he, m.stdHE)}`}>{m.he.toLocaleString('en-IN')}</Td>
+                    <Td right className="text-gray-400">{m.stdHE != null ? Math.round(m.stdHE).toLocaleString('en-IN') : '—'}</Td>
+                    <Td right className={`font-medium ${vsStd(m.eggs > 0 ? (m.he/m.eggs)*100 : null, m.stdHePct)}`}>
+                      {m.eggs > 0 ? pct(m.he/m.eggs) : '—'}
                     </Td>
+                    <Td right className="text-gray-400">{m.stdHePct != null ? `${m.stdHePct.toFixed(1)}%` : '—'}</Td>
                     <Td right>{Math.round(m.avgF).toLocaleString('en-IN')}</Td>
-                    <Td right className="text-red-500">{m.mortF > 0 ? m.mortF : '—'}</Td>
+                    <Td right className={`font-medium ${vsStd(m.mortF, m.stdMortF, true)}`}>{m.mortF > 0 ? m.mortF : '—'}</Td>
+                    <Td right className="text-gray-400">{m.stdMortF != null ? Math.round(m.stdMortF).toLocaleString('en-IN') : '—'}</Td>
                     <Td right>{m.feedF.toLocaleString('en-IN')}</Td>
                     <Td right>{m.feedM.toLocaleString('en-IN')}</Td>
                   </tr>
@@ -2068,7 +2186,12 @@ export const FlockDetail: React.FC = () => {
                 <Td>TOTAL ({monthlyRows.length} months)</Td>
                 <Td right>{monthlyRows.reduce((s: number, m: any) => s + (m.days ?? 0), 0)}</Td>
                 <Td right>{monthlyRows.reduce((s: number, m: any) => s + (m.eggs ?? 0), 0).toLocaleString('en-IN')}</Td>
+                {/* The standard totals cover only the months the curve reaches,
+                    so they are the right comparison for those months and are
+                    marked with a dash where it reaches none. */}
+                <Td right className="text-gray-400">{stdTot(monthlyRows, 'stdEggs')}</Td>
                 <Td right>{monthlyRows.reduce((s: number, m: any) => s + (m.he ?? 0), 0).toLocaleString('en-IN')}</Td>
+                <Td right className="text-gray-400">{stdTot(monthlyRows, 'stdHE')}</Td>
                 <Td right>
                   {(() => {
                     const e = monthlyRows.reduce((s: number, m: any) => s + (m.eggs ?? 0), 0)
@@ -2076,11 +2199,21 @@ export const FlockDetail: React.FC = () => {
                     return e > 0 ? pct(h / e) : '—'
                   })()}
                 </Td>
+                <Td right className="text-gray-400">
+                  {(() => {
+                    // Recomputed from the standard's own totals, never averaged
+                    // down the column - the same rule the actual TOTAL follows.
+                    const e = monthlyRows.reduce((a: number, m: any) => a + (m.stdEggs ?? 0), 0)
+                    const h = monthlyRows.reduce((a: number, m: any) => a + (m.stdHE ?? 0), 0)
+                    return e > 0 ? `${((h / e) * 100).toFixed(1)}%` : '—'
+                  })()}
+                </Td>
                 {/* Average birds is deliberately blank: averaging monthly
                     averages over months of different lengths gives a figure
                     that belongs to no month. */}
                 <Td right className="text-gray-400">—</Td>
                 <Td right className="text-red-500">{monthlyRows.reduce((s: number, m: any) => s + (m.mortF ?? 0), 0).toLocaleString('en-IN')}</Td>
+                <Td right className="text-gray-400">{stdTot(monthlyRows, 'stdMortF')}</Td>
                 <Td right>{Math.round(monthlyRows.reduce((s: number, m: any) => s + (m.feedF ?? 0), 0)).toLocaleString('en-IN')}</Td>
                 <Td right>{Math.round(monthlyRows.reduce((s: number, m: any) => s + (m.feedM ?? 0), 0)).toLocaleString('en-IN')}</Td>
               </tr></tfoot>
@@ -2906,14 +3039,14 @@ export const FlockDetail: React.FC = () => {
             // mortality) — matches the weighted formula already used by
             // v_flock_summary (All Flocks Data) and the Reports page.
             type WeekAgg = { openFSum: number; totalEggs: number; heEggs: number; depletion: number }
-            // Same one-based rule as the memo above: the standard's week 1 is
-            // the flock's first week of life, not its first COMPLETED week.
-            const stdWeekOfR = (date: string) => flockAgeWeeks(flock.placement_date, date) + 1
+            // Same rule as the memo above: the standard's week N is N COMPLETED
+            // weeks of age, which is exactly what flockAgeWeeks returns.
+            const stdWeekOfR = (date: string) => flockAgeWeeks(flock.placement_date, date)
             const weekly: Record<number, WeekAgg> = {}
             for (const d of (daily ?? [])) {
               if (!d.record_date) continue
               const wk = stdWeekOfR(d.record_date)
-              if (wk < 1) continue
+              if (wk < 0) continue
               const row = weekly[wk] ??= { openFSum: 0, totalEggs: 0, heEggs: 0, depletion: 0 }
               row.openFSum += d.opening_female ?? 0
               row.totalEggs += d.total_eggs ?? 0
@@ -2932,7 +3065,7 @@ export const FlockDetail: React.FC = () => {
               const isLump = lines.length === 1
               for (const l of lines) {
                 const wk = stdWeekOfR(l.prod_date)
-                if (wk < 1) continue
+                if (wk < 0) continue
                 const e = touch(wk)
                 e.dispatched += lineEggs(l)
                 if (isLump) e.lumped = true
@@ -2944,7 +3077,7 @@ export const FlockDetail: React.FC = () => {
                 if (total <= 0) continue
                 for (const l of lines) {
                   const wk = stdWeekOfR(l.prod_date)
-                  if (wk < 1) continue
+                  if (wk < 0) continue
                   const share = lineEggs(l) / total
                   const e = touch(wk)
                   e.set += eggsSet * share

@@ -227,6 +227,23 @@ export const FlockLifetime: React.FC = () => {
     }
     const curveOf = (wk: number) => (curve as any[]).find(c => c.week_of_age === wk)
 
+    // THE TWO WEEK NUMBERINGS ON THIS PAGE, AND WHY BOTH ARE RIGHT.
+    //
+    // The Week column is ONE-BASED and stays that way. That is not a guess
+    // either: counted like this, Flock 22's weeks 2 to 14 reproduce its weekly
+    // report EXACTLY, mortality and feed alike - it is the numbering on the
+    // farm's own paper, and renumbering it would break every reference to it.
+    //
+    // The VENCO books - breed_standard and std_production_curve - number by
+    // COMPLETED weeks of age, which is one LESS. Confirmed by the owner on
+    // 22/09/2026, and by the data: F-19 reaches 4.6% hen-day after 24
+    // completed weeks, where the Summer curve says 5.0% at week 24.
+    //
+    // Every Venco lookup therefore converts. Until today they did not, so a
+    // week's actual was read against the standard of the week BEFORE it, and
+    // a flock appeared a week behind the book all the way down.
+    const venco = (wk: number) => wk - 1
+
     // Built once per sex. The running totals must restart for each, or the
     // males would inherit the females' cumulative feed.
     const build = (sx: 'Female' | 'Male') => {
@@ -252,18 +269,18 @@ export const FlockLifetime: React.FC = () => {
       // Feed per bird per day needs the birds that ate it and the days they
       // ate over — a short week must not read as a low intake.
       const feedGPerDay = birds && w.days > 0 ? (feed * 1000) / birds / w.days : null
-      const stdRow = stdOf(w.wk, sx)
-      const cur = curveOf(w.wk)
+      const stdRow = stdOf(venco(w.wk), sx)
+      const cur = curveOf(venco(w.wk))
 
       const cumDepPct = placedTotal > 0 ? (cumMort / placedTotal) * 100 : null
       // The sheet also carries CUMULATIVE feed against cumulative standard, so
       // a flock that ate well one week and poorly the next is judged on the
       // whole run rather than the last seven days.
       cumStdKgPerBird += stdRow?.feed_g_per_day != null ? (Number(stdRow.feed_g_per_day) * 7) / 1000 : 0
-      const bw = bwOf(w.wk, sx)
+      const bw = bwOf(venco(w.wk), sx)
       const bwAct = n0(bw?.avg_body_weight_g)
       const bwStd = n0(stdRow?.body_weight_g)
-      const prevBw = bwOf(w.wk - 1, sx)
+      const prevBw = bwOf(venco(w.wk) - 1, sx)
       const gainAct = bwAct != null && prevBw?.avg_body_weight_g != null
         ? bwAct - Number(prevBw.avg_body_weight_g) : null
       const hdPct = birds && w.days > 0 ? (w.eggs / birds / w.days) * 100 : null
