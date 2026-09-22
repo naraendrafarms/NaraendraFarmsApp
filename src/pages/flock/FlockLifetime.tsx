@@ -138,7 +138,10 @@ export const FlockLifetime: React.FC = () => {
         // and the Operations Board already compare actual HD% against.
         // std_production_pct is an unused leftover from the table's first
         // version and has never held a value, so it is not read here.
-        .select('week_of_age,cum_depletion_pct,hen_week_pct,he_pct')
+        // weekly_he_hh / cum_he_hh are HATCHING eggs per HEN HOUSED. They turn
+        // the percentage comparison into a COUNT one - how many HE eggs the
+        // book expected this week against how many actually came in.
+        .select('week_of_age,cum_depletion_pct,hen_week_pct,he_pct,weekly_he_hh,cum_he_hh')
         .eq('season', laySeason ?? rearSeason).order('week_of_age')
       return data ?? []
     }
@@ -228,6 +231,9 @@ export const FlockLifetime: React.FC = () => {
     // males would inherit the females' cumulative feed.
     const build = (sx: 'Female' | 'Male') => {
     const placedTotal = sx === 'Female' ? Number(flock.total_placed_f ?? 0) : Number(flock.total_placed_m ?? 0)
+    // Eggs are laid by the females whatever sex this pass is building, so the
+    // HE standard always multiplies the females placed - "per hen housed".
+    const hensHoused = Number(flock.total_placed_f ?? 0)
     let cumMort = 0, cumFeedKg = 0, cumStdKgPerBird = 0
 
     return [...m.values()].sort((a, b) => a.wk - b.wk).map(w => {
@@ -278,6 +284,15 @@ export const FlockLifetime: React.FC = () => {
         cumStdPerBird: cumStdKgPerBird || null,
         eggs: w.eggs, hdPct, hdStd: n0(cur?.hen_week_pct),
         hePct: w.eggs > 0 ? (w.he / w.eggs) * 100 : null, heStd: n0(cur?.he_pct),
+        // HE eggs as a COUNT, not a ratio. The standard is per HEN HOUSED, so
+        // it multiplies the females PLACED - never the live count, because the
+        // book's own curve already allows for depletion and using a depleted
+        // count would subtract mortality twice.
+        heAct: w.he,
+        heExp: n0(cur?.weekly_he_hh) != null && hensHoused
+          ? Number(cur.weekly_he_hh) * hensHoused : null,
+        heCumExp: n0(cur?.cum_he_hh) != null && hensHoused
+          ? Number(cur.cum_he_hh) * hensHoused : null,
         phase: stdRow?.phase ?? (w.eggs > 0 ? 'Laying' : 'Growing'),
       }
     })
@@ -318,12 +333,16 @@ export const FlockLifetime: React.FC = () => {
   const exportCSV = () => {
     const headers = ['Week','Days','Opening','Closing','Mortality','Cum mortality','Cum depletion %','Std depletion %',
       'Body wt (g)','Std body wt','Gain (g)','Std gain','Feed kg','Feed g/bird/day','Std feed g/day','Feed type',
-      'Cum feed/bird (kg)','Std cum feed/bird (kg)','Eggs','HD %','Std HD %','HE %','Std HE %']
+      'Cum feed/bird (kg)','Std cum feed/bird (kg)','Eggs','HD %','Std HD %','HE %','Std HE %',
+      'HE eggs','Std HE eggs','HE dev','Std cum HE eggs']
     const lines = rows.map(r => [r.wk, r.days, r.open ?? '', r.close ?? '', r.mort, r.cumMort,
       r.cumDepPct?.toFixed(2) ?? '', r.stdDepPct ?? '', r.bwAct ?? '', r.bwStd ?? '', r.gainAct ?? '', r.gainStd ?? '',
       r.feedKg.toFixed(1), r.feedGPerDay?.toFixed(1) ?? '', r.feedStd ?? '', r.feedType ?? '',
       r.cumFeedPerBird?.toFixed(2) ?? '', r.cumStdPerBird?.toFixed(2) ?? '', r.eggs, r.hdPct?.toFixed(1) ?? '', r.hdStd ?? '',
-      r.hePct?.toFixed(1) ?? '', r.heStd ?? ''])
+      r.hePct?.toFixed(1) ?? '', r.heStd ?? '',
+      r.heAct || '', r.heExp != null ? Math.round(r.heExp) : '',
+      r.heExp != null ? Math.round(r.heAct - r.heExp) : '',
+      r.heCumExp != null ? Math.round(r.heCumExp) : ''])
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const csv = [headers.map(esc).join(','), ...lines.map(l => l.map(esc).join(','))].join('\n')
     const a = document.createElement('a')
@@ -504,6 +523,7 @@ export const FlockLifetime: React.FC = () => {
                       <Th right>♂ Open</Th><Th right>♂ Deaths</Th><Th right>♂ Cum %</Th><Th right>♂ Dev</Th>
                       <Th right>♂ Body wt</Th><Th right>♂ Dev</Th><Th right>♂ Feed g/b/d</Th><Th right>♂ Dev</Th>
                       <Th right>Eggs</Th><Th right>HD%</Th>
+                      <Th right>HE eggs</Th><Th right>Std HE</Th><Th right>Dev</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -534,6 +554,9 @@ export const FlockLifetime: React.FC = () => {
 
                           <Td right>{f.eggs ? fmt(f.eggs) : '—'}</Td>
                           <Td right>{f.hdPct ? fmt(f.hdPct, 1) : '—'}</Td>
+                          <Td right className="font-medium">{f.heAct ? fmt(f.heAct) : '—'}</Td>
+                          <Td right className="text-gray-500">{f.heExp != null ? fmt(Math.round(f.heExp)) : '—'}</Td>
+                          <Td right><Dev v={f.heExp != null ? f.heAct - f.heExp : null} /></Td>
                         </tr>
                       )
                     })}
@@ -549,6 +572,7 @@ export const FlockLifetime: React.FC = () => {
                     <Th right>Feed kg</Th><Th right>Feed g/b/d</Th><Th right>Std</Th><Th right>Dev</Th>
                     <Th right>Cum feed/bird</Th><Th right>Std cum</Th><Th right>Dev</Th><Th>Feed type</Th>
                     <Th right>Eggs</Th><Th right>HD%</Th><Th right>Std</Th>
+                    <Th right>HE eggs</Th><Th right>Std HE eggs</Th><Th right>Dev</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -575,6 +599,9 @@ export const FlockLifetime: React.FC = () => {
                       <Td right>{r.eggs ? fmt(r.eggs) : '—'}</Td>
                       <Td right>{r.hdPct ? fmt(r.hdPct, 1) : '—'}</Td>
                       <Td right className="text-gray-500">{fmt(r.hdStd, 1)}</Td>
+                      <Td right className="font-medium">{r.heAct ? fmt(r.heAct) : '—'}</Td>
+                      <Td right className="text-gray-500">{r.heExp != null ? fmt(Math.round(r.heExp)) : '—'}</Td>
+                      <Td right><Dev v={r.heExp != null ? r.heAct - r.heExp : null} /></Td>
                     </tr>
                   ))}
                 </tbody>
