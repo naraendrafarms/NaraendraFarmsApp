@@ -58,7 +58,7 @@ export const ShedPerformancePage: React.FC = () => {
       while (true) {
         let q = supabase
           .from('daily_records')
-          .select('id,record_date,farm_id,shed_id,flock_id,opening_female,opening_male,closing_female,closing_male,mortality_female,mortality_male,trcull_female,trcull_male,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,je_eggs,te_eggs,be_eggs,le_eggs,wastage_eggs,feed_female_kg,feed_male_kg,hd_pct,he_pct,farms(name,code),sheds(shed_no,shed_name,shed_type),flocks(flock_no,breed)')
+          .select('id,record_date,farm_id,shed_id,flock_id,opening_female,opening_male,closing_female,closing_male,mortality_female,mortality_male,total_eggs,he_eggs,he_grade_a,he_grade_b,he_grade_c,je_eggs,te_eggs,be_eggs,le_eggs,wastage_eggs,feed_female_kg,feed_male_kg,hd_pct,he_pct,farms(name,code),sheds(shed_no,shed_name,shed_type),flocks(flock_no,breed)')
           .gte('record_date', fromDate)
           .lte('record_date', toDate)
           .order('record_date', { ascending: false })

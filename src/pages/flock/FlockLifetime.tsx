@@ -100,7 +100,7 @@ export const FlockLifetime: React.FC = () => {
     queryFn: async () => fetchAllPages<any>(
       (from, to) => supabase.from('daily_records')
         .select('record_date,opening_female,opening_male,closing_female,closing_male,' +
-                'mortality_female,mortality_male,trcull_female,trcull_male,' +
+                'mortality_female,mortality_male,cull_female,cull_male,' +
                 'feed_female_kg,feed_male_kg,total_eggs,he_eggs')
         .eq('flock_id', flockId)
         .order('record_date').order('id').range(from, to),
@@ -187,7 +187,14 @@ export const FlockLifetime: React.FC = () => {
       // across sheds on those days — a flock in five sheds has five rows a day.
       if (e.openF == null && r.opening_female != null) e.openF = 0
       e.mortF += Number(r.mortality_female ?? 0); e.mortM += Number(r.mortality_male ?? 0)
-      e.cullF += Number(r.trcull_female ?? 0); e.cullM += Number(r.trcull_male ?? 0)
+      // cull_female, NOT trcull_female. trcull is the OLD combined column that
+      // migration 060 split into transfer + cull; it still holds transfers,
+      // which are birds MOVED to the laying farm and not lost at all, and it
+      // has since gone stale - measured 22/09/2026, it disagrees with
+      // transfer + cull on 92 of 7,113 rows and is short by 70,871 birds on
+      // F-19 alone. Nothing displayed it, because this value was collected
+      // and never read.
+      e.cullF += Number(r.cull_female ?? 0); e.cullM += Number(r.cull_male ?? 0)
       e.feedF += Number(r.feed_female_kg ?? 0); e.feedM += Number(r.feed_male_kg ?? 0)
       e.eggs += Number(r.total_eggs ?? 0); e.he += Number(r.he_eggs ?? 0)
       m.set(wk, e)
@@ -251,13 +258,18 @@ export const FlockLifetime: React.FC = () => {
     // Eggs are laid by the females whatever sex this pass is building, so the
     // HE standard always multiplies the females placed - "per hen housed".
     const hensHoused = Number(flock.total_placed_f ?? 0)
-    let cumMort = 0, cumFeedKg = 0, cumStdKgPerBird = 0
+    let cumMort = 0, cumCull = 0, cumFeedKg = 0, cumStdKgPerBird = 0
 
     return [...m.values()].sort((a, b) => a.wk - b.wk).map(w => {
       const isF = sx === 'Female'
       const mort = isF ? w.mortF : w.mortM
+      // Depletion in the book is deaths AND culling. This counted deaths only,
+      // so it read lower than the flock page's vs Standard tab, which has
+      // always counted both. Owner's call, 22/09/2026: both count both.
+      const cull = isF ? w.cullF : w.cullM
       const feed = isF ? w.feedF : w.feedM
-      cumMort += mort
+      cumMort += mort + cull
+      cumCull += cull
       cumFeedKg += feed
 
       const openDay = firstDayOfWeek.get(w.wk)
@@ -286,7 +298,7 @@ export const FlockLifetime: React.FC = () => {
       const hdPct = birds && w.days > 0 ? (w.eggs / birds / w.days) * 100 : null
 
       return {
-        wk: w.wk, days: w.days, open, close, mort, cumMort,
+        wk: w.wk, days: w.days, open, close, mort, cull, cumMort, cumCull,
         // std_production_curve only covers the laying weeks (24-66); weeks
         // 1-23 have no depletion standard there at all, so this fell back to
         // blank for the whole rearing period. breed_standard now carries the
@@ -348,11 +360,11 @@ export const FlockLifetime: React.FC = () => {
     .map(r => ({ wk: r.wk, Actual: r.hdPct, Standard: r.hdStd }))
 
   const exportCSV = () => {
-    const headers = ['Week','Days','Opening','Closing','Mortality','Cum mortality','Cum depletion %','Std depletion %',
+    const headers = ['Week','Days','Opening','Closing','Mortality','Culls','Cum depletion (birds)','Cum culls','Cum depletion %','Std depletion %',
       'Body wt (g)','Std body wt','Gain (g)','Std gain','Feed kg','Feed g/bird/day','Std feed g/day','Feed type',
       'Cum feed/bird (kg)','Std cum feed/bird (kg)','Eggs','HD %','Std HD %','HE %','Std HE %',
       'HE eggs','Std HE eggs','HE dev','Std cum HE eggs']
-    const lines = rows.map(r => [r.wk, r.days, r.open ?? '', r.close ?? '', r.mort, r.cumMort,
+    const lines = rows.map(r => [r.wk, r.days, r.open ?? '', r.close ?? '', r.mort, r.cull, r.cumMort, r.cumCull,
       r.cumDepPct?.toFixed(2) ?? '', r.stdDepPct ?? '', r.bwAct ?? '', r.bwStd ?? '', r.gainAct ?? '', r.gainStd ?? '',
       r.feedKg.toFixed(1), r.feedGPerDay?.toFixed(1) ?? '', r.feedStd ?? '', r.feedType ?? '',
       r.cumFeedPerBird?.toFixed(2) ?? '', r.cumStdPerBird?.toFixed(2) ?? '', r.eggs, r.hdPct?.toFixed(1) ?? '', r.hdStd ?? '',
@@ -421,8 +433,8 @@ export const FlockLifetime: React.FC = () => {
         // Same columns as the on-screen Both table, Dev included — standard
         // itself isn't shown there either (only the deviation is), same as
         // the screen: twelve more columns of standard would not fit anywhere.
-        headers: ['Wk', 'Days', '♀ Open', '♀ Deaths', '♀ Cum%', '♀ Dev', '♀ Body wt', '♀ Dev', '♀ Feed g/b/d', '♀ Dev',
-                  '♂ Open', '♂ Deaths', '♂ Cum%', '♂ Dev', '♂ Body wt', '♂ Dev', '♂ Feed g/b/d', '♂ Dev', 'Eggs', 'HD%'],
+        headers: ['Wk', 'Days', '♀ Open', '♀ Deaths', '♀ Culls', '♀ Cum%', '♀ Dev', '♀ Body wt', '♀ Dev', '♀ Feed g/b/d', '♀ Dev',
+                  '♂ Open', '♂ Deaths', '♂ Culls', '♂ Cum%', '♂ Dev', '♂ Body wt', '♂ Dev', '♂ Feed g/b/d', '♂ Dev', 'Eggs', 'HD%'],
         rightAlignFrom: 1,
         rows: both.Female.map((f: any, i: number) => {
           const m2: any = both.Male[i] ?? {}
@@ -433,9 +445,9 @@ export const FlockLifetime: React.FC = () => {
           const mDepDev = m2.stdDepPct != null && m2.cumDepPct != null ? m2.cumDepPct - m2.stdDepPct : null
           const mBwDev = m2.bwAct != null && m2.bwStd != null ? m2.bwAct - m2.bwStd : null
           const mFeedDev = m2.feedGPerDay != null && m2.feedStd != null ? m2.feedGPerDay - m2.feedStd : null
-          return [f.wk, f.days, fmt(f.open), fmt(f.mort), fmt(f.cumDepPct, 2), devFmt(fDepDev, 2),
+          return [f.wk, f.days, fmt(f.open), fmt(f.mort), fmt(f.cull), fmt(f.cumDepPct, 2), devFmt(fDepDev, 2),
                   fmt(f.bwAct), devFmt(fBwDev), fmt(f.feedGPerDay, 1), devFmt(fFeedDev, 1),
-                  fmt(m2.open), fmt(m2.mort), fmt(m2.cumDepPct, 2), devFmt(mDepDev, 2),
+                  fmt(m2.open), fmt(m2.mort), fmt(m2.cull), fmt(m2.cumDepPct, 2), devFmt(mDepDev, 2),
                   fmt(m2.bwAct), devFmt(mBwDev), fmt(m2.feedGPerDay, 1), devFmt(mFeedDev, 1),
                   f.eggs ? fmt(f.eggs) : '—', f.hdPct ? fmt(f.hdPct, 1) : '—']
         }),
@@ -447,7 +459,7 @@ export const FlockLifetime: React.FC = () => {
         // Same 21 columns as the on-screen table, in the same order — a
         // printed copy that's missing columns can't be checked against the
         // page it came from.
-        headers: ['Wk', 'Days', 'Opening', 'Deaths', 'Cum%', 'Std%', 'Dev', 'Body wt', 'Std', 'Dev',
+        headers: ['Wk', 'Days', 'Opening', 'Deaths', 'Culls', 'Cum%', 'Std%', 'Dev', 'Body wt', 'Std', 'Dev',
                    'Feed kg', 'Feed g/b/d', 'Std', 'Dev', 'Cum feed/bird', 'Std cum', 'Dev', 'Feed type',
                    'Eggs', 'HD%', 'Std'],
         rightAlignFrom: 1,
@@ -457,7 +469,7 @@ export const FlockLifetime: React.FC = () => {
           const feedDev = r.feedGPerDay != null && r.feedStd != null ? r.feedGPerDay - r.feedStd : null
           const cumFeedDev = r.cumFeedPerBird != null && r.cumStdPerBird != null ? r.cumFeedPerBird - r.cumStdPerBird : null
           const devFmt = (v: number | null, d = 0) => v == null ? '—' : `${v > 0 ? '+' : ''}${fmt(v, d)}`
-          return [r.wk, r.days, fmt(r.open), fmt(r.mort), fmt(r.cumDepPct, 2), fmt(r.stdDepPct, 2), devFmt(depDev, 2),
+          return [r.wk, r.days, fmt(r.open), fmt(r.mort), fmt(r.cull), fmt(r.cumDepPct, 2), fmt(r.stdDepPct, 2), devFmt(depDev, 2),
                   fmt(r.bwAct), fmt(r.bwStd), devFmt(bwDev),
                   fmt(r.feedKg, 0), fmt(r.feedGPerDay, 1), fmt(r.feedStd, 1), devFmt(feedDev, 1),
                   fmt(r.cumFeedPerBird, 2), fmt(r.cumStdPerBird, 2), devFmt(cumFeedDev, 2), r.feedType ?? '—',
@@ -535,9 +547,9 @@ export const FlockLifetime: React.FC = () => {
                   <thead>
                     <tr>
                       <Th>Wk</Th><Th right>Days</Th>
-                      <Th right>♀ Open</Th><Th right>♀ Deaths</Th><Th right>♀ Cum %</Th><Th right>♀ Dev</Th>
+                      <Th right>♀ Open</Th><Th right>♀ Deaths</Th><Th right>♀ Culls</Th><Th right>♀ Cum %</Th><Th right>♀ Dev</Th>
                       <Th right>♀ Body wt</Th><Th right>♀ Dev</Th><Th right>♀ Feed g/b/d</Th><Th right>♀ Dev</Th>
-                      <Th right>♂ Open</Th><Th right>♂ Deaths</Th><Th right>♂ Cum %</Th><Th right>♂ Dev</Th>
+                      <Th right>♂ Open</Th><Th right>♂ Deaths</Th><Th right>♂ Culls</Th><Th right>♂ Cum %</Th><Th right>♂ Dev</Th>
                       <Th right>♂ Body wt</Th><Th right>♂ Dev</Th><Th right>♂ Feed g/b/d</Th><Th right>♂ Dev</Th>
                       <Th right>Eggs</Th><Th right>HD%</Th>
                       <Th right>HE eggs</Th><Th right>Std HE</Th><Th right>Dev</Th>
@@ -553,6 +565,7 @@ export const FlockLifetime: React.FC = () => {
 
                           <Td right>{fmt(f.open)}</Td>
                           <Td right className={f.mort > 0 ? 'text-red-600' : 'text-gray-400'}>{fmt(f.mort)}</Td>
+                          <Td right className={f.cull > 0 ? 'text-orange-600' : 'text-gray-400'}>{fmt(f.cull)}</Td>
                           <Td right>{fmt(f.cumDepPct, 2)}</Td>
                           <Td right><Dev v={f.stdDepPct != null && f.cumDepPct != null ? f.cumDepPct - f.stdDepPct : null} d={2} goodHigh={false} /></Td>
                           <Td right className="font-medium">{fmt(f.bwAct)}</Td>
@@ -562,6 +575,7 @@ export const FlockLifetime: React.FC = () => {
 
                           <Td right>{fmt(m2.open)}</Td>
                           <Td right className={m2.mort > 0 ? 'text-red-600' : 'text-gray-400'}>{fmt(m2.mort)}</Td>
+                          <Td right className={m2.cull > 0 ? 'text-orange-600' : 'text-gray-400'}>{fmt(m2.cull)}</Td>
                           <Td right>{fmt(m2.cumDepPct, 2)}</Td>
                           <Td right><Dev v={m2.stdDepPct != null && m2.cumDepPct != null ? m2.cumDepPct - m2.stdDepPct : null} d={2} goodHigh={false} /></Td>
                           <Td right className="font-medium">{fmt(m2.bwAct)}</Td>
@@ -583,7 +597,7 @@ export const FlockLifetime: React.FC = () => {
               <Table>
                 <thead>
                   <tr>
-                    <Th>Wk</Th><Th right>Days</Th><Th right>Opening</Th><Th right>Deaths</Th>
+                    <Th>Wk</Th><Th right>Days</Th><Th right>Opening</Th><Th right>Deaths</Th><Th right>Culls</Th>
                     <Th right>Cum %</Th><Th right>Std %</Th><Th right>Dev</Th>
                     <Th right>Body wt</Th><Th right>Std</Th><Th right>Dev</Th>
                     <Th right>Feed kg</Th><Th right>Feed g/b/d</Th><Th right>Std</Th><Th right>Dev</Th>
@@ -599,7 +613,13 @@ export const FlockLifetime: React.FC = () => {
                       <Td right className={r.days < 7 ? 'text-amber-700' : 'text-gray-400'}>{r.days}</Td>
                       <Td right>{fmt(r.open)}</Td>
                       <Td right className={r.mort > 0 ? 'text-red-600' : 'text-gray-400'}>{fmt(r.mort)}</Td>
-                      <Td right>{fmt(r.cumDepPct, 2)}</Td>
+                      <Td right className={r.cull > 0 ? 'text-orange-600' : 'text-gray-400'}>{fmt(r.cull)}</Td>
+                      <Td right>
+                        {fmt(r.cumDepPct, 2)}
+                        {r.cumMort > 0 && <div className="text-[10px] text-gray-400">
+                          {r.cumMort.toLocaleString('en-IN')} birds{r.cumCull > 0 ? ` (incl. ${r.cumCull.toLocaleString('en-IN')} culled)` : ''}
+                        </div>}
+                      </Td>
                       <Td right className="text-gray-500">{fmt(r.stdDepPct, 2)}</Td>
                       <Td right><Dev v={r.stdDepPct != null && r.cumDepPct != null ? r.cumDepPct - r.stdDepPct : null} d={2} goodHigh={false} /></Td>
                       <Td right className="font-medium">{fmt(r.bwAct)}</Td>

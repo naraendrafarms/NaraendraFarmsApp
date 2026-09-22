@@ -842,6 +842,7 @@ export const FlockDetail: React.FC = () => {
         map.set(weekNum, {
           weekNum, days: 1, totalEggs: eggs, totalHE: he,
           mortF: d.mortality_female ?? 0, mortM: d.mortality_male ?? 0,
+          cullF: d.cull_female ?? 0,
           feedF: d.feed_female_kg ?? 0, feedM: d.feed_male_kg ?? 0,
           hdSum: openF > 0 ? eggs / openF : 0, hdCount: openF > 0 ? 1 : 0,
           openFSum: openF,
@@ -854,6 +855,7 @@ export const FlockDetail: React.FC = () => {
         ex.totalHE += he
         ex.mortF += d.mortality_female ?? 0
         ex.mortM += d.mortality_male ?? 0
+        ex.cullF += d.cull_female ?? 0
         ex.feedF += d.feed_female_kg ?? 0
         ex.feedM += d.feed_male_kg ?? 0
         if (openF > 0) { ex.hdSum += eggs / openF; ex.hdCount += 1 }
@@ -1361,6 +1363,7 @@ export const FlockDetail: React.FC = () => {
     const feedF = monthDaily.reduce((s, d) => s + (d.feed_female_kg ?? 0), 0)
     const feedM = monthDaily.reduce((s, d) => s + (d.feed_male_kg ?? 0), 0)
     const mortF = monthDaily.reduce((s, d) => s + (d.mortality_female ?? 0), 0)
+    const cullF = monthDaily.reduce((s, d) => s + (d.cull_female ?? 0), 0)
     // ── the standard for a CALENDAR month ────────────────────────────────
     // The book has no monthly figure and cannot have one: a month spans about
     // four and a third weeks of age and straddles the boundary between them.
@@ -1389,7 +1392,7 @@ export const FlockDetail: React.FC = () => {
         }
       }
     }
-    return { ...m, days: monthDaily.length, avgF, feedF, feedM, mortF,
+    return { ...m, days: monthDaily.length, avgF, feedF, feedM, mortF, cullF,
       // null, not zero, when the curve says nothing about this month - a zero
       // standard would read as "the book expected none", which is not the same
       // as "the book does not cover these weeks".
@@ -1468,7 +1471,8 @@ export const FlockDetail: React.FC = () => {
         return {
           title: `Flock ${flock.flock_no} — Weekly Report`,
           headers: ['Week','Date Range','Days Logged','Open ♀','Close ♀','Close ♂','Total Eggs',
-                    'HD%','Std HD%','HE','Std HE','HE%','Std HE%','Mort ♀','Std Mort ♀','Mort ♂','Feed ♀','Feed ♂'],
+                    'HD%','Std HD%','HE','Std HE','HE%','Std HE%',
+                    'Mort ♀','Cull ♀','Depl ♀','Std Depl ♀','Mort ♂','Feed ♀','Feed ♂'],
           rightAlignFrom: 2,
           rows: weeklyAgg.map((w: any) => [
             w.weekNum < 0 ? 'Pre-placement' : `Week ${w.weekNum}`, `${fmtDate(w.firstDate)} – ${fmtDate(w.lastDate)}`, `${w.days}/7`,
@@ -1476,7 +1480,8 @@ export const FlockDetail: React.FC = () => {
             w.hdPct != null ? pct(w.hdPct,1) : '—', w.std?.hen_week_pct != null ? `${w.std.hen_week_pct}%` : '—',
             w.totalHE, w.stdHE != null ? Math.round(w.stdHE) : '—',
             w.hePct != null ? pct(w.hePct,1) : '—', w.std?.he_pct != null ? `${w.std.he_pct}%` : '—',
-            w.mortF || '—', w.stdMortF != null ? Math.round(w.stdMortF) : '—',
+            w.mortF || '—', w.cullF || '—', (w.mortF + w.cullF) || '—',
+            w.stdMortF != null ? Math.round(w.stdMortF) : '—',
             w.mortM || '—', w.feedF, w.feedM,
           ]),
         }
@@ -1484,14 +1489,15 @@ export const FlockDetail: React.FC = () => {
         return {
           title: `Flock ${flock.flock_no} — Monthly Report`,
           headers: ['Month','Days','Eggs','Std Eggs','HE','Std HE','HE%','Std HE%',
-                    'Avg Open ♀','Mort ♀','Std Mort ♀','Feed ♀ kg','Feed ♂ kg'],
+                    'Avg Open ♀','Mort ♀','Cull ♀','Depl ♀','Std Depl ♀','Feed ♀ kg','Feed ♂ kg'],
           rightAlignFrom: 1,
           rows: monthlyRows.map((m: any) => [
             m.month, m.days,
             m.eggs, m.stdEggs != null ? Math.round(m.stdEggs) : '—',
             m.he, m.stdHE != null ? Math.round(m.stdHE) : '—',
             m.eggs > 0 ? pct(m.he/m.eggs) : '—', m.stdHePct != null ? `${m.stdHePct.toFixed(1)}%` : '—',
-            Math.round(m.avgF), m.mortF || '—', m.stdMortF != null ? Math.round(m.stdMortF) : '—',
+            Math.round(m.avgF), m.mortF || '—', m.cullF || '—', (m.mortF + m.cullF) || '—',
+            m.stdMortF != null ? Math.round(m.stdMortF) : '—',
             m.feedF, m.feedM,
           ]),
         }
@@ -1815,6 +1821,16 @@ export const FlockDetail: React.FC = () => {
               Flock is {ageWeeks} weeks old{last.week_of_age != null && ageWeeks > last.week_of_age
                 ? ` — past week ${last.week_of_age}, where the curve ends` : ''}.
             </span>
+            {/* A cleared-out flock reads near 100% depleted, which is true and
+                says nothing about how it performed. Without this line somebody
+                reads that figure against the book's 7% and draws the wrong
+                conclusion about a flock that simply reached the end. */}
+            {flock.status === 'closed' && (
+              <span className="block mt-1 text-amber-700">
+                This flock is CLOSED — it has been cleared out, so its depletion reads near 100%.
+                That is the sell-off, not a loss: judge it on the weeks it was working, not on the final figure.
+              </span>
+            )}
           </div>
         )
       })()}
@@ -2108,6 +2124,8 @@ export const FlockDetail: React.FC = () => {
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">HE%</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-400">Std</th>
                   <th className="px-2 py-2 text-right font-semibold text-red-500">Mort ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-orange-500">Cull ♀</th>
+                  <th className="px-2 py-2 text-right font-semibold text-gray-600">Depl ♀</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-400">Std</th>
                   <th className="px-2 py-2 text-right font-semibold text-red-500">Mort ♂</th>
                   <th className="px-2 py-2 text-right font-semibold text-gray-600">Feed ♀</th>
@@ -2130,8 +2148,12 @@ export const FlockDetail: React.FC = () => {
                     <td className="px-2 py-1.5 text-right text-gray-400">{w.stdHE != null ? Math.round(w.stdHE).toLocaleString('en-IN') : '—'}</td>
                     <td className={`px-2 py-1.5 text-right font-medium ${vsStd(w.hePct != null ? w.hePct * 100 : null, w.std?.he_pct)}`}>{w.hePct != null ? pct(w.hePct, 1) : '—'}</td>
                     <td className="px-2 py-1.5 text-right text-gray-400">{stdCell(w.std?.he_pct, '%')}</td>
-                    {/* Fewer deaths than the book is GOOD, so this one is read the other way round. */}
-                    <td className={`px-2 py-1.5 text-right font-medium ${vsStd(w.mortF, w.stdMortF, true)}`}>{w.mortF > 0 ? w.mortF : '—'}</td>
+                    <td className="px-2 py-1.5 text-right text-red-500">{w.mortF > 0 ? w.mortF : '—'}</td>
+                    <td className="px-2 py-1.5 text-right text-orange-500">{w.cullF > 0 ? w.cullF : '—'}</td>
+                    {/* The book's depletion is deaths AND culls, so the figure
+                        put beside it has to be both. Fewer than the book is
+                        GOOD, so this one is read the other way round. */}
+                    <td className={`px-2 py-1.5 text-right font-medium ${vsStd(w.mortF + w.cullF, w.stdMortF, true)}`}>{(w.mortF + w.cullF) > 0 ? (w.mortF + w.cullF) : '—'}</td>
                     <td className="px-2 py-1.5 text-right text-gray-400">{w.stdMortF != null ? Math.round(w.stdMortF).toLocaleString('en-IN') : '—'}</td>
                     <td className="px-2 py-1.5 text-right text-red-500">{w.mortM > 0 ? w.mortM : '—'}</td>
                     <td className="px-2 py-1.5 text-right">{w.feedF.toLocaleString('en-IN')}</td>
@@ -2139,7 +2161,7 @@ export const FlockDetail: React.FC = () => {
                   </tr>
                 ))}
                 {weeklyAgg.length === 0 && (
-                  <tr><td colSpan={18} className="text-center text-gray-400 py-6">No daily records yet</td></tr>
+                  <tr><td colSpan={20} className="text-center text-gray-400 py-6">No daily records yet</td></tr>
                 )}
               </tbody>
             </table>
@@ -2157,7 +2179,7 @@ export const FlockDetail: React.FC = () => {
               <Th right>HE</Th><Th right>Std</Th>
               <Th right>HE%</Th><Th right>Std</Th>
               <Th right>Avg Open ♀</Th>
-              <Th right>Mort ♀</Th><Th right>Std</Th>
+              <Th right>Mort ♀</Th><Th right>Cull ♀</Th><Th right>Depl ♀</Th><Th right>Std</Th>
               <Th right>Feed ♀ kg</Th><Th right>Feed ♂ kg</Th>
             </tr></thead>
             <tbody>
@@ -2174,7 +2196,9 @@ export const FlockDetail: React.FC = () => {
                     </Td>
                     <Td right className="text-gray-400">{m.stdHePct != null ? `${m.stdHePct.toFixed(1)}%` : '—'}</Td>
                     <Td right>{Math.round(m.avgF).toLocaleString('en-IN')}</Td>
-                    <Td right className={`font-medium ${vsStd(m.mortF, m.stdMortF, true)}`}>{m.mortF > 0 ? m.mortF : '—'}</Td>
+                    <Td right className="text-red-500">{m.mortF > 0 ? m.mortF : '—'}</Td>
+                    <Td right className="text-orange-500">{m.cullF > 0 ? m.cullF : '—'}</Td>
+                    <Td right className={`font-medium ${vsStd(m.mortF + m.cullF, m.stdMortF, true)}`}>{(m.mortF + m.cullF) > 0 ? (m.mortF + m.cullF) : '—'}</Td>
                     <Td right className="text-gray-400">{m.stdMortF != null ? Math.round(m.stdMortF).toLocaleString('en-IN') : '—'}</Td>
                     <Td right>{m.feedF.toLocaleString('en-IN')}</Td>
                     <Td right>{m.feedM.toLocaleString('en-IN')}</Td>
@@ -2213,6 +2237,8 @@ export const FlockDetail: React.FC = () => {
                     that belongs to no month. */}
                 <Td right className="text-gray-400">—</Td>
                 <Td right className="text-red-500">{monthlyRows.reduce((s: number, m: any) => s + (m.mortF ?? 0), 0).toLocaleString('en-IN')}</Td>
+                <Td right className="text-orange-500">{monthlyRows.reduce((s: number, m: any) => s + (m.cullF ?? 0), 0).toLocaleString('en-IN')}</Td>
+                <Td right>{monthlyRows.reduce((s: number, m: any) => s + (m.mortF ?? 0) + (m.cullF ?? 0), 0).toLocaleString('en-IN')}</Td>
                 <Td right className="text-gray-400">{stdTot(monthlyRows, 'stdMortF')}</Td>
                 <Td right>{Math.round(monthlyRows.reduce((s: number, m: any) => s + (m.feedF ?? 0), 0)).toLocaleString('en-IN')}</Td>
                 <Td right>{Math.round(monthlyRows.reduce((s: number, m: any) => s + (m.feedM ?? 0), 0)).toLocaleString('en-IN')}</Td>
