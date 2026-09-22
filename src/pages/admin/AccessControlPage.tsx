@@ -13,6 +13,17 @@ const ROLES: { key: Role; label: string }[] = [
   { key: 'site_manager', label: 'Site Manager' },
   { key: 'site_incharge', label: 'Site Incharge' },
   { key: 'viewer', label: 'Viewer' },
+  // shed_supervisor has been a valid role since migration 640 and holds its
+  // own permission rows, but was never listed here - so its levels could not
+  // be seen or changed from this page at all.
+  { key: 'shed_supervisor', label: 'Shed Supervisor' },
+  { key: 'doctor', label: 'Veterinary Doctor' },
+  { key: 'hatchery_manager', label: 'Hatchery Manager' },
+  { key: 'feed_mill_manager', label: 'Feed Mill Manager' },
+  { key: 'store_keeper', label: 'Store Keeper' },
+  { key: 'purchase_officer', label: 'Purchase Officer' },
+  { key: 'hr_officer', label: 'HR / Payroll Officer' },
+  { key: 'auditor', label: 'Auditor / CA' },
 ]
 
 const LEVELS: { value: 'hidden' | 'read_only' | 'full'; label: string; className: string }[] = [

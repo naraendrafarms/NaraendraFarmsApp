@@ -8,7 +8,21 @@ export type PermLevel = 'hidden' | 'read_only' | 'full'
 // 'shed_supervisor' was added to the database role list in migration 640 but
 // never to this type, so the app could not refer to a role its own database
 // already accepts. Kept in step with the profiles.role CHECK constraint.
-export type Role = 'admin' | 'management' | 'accounts' | 'site_manager' | 'site_incharge' | 'viewer' | 'shed_supervisor'
+export type Role =
+  | 'admin' | 'management' | 'accounts' | 'site_manager' | 'site_incharge'
+  | 'viewer' | 'shed_supervisor'
+  // Added by migration 1348 - the seven a breeder farm needs that the app did
+  // not have. Their module rows were seeded first, deliberately, so nobody
+  // working was disturbed; until this type listed them the Admin Centre
+  // dropdown could not offer them and no user could hold one.
+  | 'doctor' | 'hatchery_manager' | 'feed_mill_manager' | 'store_keeper'
+  | 'purchase_officer' | 'hr_officer' | 'auditor'
+
+// The roles that may ENTER data. Auditor is deliberately absent: an auditor
+// reads the books, it does not write them.
+const ENTRY_ROLES: Role[] = ['admin', 'accounts', 'site_manager', 'site_incharge',
+  'doctor', 'hatchery_manager', 'feed_mill_manager', 'store_keeper',
+  'purchase_officer', 'hr_officer']
 
 export interface Profile {
   id: string
@@ -21,32 +35,45 @@ export interface Profile {
 // ── Permission helpers ────────────────────────────────────────────
 export const can = {
   // Can enter data (create/update records)
-  enterData: (r?: Role) =>
-    r === 'admin' || r === 'accounts' || r === 'site_manager' || r === 'site_incharge',
+  enterData: (r?: Role) => !!r && ENTRY_ROLES.includes(r),
 
   // Can see salary / employee / financial data
+  // The auditor is here because auditing IS reading the financials. It is the
+  // only one of the seven new roles with any financial sight at all.
   viewFinancial: (r?: Role) =>
-    r === 'admin' || r === 'accounts' || r === 'management',
+    r === 'admin' || r === 'accounts' || r === 'management' || r === 'auditor',
 
   // Can see Purchase Orders and Payments pages
   viewPurchase: (r?: Role) =>
-    r === 'admin' || r === 'accounts' || r === 'management',
+    r === 'admin' || r === 'accounts' || r === 'management'
+    || r === 'purchase_officer' || r === 'auditor',
 
   // Can add/edit Purchase Orders and Payments
+  // purchase_officer raises intents and POs. They do NOT approve payments and
+  // do NOT see the bank ledger - separating those two is the entire reason
+  // this role exists instead of handing someone the accounts role.
   editPurchase: (r?: Role) =>
-    r === 'admin' || r === 'accounts',
+    r === 'admin' || r === 'accounts' || r === 'purchase_officer',
 
   // Can view Bank Ledger (sensitive — bank balances)
+  // Auditor only, and only because migration 1348 already grants it
+  // accounts=read_only - a module grant the page then refused would be two
+  // permission systems disagreeing, which is the bug class that put company
+  // revenue on a shed supervisor's dashboard. NOT purchase_officer.
   viewBankLedger: (r?: Role) =>
-    r === 'admin' || r === 'accounts',
+    r === 'admin' || r === 'accounts' || r === 'auditor',
 
   // Can approve / mark payments as Paid
+  // Deliberately unchanged. No new role approves a payment - least of all
+  // purchase_officer, who raises the order in the first place.
   approvePayment: (r?: Role) =>
     r === 'admin' || r === 'accounts',
 
   // Can see all sites (not limited to one farm)
+  // Only site_incharge and shed_supervisor are scoped to one place; none of
+  // the seven new roles is.
   viewAllSites: (r?: Role) =>
-    r === 'admin' || r === 'accounts' || r === 'site_manager' || r === 'viewer' || r === 'management',
+    !!r && r !== 'site_incharge' && r !== 'shed_supervisor',
 
   // Can manage master data (farms, ingredients, parties etc.)
   manageMasters: (r?: Role) =>
@@ -66,8 +93,11 @@ export const can = {
 
   // Can see/enter Planning (Flock Cost Projection, Quarterly Budget) — admin
   // only for now; extend this single check later if a partner/CA needs it.
+  // The "extend this later if a partner/CA needs it" note above was written
+  // for exactly this: the auditor holds planning=read_only in 1348, so the
+  // check has to agree with the grant.
   viewPlanning: (r?: Role) =>
-    r === 'admin',
+    r === 'admin' || r === 'auditor',
 }
 
 interface AuthState {

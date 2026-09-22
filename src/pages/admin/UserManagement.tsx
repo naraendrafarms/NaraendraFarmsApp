@@ -20,6 +20,16 @@ const ROLES: { value: Role; label: string; desc: string }[] = [
   // role could not actually be given to anyone.
   { value: 'shed_supervisor', label: 'Shed Supervisor', desc: 'Line Daily Entry and Line Master only — nothing else' },
   { value: 'viewer',        label: 'Viewer',         desc: 'View and reports only — no data entry' },
+  // The seven added by migration 1348. Their module rows were seeded first so
+  // nobody working was disturbed; this list is what finally makes them
+  // assignable. Every level is editable in Admin Centre → Access Control.
+  { value: 'doctor',            label: 'Veterinary Doctor',  desc: 'Flock health, mortality, medicine & vaccines. Sees the vaccination schedule, does not maintain it. No money.' },
+  { value: 'hatchery_manager',  label: 'Hatchery Manager',   desc: 'Hatch batches, eggs set, hatchability. No money.' },
+  { value: 'feed_mill_manager', label: 'Feed Mill Manager',  desc: 'Formulas, ingredients, production and mill stock. No money.' },
+  { value: 'store_keeper',      label: 'Store Keeper',       desc: 'Inventory and Goods Receipt. NOT Purchase Orders — no PO prices, no payments.' },
+  { value: 'purchase_officer',  label: 'Purchase Officer',   desc: 'Intents and POs. CANNOT approve payments or open the bank ledger.' },
+  { value: 'hr_officer',        label: 'HR / Payroll Officer', desc: 'Attendance and salary only. No flocks, no purchase.' },
+  { value: 'auditor',           label: 'Auditor / CA',       desc: 'Read-only across the books, including the bank ledger. Enters nothing.' },
 ]
 
 const ROLE_COLORS: Record<Role, any> = {
@@ -30,6 +40,13 @@ const ROLE_COLORS: Record<Role, any> = {
   site_incharge: 'green',
   viewer:        'gray',
   shed_supervisor: 'teal',
+  doctor:            'red',
+  hatchery_manager:  'yellow',
+  feed_mill_manager: 'green',
+  store_keeper:      'blue',
+  purchase_officer:  'purple',
+  hr_officer:        'purple',
+  auditor:           'gray',
 }
 
 export const UserManagement: React.FC = () => {

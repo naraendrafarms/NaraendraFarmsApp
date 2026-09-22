@@ -85,7 +85,11 @@ const NAV: NavItem[] = [
   {
     // Accounts dept + admin only for salary entry; site_manager can view employees
     label: 'Employees', icon: <Users size={18}/>,
-    hideRoles: ['site_incharge', 'viewer'],
+    // HR runs this section and the auditor reads it; the other five new roles
+    // have payroll hidden in role_permissions, so hide them here too rather
+    // than leaving the two systems to disagree.
+    hideRoles: ['site_incharge', 'viewer', 'doctor', 'hatchery_manager',
+                'feed_mill_manager', 'store_keeper', 'purchase_officer'],
     children: [
       { label: 'Employee List',   to: '/employees' },
       { label: 'Bulk Salary',      to: '/employees/bulk-salary' },
@@ -118,14 +122,21 @@ const NAV: NavItem[] = [
     // The shed roles are allowed into the section so Line Master is reachable;
     // every pre-existing entry below keeps roles: ['admin','accounts'], so
     // nothing that was hidden from them yesterday becomes visible today.
-    roles: ['admin', 'accounts', 'shed_supervisor', 'site_manager', 'site_incharge'],
+    // All seven new roles hold masters=read_only in role_permissions. Without
+    // them here the static array would hide the section anyway - the nav needs
+    // BOTH to pass, and two gates disagreeing is how a grant becomes a dead
+    // end the admin cannot explain.
+    roles: ['admin', 'accounts', 'shed_supervisor', 'site_manager', 'site_incharge',
+            'doctor','hatchery_manager','feed_mill_manager','store_keeper','purchase_officer','hr_officer','auditor'],
     children: [
       { label: 'Farm / Sites',         to: '/masters/farms',       roles: ['admin', 'accounts'] },
       { label: 'Sheds',                to: '/masters/sheds',       roles: ['admin', 'accounts'] },
       { label: 'Line Master',          to: '/masters/lines' },
-      { label: 'Feed Types',           to: '/masters/feed-types',  roles: ['admin', 'accounts'] },
-      { label: 'Vaccination Schedule', to: '/masters/vaccination', roles: ['admin', 'accounts'] },
-      { label: 'Hatcheries',           to: '/masters/hatcheries',  roles: ['admin', 'accounts'] },
+      { label: 'Feed Types',           to: '/masters/feed-types',  roles: ['admin', 'accounts', 'feed_mill_manager', 'auditor'] },
+      // The vet SEES this and ACCOUNTS maintains it - the owner's decision,
+      // 22/09/2026. doctor holds masters=read_only, so it opens read-only.
+      { label: 'Vaccination Schedule', to: '/masters/vaccination', roles: ['admin', 'accounts', 'doctor', 'auditor'] },
+      { label: 'Hatcheries',           to: '/masters/hatcheries',  roles: ['admin', 'accounts', 'hatchery_manager', 'auditor'] },
       { label: 'Electricity Meters',   to: '/masters/meters',      roles: ['admin', 'accounts'] },
       { label: 'Vehicles',            to: '/masters/vehicles',     roles: ['admin', 'accounts'] },
       { label: 'Cash Imprest Accounts', to: '/masters/cash-accounts', roles: ['admin', 'accounts'] },
@@ -231,12 +242,15 @@ const NAV: NavItem[] = [
   },
   {
     label: 'Help & Guide', icon: <BookOpen size={18}/>,
-    roles: ['admin','management','accounts','site_manager','viewer'],
+    // Everyone who can log in can read the guide - withholding the manual
+    // from a new role only generates questions.
+    roles: ['admin','management','accounts','site_manager','viewer','site_incharge','shed_supervisor',
+            'doctor','hatchery_manager','feed_mill_manager','store_keeper','purchase_officer','hr_officer','auditor'],
     to: '/help',
   },
   {
     label: 'Planning', icon: <TrendingUp size={18}/>,
-    roles: ['admin'],
+    roles: ['admin', 'auditor'],
     to: '/planning',
   },
   {
@@ -266,6 +280,13 @@ const ROLE_LABELS: Record<Role, string> = {
   site_incharge: 'Site Incharge',
   viewer:        'Viewer',
   shed_supervisor: 'Shed Supervisor',
+  doctor:            'Veterinary Doctor',
+  hatchery_manager:  'Hatchery Manager',
+  feed_mill_manager: 'Feed Mill Manager',
+  store_keeper:      'Store Keeper',
+  purchase_officer:  'Purchase Officer',
+  hr_officer:        'HR / Payroll Officer',
+  auditor:           'Auditor / CA',
 }
 const ROLE_COLORS: Record<Role, string> = {
   admin:         'bg-red-100 text-red-700',
@@ -275,6 +296,13 @@ const ROLE_COLORS: Record<Role, string> = {
   site_incharge: 'bg-green-100 text-green-700',
   viewer:        'bg-gray-100 text-gray-600',
   shed_supervisor: 'bg-teal-100 text-teal-700',
+  doctor:            'bg-rose-100 text-rose-700',
+  hatchery_manager:  'bg-amber-100 text-amber-700',
+  feed_mill_manager: 'bg-lime-100 text-lime-700',
+  store_keeper:      'bg-cyan-100 text-cyan-700',
+  purchase_officer:  'bg-indigo-100 text-indigo-700',
+  hr_officer:        'bg-fuchsia-100 text-fuchsia-700',
+  auditor:           'bg-slate-100 text-slate-700',
 }
 
 // Filters both by the existing static roles/hideRoles arrays AND by the
