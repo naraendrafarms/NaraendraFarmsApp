@@ -8,6 +8,7 @@ export type ModuleKey =
   | 'reports_financial' | 'accounts' | 'vhl' | 'planning' | 'admin'
   | 'line_master'
   | 'line_entry'
+  | 'grn'
 
 export const MODULES: { key: ModuleKey; label: string }[] = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -31,6 +32,11 @@ export const MODULES: { key: ModuleKey; label: string }[] = [
   // 'full' there (migration 1127 checked this against the live table).
   { key: 'line_master', label: 'Line Master (shed lines)' },
   { key: 'line_entry', label: 'Line Daily Entry (eggs, mortality, feed)' },
+  // Goods receipt, split out of 'purchase' in migration 1351. A store keeper
+  // has to receive stock, but giving them the purchase module also handed over
+  // Purchase Orders, Intent and Pending Payments - and with them the agreed PO
+  // prices. Same reasoning as line_master being split out of masters.
+  { key: 'grn', label: 'Goods Receipt (GRN)' },
 ]
 
 // Longest-prefix match against the current route path (no leading slash,
@@ -51,6 +57,9 @@ export const ROUTE_MODULES: Record<string, ModuleKey> = {
   'electricity': 'electricity',
 
   'purchase': 'purchase',
+  // Longest prefix wins, so this beats the general 'purchase' mapping above -
+  // the same trick 'employees/statutory' uses to sit apart from 'employees'.
+  'purchase/grn': 'grn',
   'purchases': 'purchase',
   'purchase-orders': 'purchase',
   'procurement': 'purchase',
