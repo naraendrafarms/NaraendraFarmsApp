@@ -77,8 +77,25 @@ function rowCalc(b: any) {
 // ── one row definition, used by BOTH the Excel export and the print ──────────
 // Kept in one place on purpose: two separate column lists drift apart, and a
 // printed sheet that disagrees with the exported one is worse than either.
-function reportRow(b: any) {
+// avgProd: dispatch_id -> egg-weighted average production date, in ms. It is
+// built in the component from he_dispatch_lines, so it has to be handed in -
+// which is exactly why Age@Prod and Egg Age were never in the export: this
+// function could not see them, and linking a dispatch changed the screen and
+// nothing else.
+function reportRow(b: any, avgProd?: Record<string, number>) {
   const r = rowCalc(b)
+  // Identical to the three age columns on screen, including the fallback to
+  // the LINKED DISPATCH's flock for a placement date, and including the
+  // refusal to fall back to the setting date for Age@Prod - that once made
+  // Age@Prod a copy of Age@Setting, a made-up figure that looked real.
+  const placement   = b.flocks?.placement_date ?? b.he_dispatch?.flocks?.placement_date ?? null
+  const ageSetting  = ageDays(placement, b.setting_date)
+  const avgProdMs   = b.dispatch_id ? avgProd?.[b.dispatch_id] : null
+  const avgProdDate = avgProdMs ? new Date(avgProdMs).toISOString().slice(0, 10) : null
+  const ageProd     = avgProdDate ? ageDays(placement, avgProdDate) : null
+  const eggAge      = avgProdDate && b.setting_date
+    ? Math.round((new Date(b.setting_date).getTime() - new Date(avgProdDate).getTime()) / 86400000)
+    : null
   return {
     'Flock':          `F-${b.flocks?.flock_no ?? b.he_dispatch?.flocks?.flock_no ?? ''}`,
     'Invoice/DC':     b.invoice_no ?? b.he_dispatch?.invoice_no ?? (b.he_dispatch?.dc_no ? `DC-${b.he_dispatch.dc_no}` : ''),
@@ -86,9 +103,14 @@ function reportRow(b: any) {
     'Setting Date':   fmtDate(b.setting_date),
     'Hatch Date':     b.hatch_date ? fmtDate(b.hatch_date) : '',
     'Setting No':     b.setting_no ?? '',
-    'Age @ Setting':  b.flocks?.placement_date && b.setting_date
-      ? Math.round((new Date(b.setting_date).getTime() - new Date(b.flocks.placement_date).getTime()) / 86400000) + ' days'
-      : '',
+    // Both dressings of the same figure: the one the page shows, and a plain
+    // number Excel can sort, filter and average. "432 days" as text could do
+    // none of those.
+    'Age @ Setting':        ageSetting != null ? ageLabel(ageSetting) : '',
+    'Age @ Setting (days)': ageSetting,
+    'Age @ Prod':           ageProd != null ? ageLabel(ageProd) : '',
+    'Age @ Prod (days)':    ageProd,
+    'Egg Age (days)':       eggAge,
     'Eggs Weight':    b.eggs_weight ?? '',
     'Received':       r.received,
     'Setting':        r.setting,
@@ -117,28 +139,32 @@ function reportRow(b: any) {
 // no longer matches a key fails to compile rather than printing a blank column.
 type ReportRow = ReturnType<typeof reportRow>
 const REPORT_HEADERS: (keyof ReportRow)[] = ['Flock','Invoice/DC','Hatchery','Setting Date','Hatch Date','Setting No',
-  'Age @ Setting','Eggs Weight','Received','Setting','Broken','Broken%','Inf','Inf%','Blst','Blst%',
+  'Age @ Setting','Age @ Setting (days)','Age @ Prod','Age @ Prod (days)','Egg Age (days)',
+  'Eggs Weight','Received','Setting','Broken','Broken%','Inf','Inf%','Blst','Blst%',
   'Sale Chk','Hatch%','STD Hatch%','Std','Unhatch','Unhatch%','Reject','Reject%','Actual Std',
   'Sale−STD Chicks','Remarks']
-const RIGHT_ALIGN_FROM = 8   // index of 'Received'
+const RIGHT_ALIGN_FROM = 6   // index of 'Age @ Setting' - everything from here is a quantity
 
 // ── Excel export ─────────────────────────────────────────────────────────────
-function exportExcel(rows: any[]) {
+function exportExcel(rows: any[], avgProd?: Record<string, number>) {
   if (rows.length === 0) { toast.error('No batches to export'); return }
-  const data = rows.map(reportRow)
-  const ws = XLSX.utils.json_to_sheet(data)
+  const data = rows.map(b => reportRow(b, avgProd))
+  // The header order is given explicitly: without it a column whose every row
+  // is blank - Age@Prod on a selection with nothing linked - would drop out of
+  // the sheet altogether, and the columns could drift from the printed ones.
+  const ws = XLSX.utils.json_to_sheet(data, { header: REPORT_HEADERS as string[] })
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Hatch Batches')
   XLSX.writeFile(wb, `HatchBatches_${today()}.xlsx`)
 }
 
 // ── print ────────────────────────────────────────────────────────────────────
-// Landscape, because 27 columns do not fit portrait A4 — they come out clipped.
-function printBatches(rows: any[], subtitle: string) {
+// Landscape, because 31 columns do not fit portrait A4 — they come out clipped.
+function printBatches(rows: any[], subtitle: string, avgProd?: Record<string, number>) {
   // A filter can leave nothing on screen; printing a blank sheet with a TOTAL
   // of zero on it would look like a result rather than an empty selection.
   if (rows.length === 0) { toast.error('No batches to print'); return }
-  const data = rows.map(reportRow)
+  const data = rows.map(b => reportRow(b, avgProd))
   const totals = rows.reduce((a: any, b: any) => {
     const r = rowCalc(b)
     a.received += r.received; a.setting += r.setting; a.broken += r.broken
@@ -156,7 +182,7 @@ function printBatches(rows: any[], subtitle: string) {
   // the Hatchery Comparison already follow.
   const pc = (num: number, den: number) => den > 0 ? `${p2((num / den) * 100)}%` : '—'
   const footer: (string | number)[] = [
-    `TOTAL (${rows.length})`, '', '', '', '', '', '', '',
+    `TOTAL (${rows.length})`, '', '', '', '', '', '', '', '', '', '', '',
     totals.received.toLocaleString('en-IN'),
     totals.setting.toLocaleString('en-IN'),
     totals.broken.toLocaleString('en-IN'), pc(totals.broken, totals.received),
@@ -1009,11 +1035,11 @@ export const HatchBatches: React.FC = () => {
             {(batches?.length ?? 0) > 0 && (
               <>
                 <Button variant="secondary" icon={<Printer size={15}/>}
-                  onClick={() => printBatches(reportRows, reportSubtitle)}>
+                  onClick={() => printBatches(reportRows, reportSubtitle, dispatchAvgProd)}>
                   Print{reportCount > 0 ? ` (${reportCount})` : ''}
                 </Button>
                 <Button variant="secondary" icon={<Download size={15}/>}
-                  onClick={() => exportExcel(reportRows)}>
+                  onClick={() => exportExcel(reportRows, dispatchAvgProd)}>
                   Export{reportCount > 0 ? ` (${reportCount})` : ''}
                 </Button>
               </>
