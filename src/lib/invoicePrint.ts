@@ -73,8 +73,13 @@ export function printReport(opts: {
   rows: (string | number | null | undefined)[][]
   rightAlignFrom?: number   // column index from which cells right-align (numbers); default: none
   footerRow?: (string | number | null | undefined)[]   // optional bold TOTAL row
+  // Sideways paper and tighter cells, for tables too wide for portrait A4 —
+  // Hatch Batches is 23 columns and comes out clipped without it. OFF by
+  // default, so every page already using this function prints exactly as
+  // before.
+  landscape?: boolean
 }) {
-  const { title, subtitle, headers, rows, rightAlignFrom, footerRow } = opts
+  const { title, subtitle, headers, rows, rightAlignFrom, footerRow, landscape } = opts
   const thead = headers.map(h => `<th>${h}</th>`).join('')
   const tbody = rows.map(r => `<tr>${r.map((c, i) =>
     `<td${rightAlignFrom != null && i >= rightAlignFrom ? ' style="text-align:right"' : ''}>${c ?? ''}</td>`
@@ -82,8 +87,15 @@ export function printReport(opts: {
   const tfoot = footerRow ? `<tfoot><tr class="total-row">${footerRow.map((c, i) =>
     `<td${rightAlignFrom != null && i >= rightAlignFrom ? ' style="text-align:right"' : ''}>${c ?? ''}</td>`
   ).join('')}</tr></tfoot>` : ''
+  const wideCSS = landscape ? `<style>
+    @page{size:A4 landscape;margin:8mm}
+    body{padding:8px}
+    table{table-layout:fixed;width:100%}
+    th{padding:2px 3px;font-size:7.5px;word-wrap:break-word}
+    td{padding:2px 3px;font-size:7.5px;word-wrap:break-word}
+  </style>` : ''
   const html = `<!doctype html><html><head><title>${title}</title>
-  <style>${CSS}</style>${LOGO_ROW_CSS}</head><body>
+  <style>${CSS}</style>${LOGO_ROW_CSS}${wideCSS}</head><body>
     <div class="header">
       <div>
         <div class="co-name-row">${LOGO_SVG}<h1>${CO.name}</h1></div>

@@ -4,12 +4,13 @@ import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import { fmtDate, today, pct, fetchAllPages, AGE_BANDS, SEASONS, flockAgeWeeksAt, inAgeBand, inSeason } from '@/lib/utils'
 import { useFarmScope } from '@/lib/useFarmScope'
+import { printReport } from '@/lib/invoicePrint'
 import { useFormDraft } from '@/hooks/useFormDraft'
 import {
   Card, Button, Input, Select, FormRow, Modal, Table, Th, Td, Badge,
   SectionHeader, Spinner, EmptyState, StatCard, Divider
 , DateInput, SearchableSelect } from '@/components/ui'
-import { Plus, Edit2, Egg, Trash2, Download, Upload, FileDown } from 'lucide-react'
+import { Plus, Edit2, Egg, Trash2, Download, Upload, FileDown, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -73,46 +74,117 @@ function rowCalc(b: any) {
   }
 }
 
+// ── one row definition, used by BOTH the Excel export and the print ──────────
+// Kept in one place on purpose: two separate column lists drift apart, and a
+// printed sheet that disagrees with the exported one is worse than either.
+function reportRow(b: any) {
+  const r = rowCalc(b)
+  return {
+    'Flock':          `F-${b.flocks?.flock_no ?? b.he_dispatch?.flocks?.flock_no ?? ''}`,
+    'Invoice/DC':     b.invoice_no ?? b.he_dispatch?.invoice_no ?? (b.he_dispatch?.dc_no ? `DC-${b.he_dispatch.dc_no}` : ''),
+    'Hatchery':       b.hatcheries?.name ?? b.hatchery_name ?? '',
+    'Setting Date':   fmtDate(b.setting_date),
+    'Hatch Date':     b.hatch_date ? fmtDate(b.hatch_date) : '',
+    'Setting No':     b.setting_no ?? '',
+    'Age @ Setting':  b.flocks?.placement_date && b.setting_date
+      ? Math.round((new Date(b.setting_date).getTime() - new Date(b.flocks.placement_date).getTime()) / 86400000) + ' days'
+      : '',
+    'Eggs Weight':    b.eggs_weight ?? '',
+    'Received':       r.received,
+    'Setting':        r.setting,
+    'Broken':         r.broken,
+    'Broken%':        r.brokenPct,
+    'Inf':            r.inf,
+    'Inf%':           r.infPct,
+    'Blst':           r.blst,
+    'Blst%':          r.blstPct,
+    'Sale Chk':       r.saleChk,
+    'Hatch%':         r.hatchPct,
+    'STD Hatch%':     r.stdHatchPct ?? '',
+    'Std':            r.std,
+    'Unhatch':        r.unhatch,
+    'Unhatch%':       r.unhatchPct,
+    'Reject':         r.reject,
+    'Reject%':        r.rejectPct,
+    'Actual Std':     r.actualStd ?? '',
+    'Sale−STD Chicks': r.stdMinusSale,
+    'Remarks':        b.remarks ?? '',
+  }
+}
+
+// The first column is text; everything from 'Received' on is a number and is
+// right-aligned when printed. Typed against the row itself, so a header that
+// no longer matches a key fails to compile rather than printing a blank column.
+type ReportRow = ReturnType<typeof reportRow>
+const REPORT_HEADERS: (keyof ReportRow)[] = ['Flock','Invoice/DC','Hatchery','Setting Date','Hatch Date','Setting No',
+  'Age @ Setting','Eggs Weight','Received','Setting','Broken','Broken%','Inf','Inf%','Blst','Blst%',
+  'Sale Chk','Hatch%','STD Hatch%','Std','Unhatch','Unhatch%','Reject','Reject%','Actual Std',
+  'Sale−STD Chicks','Remarks']
+const RIGHT_ALIGN_FROM = 8   // index of 'Received'
+
 // ── Excel export ─────────────────────────────────────────────────────────────
 function exportExcel(rows: any[]) {
-  const data = rows.map((b: any) => {
-    const r = rowCalc(b)
-    return {
-      'Flock':          `F-${b.flocks?.flock_no ?? b.he_dispatch?.flocks?.flock_no ?? ''}`,
-      'Invoice/DC':     b.invoice_no ?? b.he_dispatch?.invoice_no ?? (b.he_dispatch?.dc_no ? `DC-${b.he_dispatch.dc_no}` : ''),
-      'Hatchery':       b.hatcheries?.name ?? b.hatchery_name ?? '',
-      'Setting Date':   fmtDate(b.setting_date),
-      'Hatch Date':     b.hatch_date ? fmtDate(b.hatch_date) : '',
-      'Setting No':     b.setting_no ?? '',
-      'Age @ Setting':  b.flocks?.placement_date && b.setting_date
-        ? Math.round((new Date(b.setting_date).getTime() - new Date(b.flocks.placement_date).getTime()) / 86400000) + ' days'
-        : '',
-      'Eggs Weight':    b.eggs_weight ?? '',
-      'Received':       r.received,
-      'Setting':        r.setting,
-      'Broken':         r.broken,
-      'Broken%':        r.brokenPct,
-      'Inf':            r.inf,
-      'Inf%':           r.infPct,
-      'Blst':           r.blst,
-      'Blst%':          r.blstPct,
-      'Sale Chk':       r.saleChk,
-      'Hatch%':         r.hatchPct,
-      'STD Hatch%':     r.stdHatchPct ?? '',
-      'Std':            r.std,
-      'Unhatch':        r.unhatch,
-      'Unhatch%':       r.unhatchPct,
-      'Reject':         r.reject,
-      'Reject%':        r.rejectPct,
-      'Actual Std':     r.actualStd ?? '',
-      'Sale−STD Chicks': r.stdMinusSale,
-      'Remarks':        b.remarks ?? '',
-    }
-  })
+  if (rows.length === 0) { toast.error('No batches to export'); return }
+  const data = rows.map(reportRow)
   const ws = XLSX.utils.json_to_sheet(data)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Hatch Batches')
   XLSX.writeFile(wb, `HatchBatches_${today()}.xlsx`)
+}
+
+// ── print ────────────────────────────────────────────────────────────────────
+// Landscape, because 27 columns do not fit portrait A4 — they come out clipped.
+function printBatches(rows: any[], subtitle: string) {
+  // A filter can leave nothing on screen; printing a blank sheet with a TOTAL
+  // of zero on it would look like a result rather than an empty selection.
+  if (rows.length === 0) { toast.error('No batches to print'); return }
+  const data = rows.map(reportRow)
+  const totals = rows.reduce((a: any, b: any) => {
+    const r = rowCalc(b)
+    a.received += r.received; a.setting += r.setting; a.broken += r.broken
+    a.inf += r.inf; a.blst += r.blst; a.saleChk += r.saleChk; a.std += r.std
+    a.unhatch += r.unhatch; a.reject += r.reject
+    if (r.stdHatchPct != null) {
+      a.stdHatchSum += r.stdHatchPct * (r.setting || 1)
+      a.stdHatchWeight += (r.setting || 1)
+    }
+    return a
+  }, { received: 0, setting: 0, broken: 0, inf: 0, blst: 0, saleChk: 0, std: 0, unhatch: 0, reject: 0,
+       stdHatchSum: 0, stdHatchWeight: 0 })
+  // Every percentage on the TOTAL line is worked out from the summed counts,
+  // never averaged across batches — the same rule the TOTAL row on screen and
+  // the Hatchery Comparison already follow.
+  const pc = (num: number, den: number) => den > 0 ? `${p2((num / den) * 100)}%` : '—'
+  const footer: (string | number)[] = [
+    `TOTAL (${rows.length})`, '', '', '', '', '', '', '',
+    totals.received.toLocaleString('en-IN'),
+    totals.setting.toLocaleString('en-IN'),
+    totals.broken.toLocaleString('en-IN'), pc(totals.broken, totals.received),
+    totals.inf.toLocaleString('en-IN'),    pc(totals.inf, totals.setting),
+    totals.blst.toLocaleString('en-IN'),   pc(totals.blst, totals.setting),
+    totals.saleChk.toLocaleString('en-IN'),
+    // chicks sold / setting, the same basis as each row and as the TOTAL on screen
+    pc(totals.saleChk, totals.setting),
+    // STD Hatch % is entered per batch, so the total is the egg-weighted
+    // average of the ones carrying it - a plain mean would let a 5,000-egg
+    // batch outweigh a 50,000-egg one. Same rule as the screen.
+    totals.stdHatchWeight > 0 ? `${p2(totals.stdHatchSum / totals.stdHatchWeight)}%` : '—',
+    totals.std.toLocaleString('en-IN'),
+    totals.unhatch.toLocaleString('en-IN'), pc(totals.unhatch, totals.setting),
+    totals.reject.toLocaleString('en-IN'),  pc(totals.reject, totals.setting),
+    // Actual Std, Sale-STD Chicks and Remarks carry no total on screen, so
+    // they carry none here either.
+    '', '', '',
+  ]
+  printReport({
+    title: 'Hatch Batches',
+    subtitle,
+    headers: REPORT_HEADERS as string[],
+    rows: data.map(d => REPORT_HEADERS.map(h => d[h])),
+    rightAlignFrom: RIGHT_ALIGN_FROM,
+    footerRow: footer,
+    landscape: true,
+  })
 }
 
 // ── template download ─────────────────────────────────────────────────────────
@@ -894,17 +966,36 @@ export const HatchBatches: React.FC = () => {
   // ── UI helper ─────────────────────────────────────────────────────────────────
   const pctCell = (v: number) => v > 0 ? `${v}%` : '—'
 
+  // ── what Export and Print actually cover ──────────────────────────────────────
+  // Tick nothing and you get every batch the filters left showing, as before.
+  // Tick some and you get exactly those, and nothing else. The two buttons read
+  // the same set, so an exported sheet and a printed one always agree.
+  // Ticks survive a filter change, so count what is BOTH ticked and showing -
+  // otherwise the button could read "(5)" and hand over 2. If a filter hides
+  // every ticked batch, the buttons go back to covering what is on screen.
+  const selVisible = sel.size > 0 ? displayed.filter((b: any) => sel.has(b.id)) : []
+  const reportRows = selVisible.length > 0 ? selVisible : displayed
+  const reportCount = selVisible.length
+  // The filters in words, reused as the printed sheet's subtitle so the paper
+  // says which batches it is and cannot be mistaken for the whole register.
+  const filterDesc = `${flockFilter ? ' in this flock' : ''}${
+    hatcheryFilter ? ' at this hatchery' : ''}${belowOnly ? ', below standard only' : ''}${
+    ageBand ? `, flock ${AGE_BANDS.find(x => x.value === ageBand)?.label.toLowerCase()} at setting` : ''}${
+    season ? `, set in ${SEASONS.find(x => x.value === season)?.label}` : ''}${
+    q ? ` matching "${search.trim()}"` : ''}${
+    fromDate || toDate ? ` set ${fromDate ? fmtDate(fromDate) : 'the beginning'} to ${toDate ? fmtDate(toDate) : 'now'}` : ''}`
+  const reportSubtitle = reportCount > 0
+    ? `${reportCount.toLocaleString('en-IN')} selected batch(es) of ${displayed.length.toLocaleString('en-IN')} showing`
+    : `${displayed.length.toLocaleString('en-IN')} batch(es)${filterDesc}`
+
   return (
     <div className="space-y-5">
       <SectionHeader title="Hatch Batches"
-        subtitle={`${displayed.length.toLocaleString('en-IN')} batch(es)${flockFilter ? ' in this flock' : ''}${
-          hatcheryFilter ? ' at this hatchery' : ''}${belowOnly ? ', below standard only' : ''}${
-          ageBand ? `, flock ${AGE_BANDS.find(x => x.value === ageBand)?.label.toLowerCase()} at setting` : ''}${
-          season ? `, set in ${SEASONS.find(x => x.value === season)?.label}` : ''}${
-          q ? ` matching "${search.trim()}"` : ''}${
-          fromDate || toDate ? ` set ${fromDate ? fmtDate(fromDate) : 'the beginning'} to ${toDate ? fmtDate(toDate) : 'now'}` : ''
-        } — every figure on this page, and the Excel export, covers exactly these${
-          displayed.length !== (batches ?? []).length ? ` (${(batches ?? []).length.toLocaleString('en-IN')} in total)` : ''}`}
+        subtitle={`${displayed.length.toLocaleString('en-IN')} batch(es)${filterDesc} — every figure on this page covers exactly these${
+          displayed.length !== (batches ?? []).length ? ` (${(batches ?? []).length.toLocaleString('en-IN')} in total)` : ''}. ${
+          reportCount > 0
+            ? `Export and Print cover the ${reportCount.toLocaleString('en-IN')} you have ticked, not all ${displayed.length.toLocaleString('en-IN')}.`
+            : 'Export and Print cover all of them; tick some batches to take only those.'}`}
         action={
           <div className="flex gap-2">
             {sel.size > 0 && (
@@ -916,7 +1007,16 @@ export const HatchBatches: React.FC = () => {
             <Button variant="secondary" icon={<Upload size={15}/>} onClick={() => fileRef.current?.click()}>Import</Button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} />
             {(batches?.length ?? 0) > 0 && (
-              <Button variant="secondary" icon={<Download size={15}/>} onClick={() => exportExcel(displayed)}>Export</Button>
+              <>
+                <Button variant="secondary" icon={<Printer size={15}/>}
+                  onClick={() => printBatches(reportRows, reportSubtitle)}>
+                  Print{reportCount > 0 ? ` (${reportCount})` : ''}
+                </Button>
+                <Button variant="secondary" icon={<Download size={15}/>}
+                  onClick={() => exportExcel(reportRows)}>
+                  Export{reportCount > 0 ? ` (${reportCount})` : ''}
+                </Button>
+              </>
             )}
             <Button icon={<Plus size={16}/>} onClick={() => openForm()}>Add Batch</Button>
           </div>
