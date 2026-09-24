@@ -196,10 +196,11 @@ where money should be, is a real failure even when the data underneath is fine.
 ### 1. Migration Checklist (MANDATORY every time)
 ```
 1. Write migration file  supabase/migrations/NNN_name.sql
-2. git add + commit + push to main
-3. Trigger workflow:  inputs: {"migration": "NNN_name.sql"}
-4. Check actual job logs — confirm filename matches + "Errors: 0"
-5. Test the feature in the app immediately after
+2. Creating a table, view or sequence? GRANT it in the SAME file — see 1d
+3. git add + commit + push to main
+4. Trigger workflow:  inputs: {"migration": "NNN_name.sql"}
+5. Check actual job logs — confirm filename matches + "Errors: 0"
+6. Test the feature in the app immediately after
 ```
 > NEVER trust workflow green status alone — run_sql.py exits 0 even on SQL errors.
 > WORSE: run_sql.py treats any error containing "does not exist", "already exists",
@@ -224,6 +225,31 @@ Split multi-constraint ALTERs into separate statements if you must use FKs.
 - `cash_book.nhe_sale_id` / `he_dispatch_id` columns (migration 082)
 - `trg_del_cash_book` DELETE trigger on nhe_sales + he_dispatch (migration 085)
 - Frontend insert always sets nhe_sale_id/he_dispatch_id; edits delete-then-reinsert
+
+### 1d. EVERY new table/view needs GRANTs in the SAME migration
+From 30 October Supabase no longer grants Data API access automatically to new
+tables in `public`. A `CREATE TABLE` with RLS and a policy but no GRANT will
+apply cleanly — **run_sql.py reports "Errors: 0"** — and then every page
+reading it returns permission denied and shows nothing. Green migration, empty
+screen: the Pending Payments failure again.
+
+RLS and GRANT are different layers. The policy decides WHICH ROWS; the grant
+decides whether the role may touch the table at all. We have always set only
+the first.
+
+So every migration that creates a table, view or sequence must also carry:
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.your_table TO anon, authenticated, service_role;
+-- a view: GRANT SELECT ON public.v_your_view TO anon, authenticated, service_role;
+-- a serial id: GRANT USAGE, SELECT ON SEQUENCE public.your_table_id_seq TO anon, authenticated, service_role;
+```
+`anon` IS included, on purpose. Measured 24/09/2026: all 185 existing tables
+already carry SELECT for anon — it is Supabase's own default, and the app is
+protected by the RLS policies (`TO authenticated`), not by withholding the
+grant. Leaving anon out makes a new table behave unlike every existing one.
+
+Migration 1357 backfilled all existing tables, views and sequences so a rebuild
+from migrations produces a database the app can actually read.
 
 ### 2. View changes → always DROP first
 `CREATE OR REPLACE VIEW` silently fails when column names/order change.
