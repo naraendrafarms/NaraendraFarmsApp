@@ -380,6 +380,17 @@ export const ReceivePaymentModal: React.FC<{
   const [status, setStatus] = useState('Received')
   const [saving, setSaving] = useState(false)
   const [selectedAdvanceId, setSelectedAdvanceId] = useState('')
+  // Receipts ALREADY recorded against this voucher, counted as EVENTS rather
+  // than rows. A split receipt writes one cash_book row AND one
+  // bank_transactions row on the SAME date - that is one event, and replacing
+  // it is correct. Two different dates means two real instalments, and saving
+  // here would delete both, because the cleanup below is unconditional.
+  // Measured 26/09/2026 before choosing this rule: 37 NHE sales and 2 HE
+  // dispatches hold rows in both ledgers (legitimate splits), while 5 NHE sales
+  // hold more than one bank credit (real instalments). Counting rows would have
+  // blocked all 39 splits; counting dates separates them.
+  const [priorReceipts, setPriorReceipts] = useState<{ dates: string[]; total: number } | null>(null)
+  const [ackReplace, setAckReplace] = useState(false)
 
   const { data: cashAccounts = [] } = useQuery({
     queryKey: ['cash_accounts_active'],
@@ -406,6 +417,44 @@ export const ReceivePaymentModal: React.FC<{
     enabled: !!sale?.party_id && open,
   })
   const totalAdvanceBalance = partyAdvances.reduce((s: number, a: any) => s + (a.amount - a.amount_used), 0)
+
+  React.useEffect(() => {
+    if (!open || !sale?.id) { setPriorReceipts(null); setAckReplace(false); return }
+    let cancelled = false
+    ;(async () => {
+      const lc = table === 'he_dispatch' ? 'he_dispatch_id' : 'nhe_sale_id'
+      const [cb, bt] = await Promise.all([
+        supabase.from('cash_book').select('txn_date,amount_in').eq(lc, sale.id),
+        supabase.from('bank_transactions').select('txn_date,amount').eq(lc, sale.id),
+      ])
+      if (cancelled) return
+      const rows = [
+        ...(((cb.data ?? []) as any[]).map(r => ({ d: r.txn_date, a: Number(r.amount_in ?? 0) }))),
+        ...(((bt.data ?? []) as any[]).map(r => ({ d: r.txn_date, a: Number(r.amount ?? 0) }))),
+      ]
+      setPriorReceipts({
+        dates: [...new Set(rows.map(r => r.d).filter(Boolean))].sort(),
+        total: rows.reduce((t, r) => t + r.a, 0),
+      })
+      setAckReplace(false)
+    })()
+    return () => { cancelled = true }
+  }, [open, sale?.id, table])
+
+  // Reversing to Pending must also clear the figure. The Amount box opens
+  // pre-filled with what was received, and the save writes amount_received from
+  // it whatever the status - so a row saved as Pending with the amount left in
+  // place reads FULLY SETTLED everywhere (every balance is amount minus
+  // amount_received) while its status says unpaid and its ledger row is gone.
+  React.useEffect(() => {
+    if (status === 'Pending') {
+      setAmtReceived('')
+      setSplitOn(false)
+      setCashAmt('')
+      setOnlineAmt('')
+      setUtr('')
+    }
+  }, [status])
 
   React.useEffect(() => {
     if (sale) {
@@ -484,7 +533,19 @@ export const ReceivePaymentModal: React.FC<{
       // total that disagreed with them is how a receipt ends up in the ledgers
       // for one figure and on the sale for another.
       const amt = splitOn ? splitCash + splitOnline : (parseFloat(amtReceived) || 0)
-      const isAdvance = mode === 'Advance'
+      // A reversal: put the voucher back to unpaid and leave NO figure behind.
+      const isReversal = status === 'Pending'
+      const isAdvance = mode === 'Advance' && !isReversal
+      // Replacing a single receipt is fine. Replacing an INSTALMENT HISTORY
+      // silently destroys receipts the cash book still has to account for, so
+      // it is confirmed explicitly rather than done quietly.
+      if ((priorReceipts?.dates.length ?? 0) > 1 && !ackReplace) {
+        throw new Error(
+          `This voucher already has ${priorReceipts!.dates.length} separate receipts `
+          + `(${priorReceipts!.dates.join(', ')}) totalling ${inr(priorReceipts!.total)}. `
+          + `Saving here REPLACES all of them with one entry. Tick the confirmation box `
+          + `to go ahead, or remove just the wrong one from the Cash Book instead.`)
+      }
       if (splitOn) {
         if (amt <= 0) throw new Error('Enter the cash and/or online amount')
         if (splitOnline > 0 && !bankId) {
@@ -573,10 +634,12 @@ export const ReceivePaymentModal: React.FC<{
           : mode,
         payment_cash: splitOn ? splitCash : (mode === 'Cash' ? (amt || 0) : 0),
         payment_online: splitOn ? splitOnline : (mode !== 'Cash' && mode !== 'Advance' ? (amt || 0) : 0),
-        received_date: date || null,
-        amount_received: amt || null,
-        bank_account_id: splitOn ? (splitOnline > 0 ? bankId : null) : ((mode !== 'Cash' && bankId) ? bankId : null),
-        utr_ref: utr || null,
+        // On a reversal every trace of the receipt goes, not just the status.
+        received_date: isReversal ? null : (date || null),
+        amount_received: isReversal ? null : (amt || null),
+        bank_account_id: isReversal ? null
+          : (splitOn ? (splitOnline > 0 ? bankId : null) : ((mode !== 'Cash' && bankId) ? bankId : null)),
+        utr_ref: isReversal ? null : (utr || null),
         // NO cash_farm_id here: nhe_sales does not have that column (nor does
         // he_dispatch), and sending it made PostgREST reject the whole update,
         // so a cash receipt could not save. The location is kept on the cash
@@ -706,13 +769,46 @@ export const ReceivePaymentModal: React.FC<{
           </div>
         )}
 
+        {sale?.party_id && totalAdvanceBalance <= 0 && (
+          <div className="rounded-lg bg-gray-50 border border-gray-200 p-2 text-xs text-gray-600">
+            No advance balance for this buyer, so <strong>Advance</strong> is not offered as a
+            payment mode. Record one under <strong>Accounts → Buyer Advances</strong> and it will
+            appear here with its remaining balance.
+          </div>
+        )}
+
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Select label="Status" value={status} onChange={e => setStatus(e.target.value)}
               options={[{value:'Received',label:'Fully Received'},{value:'Partial',label:'Partial'},{value:'Pending',label:'Pending'}]} />
-            <Input label="Amount (₹)" type="number" step="0.01" value={splitOn ? String(((parseFloat(cashAmt)||0) + (parseFloat(onlineAmt)||0)) || '') : amtReceived}
-              disabled={splitOn} onChange={e => setAmtReceived(e.target.value)} />
+            <Input label={status === 'Pending' ? 'Amount (₹) — cleared' : 'Amount (₹)'}
+              type="number" step="0.01"
+              value={status === 'Pending' ? '' : (splitOn ? String(((parseFloat(cashAmt)||0) + (parseFloat(onlineAmt)||0)) || '') : amtReceived)}
+              disabled={splitOn || status === 'Pending'} onChange={e => setAmtReceived(e.target.value)} />
           </div>
+
+          {status === 'Pending' && (
+            <div className="rounded-lg bg-orange-50 border border-orange-200 p-2 text-xs text-orange-800">
+              <strong>Reversing this receipt.</strong> The amount is cleared and the Cash Book
+              or Bank entry for it is removed, so the voucher goes back to fully outstanding.
+              Any advance it used is returned to the buyer&apos;s balance.
+            </div>
+          )}
+
+          {(priorReceipts?.dates.length ?? 0) > 1 && (
+            <div className="rounded-lg bg-red-50 border border-red-300 p-2 space-y-1.5">
+              <p className="text-xs text-red-800">
+                <strong>This voucher was paid in {priorReceipts!.dates.length} instalments</strong>
+                {' '}({priorReceipts!.dates.join(', ')}), {inr(priorReceipts!.total)} in total.
+                Saving here replaces <strong>all of them</strong> with the single entry above.
+                To undo just one, remove that entry from the Cash Book instead.
+              </p>
+              <label className="flex items-center gap-2 text-xs text-red-900 cursor-pointer select-none">
+                <input type="checkbox" checked={ackReplace} onChange={e => setAckReplace(e.target.checked)} />
+                I understand all {priorReceipts!.dates.length} receipts will be replaced
+              </label>
+            </div>
+          )}
 
           {mode !== 'Advance' && (
             <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
@@ -2383,6 +2479,9 @@ export const HEDispatch: React.FC = () => {
           qc.invalidateQueries({ queryKey: ['he_dispatch'] })
           qc.invalidateQueries({ queryKey: ['cash_book'] })
           qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+          // The Party Dues panel now counts HE dispatch as well, so an HE
+          // receipt changes it and it must not be left showing the old figure.
+          qc.invalidateQueries({ queryKey: ['nhe_party_dues'] })
         }}
       />
 
@@ -2979,13 +3078,32 @@ export const NHESales: React.FC = () => {
   const { data: partyDues } = useQuery({
     queryKey: ['nhe_party_dues'],
     queryFn: async () => {
-      const data = await fetchAllPages<any>(
-        (from, to) => supabase.from('nhe_sales')
-          .select('party_id,amount,amount_received,sale_type,parties(name)')
-          .or('is_employee_sale.is.null,is_employee_sale.eq.false')
-          .range(from, to),
-        'Party dues'
-      )
+      // BOTH sale books, not just NHE. A buyer owes on hatching-egg dispatches
+      // as well, and reading nhe_sales alone understated this panel against
+      // Party Outstanding, which has always counted both. Worse, the Receive
+      // button here opens the Bulk Receipt window, and THAT already lists
+      // he_dispatch vouchers - so the heading promised one figure and the window
+      // then offered more to settle.
+      const [nhe, he] = await Promise.all([
+        fetchAllPages<any>(
+          (from, to) => supabase.from('nhe_sales')
+            .select('party_id,amount,amount_received,sale_type,parties(name)')
+            .or('is_employee_sale.is.null,is_employee_sale.eq.false')
+            .range(from, to),
+          'Party dues'
+        ),
+        fetchAllPages<any>(
+          (from, to) => supabase.from('he_dispatch')
+            .select('party_id,amount,amount_received,parties(name)')
+            .gt('amount', 0)
+            .range(from, to),
+          'Party dues (HE dispatch)'
+        ),
+      ])
+      const data = [
+        ...nhe,
+        ...he.map((r: any) => ({ ...r, sale_type: 'he' })),
+      ]
       const m: Record<string, any> = {}
       for (const r of data) {
         const id = r.party_id; if (!id) continue
@@ -4118,7 +4236,7 @@ export const NHESales: React.FC = () => {
         <Card className="p-3">
           <button className="flex items-center justify-between w-full text-sm font-semibold text-gray-700"
             onClick={() => setShowPartyDues(v => !v)}>
-            <span>Party (Buyer) Dues — {partyDues!.length} parties · Pending {inr(partyDues!.reduce((s: number, r: any) => s + r.pending, 0))}</span>
+            <span>Party (Buyer) Dues — HE + NHE — {partyDues!.length} parties · Pending {inr(partyDues!.reduce((s: number, r: any) => s + r.pending, 0))}</span>
             <span className="text-xs text-brand-600">{showPartyDues ? 'Hide ▲' : 'Show ▼'}</span>
           </button>
           {showPartyDues && (
