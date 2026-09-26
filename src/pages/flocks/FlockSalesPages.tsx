@@ -4728,6 +4728,10 @@ export const NHESales: React.FC = () => {
           qc.invalidateQueries({ queryKey: ['nhe_sales'] })
           qc.invalidateQueries({ queryKey: ['cash_book'] })
           qc.invalidateQueries({ queryKey: ['bank_transactions'] })
+          // The dues panels on this page move with a receipt, so they must not
+          // be left showing the figure from before it.
+          qc.invalidateQueries({ queryKey: ['nhe_party_dues'] })
+          qc.invalidateQueries({ queryKey: ['nhe_emp_dues'] })
         }}
       />
 
