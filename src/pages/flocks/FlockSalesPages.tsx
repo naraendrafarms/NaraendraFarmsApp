@@ -3085,10 +3085,16 @@ export const NHESales: React.FC = () => {
       // he_dispatch vouchers - so the heading promised one figure and the window
       // then offered more to settle.
       const [nhe, he] = await Promise.all([
+        // .order('id') is NOT decoration. A paged read with no ordering at all
+        // has no defined row order between slices, so a row can be served twice
+        // or skipped as the pages are fetched - and this total is money. The
+        // Code Check paging guard only catches a read ordered by a date, not one
+        // ordered by nothing, so it would not have flagged either of these.
         fetchAllPages<any>(
           (from, to) => supabase.from('nhe_sales')
             .select('party_id,amount,amount_received,sale_type,parties(name)')
             .or('is_employee_sale.is.null,is_employee_sale.eq.false')
+            .order('id')
             .range(from, to),
           'Party dues'
         ),
@@ -3096,6 +3102,7 @@ export const NHESales: React.FC = () => {
           (from, to) => supabase.from('he_dispatch')
             .select('party_id,amount,amount_received,parties(name)')
             .gt('amount', 0)
+            .order('id')
             .range(from, to),
           'Party dues (HE dispatch)'
         ),
@@ -3139,9 +3146,11 @@ export const NHESales: React.FC = () => {
     queryKey: ['nhe_emp_dues'],
     queryFn: async () => {
       const data = await fetchAllPages<any>(
+        // Same unordered-paging risk as partyDues above.
         (from, to) => supabase.from('nhe_sales')
           .select('employee_id,amount,amount_received,sale_type,employees(name,emp_id)')
           .eq('is_employee_sale', true)
+          .order('id')
           .range(from, to),
         'Employee dues'
       )
