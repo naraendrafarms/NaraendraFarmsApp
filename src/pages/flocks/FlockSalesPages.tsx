@@ -379,7 +379,14 @@ export const ReceivePaymentModal: React.FC<{
   const [utr, setUtr] = useState('')
   const [status, setStatus] = useState('Received')
   const [saving, setSaving] = useState(false)
-  const [selectedAdvanceId, setSelectedAdvanceId] = useState('')
+  // MANY advances, not one. A buyer can hold several part-advances that only
+  // cover an invoice together - measured case: Rs 1,888 + Rs 1,50,000 against a
+  // Rs 1,59,354 dispatch, leaving Rs 7,466 to come in as cash. The old single
+  // id could not express that, and re-saving to add a second advance REVERSED
+  // the first, so it was not reachable by doing it twice either.
+  const [advanceIds, setAdvanceIds] = useState<string[]>([])
+  // How the shortfall arrives once the advances are applied.
+  const [restMode, setRestMode] = useState('Cash')
   // Receipts ALREADY recorded against this voucher, counted as EVENTS rather
   // than rows. A split receipt writes one cash_book row AND one
   // bank_transactions row on the SAME date - that is one event, and replacing
@@ -477,7 +484,8 @@ export const ReceivePaymentModal: React.FC<{
       setAmtReceived(sale.amount_received?.toString() ?? netDue.toString())
       setUtr(sale.utr_ref ?? '')
       setStatus(sale.payment_status === 'Pending' || !sale.payment_status ? 'Received' : sale.payment_status)
-      setSelectedAdvanceId('')
+      setAdvanceIds(sale.party_advance_id ? [sale.party_advance_id] : [])
+      setRestMode('Cash')
       const pc = Number(sale.payment_cash ?? 0), po = Number(sale.payment_online ?? 0)
       setSplitOn(pc > 0 && po > 0)
       setCashAmt(pc ? String(pc) : '')
@@ -574,7 +582,28 @@ export const ReceivePaymentModal: React.FC<{
       // nothing.
       const prevAdvanceId = sale.party_advance_id
       const prevAdjusted = sale.advance_adjusted || 0
-      if (prevAdvanceId && prevAdjusted > 0) {
+      // Refund the allocation ROWS when they exist - they say how much came
+      // from EACH advance - and fall back to the single pointer for sales
+      // settled before those rows existed, so an old sale behaves exactly as
+      // it always did. Without the rows, a sale settled from two advances
+      // would hand the whole advance_adjusted back to one of them: that one
+      // over-refunded, the other left permanently short of its own balance.
+      const { data: priorAlloc } = await supabase.from('sale_advance_allocations')
+        .select('advance_id,amount').eq('sale_id', sale.id).eq('sale_table', table)
+      const allocRows = (priorAlloc ?? []) as any[]
+      if (allocRows.length) {
+        for (const l of allocRows) {
+          const { data: a } = await supabase.from('party_advances')
+            .select('amount_used').eq('id', l.advance_id).maybeSingle()
+          if (a) {
+            await supabase.from('party_advances')
+              .update({ amount_used: Math.max(0, (a.amount_used ?? 0) - (l.amount ?? 0)) })
+              .eq('id', l.advance_id)
+          }
+        }
+        await supabase.from('sale_advance_allocations')
+          .delete().eq('sale_id', sale.id).eq('sale_table', table)
+      } else if (prevAdvanceId && prevAdjusted > 0) {
         const { data: prevAdv } = await supabase.from('party_advances').select('amount_used').eq('id', prevAdvanceId).single()
         if (prevAdv) {
           await supabase.from('party_advances')
@@ -592,36 +621,120 @@ export const ReceivePaymentModal: React.FC<{
       await supabase.from('bank_transactions').delete().eq(linkCol, sale.id)
 
       if (isAdvance) {
-        if (!selectedAdvanceId) throw new Error('Select which advance to use')
-        const adv = (partyAdvances as any[]).find(a => a.id === selectedAdvanceId)
-        if (!adv) throw new Error('Advance not found')
-        // adv.amount_used already reflects the reversal above if this is the
-        // same advance as before; if it's a different advance, it's unaffected.
-        const currentUsed = selectedAdvanceId === prevAdvanceId
-          ? Math.max(0, adv.amount_used - prevAdjusted)
-          : adv.amount_used
-        const available = adv.amount - currentUsed
-        if (amt > available) throw new Error(`Only ${inr(available)} available in this advance`)
-        // update sale with advance adjustment
+        if (!advanceIds.length) throw new Error('Tick at least one advance to adjust')
+        // Oldest advance first, so the buyer's money is consumed in the order
+        // it was given - the same rule Bulk Receipt already uses for vouchers.
+        const picked = (partyAdvances as any[])
+          .filter(a => advanceIds.includes(a.id))
+          .sort((x, y) => String(x.advance_date).localeCompare(String(y.advance_date)))
+        if (!picked.length) throw new Error('Advance not found')
+        // The reversal above has already given back whatever this sale had
+        // taken, so amount_used on each row is its TRUE used figure now.
+        let left = amt
+        const used: { advance: any; take: number }[] = []
+        for (const a of picked) {
+          if (left <= 0.005) break
+          const avail = Math.round((a.amount - a.amount_used) * 100) / 100
+          const take = Math.round(Math.min(avail, left) * 100) / 100
+          if (take <= 0) continue
+          used.push({ advance: a, take })
+          left = Math.round((left - take) * 100) / 100
+        }
+        const fromAdvance = Math.round((amt - left) * 100) / 100
+        // `left` is the SHORTFALL the ticked advances could not cover. It is
+        // not an error - it is the part the buyer pays in cash or by bank, and
+        // it is the whole point of this screen.
+        const rest = left
+        if (fromAdvance <= 0) throw new Error('The ticked advances have no balance left to adjust')
+        const restIsCash = restMode === 'Cash'
+        if (rest > 0.005 && !restIsCash && !bankId) {
+          throw new Error(`Rs ${inr(rest)} is left after the advances. Pick the bank account it came into.`)
+        }
+        if (rest > 0.005 && restIsCash && !cashFarmId) {
+          throw new Error(`Rs ${inr(rest)} is left after the advances. Choose where that cash was received.`)
+        }
+
         const advUpdate: any = {
           payment_status: status,
-          payment_mode: 'Advance',
+          // Both widened CHECKs accept these two labels (migration 1371); any
+          // other combined string would be rejected and the save would fail.
+          payment_mode: rest > 0.005 ? (restIsCash ? 'Advance+Cash' : 'Advance+Bank') : 'Advance',
           received_date: date || null,
+          // What the invoice has been settled by IN TOTAL - the advance part
+          // plus the money part - because every balance in the app reads
+          // amount minus amount_received.
           amount_received: amt || null,
-          bank_account_id: null,
-          utr_ref: null,
-          advance_adjusted: amt,
-          party_advance_id: selectedAdvanceId,
+          // Only the money part is cash or bank; the advance part moved when
+          // the advance itself was received.
+          payment_cash: rest > 0.005 && restIsCash ? rest : 0,
+          payment_online: rest > 0.005 && !restIsCash ? rest : 0,
+          bank_account_id: rest > 0.005 && !restIsCash ? bankId : null,
+          utr_ref: rest > 0.005 && !restIsCash ? (utr || null) : null,
+          advance_adjusted: fromAdvance,
+          // Kept for anything still reading the single pointer; the allocation
+          // rows below are the real record.
+          party_advance_id: used[0].advance.id,
+          ...(table === 'nhe_sales' ? {
+            cash_account_id: rest > 0.005 && restIsCash ? (cashAccountId || null) : null,
+          } : {}),
         }
         const { error: sErr } = await supabase.from(table).update(advUpdate).eq('id', sale.id)
         if (sErr) throw sErr
-        // deduct from party_advances.amount_used
-        const { error: aErr } = await supabase
-          .from('party_advances')
-          .update({ amount_used: currentUsed + amt })
-          .eq('id', selectedAdvanceId)
-        if (aErr) throw aErr
-        toast.success('Advance adjusted successfully')
+
+        // How much came from WHICH advance. Without this a later reversal
+        // would hand the whole advance_adjusted back to party_advance_id
+        // alone, over-refunding one advance and leaving the rest overstated.
+        const { error: lErr } = await supabase.from('sale_advance_allocations').insert(
+          used.map(u => ({
+            sale_id: sale.id, sale_table: table,
+            advance_id: u.advance.id, amount: u.take, adjusted_on: date || null,
+          })))
+        if (lErr) throw new Error('Receipt saved, but recording which advances paid it failed: ' + lErr.message)
+
+        for (const u of used) {
+          const { error: aErr } = await supabase.from('party_advances')
+            .update({ amount_used: u.advance.amount_used + u.take }).eq('id', u.advance.id)
+          if (aErr) throw aErr
+        }
+
+        // The money part is a REAL receipt and has to reach a ledger. The
+        // advance part deliberately does not: that money already arrived when
+        // the advance was recorded, and Buyer Advances posted its entry then -
+        // counting it again here would double the income.
+        if (rest > 0.005) {
+          const saleType = sale.sale_type ?? (table === 'he_dispatch' ? 'he_sale' : 'je')
+          const { category: cbCat, label: tLabel } = nheCashCategory(saleType)
+          const fLabel = sale.flocks?.flock_no ? `F-${sale.flocks.flock_no}` : ''
+          const desc = [tLabel, fLabel, sale.dc_no ?? sale.invoice_no ?? '', '(balance after advance)']
+            .filter(Boolean).join(' — ')
+          const srcCol = table === 'he_dispatch' ? { he_dispatch_id: sale.id } : { nhe_sale_id: sale.id }
+          if (restIsCash) {
+            const { error: cbErr } = await supabase.from('cash_book').insert({
+              txn_date: date, txn_type: 'receipt', category: cbCat, description: desc,
+              party_name: sale.parties?.name ?? null,
+              farm_id: cashFarmId === 'ho' ? null : cashFarmId,
+              flock_id: sale.flock_id ?? null,
+              reference_no: sale.dc_no ?? sale.invoice_no ?? null,
+              amount_in: rest, amount_out: 0, payment_mode: 'cash',
+              cash_account_id: cashAccountId || null,
+              ...srcCol,
+            })
+            if (cbErr) throw new Error('Advance adjusted but the Cash Book entry failed: ' + cbErr.message)
+          } else {
+            const { error: btErr } = await supabase.from('bank_transactions').insert({
+              bank_account_id: bankId, txn_date: date, txn_type: 'Credit',
+              category: 'Sale Receipt',
+              reference_no: utr || sale.dc_no || sale.invoice_no || null,
+              description: desc, amount: rest, party_id: sale.party_id ?? null,
+              [linkCol]: sale.id,
+            })
+            if (btErr) throw new Error('Advance adjusted but the Bank entry failed: ' + btErr.message)
+          }
+        }
+
+        toast.success(rest > 0.005
+          ? `Adjusted ${inr(fromAdvance)} from ${used.length} advance${used.length > 1 ? 's' : ''} + ${inr(rest)} received`
+          : `Adjusted ${inr(fromAdvance)} from ${used.length} advance${used.length > 1 ? 's' : ''}`)
         onSaved()
         setSaving(false)
         return
@@ -744,6 +857,22 @@ export const ReceivePaymentModal: React.FC<{
   const siteImprestLabel = cashFarmId === 'ho'
     ? ((cashAccounts as any[]).find((a: any) => a.acct_type === 'ho_imprest')?.name ?? 'Head Office') + ' (default)'
     : (siteImprestOf(cashFarmId)?.name ?? 'this site has no imprest') + ' (default)'
+  // An advance receipt with a shortfall still needs the cash location or the
+  // bank account for THAT part, so the pickers below cannot stay gated on
+  // mode === 'Cash' alone - they would be hidden exactly when they are needed
+  // and the save would refuse with no field to fix.
+  const advPool = (partyAdvances as any[])
+    .filter(a => advanceIds.includes(a.id))
+    .reduce((t, a) => t + (a.amount - a.amount_used), 0)
+  const advDue = parseFloat(amtReceived) || 0
+  const advRest = mode === 'Advance'
+    ? Math.max(0, Math.round((advDue - Math.min(advPool, advDue)) * 100) / 100) : 0
+  const advRestCash = mode === 'Advance' && advRest > 0.005 && restMode === 'Cash'
+  const advRestBank = mode === 'Advance' && advRest > 0.005 && restMode !== 'Cash'
+  const needCashFields = (splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash') || advRestCash
+  const needBankFields = (splitOn ? (parseFloat(onlineAmt) || 0) > 0
+    : (mode !== 'Cash' && mode !== 'Advance')) || advRestBank
+
   const paymentModeOptions = [
     'Cash', 'NEFT', 'RTGS', 'Bank Transfer', 'UPI', 'Cheque',
     ...(totalAdvanceBalance > 0 ? ['Advance'] : []),
@@ -835,39 +964,71 @@ export const ReceivePaymentModal: React.FC<{
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              <Select label="Payment Mode" value={mode} onChange={e => { setMode(e.target.value); setSelectedAdvanceId('') }}
+              <Select label="Payment Mode" value={mode} onChange={e => { setMode(e.target.value); setAdvanceIds([]) }}
                 options={paymentModeOptions} />
               <DateInput label="Date" value={date} onChange={e => setDate(e.target.value)} />
             </div>
           )}
-          {mode === 'Advance' && (
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Select Advance Entry</label>
-              <select
-                value={selectedAdvanceId}
-                onChange={e => {
-                  setSelectedAdvanceId(e.target.value)
-                  const adv = (partyAdvances as any[]).find(a => a.id === e.target.value)
-                  if (adv) setAmtReceived(Math.min(adv.amount - adv.amount_used, parseFloat(amtReceived) || (sale.amount ?? 0)).toString())
-                }}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="">— Select advance —</option>
-                {(partyAdvances as any[]).map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {fmtDate(a.advance_date)} · {a.payment_mode} · Balance: {inr(a.amount - a.amount_used)}
-                    {a.reference_no ? ` (${a.reference_no})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          {(splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash') && (
+          {mode === 'Advance' && (() => {
+            const list = (partyAdvances as any[])
+            const ticked = list.filter(a => advanceIds.includes(a.id))
+            const pool = ticked.reduce((t, a) => t + (a.amount - a.amount_used), 0)
+            const due = parseFloat(amtReceived) || 0
+            const fromAdv = Math.min(pool, due)
+            const rest = Math.max(0, Math.round((due - fromAdv) * 100) / 100)
+            const toggle = (id: string) => setAdvanceIds(ids =>
+              ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+            return (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Which advance(s) to adjust — tick one or more
+                </label>
+                <div className="border border-gray-300 rounded-lg max-h-40 overflow-y-auto">
+                  {list.map((a: any) => (
+                    <label key={a.id}
+                      className={`flex items-center gap-2 px-3 py-2 text-sm border-b border-gray-100 last:border-b-0 cursor-pointer hover:bg-gray-50 ${advanceIds.includes(a.id) ? 'bg-blue-50' : ''}`}>
+                      <input type="checkbox" className="rounded border-gray-300 text-brand-600"
+                        checked={advanceIds.includes(a.id)} onChange={() => toggle(a.id)} />
+                      <span className="flex-1">
+                        {fmtDate(a.advance_date)} · {a.payment_mode} · Balance: {inr(a.amount - a.amount_used)}
+                        {a.reference_no ? ` (${a.reference_no})` : ''}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {ticked.length > 0 && (
+                  <div className="mt-2 rounded-lg bg-gray-50 border border-gray-200 p-2 text-xs space-y-0.5">
+                    <div className="flex justify-between"><span>Invoice being settled</span><strong>{inr(due)}</strong></div>
+                    <div className="flex justify-between text-blue-700">
+                      <span>From {ticked.length} advance{ticked.length > 1 ? 's' : ''} (oldest first)</span>
+                      <strong>{inr(fromAdv)}</strong>
+                    </div>
+                    <div className={`flex justify-between font-semibold ${rest > 0 ? 'text-orange-700' : 'text-green-700'}`}>
+                      <span>{rest > 0 ? 'Balance still to receive' : 'Fully covered by advance'}</span>
+                      <strong>{inr(rest)}</strong>
+                    </div>
+                  </div>
+                )}
+                {rest > 0 && ticked.length > 0 && (
+                  <div className="mt-2">
+                    <Select label={`How the balance of ${inr(rest)} was received`}
+                      value={restMode} onChange={e => setRestMode(e.target.value)}
+                      options={['Cash', 'NEFT', 'RTGS', 'Bank Transfer', 'UPI', 'Cheque']} />
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      Only this balance reaches the Cash Book or Bank Ledger. The advance part
+                      already did, when the advance itself was received.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+          {needCashFields && (
             <Select label="Cash Location" required placeholder="— Select location —"
               value={cashFarmId} onChange={e => setCashFarmId(e.target.value)}
               options={cashLocationOptions} />
           )}
-          {(splitOn ? (parseFloat(cashAmt) || 0) > 0 : mode === 'Cash') && (
+          {needCashFields && (
             <div>
               <Select label="Received into (Imprest)" placeholder={siteImprestLabel}
                 value={cashAccountId} onChange={e => setCashAccountId(e.target.value)}
@@ -877,11 +1038,11 @@ export const ReceivePaymentModal: React.FC<{
               </p>
             </div>
           )}
-          {(splitOn ? (parseFloat(onlineAmt) || 0) > 0 : (mode !== 'Cash' && mode !== 'Advance')) && (
+          {needBankFields && (
             <Select label="Bank Account" placeholder="— Select bank —" value={bankId} onChange={e => setBankId(e.target.value)}
               options={bankOptions} />
           )}
-          {(splitOn ? (parseFloat(onlineAmt) || 0) > 0 : (mode === 'Bank Transfer' || mode === 'UPI' || mode === 'Cheque')) && (
+          {((splitOn ? (parseFloat(onlineAmt) || 0) > 0 : (mode === 'Bank Transfer' || mode === 'UPI' || mode === 'Cheque')) || advRestBank) && (
             <Input label={mode === 'Cheque' ? 'Cheque No' : 'UTR / Reference No'} value={utr} onChange={e => setUtr(e.target.value)} placeholder="Transaction reference" />
           )}
         </div>
